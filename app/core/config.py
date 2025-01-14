@@ -83,14 +83,44 @@ class Settings(BaseSettings):
     REDIS_JWT_BLACKLIST_TTL_DAYS: int = 7
     REDIS_SESSION_TTL_HOURS: int = 24
 
-    RATE_LIMIT_PER_MINUTE: int = 100
+    # Rate limiting settings
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_ANONYMOUS: int = 30  # requests per minute
+    RATE_LIMIT_AUTHENTICATED: int = 60  # requests per minute
+    RATE_LIMIT_ADMIN: int = 120  # requests per minute
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    # Special endpoint rate limits (requests per minute)
+    RATE_LIMIT_LOGIN: int = 5
+    RATE_LIMIT_REGISTER: int = 3
+    RATE_LIMIT_PRODUCTS: int = 100
 
+    # Essential GDPR Settings
     USER_DATA_RETENTION_DAYS: int = 365
-    INACTIVE_ACCOUNT_DELETE_DAYS: int = 730
-    GDPR_EXPORT_EXPIRY_HOURS: int = 24
     CONSENT_REQUIRED: bool = True
     DATA_ENCRYPTION_KEY: str
+    GDPR_EXPORT_EXPIRY_HOURS: int = 24
+    INACTIVE_ACCOUNT_DELETE_DAYS: int = 730  # 2 years
 
+    # Company Information (MVP)
+    COMPANY_NAME: str = "Your Company Name"
+    COMPANY_EMAIL: str = "contact@yourcompany.com"
+    COMPANY_ADDRESS: str = "Your Company Address, EU"  # Required for EU compliance
+    COMPANY_VAT: str = "EU VAT Number"  # Required for EU business
+    DPO_NAME: str = "Hryshyn Mykyta"
+    DPO_EMAIL: str = "dpo@yourcompany.com"
+    TECHNICAL_CONTACT: str = "Aleksandr Albekov"
+    
+    # Cookie Consent Settings
+    COOKIE_CONSENT_ENABLED: bool = True
+    COOKIE_CONSENT_EXPIRE_DAYS: int = 365
+    ESSENTIAL_COOKIES: List[str] = ["session", "csrf_token"]
+    
+    # GDPR Email Templates
+    GDPR_EXPORT_READY_TEMPLATE: str = "gdpr_export_ready"
+    GDPR_DELETION_CONFIRMED_TEMPLATE: str = "gdpr_deletion_confirmed"
+    GDPR_REQUEST_RECEIVED_TEMPLATE: str = "gdpr_request_received"
+
+    # Email Settings
     SMTP_HOST: str
     SMTP_PORT: int = 587
     SMTP_USER: str

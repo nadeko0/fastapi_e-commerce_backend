@@ -1,9 +1,10 @@
 import logging
 import signal
 import sys
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from redis.exceptions import RedisError
@@ -11,15 +12,26 @@ from redis.exceptions import RedisError
 from app.core.config import settings
 from app.core.database import engine
 from app.services.redis import RedisService
+from app.core.rate_limit import RateLimiter
 from app.core.logging_config import setup_logging
-from app.api.v1 import users, products, orders, cart, admin
+from app.api.v1 import users, products, orders, cart, admin, legal
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 logger.info("Initializing FastAPI application")
 
-logger.info("Configuring FastAPI middleware and CORS")
+logger.info("Configuring FastAPI middleware, CORS, and rate limiting")
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app):
+        super().__init__(app)
+        self.limiter = RateLimiter()
+
+    async def dispatch(self, request: Request, call_next):
+        await self.limiter.check_rate_limit(request)
+        return await call_next(request)
+logger.info("Initializing FastAPI application with rate limiting")
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="E-commerce backend API with FastAPI",
@@ -27,6 +39,9 @@ app = FastAPI(
     docs_url=f"{settings.API_V1_STR}/docs",
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
+
+logger.debug("Adding rate limiting middleware")
+app.add_middleware(RateLimitMiddleware)
 
 logger.debug("Adding security headers middleware")
 @app.middleware("http")
@@ -94,6 +109,7 @@ app.include_router(products.router, prefix=settings.API_V1_STR)
 app.include_router(orders.router, prefix=settings.API_V1_STR)
 app.include_router(cart.router, prefix=settings.API_V1_STR)
 app.include_router(admin.router, prefix=settings.API_V1_STR)
+app.include_router(legal.router, prefix=settings.API_V1_STR)
 
 
 @app.on_event("shutdown")
