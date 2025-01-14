@@ -1,51 +1,159 @@
-# E-commerce Backend API
+# FastAPI E-commerce Backend
 
-A robust and scalable e-commerce backend API built with FastAPI, providing comprehensive features for managing products, orders, users, and more.
+A production-ready e-commerce backend API built with FastAPI, implementing SOLID principles and providing comprehensive features for managing products, orders, users, and more. The project follows best practices for scalability, maintainability, and security.
+
+## SOLID Principles Implementation
+
+### Single Responsibility Principle (SRP)
+- Each service class has a single responsibility (e.g., `EmailService`, `GDPRService`)
+- Clear separation between models, schemas, and services
+- Dedicated modules for specific functionalities (auth, email, GDPR)
+
+### Open/Closed Principle (OCP)
+- Base models and schemas that can be extended
+- Middleware system for adding new functionality
+- Plugin-based architecture for easy feature additions
+
+### Liskov Substitution Principle (LSP)
+- Proper inheritance in models (Base model classes)
+- Consistent interface implementations
+- Type hints and proper abstract classes usage
+
+### Interface Segregation Principle (ISP)
+- Focused API endpoints for specific functionalities
+- Granular Pydantic schemas
+- Specific dependencies for different authentication levels
+
+### Dependency Inversion Principle (DIP)
+- Dependency injection throughout the application
+- Abstract base classes for services
+- Configuration through environment variables
 
 ## Features
 
-- **User Management**
-  - Registration and authentication with JWT
-  - Role-based access control (Admin/Client)
-  - Email verification
-  - Password reset functionality
-  - GDPR compliance with consent management
-  - User profile management
+### User Management
+- Registration and authentication with JWT
+- Role-based access control (Admin/Client)
+- Email verification
+- Password reset functionality
+- GDPR compliance with consent management
+- User profile management
 
-- **Product Management**
-  - Product CRUD operations
-  - Category management with hierarchical structure
-  - Product search and filtering
-  - Stock management
-  - Image handling
+### Product Management
+- Product CRUD operations
+- Category management with hierarchical structure
+- Product search and filtering
+- Stock management
+- Image handling
 
-- **Order Management**
-  - Shopping cart functionality
-  - Order processing
-  - Order status tracking
-  - Order history
-  - Email notifications
+### Order Management
+- Shopping cart functionality
+- Order processing
+- Order status tracking
+- Order history
+- Email notifications
 
-- **Security**
-  - JWT authentication
-  - Token blacklisting
-  - Password hashing
-  - CORS protection
-  - Rate limiting
+### Security
+- JWT authentication with refresh tokens
+- Token blacklisting
+- Password hashing with bcrypt
+- CORS protection
+- Rate limiting
+- Security headers
+- SQL injection protection
+- XSS protection
+- CSRF protection
 
-- **Data Management**
-  - Redis caching
-  - Database migrations
-  - GDPR data export
-  - Data retention policies
+### Data Management
+- Redis caching
+- Database migrations
+- GDPR data export
+- Data retention policies
+
+## CRUD Operations Overview
+
+### Products
+```python
+# Create
+POST /api/v1/products
+{
+    "name": "Product Name",
+    "description": "Description",
+    "price": 99.99,
+    "stock": 100
+}
+
+# Read
+GET /api/v1/products
+GET /api/v1/products/{id}
+
+# Update
+PUT /api/v1/products/{id}
+{
+    "name": "Updated Name",
+    "price": 89.99
+}
+
+# Delete
+DELETE /api/v1/products/{id}
+```
+
+### Orders
+```python
+# Create
+POST /api/v1/orders
+{
+    "items": [
+        {"product_id": 1, "quantity": 2}
+    ],
+    "shipping_address_id": 1
+}
+
+# Read
+GET /api/v1/orders
+GET /api/v1/orders/{id}
+
+# Update (Status)
+PUT /api/v1/orders/{id}/status
+{
+    "status": "processing"
+}
+
+# Delete (Cancel)
+DELETE /api/v1/orders/{id}
+```
+
+### Users
+```python
+# Create
+POST /api/v1/users/register
+{
+    "email": "user@example.com",
+    "password": "secure_password",
+    "full_name": "John Doe"
+}
+
+# Read
+GET /api/v1/users/me
+GET /api/v1/users/{id} (admin only)
+
+# Update
+PUT /api/v1/users/me
+{
+    "full_name": "John Smith",
+    "phone": "+1234567890"
+}
+
+# Delete
+DELETE /api/v1/users/me
+```
 
 ## Technical Stack
 
-- **Framework**: FastAPI
-- **Database**: PostgreSQL
-- **ORM**: SQLAlchemy
-- **Caching**: Redis
-- **Task Queue**: Celery (for background tasks)
+- **Framework**: FastAPI 0.115.6
+- **Database**: PostgreSQL with SQLAlchemy 2.0.37
+- **Caching**: Redis 5.2.1
+- **Task Queue**: Celery 5.4.0
 - **Authentication**: JWT with refresh tokens
 - **Email**: SMTP integration
 - **Documentation**: OpenAPI (Swagger)
@@ -54,98 +162,111 @@ A robust and scalable e-commerce backend API built with FastAPI, providing compr
 
 ```
 app/
-├── api/
-│   ├── v1/
+├── api/                    # API endpoints
+│   ├── v1/                # API version 1
 │   │   ├── admin.py       # Admin endpoints
-│   │   ├── cart.py        # Shopping cart endpoints
+│   │   ├── cart.py        # Shopping cart
 │   │   ├── orders.py      # Order management
 │   │   ├── products.py    # Product catalog
-│   │   └── users.py       # User management
-│   └── deps.py            # Dependencies and utilities
-├── core/
-│   ├── config.py          # Configuration settings
-│   ├── database.py        # Database setup
-│   ├── security.py        # Security utilities
-│   └── logging_config.py  # Logging configuration
-├── models/
-│   ├── user.py            # User model
-│   ├── product.py         # Product model
-│   ├── order.py           # Order model
-│   ├── category.py        # Category model
-│   └── address.py         # Address model
-├── schemas/
-│   ├── user.py            # User schemas
-│   ├── product.py         # Product schemas
-│   ├── order.py           # Order schemas
-│   └── common.py          # Common schemas
-├── services/
-│   ├── email.py           # Email service
-│   ├── redis.py           # Redis service
-│   └── auth.py            # Authentication service
-└── main.py                # Application entry point
+│   │   ├── users.py       # User management
+│   │   └── legal.py       # Legal & GDPR
+│   └── deps.py            # Dependencies
+├── core/                  # Core functionality
+│   ├── config.py          # Settings
+│   ├── database.py        # DB setup
+│   ├── security.py        # Security
+│   └── logging_config.py  # Logging
+├── models/                # Database models
+├── schemas/               # Pydantic schemas
+├── services/             # Business logic
+└── main.py               # Entry point
 ```
 
-## Setup
+## Docker Setup
 
 ### Prerequisites
+- Docker
+- Docker Compose
 
-- Python 3.8+
-- PostgreSQL
-- Redis
-- SMTP server for emails
+### Docker Configuration Files
 
-### Environment Variables
+1. Create `Dockerfile`:
+```dockerfile
+FROM python:3.11-slim
 
-Create a `.env` file in the root directory:
+WORKDIR /app
 
-```env
-# Application Settings
-PROJECT_NAME=E-commerce Backend
-VERSION=1.0.0
-ENVIRONMENT=development
-DEBUG=True
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
-# Server Configuration
-HOST=0.0.0.0
-PORT=8000
-WORKERS=4
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Database Configuration
-POSTGRES_SERVER=localhost
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=your_password
-POSTGRES_DB=ecommerce
+COPY . .
 
-# Redis Configuration
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
-REDIS_DB=0
-
-# JWT Configuration
-JWT_SECRET_KEY=your_secret_key
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=15
-REFRESH_TOKEN_EXPIRE_DAYS=7
-
-# Email Settings
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your_email@gmail.com
-SMTP_PASSWORD=your_app_password
-EMAILS_FROM_EMAIL=noreply@example.com
-EMAILS_FROM_NAME=E-commerce Support
-
-# CORS Configuration
-BACKEND_CORS_ORIGINS=["http://localhost:3000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-### Installation
+2. Create `docker-compose.yml`:
+```yaml
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+
+  db:
+    image: postgres:15
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
+```
+
+### Running with Docker
+
+1. Build and start services:
+```bash
+docker-compose up --build
+```
+
+2. Run migrations:
+```bash
+docker-compose exec api alembic upgrade head
+```
+
+3. Create initial admin user:
+```bash
+docker-compose exec api python -m scripts.create_admin
+```
+
+## Local Development Setup
 
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd backend
+cd fastapi-ecommerce
 ```
 
 2. Create and activate virtual environment:
@@ -160,71 +281,44 @@ venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 ```
 
-4. Run database migrations:
+4. Set up environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your configurations
+```
+
+5. Run database migrations:
 ```bash
 alembic upgrade head
 ```
 
-5. Start the application:
+6. Start the application:
 ```bash
 uvicorn app.main:app --reload
 ```
 
 ## API Documentation
 
-Once the application is running, access the API documentation at:
 - Swagger UI: `http://localhost:8000/api/v1/docs`
 - ReDoc: `http://localhost:8000/api/v1/redoc`
 
+## Production Deployment Checklist
 
-### Database Migrations
-
-To create a new migration:
-```bash
-alembic revision --autogenerate -m "description"
-```
-
-To apply migrations:
-```bash
-alembic upgrade head
-```
-
-## Deployment
-
-### Docker Deployment
-
-1. Build the Docker image:
-```bash
-docker build -t ecommerce-backend .
-```
-
-2. Run with Docker Compose:
-```bash
-docker-compose up -d
-```
-
-### Production Considerations
-
-- Set `ENVIRONMENT=production` in .env
-- Configure proper logging
-- Set up monitoring
-- Configure proper CORS origins
-- Use secure SMTP settings
-- Set up proper database backups
-- Configure rate limiting
-- Set up proper caching strategies
-
-## Security Features
-
-- Password hashing using bcrypt
-- JWT token authentication
-- Token blacklisting for logout
-- Rate limiting on sensitive endpoints
-- CORS protection
-- Security headers middleware
-- SQL injection protection through SQLAlchemy
-- XSS protection
-- CSRF protection
+- [ ] Set `ENVIRONMENT=production` in .env
+- [ ] Configure proper logging
+- [ ] Set up monitoring (e.g., Prometheus + Grafana)
+- [ ] Configure proper CORS origins
+- [ ] Use secure SMTP settings
+- [ ] Set up database backups
+- [ ] Configure rate limiting
+- [ ] Set up proper caching strategies
+- [ ] Enable HTTPS
+- [ ] Set up CI/CD pipeline
+- [ ] Configure error tracking (e.g., Sentry)
+- [ ] Set up load balancing
+- [ ] Configure database connection pooling
+- [ ] Set up automated backups
+- [ ] Configure monitoring alerts
 
 ## Contributing
 
@@ -233,3 +327,7 @@ docker-compose up -d
 3. Commit your changes
 4. Push to the branch
 5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

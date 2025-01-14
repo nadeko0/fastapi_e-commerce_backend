@@ -8,6 +8,7 @@ build/
 develop-eggs/
 dist/
 downloads/
+migrations/versions/
 eggs/
 docs/
 .eggs/

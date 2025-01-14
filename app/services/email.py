@@ -268,30 +268,140 @@ def send_gdpr_export_email(to_email: str, export_data: "GDPRExport") -> bool:
     html_content = f"""
     <html>
         <body>
-            <h2>Your Data Export</h2>
-            <p>As requested, here is your personal data export.</p>
+            <h2>Your Personal Data Export (GDPR Article 15)</h2>
+            <p>As requested under your right of access, here is your personal data export.</p>
             
             <h3>Export Details:</h3>
             <ul>
+                <li>Request Date: {export_data.request_date.strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
                 <li>Generated at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
                 <li>Expires at: {export_data.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
+                <li>Request ID: {export_data.request_id}</li>
             </ul>
             
             <p>For your privacy and security:</p>
             <ul>
                 <li>This export will be automatically deleted after {settings.GDPR_EXPORT_EXPIRY_HOURS} hours</li>
                 <li>Store this data securely and do not share it with others</li>
-                <li>Contact us if you have any questions about your data</li>
+                <li>Use encryption when storing this data</li>
+                <li>Delete this export once you no longer need it</li>
             </ul>
             
-            <p>Best regards,<br>The {settings.PROJECT_NAME} Team</p>
+            <p>Questions about your data?</p>
+            <ul>
+                <li>Contact our DPO: {settings.DPO_EMAIL}</li>
+                <li>Visit our Privacy Policy: [Link to Privacy Policy]</li>
+                <li>Your rights under GDPR: [Link to Rights Page]</li>
+            </ul>
+            
+            <p>Best regards,<br>{settings.PROJECT_NAME}</p>
+            <p>Data Protection Officer: {settings.DPO_NAME}</p>
+            <p>{settings.COMPANY_ADDRESS}</p>
         </body>
     </html>
     """
     
     return email_service._send_email(
         to_email,
-        "Your Data Export",
+        "Your Personal Data Export (GDPR Request)",
+        html_content
+    )
+
+def send_gdpr_deletion_confirmation(to_email: str, request_id: str) -> bool:
+    email_service = EmailService()
+    
+    html_content = f"""
+    <html>
+        <body>
+            <h2>Data Deletion Confirmation (GDPR Article 17)</h2>
+            <p>We confirm that your personal data has been deleted as requested.</p>
+            
+            <h3>Deletion Details:</h3>
+            <ul>
+                <li>Request ID: {request_id}</li>
+                <li>Completed at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
+            </ul>
+            
+            <p>What was deleted:</p>
+            <ul>
+                <li>Account information</li>
+                <li>Order history</li>
+                <li>Communication preferences</li>
+                <li>Addresses</li>
+                <li>Usage data</li>
+            </ul>
+            
+            <p>Please note:</p>
+            <ul>
+                <li>Some data may be retained for legal requirements (e.g., tax records)</li>
+                <li>Anonymized data may be kept for analytics</li>
+                <li>You can create a new account at any time</li>
+            </ul>
+            
+            <p>Questions?</p>
+            <p>Contact our DPO at {settings.DPO_EMAIL}</p>
+            
+            <p>Best regards,<br>{settings.PROJECT_NAME}</p>
+            <p>Data Protection Officer: {settings.DPO_NAME}</p>
+            <p>{settings.COMPANY_ADDRESS}</p>
+        </body>
+    </html>
+    """
+    
+    return email_service._send_email(
+        to_email,
+        "Data Deletion Confirmation (GDPR Request)",
+        html_content
+    )
+
+def send_gdpr_request_received(to_email: str, request_type: str, request_id: str) -> bool:
+    email_service = EmailService()
+    
+    request_type_text = "deletion" if request_type == "deletion" else "export"
+    gdpr_article = "17" if request_type == "deletion" else "15"
+    
+    html_content = f"""
+    <html>
+        <body>
+            <h2>GDPR Request Received (Article {gdpr_article})</h2>
+            <p>We have received your request for data {request_type_text}.</p>
+            
+            <h3>Request Details:</h3>
+            <ul>
+                <li>Request Type: {request_type_text}</li>
+                <li>Request ID: {request_id}</li>
+                <li>Received at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
+                <li>Estimated completion: Within 30 days</li>
+            </ul>
+            
+            <p>Next steps:</p>
+            <ul>
+                <li>We will process your request within 30 days</li>
+                <li>You will receive a confirmation email when completed</li>
+                <li>We may contact you if we need additional information</li>
+            </ul>
+            
+            <p>Your rights under GDPR:</p>
+            <ul>
+                <li>Right to access your data (Article 15)</li>
+                <li>Right to erasure (Article 17)</li>
+                <li>Right to data portability (Article 20)</li>
+                <li>Right to object (Article 21)</li>
+            </ul>
+            
+            <p>Questions about your request?</p>
+            <p>Contact our DPO at {settings.DPO_EMAIL}</p>
+            
+            <p>Best regards,<br>{settings.PROJECT_NAME}</p>
+            <p>Data Protection Officer: {settings.DPO_NAME}</p>
+            <p>{settings.COMPANY_ADDRESS}</p>
+        </body>
+    </html>
+    """
+    
+    return email_service._send_email(
+        to_email,
+        f"GDPR {request_type.title()} Request Received",
         html_content
     )
 

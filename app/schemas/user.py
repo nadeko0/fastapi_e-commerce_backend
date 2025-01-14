@@ -132,13 +132,47 @@ class PasswordUpdate(BaseModel):
         return v
 
 class GDPRExport(BaseModel):
-    """Schema for GDPR data export"""
+    """Schema for GDPR data export metadata"""
+    request_id: str = Field(..., description="Unique identifier for the export request")
+    request_date: datetime = Field(..., description="When the export was requested")
+    expires_at: datetime = Field(..., description="When the export data will be deleted")
+    status: str = Field(default="processing", description="Current status of the export")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "request_id": "export_123_1642161234",
+                "request_date": "2025-01-14T19:21:32.388Z",
+                "expires_at": "2025-01-15T19:21:32.388Z",
+                "status": "processing"
+            }
+        }
+
+class GDPRExportData(BaseModel):
+    """Schema for the actual GDPR data export content"""
     personal_data: UserInDB
     consents: List[ConsentHistory]
-    addresses: List["AddressResponse"]  # Forward reference
-    orders: List["OrderResponse"]  # Forward reference
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    expires_at: datetime  # When the export data will be deleted
+    addresses: List["AddressResponse"]
+    orders: List["OrderResponse"]
+    export_metadata: GDPRExport
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "personal_data": {},
+                "consents": [],
+                "addresses": [],
+                "orders": [],
+                "export_metadata": {
+                    "request_id": "export_123_1642161234",
+                    "request_date": "2025-01-14T19:21:32.388Z",
+                    "expires_at": "2025-01-15T19:21:32.388Z",
+                    "status": "completed"
+                },
+                "generated_at": "2025-01-14T19:21:32.388Z"
+            }
+        }
 
 class GDPRDelete(BaseModel):
     """Schema for GDPR account deletion"""
