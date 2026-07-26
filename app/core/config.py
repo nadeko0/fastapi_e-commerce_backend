@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic_settings import BaseSettings
 from pydantic import AnyHttpUrl, validator, PositiveInt
 
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str
-    DATABASE_URI: str = None
+    DATABASE_URI: Optional[str] = None
     SQL_DEBUG: bool = False
 
     DB_POOL_SIZE: int = 10
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
 
     REDIS_HOST: str
     REDIS_PORT: int = 6379
-    REDIS_PASSWORD: str = None
+    REDIS_PASSWORD: Optional[str] = None
     REDIS_DB: int = 0
     REDIS_POOL_SIZE: int = 50
     REDIS_POOL_TIMEOUT: int = 20
@@ -106,9 +106,9 @@ class Settings(BaseSettings):
     COMPANY_EMAIL: str = "contact@yourcompany.com"
     COMPANY_ADDRESS: str = "Your Company Address, EU"  # Required for EU compliance
     COMPANY_VAT: str = "EU VAT Number"  # Required for EU business
-    DPO_NAME: str = "Hryshyn Mykyta"
+    DPO_NAME: str = "Data Protection Officer"
     DPO_EMAIL: str = "dpo@yourcompany.com"
-    TECHNICAL_CONTACT: str = "Aleksandr Albekov"
+    TECHNICAL_CONTACT: str = "Technical Support"
     
     # Cookie Consent Settings
     COOKIE_CONSENT_ENABLED: bool = True
