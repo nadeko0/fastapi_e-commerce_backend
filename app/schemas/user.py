@@ -49,6 +49,11 @@ class UserCreate(UserBase):
             raise ValueError('Password must contain at least one letter')
         if not any(c.isdigit() for c in v):
             raise ValueError('Password must contain at least one number')
+        # bcrypt hard-limits inputs to 72 bytes and raises instead of
+        # truncating; reject oversized passwords here with a clean 422
+        # rather than letting that surface as a 500 from the hasher.
+        if len(v.encode('utf-8')) > 72:
+            raise ValueError('Password must be at most 72 bytes long')
         return v
     gdpr_consent: bool = Field(..., description="GDPR consent is required")
     privacy_policy_accepted: bool = Field(..., description="Privacy policy must be accepted")
@@ -129,6 +134,8 @@ class PasswordUpdate(BaseModel):
             raise ValueError('Password must contain at least one letter')
         if not any(c.isdigit() for c in v):
             raise ValueError('Password must contain at least one number')
+        if len(v.encode('utf-8')) > 72:
+            raise ValueError('Password must be at most 72 bytes long')
         return v
 
 class GDPRExport(BaseModel):

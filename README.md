@@ -150,13 +150,30 @@ DELETE /api/v1/users/me
 
 ## Technical Stack
 
-- **Framework**: FastAPI 0.115.6
-- **Database**: PostgreSQL with SQLAlchemy 2.0.37
-- **Caching**: Redis 5.2.1
-- **Task Queue**: Celery 5.4.0
-- **Authentication**: JWT with refresh tokens
+- **Runtime**: Python 3.13
+- **Framework**: FastAPI 0.141.1 (Starlette 1.6.0)
+- **Database**: PostgreSQL with SQLAlchemy 2.0.52
+- **Caching**: Redis 8.1.0 (redis-py client)
+- **Task Queue**: Celery 5.6.3
+- **Authentication**: JWT (python-jose 3.5.0) with refresh tokens
+- **Password hashing**: bcrypt 5.0.0, called directly (no passlib wrapper)
 - **Email**: SMTP integration
 - **Documentation**: OpenAPI (Swagger)
+- **Packaging**: [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`)
+
+All dependencies track latest stable. Two version decisions are worth
+calling out because they weren't just "bump and go":
+- `python-jose` 3.3.0 had CVE-2024-33663 (algorithm confusion); 3.5.0 fixes it.
+- `fastapi` jumped from the 0.115.x line straight to 0.141.x specifically to
+  pull in a Starlette release patched against CVE-2025-62727 (a DoS via a
+  crafted `Range` header) - FastAPI 0.115.x pins an older Starlette that
+  can't take the fix alone.
+- `passlib` (last released 2020, unmaintained) breaks outright on bcrypt
+  5.x - hashing raises `ValueError: password cannot be longer than 72
+  bytes` for any password, because its bcrypt-version-detection shim relies
+  on an attribute bcrypt 5.x removed. Rather than pin bcrypt back to 4.x,
+  `app/core/security.py` now calls `bcrypt.hashpw`/`bcrypt.checkpw`
+  directly and passlib was dropped entirely.
 
 ## Project Structure
 
@@ -182,67 +199,29 @@ app/
 └── main.py               # Entry point
 ```
 
-## Docker Setup
+## Quick Start (uv)
 
 ### Prerequisites
-- Docker
-- Docker Compose
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- PostgreSQL 15 and Redis 7 (or Docker, see below)
 
-### Docker Configuration Files
-
-1. Create `Dockerfile`:
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```bash
+git clone <repository-url>
+cd fastapi-ecommerce
+cp .env.example .env        # edit with your local DB/Redis/SMTP settings
+uv sync                     # creates .venv and installs pinned deps from uv.lock
+uv run alembic upgrade head
+uv run python main.py       # or: uv run uvicorn app.main:app --reload
 ```
 
-2. Create `docker-compose.yml`:
-```yaml
-version: '3.8'
+Run the test suite with `uv run pytest --cov=app`.
 
-services:
-  api:
-    build: .
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    depends_on:
-      - db
-      - redis
+## Docker Setup
 
-  db:
-    image: postgres:15
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    env_file:
-      - .env
-    ports:
-      - "5432:5432"
-
-  redis:
-    image: redis:7
-    ports:
-      - "6379:6379"
-    command: redis-server --requirepass ${REDIS_PASSWORD}
-    volumes:
-      - redis_data:/data
-
-volumes:
-  postgres_data:
-  redis_data:
-```
+The actual [`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml)
+in the repo root are the source of truth; they build the API image with `uv`
+(dependencies resolved from `uv.lock`, not re-resolved at build time) and run
+Postgres and Redis alongside it.
 
 ### Running with Docker
 
@@ -254,47 +233,6 @@ docker-compose up --build
 2. Run migrations:
 ```bash
 docker-compose exec api alembic upgrade head
-```
-
-3. Create initial admin user:
-```bash
-docker-compose exec api python -m scripts.create_admin
-```
-
-## Local Development Setup
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd fastapi-ecommerce
-```
-
-2. Create and activate virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env with your configurations
-```
-
-5. Run database migrations:
-```bash
-alembic upgrade head
-```
-
-6. Start the application:
-```bash
-uvicorn app.main:app --reload
 ```
 
 ## API Documentation

@@ -1,0 +1,43 @@
+[project]
+name = "fastapi-ecommerce-backend"
+version = "1.0.0"
+description = "E-commerce backend API with FastAPI"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy",
+    "psycopg2-binary",
+    "alembic",
+    "pydantic",
+    "pydantic-settings",
+    "python-jose",
+    "bcrypt",
+    "cryptography",
+    "python-multipart",
+    "email-validator",
+    "python-dotenv",
+    "redis",
+    "celery",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "httpx",
+    "pytest-cov",
+    "ruff",
+    "freezegun",
+    "fakeredis",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
