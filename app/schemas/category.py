@@ -1,6 +1,8 @@
 from datetime import datetime
-from typing import List, Optional, Dict
-from pydantic import BaseModel, Field, ConfigDict, validator
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, validator
+
 
 class CategoryBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)

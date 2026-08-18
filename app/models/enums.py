@@ -1,5 +1,8 @@
 from enum import Enum
 
+from sqlalchemy import String
+
+
 # User related enums
 class UserRole(str, Enum):
     CLIENT = "client"
@@ -26,7 +29,6 @@ class PaymentStatus(str, Enum):
     FAILED = "failed"
     REFUNDED = "refunded"
 
-from sqlalchemy import String
 
 def create_string_enum(enum_class, name):
     """Create a String column with check constraint for enum values"""

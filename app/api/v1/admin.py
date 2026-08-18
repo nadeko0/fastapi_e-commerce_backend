@@ -1,33 +1,35 @@
 from datetime import datetime, timedelta
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import status as http_status
-from sqlalchemy import func, desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import get_db
 from app.core.security import get_current_admin_user
-from app.schemas.product import (
-    ProductCreate,
-    ProductUpdate,
-    ProductInDB,
-    ProductResponse,
-)
+from app.models.category import Category
+from app.models.order import Order
+from app.models.order_items import OrderItem
+from app.models.product import Product
+from app.models.user import User
 from app.schemas.category import (
     CategoryCreate,
     CategoryResponse,
 )
+from app.schemas.common import APIResponse, PaginationParams
 from app.schemas.order import (
+    OrderListResponse,
     OrderResponse,
     OrderStatus,
     PaymentStatus,
 )
-from app.schemas.common import APIResponse, PaginationParams
-from app.models.user import User
-from app.models.product import Product
-from app.models.category import Category
-from app.models.order import Order
-from app.models.order_items import OrderItem
+from app.schemas.product import (
+    ProductCreate,
+    ProductInDB,
+    ProductResponse,
+    ProductUpdate,
+)
 from app.services.redis import RedisService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -148,7 +150,7 @@ async def update_product(
 
     for field, value in product.dict(exclude_unset=True).items():
         setattr(db_product, field, value)
-    
+
     db_product.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(db_product)
@@ -211,7 +213,7 @@ async def delete_product(
 
 @router.get(
     "/orders",
-    response_model=APIResponse[List[OrderResponse]],
+    response_model=APIResponse[OrderListResponse],
     responses={
         403: {"description": "Admin privileges required"},
         422: {"description": "Invalid status, payment_status, or sort_by value"},
@@ -252,7 +254,7 @@ async def list_orders(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid order status. Valid values are: {', '.join([s.value for s in OrderStatus])}"
             )
-            
+
     if payment_status:
         try:
             pay_status = PaymentStatus(payment_status.lower())
@@ -273,21 +275,21 @@ async def list_orders(
 
             *field_parts, order = pagination.sort_by.rsplit('_', 1)
             field = '_'.join(field_parts)
-            
+
 
             if not hasattr(Order, field):
                 raise HTTPException(
                     status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"Invalid sort field: {field}"
                 )
-            
+
 
             if order not in ('asc', 'desc'):
                 raise HTTPException(
                     status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Sort order must be either 'asc' or 'desc'"
                 )
-                
+
             column = getattr(Order, field)
             query = query.order_by(desc(column) if order == 'desc' else column)
         except ValueError:
@@ -305,9 +307,13 @@ async def list_orders(
         .all()
     )
 
-    return APIResponse.success_response([
-        OrderResponse.from_orm(order) for order in orders
-    ])
+    return APIResponse.success_response(OrderListResponse(
+        items=[OrderResponse.from_orm(order) for order in orders],
+        total=total,
+        page=pagination.page,
+        size=pagination.size,
+        has_more=total > pagination.page * pagination.size,
+    ))
 
 @router.get(
     "/stats",

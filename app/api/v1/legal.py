@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
-from typing import Dict, Optional
 from datetime import datetime, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -8,11 +8,11 @@ from app.core.config import settings
 from app.core.security import get_current_active_user
 from app.schemas.legal import (
     ConsentUpdate,
+    ConsentUpdateResponse,
     DataRequest,
     DataRequestResponse,
     LegalDocument,
-    ConsentUpdateResponse,
-    UserConsent
+    UserConsent,
 )
 from app.services.gdpr import GDPRService
 
@@ -252,12 +252,12 @@ async def update_user_consent(
 ):
     """
     Update user's consent preferences for marketing and analytics.
-    
+
     This endpoint allows users to update their consent preferences for:
     * Marketing communications
     * Analytics tracking
     * Privacy policy acceptance
-    
+
     The endpoint also maintains a complete history of consent changes.
     """
     gdpr_service = GDPRService(db)
@@ -267,7 +267,7 @@ async def update_user_consent(
         ip_address=request.client.host,
         user_agent=request.headers.get("user-agent")
     )
-    
+
     return ConsentUpdateResponse(
         status="success",
         updated_consents=updated_consents,
@@ -282,15 +282,15 @@ async def request_personal_data(
 ):
     """
     Handle GDPR data access and deletion requests.
-    
+
     This endpoint allows users to:
     * Request export of their personal data
     * Request deletion of their account and personal data
-    
+
     The process is asynchronous and returns a request ID for tracking.
     """
     gdpr_service = GDPRService(db)
-    
+
     if request_data.request_type == "export":
         request_id = await gdpr_service.process_data_export(current_user)
     elif request_data.request_type == "deletion":
@@ -300,7 +300,7 @@ async def request_personal_data(
             status_code=400,
             detail="Invalid request type. Must be either 'export' or 'deletion'"
         )
-    
+
     return DataRequestResponse(
         request_id=request_id,
         status="processing",
@@ -314,7 +314,7 @@ async def get_consent_status(
 ):
     """
     Retrieve current consent status and history for the user.
-    
+
     Returns:
     * Current consent settings
     * Timestamps of consent changes

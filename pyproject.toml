@@ -48,3 +48,10 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+# E501 (line too long) is ignored rather than enforced: most remaining
+# violations are long f-string HTML email templates and SQLAlchemy
+# CheckConstraint strings, where reformatting to fit 100 chars produces
+# less readable code than the original single line. Everything else
+# (unused imports/vars, undefined names, import order/placement) is a
+# real hard gate.
+ignore = ["E501"]

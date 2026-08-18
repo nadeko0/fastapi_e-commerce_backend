@@ -1,15 +1,16 @@
 import json
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from app.schemas.category import CategoryTreeResponse
-from redis import Redis, ConnectionPool, ConnectionError
-from decimal import Decimal
+
+from redis import ConnectionError, ConnectionPool, Redis
 
 from app.core.config import settings
-from app.schemas.common import Cart, CartItem
 from app.schemas.cart import CART_KEY_PREFIX, CART_TTL_DAYS
+from app.schemas.common import Cart, CartItem
+
 
 class RedisService:
     _instance = None
@@ -41,7 +42,7 @@ class RedisService:
     def _deserialize(self, data: str, model_class=None) -> Any:
         if not data:
             return None
-            
+
         try:
             parsed = json.loads(data)
             if model_class:
@@ -55,11 +56,11 @@ class RedisService:
                         for item in parsed['items']:
                             items_dict[str(item['product_id'])] = item
                         parsed['items'] = items_dict
-                    
+
 
                     if 'expires_at' not in parsed:
                         parsed['expires_at'] = (datetime.utcnow() + timedelta(days=CART_TTL_DAYS)).isoformat()
-                
+
 
                 if model_class.__name__ == 'CategoryTreeResponse':
                     if isinstance(parsed, str):
@@ -157,7 +158,7 @@ class RedisService:
             data = self._redis.get("category:tree")
             if not data:
                 return None
-            
+
 
             try:
                 parsed = json.loads(data)
@@ -167,7 +168,7 @@ class RedisService:
             except json.JSONDecodeError:
                 self._redis.delete("category:tree")
                 return None
-                
+
             return self._deserialize(data, CategoryTreeResponse)
         except ConnectionError as e:
             self._handle_redis_error(f"get_cached_category_tree: {str(e)}")

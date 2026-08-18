@@ -1,7 +1,9 @@
 from datetime import datetime
-from typing import List, Optional, Dict, Any
 from decimal import Decimal
-from pydantic import BaseModel, Field, ConfigDict, validator, HttpUrl
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, validator
+
 
 class ProductCharacteristic(BaseModel):
     """Schema for dynamic product characteristics"""

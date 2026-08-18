@@ -1,28 +1,25 @@
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy import or_, and_
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.sql import func
+from typing import Optional
 
-from app.core.config import settings
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, joinedload
+
 from app.core.database import get_db
-from app.core.security import get_current_active_user, get_current_admin_user
-from app.schemas.product import (
-    ProductResponse,
-    ProductFilter,
-    ProductSearch,
-    ProductListResponse,
-)
+from app.models.category import Category
+from app.models.product import Product
 from app.schemas.category import (
-    CategoryResponse,
-    CategoryTreeResponse,
-    CategoryTreeNode,
     CategoryListResponse,
+    CategoryResponse,
+    CategoryTreeNode,
+    CategoryTreeResponse,
 )
 from app.schemas.common import APIResponse, PaginationParams
-from app.models.product import Product
-from app.models.category import Category
-from app.models.user import User
+from app.schemas.product import (
+    ProductFilter,
+    ProductListResponse,
+    ProductResponse,
+    ProductSearch,
+)
 from app.services.redis import RedisService
 
 router = APIRouter(tags=["catalog"])
@@ -78,7 +75,7 @@ async def get_category_tree(
 
 
     categories = db.query(Category).all()
-    
+
     if not categories:
 
         response = CategoryTreeResponse(
@@ -88,7 +85,7 @@ async def get_category_tree(
         )
     else:
         root_categories = [c for c in categories if c.parent_id is None]
-        
+
         def build_tree(category: Category) -> CategoryTreeNode:
             children = [c for c in categories if c.parent_id == category.id]
             return CategoryTreeNode(
@@ -105,7 +102,7 @@ async def get_category_tree(
             'total_categories': len(categories),
             'max_depth': max_depth
         }
-        
+
 
         response = CategoryTreeResponse(**response_data)
 
@@ -142,7 +139,7 @@ async def list_products(
     """List products with optional filtering, sorting, and pagination."""
 
     query = db.query(Product).options(joinedload(Product.category)).filter(
-        Product.is_active == True
+        Product.is_active
     )
 
 
@@ -198,7 +195,7 @@ async def search_products(
     """Search products by name/description, optionally scoped to a category."""
 
     query = db.query(Product).options(joinedload(Product.category)).filter(
-        Product.is_active == True,
+        Product.is_active,
         or_(
             Product.name.ilike(f"%{search.query}%"),
             Product.description.ilike(f"%{search.query}%")
@@ -241,7 +238,7 @@ async def get_product(
 
     product = db.query(Product).options(joinedload(Product.category)).filter(
         Product.id == product_id,
-        Product.is_active == True,
+        Product.is_active,
     ).first()
     if not product:
         raise HTTPException(

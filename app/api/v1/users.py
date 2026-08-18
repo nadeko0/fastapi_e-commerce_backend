@@ -1,64 +1,65 @@
 import logging
 from datetime import datetime, timedelta
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
-from pydantic import ValidationError
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy.exc import IntegrityError
 
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.config import settings
+from app.core.database import get_db
 from app.core.security import (
     create_access_token,
     create_refresh_token,
-    verify_password,
-    get_password_hash,
-    get_current_user,
-    get_current_active_user,
-    generate_password_reset_token,
-    verify_password_reset_token,
     generate_email_verification_token,
+    generate_password_reset_token,
+    get_current_active_user,
+    get_current_user,
+    get_password_hash,
     verify_email_token,
+    verify_password,
+    verify_password_reset_token,
 )
-from app.core.database import get_db
-from app.schemas.user import (
-    UserCreate,
-    UserUpdate,
-    UserResponse,
-    Token,
-    PasswordReset,
-    PasswordUpdate,
-    GDPRExport,
-    GDPRExportData,
-    GDPRDelete,
-    ConsentHistory,
-    ConsentType,
-)
+from app.models.address import Address
+from app.models.order import Order
+from app.models.order_items import OrderItem
+from app.models.user import User
 from app.schemas.address import (
     AddressCreate,
-    AddressUpdate,
-    AddressResponse,
     AddressListResponse,
+    AddressResponse,
+    AddressUpdate,
     SetDefaultAddress,
 )
-from app.schemas.order import OrderResponse
 from app.schemas.common import (
     APIResponse,
     PaginationParams,
 )
-from app.models.user import User
-from app.models.address import Address
-from app.models.order import Order
-from app.models.order_items import OrderItem
+from app.schemas.order import OrderResponse
+from app.schemas.user import (
+    ConsentHistory,
+    ConsentType,
+    GDPRDelete,
+    GDPRExport,
+    GDPRExportData,
+    PasswordReset,
+    PasswordUpdate,
+    Token,
+    UserCreate,
+    UserResponse,
+    UserUpdate,
+)
 from app.services.email import (
-    send_password_reset_email,
+    send_email_verification,
     send_gdpr_export_email,
+    send_password_reset_email,
     send_welcome_email,
-    send_email_verification
 )
 from app.services.redis import RedisService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
@@ -155,23 +156,23 @@ async def verify_email(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification token"
         )
-    
+
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     if user.is_email_verified:
         return APIResponse.success_response({
             "message": "Email already verified"
         })
-    
+
     user.is_email_verified = True
     user.email_verification_date = datetime.utcnow()
     db.commit()
-    
+
     return APIResponse.success_response({
         "message": "Email verified successfully"
     })
@@ -192,7 +193,7 @@ async def resend_verification_email(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already verified"
         )
-    
+
     if background_tasks:
         verification_token = generate_email_verification_token(current_user.email)
         logger.info(f"Queuing verification email resend for user {current_user.email}")
@@ -202,7 +203,7 @@ async def resend_verification_email(
             verification_token
         )
         logger.info(f"Verification email resend task queued for user {current_user.email}")
-    
+
     return APIResponse.success_response({
         "message": "Verification email sent"
     })
@@ -410,7 +411,7 @@ async def update_current_user(
 
     logger.info(f"Updating profile for user {current_user.email}")
     logger.debug(f"Received update request: {user_in.model_dump(exclude_unset=True)}")
-    
+
 
     update_data = user_in.model_dump(exclude_unset=True)
     if not update_data:
@@ -418,9 +419,9 @@ async def update_current_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update"
         )
-    
+
     logger.info(f"Fields to update: {list(update_data.keys())}")
-    
+
     try:
 
         user = db.query(User).filter(User.id == current_user.id).first()
@@ -429,7 +430,7 @@ async def update_current_user(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
 
         for field, new_value in update_data.items():
             old_value = getattr(user, field)
@@ -438,17 +439,17 @@ async def update_current_user(
                 f"Updated {field} for user {user.email}: "
                 f"'{old_value}' -> '{new_value}'"
             )
-        
+
         db.commit()
         logger.info(
             f"Profile updated successfully for user {user.email}. "
             f"Updated fields: {list(update_data.keys())}"
         )
-        
+
 
         db.refresh(user)
         return APIResponse.success_response(UserResponse.from_orm(user))
-        
+
     except Exception as e:
         db.rollback()
         logger.error(f"Failed to update profile for user {current_user.email}: {str(e)}")
@@ -467,14 +468,14 @@ async def list_addresses(
 
     total = db.query(Address).filter(
         Address.user_id == current_user.id,
-        Address.is_active == True
+        Address.is_active
     ).count()
 
     addresses = (
         db.query(Address)
         .filter(
             Address.user_id == current_user.id,
-            Address.is_active == True
+            Address.is_active
         )
         .offset((pagination.page - 1) * pagination.size)
         .limit(pagination.size)
@@ -508,38 +509,38 @@ async def create_address(
 
         active_addresses = db.query(Address).filter(
             Address.user_id == current_user.id,
-            Address.is_active == True
+            Address.is_active
         ).all()
-    
+
 
         should_be_default = address_in.is_default or not active_addresses
         if should_be_default:
 
             existing_default = db.query(Address).filter(
                 Address.user_id == current_user.id,
-                Address.is_active == True,
-                Address.is_default == True
+                Address.is_active,
+                Address.is_default
             ).first()
             if existing_default:
                 existing_default.is_default = False
-    
+
 
         address = Address(
             user_id=current_user.id,
             is_default=should_be_default,
             **address_in.model_dump(exclude={'is_default'})
         )
-            
+
         db.add(address)
         db.commit()
         db.refresh(address)
-        
+
         logger.info(f"Created address with ID: {address.id} for user {current_user.email}")
-        
+
 
         created = db.query(Address).get(address.id)
         logger.info(f"Verified address exists: {created and created.id} for user {current_user.email}")
-        
+
         return APIResponse.success_response(AddressResponse.from_orm(address))
     except ValidationError as e:
         raise HTTPException(
@@ -578,39 +579,39 @@ async def update_address(
     ).first()
 
     logger.info(f"Found address {address_id} for update request from user {current_user.email}")
-    
+
     if not address:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Address {address_id} not found"
         )
-        
+
     if not address.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Address {address_id} is not active"
         )
-    
 
-    
+
+
 
     if address_in.is_default:
         existing_default = db.query(Address).filter(
             Address.user_id == current_user.id,
-            Address.is_active == True,
-            Address.is_default == True,
+            Address.is_active,
+            Address.is_default,
             Address.id != address_id
         ).first()
         if existing_default:
             existing_default.is_default = False
-    
+
 
     for field, value in address_in.model_dump(exclude_unset=True).items():
         setattr(address, field, value)
-    
+
     db.commit()
     db.refresh(address)
-    
+
     return APIResponse.success_response(AddressResponse.from_orm(address))
 
 @router.delete(
@@ -634,34 +635,34 @@ async def delete_address(
     ).first()
 
     logger.info(f"Processing deletion request for address {address_id} from user {current_user.email}")
-    
+
     if not address:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Address {address_id} not found"
         )
-        
+
     if not address.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Address {address_id} is not active"
         )
-    
+
 
     address.is_active = False
-    
+
 
     if address.is_default:
         new_default = db.query(Address).filter(
             Address.user_id == current_user.id,
-            Address.is_active == True,
+            Address.is_active,
             Address.id != address_id
         ).order_by(Address.created_at.desc()).first()
         if new_default:
             new_default.is_default = True
-    
+
     db.commit()
-    
+
     return APIResponse.success_response({
         "message": "Address deleted successfully"
     })
@@ -685,33 +686,33 @@ async def set_default_address(
         Address.id == default_address.address_id,
         Address.user_id == current_user.id
     ).first()
-    
+
     logger.info(f"Processing set default request for address {default_address.address_id} from user {current_user.email}")
-    
+
     if not address:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Address {default_address.address_id} not found"
         )
-        
+
     if not address.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Address {default_address.address_id} is not active"
         )
-    
+
 
     address.is_default = True
-    
+
 
     db.query(Address).filter(
         Address.user_id == current_user.id,
-        Address.is_active == True,
+        Address.is_active,
         Address.id != address.id
     ).update({Address.is_default: False})
-    
+
     db.commit()
-    
+
     return APIResponse.success_response({
         "message": "Default address updated successfully"
     })
@@ -762,7 +763,7 @@ async def request_password_reset(
                 token
             )
             logger.info(f"Password reset email task queued for user {user.email}")
-    
+
 
     return APIResponse.success_response({
         "message": "If the email exists, a password reset link will be sent"
@@ -824,17 +825,17 @@ async def reset_password(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired reset token"
             )
-        
+
         user = db.query(User).filter(User.email == email).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-        
+
         user.hashed_password = get_password_hash(new_password.new_password)
         db.commit()
-        
+
         return APIResponse.success_response({
             "message": "Password has been reset successfully"
         })

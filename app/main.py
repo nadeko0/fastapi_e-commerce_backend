@@ -1,20 +1,21 @@
 import logging
 import signal
 import sys
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from redis.exceptions import RedisError
+from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.api.v1 import admin, cart, legal, orders, products, users
 from app.core.config import settings
 from app.core.database import engine
-from app.services.redis import RedisService
-from app.core.rate_limit import RateLimiter
 from app.core.logging_config import setup_logging
-from app.api.v1 import users, products, orders, cart, admin, legal
+from app.core.rate_limit import RateLimiter
+from app.services.redis import RedisService
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ logger.info("Redis service initialized")
 
 def cleanup():
     logger.info("Starting graceful shutdown...")
-    
+
 
     try:
         logger.info("Closing database connections...")
@@ -84,7 +85,7 @@ def cleanup():
         logger.info("Database connections closed successfully")
     except Exception as e:
         logger.error(f"Error closing database connections: {e}")
-    
+
 
     global redis_service
     if redis_service:
@@ -94,7 +95,7 @@ def cleanup():
             logger.info("Redis connections closed successfully")
         except Exception as e:
             logger.error(f"Error closing Redis connections: {e}")
-    
+
     logger.info("Graceful shutdown completed")
 
 def signal_handler(signum, frame):
@@ -130,7 +131,7 @@ async def health_check():
             "redis": "healthy"
         }
     }
-    
+
 
     logger.debug("Checking database connection")
     try:
@@ -151,7 +152,7 @@ async def health_check():
         logger.error(f"Redis health check failed: {e}")
         health_status["services"]["redis"] = "unhealthy"
         health_status["status"] = "degraded"
-    
+
     status_code = 200 if health_status["status"] == "healthy" else 503
     logger.info(f"Health check completed with status: {health_status['status']}")
     return JSONResponse(

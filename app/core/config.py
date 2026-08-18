@@ -1,6 +1,8 @@
 from typing import List, Optional
+
+from pydantic import AnyHttpUrl, validator
 from pydantic_settings import BaseSettings
-from pydantic import AnyHttpUrl, validator, PositiveInt
+
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "E-commerce Backend"
@@ -8,24 +10,24 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
-    
+
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     WORKERS: int = 4
     RELOAD: bool = False
-    
+
     @validator("WORKERS", pre=True)
     def validate_workers(cls, v: int, values: dict) -> int:
         if values.get("ENVIRONMENT") == "development":
             return 1
         return v
-    
+
     @validator("DEBUG", "RELOAD", pre=True)
     def set_debug_settings(cls, v: bool, values: dict) -> bool:
         if values.get("ENVIRONMENT") == "development":
             return True
         return False
-    
+
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
 
     @validator("BACKEND_CORS_ORIGINS", pre=True)
@@ -58,7 +60,7 @@ class Settings(BaseSettings):
     def adjust_pool_size(cls, v: str | int, values: dict) -> int:
         v_int = int(v) if isinstance(v, str) else v
         if values.get("ENVIRONMENT") == "development":
-            return max(5, v_int // 2) 
+            return max(5, v_int // 2)
         return v_int
 
     @validator("SQL_DEBUG", pre=True)
@@ -121,12 +123,12 @@ class Settings(BaseSettings):
     # (app/tasks.py) - referenced there but never defined here, so that
     # task raised AttributeError every time it ran (scheduled every 4h).
     ADMIN_EMAIL: str = "admin@yourcompany.com"
-    
+
     # Cookie Consent Settings
     COOKIE_CONSENT_ENABLED: bool = True
     COOKIE_CONSENT_EXPIRE_DAYS: int = 365
     ESSENTIAL_COOKIES: List[str] = ["session", "csrf_token"]
-    
+
     # GDPR Email Templates
     GDPR_EXPORT_READY_TEMPLATE: str = "gdpr_export_ready"
     GDPR_DELETION_CONFIRMED_TEMPLATE: str = "gdpr_deletion_confirmed"

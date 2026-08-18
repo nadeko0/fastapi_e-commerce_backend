@@ -1,13 +1,14 @@
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-import json
-from sqlalchemy.orm import Session
-from fastapi import HTTPException
+from typing import Dict, Optional
 
-from app.models.user import User
-from app.schemas.legal import ConsentUpdate, ConsentHistory, DataRequest
-from app.schemas.user import GDPRExport
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
+from app.models.user import User
+from app.schemas.legal import ConsentUpdate
+from app.schemas.user import GDPRExport
+
 
 class GDPRService:
     def __init__(self, db: Session):
@@ -24,10 +25,10 @@ class GDPRService:
         Update user's consent preferences and maintain consent history
         """
         current_time = datetime.utcnow()
-        
+
         # Create consent history entry
         consent_entries = []
-        
+
         # Entry shape matches app/api/v1/users.py::update_consent so that
         # consent_history is consistent (and demonstrable per Art. 7(1))
         # regardless of which endpoint the client used.
@@ -66,7 +67,7 @@ class GDPRService:
                 "privacy_policy": user.privacy_policy_accepted,
 
             }
-        except Exception as e:
+        except Exception:
             self.db.rollback()
             raise HTTPException(
                 status_code=500,
@@ -86,47 +87,10 @@ class GDPRService:
             from app.services.email import send_gdpr_request_received
             send_gdpr_request_received(user.email, "export", request_id)
 
-            # Prepare user data for export
-            user_data = {
-                "personal_info": {
-                    "email": user.email,
-                    "full_name": user.full_name,
-                    "phone": user.phone,
-                    "created_at": user.created_at.isoformat(),
-                    "last_login": user.last_login.isoformat() if user.last_login else None,
-                },
-                "consent_history": user.consent_history,
-                "addresses": [
-                    {
-                        "street": addr.street,
-                        "city": addr.city,
-                        "country": addr.country,
-                        "postal_code": addr.postal_code,
-                        "is_default": addr.is_default,
-                    }
-                    for addr in user.addresses
-                ],
-                "orders": [
-                    {
-                        "id": order.id,
-                        "status": order.status,
-                        "created_at": order.created_at.isoformat(),
-                        "total_amount": str(order.total_amount),
-                        "items": [
-                            {
-                                "product_id": item.product_id,
-                                "quantity": item.quantity,
-                                "price": str(item.price_at_time),
-                            }
-                            for item in order.items
-                        ],
-                    }
-                    for order in user.orders
-                ],
-            }
-
-            # In production, this would be stored in a secure location
-            # and made available for download through a secure link
+            # In production, the export payload would be assembled here and
+            # stored in a secure location with a signed, expiring download
+            # link (the synchronous GET /users/data/export endpoint already
+            # returns the full export inline instead - see users.py).
             from app.services.email import send_gdpr_export_email
             export_data = GDPRExport(
                 request_id=request_id,
@@ -137,7 +101,7 @@ class GDPRService:
 
             return request_id
 
-        except Exception as e:
+        except Exception:
             raise HTTPException(
                 status_code=500,
                 detail="Failed to process data export request"
@@ -171,7 +135,7 @@ class GDPRService:
 
             return request_id
 
-        except Exception as e:
+        except Exception:
             self.db.rollback()
             raise HTTPException(
                 status_code=500,
@@ -200,7 +164,7 @@ class GDPRService:
         """
         if not user.created_at:
             return True
-            
+
         retention_days = user.data_retention_period or settings.USER_DATA_RETENTION_DAYS
         age_in_days = (datetime.utcnow() - user.created_at).days
         return age_in_days <= retention_days

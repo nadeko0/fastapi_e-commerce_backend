@@ -1,10 +1,12 @@
 from datetime import datetime
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, JSON, Index, CheckConstraint
+
+from sqlalchemy import JSON, Boolean, CheckConstraint, Column, DateTime, Index, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.core.config import settings
 from app.models.base import Base
 from app.models.enums import UserRole, create_string_enum
+
 
 class User(Base):
     __tablename__ = "users"
@@ -18,7 +20,7 @@ class User(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     is_email_verified = Column(Boolean, nullable=False, default=False)
     email_verification_date = Column(DateTime)
-    
+
     # Essential GDPR Fields
     gdpr_consent = Column(Boolean, nullable=False, default=False)
     gdpr_consent_date = Column(DateTime)

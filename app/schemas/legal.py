@@ -1,6 +1,8 @@
-from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel
+
 
 class ConsentUpdate(BaseModel):
     marketing_consent: bool
@@ -61,7 +63,7 @@ class DataRequestResponse(BaseModel):
     request_id: str
     status: str
     estimated_completion_time: datetime
-    
+
     class Config:
         schema_extra = {
             "example": {

@@ -1,8 +1,10 @@
-from datetime import datetime
-from typing import List, Optional
-from pydantic import BaseModel, EmailStr, Field, ConfigDict, validator
-from enum import Enum
 import re
+from datetime import datetime
+from enum import Enum
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, validator
+
 
 class UserRole(str, Enum):
     CLIENT = "client"
@@ -146,7 +148,7 @@ class GDPRExport(BaseModel):
     request_date: datetime = Field(..., description="When the export was requested")
     expires_at: datetime = Field(..., description="When the export data will be deleted")
     status: str = Field(default="processing", description="Current status of the export")
-    
+
     class Config:
         json_schema_extra = {
             "example": {
