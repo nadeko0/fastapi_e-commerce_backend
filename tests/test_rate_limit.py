@@ -22,9 +22,11 @@ def test_endpoint_limits_match_real_login_and_register_routes():
     # are "/users/login" and "/users/register" - the strict limits silently
     # never applied and only the generic anonymous limit was enforced.
     limiter = RateLimiter()
+    login_limit = limiter.endpoint_limits[f"{settings.API_V1_STR}/users/login"]
+    register_limit = limiter.endpoint_limits[f"{settings.API_V1_STR}/users/register"]
 
-    assert limiter.endpoint_limits[f"{settings.API_V1_STR}/users/login"] == settings.RATE_LIMIT_LOGIN
-    assert limiter.endpoint_limits[f"{settings.API_V1_STR}/users/register"] == settings.RATE_LIMIT_REGISTER
+    assert login_limit == settings.RATE_LIMIT_LOGIN
+    assert register_limit == settings.RATE_LIMIT_REGISTER
 
 
 def test_get_rate_limit_applies_strict_login_limit_for_login_path():

@@ -5,7 +5,7 @@ This document provides detailed instructions for setting up the E-commerce Backe
 ## Prerequisites
 
 ### Local Development
-- Python 3.11 or higher
+- Python 3.13 or higher
 - PostgreSQL 15
 - Redis 7
 - Git
@@ -23,21 +23,19 @@ git clone <repository-url>
 cd fastapi-ecommerce
 ```
 
-2. **Create Virtual Environment**
-```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
+2. **Install [uv](https://docs.astral.sh/uv/getting-started/installation/)**
 
-# Linux/Mac
-python -m venv venv
-source venv/bin/activate
-```
+uv manages the virtual environment for you - there's no separate `venv`
+creation step.
 
 3. **Install Dependencies**
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
+This creates `.venv` and installs the exact versions pinned in `uv.lock`.
+Prefix subsequent commands with `uv run` (e.g. `uv run alembic upgrade head`),
+or activate the environment directly with `.venv\Scripts\activate` (Windows)
+/ `source .venv/bin/activate` (Linux/Mac).
 
 4. **Set Up Environment Variables**
 ```bash
@@ -57,7 +55,7 @@ CREATE DATABASE ecommerce;
 
 6. **Run Migrations**
 ```bash
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 7. **Start Redis Server**
@@ -71,7 +69,8 @@ sudo service redis-server start
 
 8. **Run the Application**
 ```bash
-uvicorn app.main:app --reload
+uv run python main.py
+# or: uv run uvicorn app.main:app --reload
 ```
 
 ## Docker Setup
