@@ -29,12 +29,6 @@ class ErrorDetail(BaseModel):
     field: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
 
-class ErrorResponse(BaseModel):
-    """Standard error response"""
-    error: ErrorDetail
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    request_id: Optional[str] = None
-
 class ValidationError(BaseModel):
     """Validation error details"""
     field: str

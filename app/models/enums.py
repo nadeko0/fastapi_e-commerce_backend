@@ -1,4 +1,3 @@
-from sqlalchemy.dialects.postgresql import ENUM
 from enum import Enum
 
 # User related enums
@@ -27,15 +26,9 @@ class PaymentStatus(str, Enum):
     FAILED = "failed"
     REFUNDED = "refunded"
 
-from sqlalchemy import String, CheckConstraint
+from sqlalchemy import String
 
 def create_string_enum(enum_class, name):
     """Create a String column with check constraint for enum values"""
     values = [e.value for e in enum_class]
     return String, {'name': name, 'check': f"{name} IN {tuple(values)}"}
-
-# Initialize enums with check constraints
-UserRoleEnum = create_string_enum(UserRole, "role")
-AddressTypeEnum = create_string_enum(AddressType, "address_type")
-OrderStatusEnum = create_string_enum(OrderStatus, "status")
-PaymentStatusEnum = create_string_enum(PaymentStatus, "payment_status")
