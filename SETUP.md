@@ -54,6 +54,16 @@ CREATE DATABASE ecommerce;
 ```
 
 6. **Run Migrations**
+
+`migrations/versions/` is now tracked in git (it was previously
+gitignored, so the repo had no schema history at all). If it's still
+empty, generate the initial migration against your running Postgres
+instance before upgrading:
+```bash
+uv run alembic revision --autogenerate -m "initial schema"
+uv run alembic upgrade head
+```
+Otherwise just:
 ```bash
 uv run alembic upgrade head
 ```
