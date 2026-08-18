@@ -235,6 +235,49 @@ docker-compose up --build
 docker-compose exec api alembic upgrade head
 ```
 
+## GDPR / Data Protection
+
+This is a portfolio project, not a legal audit — full regulatory compliance
+depends on organizational measures outside a codebase (a real DPA, an actual
+DPO, verified breach-response procedures) as well as the code. What's
+implemented here targets the technical requirements of EU GDPR
+(Regulation (EU) 2016/679) that apply to an e-commerce backend:
+
+- **Lawful basis & consent (Art. 6, 7)** — registration requires explicit
+  GDPR consent and privacy-policy acceptance; marketing consent is separate
+  and optional. GDPR consent can't be "withdrawn" via the consent endpoint
+  (only removed by requesting account deletion, per Art. 6(1)(b) — it's
+  needed to fulfil the contract); marketing consent toggles freely either
+  way, matching Art. 7(3)'s "as easy to withdraw as to give."
+- **Consent audit trail (Art. 7(1))** — every consent-affecting action
+  (registration, consent updates) appends a `{type, granted, timestamp,
+  ip_address, user_agent}` record to `consent_history`, in one consistent
+  shape across both places consent can be changed.
+- **Right of access & portability (Art. 15, 20)** — `GET /users/data/export`
+  returns personal data, consent history, addresses, and orders as
+  structured JSON.
+- **Right to erasure (Art. 17)** — `POST /users/data/delete` deactivates the
+  account immediately; a scheduled task anonymizes the account (email,
+  name, phone, addresses) after a 1-day grace period
+  (`DATA_DELETION_GRACE_PERIOD_DAYS`). Order/invoice rows are **not**
+  deleted — Art. 17(3)(b) exempts data still needed for a legal obligation,
+  and most EU member states require invoices retained for tax purposes for
+  around 10 years, so financial records survive with their personal
+  identifiers scrubbed rather than being cascade-deleted with the account.
+- **Data minimization (Art. 5(1)(c))** — no collection beyond what
+  registration/checkout/delivery actually need.
+
+**Known gaps, deliberately not built** (see `.agent-notes/gdpr.md` for the
+full reasoning — that file is local/gitignored, not part of the repo):
+automatic deletion purely on retention-period expiry (only explicit erasure
+requests are acted on), Art. 18 restriction-of-processing as a distinct
+state, a separate Art. 21 objection endpoint (covered by the marketing
+toggle for the one unconditional objection right, Art. 21(2)), Art. 30
+records of processing and Art. 33/34 breach notification (both
+organizational/process documents, not app features), and field-level
+envelope encryption for crypto-shredding PII (the anonymize-in-place
+approach above reaches the same legal outcome without a KMS dependency).
+
 ## API Documentation
 
 - Swagger UI: `http://localhost:8000/api/v1/docs`
