@@ -64,15 +64,6 @@ class AddressUpdate(BaseModel):
             return v.upper()
         return v.title()
 
-class AddressInDB(AddressBase):
-    id: int
-    user_id: int
-    created_at: datetime
-    updated_at: datetime
-    is_active: bool = True
-
-    model_config = ConfigDict(from_attributes=True)
-
 class AddressResponse(AddressBase):
     id: int
     created_at: datetime

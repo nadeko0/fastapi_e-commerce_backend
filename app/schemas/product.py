@@ -107,7 +107,3 @@ class ProductSearch(BaseModel):
     page: int = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
 
-class StockUpdate(BaseModel):
-    """Schema for updating product stock"""
-    quantity: int = Field(..., ge=0)
-    reason: Optional[str] = None
