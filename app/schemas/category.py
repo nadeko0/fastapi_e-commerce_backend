@@ -42,6 +42,18 @@ class CategoryInDB(CategoryBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @validator('metadata', pre=True)
+    def coerce_missing_metadata(cls, v):
+        # app.models.category.Category has no `metadata` column. Every
+        # SQLAlchemy declarative model exposes its own class-level
+        # `metadata` (the mapper's MetaData registry, not a dict) via
+        # `Base.metadata`, and with from_attributes=True that shadows this
+        # field on every ORM-loaded instance - so every GET that returns a
+        # category (list/detail/tree) raised a 500 ValidationError before
+        # this coercion. There is no real persisted category metadata
+        # today; treat any non-dict source as empty rather than reject it.
+        return v if isinstance(v, dict) else {}
+
 class CategoryResponse(CategoryInDB):
     """Schema for API responses"""
     product_count: int = 0
@@ -76,35 +88,3 @@ class CategoryTreeResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class CategoryMove(BaseModel):
-    """Schema for moving a category in the tree"""
-    category_id: int = Field(..., gt=0)
-    new_parent_id: Optional[int] = Field(None, gt=0)
-
-    @validator('new_parent_id')
-    def validate_move(cls, v, values):
-        if 'category_id' in values and v == values['category_id']:
-            raise ValueError('Category cannot be its own parent')
-        return v
-
-class CategoryBulkDelete(BaseModel):
-    """Schema for bulk category deletion"""
-    category_ids: List[int] = Field(..., min_items=1)
-    move_children_to: Optional[int] = None  # Parent ID for orphaned children
-
-    @validator('category_ids')
-    def validate_ids(cls, v):
-        if not all(x > 0 for x in v):
-            raise ValueError('All category IDs must be positive integers')
-        if len(v) != len(set(v)):
-            raise ValueError('Duplicate category IDs are not allowed')
-        return v
-
-    @validator('move_children_to')
-    def validate_move_to(cls, v, values):
-        if v is not None:
-            if v <= 0:
-                raise ValueError('move_children_to must be a positive integer')
-            if 'category_ids' in values and v in values['category_ids']:
-                raise ValueError('Cannot move children to a category being deleted')
-        return v

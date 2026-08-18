@@ -1,19 +1,17 @@
 from datetime import datetime, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi import status as http_status
 from sqlalchemy import func, desc
-from sqlalchemy.orm import Session, joinedload
-from decimal import Decimal
+from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_admin_user
 from app.schemas.product import (
     ProductCreate,
     ProductUpdate,
+    ProductInDB,
     ProductResponse,
-    ProductListResponse,
 )
 from app.schemas.category import (
     CategoryCreate,
@@ -33,13 +31,21 @@ from app.models.order_items import OrderItem
 from app.services.redis import RedisService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-@router.post("/categories", response_model=APIResponse[CategoryResponse])
+@router.post(
+    "/categories",
+    response_model=APIResponse[CategoryResponse],
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Parent category not found"},
+    },
+)
 async def create_category(
     category: CategoryCreate,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
+    """Create a new category, optionally nested under a parent category."""
 
     if category.parent_id:
         parent = db.query(Category).filter(Category.id == category.parent_id).first()
@@ -67,13 +73,21 @@ async def create_category(
 
     return APIResponse.success_response(CategoryResponse.from_orm(db_category))
 
-@router.post("/products", response_model=APIResponse[ProductResponse])
+@router.post(
+    "/products",
+    response_model=APIResponse[ProductResponse],
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Category not found"},
+    },
+)
 async def create_product(
     product: ProductCreate,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
+    """Create a new product under an existing category."""
 
     category = db.query(Category).filter(Category.id == product.category_id).first()
     if not category:
@@ -97,13 +111,24 @@ async def create_product(
     redis.invalidate_category_cache()
 
 
-    response = ProductResponse(
-        **db_product.__dict__,
-        category_name=db_product.category.name
-    )
+    # ProductResponse requires category_name, which is not a Product column,
+    # so from_attributes alone can't populate it. Validate the ORM-mapped
+    # fields first (ProductInDB has no such requirement), then build the
+    # response from that clean field set plus category_name - avoids
+    # spreading Product.__dict__ (which includes SQLAlchemy's internal
+    # _sa_instance_state) into the Pydantic constructor.
+    base = ProductInDB.model_validate(db_product, from_attributes=True)
+    response = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
     return APIResponse.success_response(response)
 
-@router.put("/products/{product_id}", response_model=APIResponse[ProductResponse])
+@router.put(
+    "/products/{product_id}",
+    response_model=APIResponse[ProductResponse],
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Product not found"},
+    },
+)
 async def update_product(
     product_id: int,
     product: ProductUpdate,
@@ -111,6 +136,7 @@ async def update_product(
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
+    """Update fields on an existing product."""
 
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if not db_product:
@@ -137,19 +163,25 @@ async def update_product(
     redis.invalidate_category_cache()
 
 
-    response = ProductResponse(
-        **db_product.__dict__,
-        category_name=db_product.category.name
-    )
+    base = ProductInDB.model_validate(db_product, from_attributes=True)
+    response = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
     return APIResponse.success_response(response)
 
-@router.delete("/products/{product_id}", response_model=APIResponse[dict])
+@router.delete(
+    "/products/{product_id}",
+    response_model=APIResponse[dict],
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Product not found"},
+    },
+)
 async def delete_product(
     product_id: int,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
+    """Delete a product, or soft-delete (deactivate) it if it has existing orders."""
 
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if not db_product:
@@ -177,7 +209,14 @@ async def delete_product(
         "message": "Product deleted successfully"
     })
 
-@router.get("/orders", response_model=APIResponse[List[OrderResponse]])
+@router.get(
+    "/orders",
+    response_model=APIResponse[List[OrderResponse]],
+    responses={
+        403: {"description": "Admin privileges required"},
+        422: {"description": "Invalid status, payment_status, or sort_by value"},
+    },
+)
 async def list_orders(
     # Named "status" for the public API/query param; see the identical note
     # in orders.update_order_status - this shadows the fastapi.status
@@ -191,8 +230,17 @@ async def list_orders(
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
+    """List orders across all users, with filtering, sorting, and pagination."""
 
-    query = db.query(Order)
+    # Eager-load shipping_address (many-to-one) with joinedload and items
+    # -> product (one-to-many) with selectinload: OrderResponse serializes
+    # both for every order in the page, so without this each row would
+    # trigger its own lazy-load queries (N+1) for shipping_address and for
+    # each item's product.
+    query = db.query(Order).options(
+        joinedload(Order.shipping_address),
+        selectinload(Order.items).joinedload(OrderItem.product),
+    )
 
 
     if status:
@@ -261,13 +309,21 @@ async def list_orders(
         OrderResponse.from_orm(order) for order in orders
     ])
 
-@router.get("/stats", response_model=APIResponse[dict])
+@router.get(
+    "/stats",
+    response_model=APIResponse[dict],
+    responses={
+        403: {"description": "Admin privileges required"},
+        422: {"description": "Invalid period value"},
+    },
+)
 async def get_statistics(
     period: str = Query("24h", regex="^(24h|7d|30d)$"),
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
+    """Retrieve order/revenue statistics and popular products for a time period."""
 
     cache_key = f"admin_stats_{period}"
     cached_stats = redis.get(cache_key)

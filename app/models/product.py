@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Numeric, Text, JSON, ARRAY, Index
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Numeric, Text, JSON, ARRAY, Boolean, Index
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
@@ -20,6 +20,10 @@ class Product(Base):
     images = Column(_string_array, nullable=False, default=[])
     characteristics = Column(JSON, nullable=False, default={})
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
+    # Soft-delete flag: admin.delete_product deactivates instead of hard
+    # deleting when a product has existing order history, so past orders
+    # keep a valid product reference. Public listings must filter on this.
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -28,4 +32,5 @@ class Product(Base):
         Index('idx_product_name_description', 'name', 'description'),
         Index('idx_product_price', 'price'),
         Index('idx_product_category', 'category_id'),
+        Index('idx_product_active', 'is_active'),
     )
