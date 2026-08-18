@@ -44,6 +44,7 @@ app.log*
 # Environment variables
 .env
 .env.*
+!.env.example
 
 # Coverage reports
 htmlcov/
