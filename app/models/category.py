@@ -1,8 +1,11 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Index, ARRAY
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Index, ARRAY, JSON
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
+
+# See app/models/product.py for why ARRAY needs a SQLite fallback.
+_int_array = ARRAY(Integer).with_variant(JSON(), "sqlite")
 
 class Category(Base):
     __tablename__ = "categories"
@@ -11,7 +14,7 @@ class Category(Base):
     name = Column(String, nullable=False, index=True)
     description = Column(Text)
     parent_id = Column(Integer, ForeignKey('categories.id'), nullable=True)
-    path = Column(ARRAY(Integer), nullable=False, default=[])
+    path = Column(_int_array, nullable=False, default=[])
     level = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

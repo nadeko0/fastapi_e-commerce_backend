@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.core.config import settings
+from app.core.security import get_current_active_user
 from app.schemas.legal import (
     ConsentUpdate,
     DataRequest,
@@ -247,7 +248,7 @@ async def update_user_consent(
     consent_update: ConsentUpdate,
     request: Request,
     db: Session = Depends(deps.get_db),
-    current_user = Depends(deps.get_current_user)
+    current_user = Depends(get_current_active_user)
 ):
     """
     Update user's consent preferences for marketing and analytics.
@@ -277,7 +278,7 @@ async def update_user_consent(
 async def request_personal_data(
     request_data: DataRequest,
     db: Session = Depends(deps.get_db),
-    current_user = Depends(deps.get_current_user)
+    current_user = Depends(get_current_active_user)
 ):
     """
     Handle GDPR data access and deletion requests.
@@ -309,7 +310,7 @@ async def request_personal_data(
 @router.get("/consent-status", response_model=UserConsent)
 async def get_consent_status(
     db: Session = Depends(deps.get_db),
-    current_user = Depends(deps.get_current_user)
+    current_user = Depends(get_current_active_user)
 ):
     """
     Retrieve current consent status and history for the user.
@@ -325,7 +326,7 @@ async def get_consent_status(
 @router.get("/data-retention")
 async def check_data_retention(
     db: Session = Depends(deps.get_db),
-    current_user = Depends(deps.get_current_user)
+    current_user = Depends(get_current_active_user)
 ):
     """
     Check if user data is within the retention period.
