@@ -24,6 +24,7 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 env/
 ENV/
 
@@ -67,3 +68,6 @@ dump.rdb
 # Database
 *.db
 *.sqlite3
+
+# Agent working notes (not for repo)
+.agent-notes/

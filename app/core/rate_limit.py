@@ -19,8 +19,8 @@ class RateLimiter:
         # Special endpoints rate limits
         self.endpoint_limits = {
             f"{settings.API_V1_STR}/products": settings.RATE_LIMIT_PRODUCTS,
-            f"{settings.API_V1_STR}/auth/login": settings.RATE_LIMIT_LOGIN,
-            f"{settings.API_V1_STR}/auth/register": settings.RATE_LIMIT_REGISTER,
+            f"{settings.API_V1_STR}/users/login": settings.RATE_LIMIT_LOGIN,
+            f"{settings.API_V1_STR}/users/register": settings.RATE_LIMIT_REGISTER,
         }
 
     def _get_window_key(self, identifier: str) -> str:
@@ -29,12 +29,16 @@ class RateLimiter:
 
     def _get_client_identifier(self, request: Request) -> Tuple[str, str]:
         """Get client identifier and type based on request."""
-        # Get client IP
+        # Get client IP. X-Forwarded-For is attacker-controlled unless it was
+        # set by a proxy we trust, so only honor it when the immediate peer
+        # (the socket connection) is in TRUSTED_PROXIES - otherwise a client
+        # could spoof the header to dodge or shift its rate limit bucket.
+        peer_ip = request.client.host if request.client else "unknown"
         forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            client_ip = forwarded.split(",")[0]
+        if forwarded and peer_ip in settings.TRUSTED_PROXIES:
+            client_ip = forwarded.split(",")[0].strip()
         else:
-            client_ip = request.client.host if request.client else "unknown"
+            client_ip = peer_ip
 
         # Get user type (anonymous/authenticated/admin)
         user = getattr(request.state, "user", None)

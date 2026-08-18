@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     REDIS_SESSION_TTL_HOURS: int = 24
 
     # Rate limiting settings
+    # IPs of reverse proxies/load balancers allowed to set X-Forwarded-For.
+    # Empty by default: with no trusted proxy in front, X-Forwarded-For is
+    # attacker-controlled and must be ignored in favor of the socket peer IP.
+    TRUSTED_PROXIES: List[str] = []
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_ANONYMOUS: int = 30  # requests per minute
     RATE_LIMIT_AUTHENTICATED: int = 60  # requests per minute
