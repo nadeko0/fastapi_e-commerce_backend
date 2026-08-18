@@ -1,0 +1,190 @@
+from app.core.security import blacklist_token
+
+USERS_PREFIX = "/api/v1/users"
+LEGAL_PREFIX = "/api/v1/legal"
+
+
+def _valid_registration_payload():
+    return {
+        "email": "legal.user@example.com",
+        "password": "Str0ngPass1",
+        "full_name": "Legal User",
+        "gdpr_consent": True,
+        "privacy_policy_accepted": True,
+        "marketing_consent": False,
+    }
+
+
+def _register_and_login(client, payload):
+    client.post(f"{USERS_PREFIX}/register", json=payload)
+    login_response = client.post(
+        f"{USERS_PREFIX}/login",
+        data={"username": payload["email"], "password": payload["password"]},
+    )
+    return login_response.json()["data"]["access_token"]
+
+
+def _auth_headers(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_privacy_policy_is_public(client):
+    response = client.get(f"{LEGAL_PREFIX}/privacy-policy")
+
+    assert response.status_code == 200
+    assert "Privacy Policy" in response.json()["content"]
+
+
+def test_terms_of_service_is_public(client):
+    response = client.get(f"{LEGAL_PREFIX}/terms-of-service")
+
+    assert response.status_code == 200
+    assert "Terms of Service" in response.json()["content"]
+
+
+def test_cookie_policy_is_public(client):
+    response = client.get(f"{LEGAL_PREFIX}/cookie-policy")
+
+    assert response.status_code == 200
+    assert "Cookie Policy" in response.json()["content"]
+
+
+def test_update_consent_requires_authentication(client):
+    response = client.post(
+        f"{LEGAL_PREFIX}/consent",
+        json={"marketing_consent": True, "privacy_policy_accepted": True},
+    )
+
+    assert response.status_code == 401
+
+
+def test_update_consent_updates_marketing_preference(client):
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/consent",
+        json={"marketing_consent": True, "privacy_policy_accepted": True},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["updated_consents"]["marketing"] is True
+
+
+def test_data_request_export_returns_processing_status(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.email.send_gdpr_request_received", lambda *a, **k: True
+    )
+    monkeypatch.setattr("app.services.email.send_gdpr_export_email", lambda *a, **k: True)
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/data-request",
+        json={"request_type": "export"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "processing"
+    assert body["request_id"].startswith("export_")
+
+
+def test_data_request_deletion_returns_processing_status(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.email.send_gdpr_request_received", lambda *a, **k: True
+    )
+    monkeypatch.setattr(
+        "app.services.email.send_gdpr_deletion_confirmation", lambda *a, **k: True
+    )
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/data-request",
+        json={"request_type": "deletion"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["request_id"].startswith("deletion_")
+
+
+def test_data_request_rejects_invalid_request_type(client):
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/data-request",
+        json={"request_type": "not-a-real-type"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 400
+
+
+def test_consent_status_returns_current_state(client):
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.get(f"{LEGAL_PREFIX}/consent-status", headers=_auth_headers(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["marketing_consent"] is False
+    assert body["privacy_policy_accepted"] is True
+
+
+def test_data_retention_reports_within_period_for_new_account(client):
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.get(f"{LEGAL_PREFIX}/data-retention", headers=_auth_headers(token))
+
+    assert response.status_code == 200
+    assert response.json()["within_retention_period"] is True
+
+
+def test_consent_status_rejects_blacklisted_token(client):
+    # Regression test: app/api/v1/legal.py's endpoints previously accepted
+    # a blacklisted (logged-out) token because they depended on a second,
+    # non-auth-checking get_current_user implementation.
+    token = _register_and_login(client, _valid_registration_payload())
+    blacklist_token(token, expires_in=3600)
+
+    response = client.get(f"{LEGAL_PREFIX}/consent-status", headers=_auth_headers(token))
+
+    assert response.status_code == 401
+
+
+def test_data_retention_rejects_blacklisted_token(client):
+    token = _register_and_login(client, _valid_registration_payload())
+    blacklist_token(token, expires_in=3600)
+
+    response = client.get(f"{LEGAL_PREFIX}/data-retention", headers=_auth_headers(token))
+
+    assert response.status_code == 401
+
+
+def test_update_consent_rejects_blacklisted_token(client):
+    token = _register_and_login(client, _valid_registration_payload())
+    blacklist_token(token, expires_in=3600)
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/consent",
+        json={"marketing_consent": True, "privacy_policy_accepted": True},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 401
+
+
+def test_data_request_rejects_blacklisted_token(client):
+    token = _register_and_login(client, _valid_registration_payload())
+    blacklist_token(token, expires_in=3600)
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/data-request",
+        json={"request_type": "export"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 401

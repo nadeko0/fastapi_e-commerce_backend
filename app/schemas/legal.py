@@ -15,8 +15,11 @@ class ConsentUpdate(BaseModel):
         }
 
 class ConsentHistory(BaseModel):
-    consent_type: str
-    value: bool
+    # Shape matches app.models.user.User.consent_history entries, written
+    # consistently by both app/api/v1/users.py::update_consent and
+    # app/services/gdpr.py::GDPRService.update_user_consent.
+    type: str
+    granted: bool
     timestamp: datetime
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
@@ -24,8 +27,8 @@ class ConsentHistory(BaseModel):
     class Config:
         schema_extra = {
             "example": {
-                "consent_type": "marketing",
-                "value": True,
+                "type": "marketing",
+                "granted": True,
                 "timestamp": "2025-01-14T19:21:32.388Z",
                 "ip_address": "192.168.1.1",
                 "user_agent": "Mozilla/5.0..."

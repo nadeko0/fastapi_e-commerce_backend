@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     DATA_ENCRYPTION_KEY: str
     GDPR_EXPORT_EXPIRY_HOURS: int = 24
     INACTIVE_ACCOUNT_DELETE_DAYS: int = 730  # 2 years
+    # Grace period between a user requesting erasure (Art. 17) and the
+    # scheduled hard delete. Distinct from INACTIVE_ACCOUNT_DELETE_DAYS,
+    # which is unrelated general staleness cleanup, not an erasure request.
+    DATA_DELETION_GRACE_PERIOD_DAYS: int = 1
 
     # Company Information (MVP)
     COMPANY_NAME: str = "Your Company Name"
@@ -113,6 +117,10 @@ class Settings(BaseSettings):
     DPO_NAME: str = "Data Protection Officer"
     DPO_EMAIL: str = "dpo@yourcompany.com"
     TECHNICAL_CONTACT: str = "Technical Support"
+    # Recipient for the check_low_stock Celery task's alert email
+    # (app/tasks.py) - referenced there but never defined here, so that
+    # task raised AttributeError every time it ran (scheduled every 4h).
+    ADMIN_EMAIL: str = "admin@yourcompany.com"
     
     # Cookie Consent Settings
     COOKIE_CONSENT_ENABLED: bool = True
@@ -132,6 +140,13 @@ class Settings(BaseSettings):
     EMAILS_FROM_EMAIL: str
     EMAILS_FROM_NAME: str
     EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = 48
+
+    # Payment settings (mock Stripe integration - no real Stripe account
+    # exists for this project; these are placeholder values, never real
+    # secrets, and no outbound network call is ever made with them).
+    STRIPE_SECRET_KEY: str = "sk_test_mock_placeholder"
+    STRIPE_WEBHOOK_SECRET: str = "whsec_mock_placeholder"
+    STRIPE_WEBHOOK_TOLERANCE_SECONDS: int = 300
 
     class Config:
         case_sensitive = True

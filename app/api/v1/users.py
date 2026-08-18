@@ -1,10 +1,10 @@
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from pydantic import ValidationError
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
@@ -46,13 +46,12 @@ from app.schemas.address import (
 from app.schemas.order import OrderResponse
 from app.schemas.common import (
     APIResponse,
-    ErrorCode,
     PaginationParams,
-    ValidationErrorResponse,
 )
 from app.models.user import User
 from app.models.address import Address
 from app.models.order import Order
+from app.models.order_items import OrderItem
 from app.services.email import (
     send_password_reset_email,
     send_gdpr_export_email,
@@ -66,14 +65,22 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
 
 
 
-@router.post("/register", response_model=APIResponse[UserResponse])
+@router.post(
+    "/register",
+    response_model=APIResponse[UserResponse],
+    responses={409: {"description": "Email already registered"}},
+)
 async def register_user(
     user_in: UserCreate,
+    request: Request,
     db: Session = Depends(get_db),
     background_tasks: BackgroundTasks = None,
 ):
+    """Register a new user account and queue a welcome/verification email."""
     try:
         now = datetime.utcnow()
+        client_ip = request.client.host if request.client else None
+        client_ua = request.headers.get("user-agent")
         user = User(
             email=user_in.email,
             hashed_password=get_password_hash(user_in.password),
@@ -88,15 +95,21 @@ async def register_user(
             consent_history=[{
                 "type": ConsentType.GDPR.value,
                 "granted": user_in.gdpr_consent,
-                "timestamp": now.isoformat()
+                "timestamp": now.isoformat(),
+                "ip_address": client_ip,
+                "user_agent": client_ua,
             }, {
                 "type": ConsentType.PRIVACY_POLICY.value,
                 "granted": user_in.privacy_policy_accepted,
-                "timestamp": now.isoformat()
+                "timestamp": now.isoformat(),
+                "ip_address": client_ip,
+                "user_agent": client_ua,
             }, {
                 "type": ConsentType.MARKETING.value,
                 "granted": user_in.marketing_consent,
-                "timestamp": now.isoformat()
+                "timestamp": now.isoformat(),
+                "ip_address": client_ip,
+                "user_agent": client_ua,
             }]
         )
         db.add(user)
@@ -122,11 +135,19 @@ async def register_user(
             detail="Email already registered"
         )
 
-@router.get("/verify-email/{token}", response_model=APIResponse[dict])
+@router.get(
+    "/verify-email/{token}",
+    response_model=APIResponse[dict],
+    responses={
+        400: {"description": "Invalid or expired verification token"},
+        404: {"description": "User not found"},
+    },
+)
 async def verify_email(
     token: str,
     db: Session = Depends(get_db),
 ):
+    """Confirm a user's email address using a verification token."""
 
     email = verify_email_token(token)
     if not email:
@@ -155,11 +176,16 @@ async def verify_email(
         "message": "Email verified successfully"
     })
 
-@router.post("/verify-email/resend", response_model=APIResponse[dict])
+@router.post(
+    "/verify-email/resend",
+    response_model=APIResponse[dict],
+    responses={400: {"description": "Email already verified"}},
+)
 async def resend_verification_email(
     current_user: User = Depends(get_current_user),
     background_tasks: BackgroundTasks = None,
 ):
+    """Resend the email verification link to the current user."""
 
     if current_user.is_email_verified:
         raise HTTPException(
@@ -181,12 +207,17 @@ async def resend_verification_email(
         "message": "Verification email sent"
     })
 
-@router.post("/login", response_model=APIResponse[Token])
+@router.post(
+    "/login",
+    response_model=APIResponse[Token],
+    responses={401: {"description": "Incorrect email or password"}},
+)
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
+    """Authenticate with email/password and receive access and refresh tokens."""
 
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -211,13 +242,19 @@ async def login(
         token_type="bearer"
     ))
 
-@router.post("/consent", response_model=APIResponse[UserResponse])
+@router.post(
+    "/consent",
+    response_model=APIResponse[UserResponse],
+    responses={400: {"description": "GDPR consent cannot be revoked via this endpoint"}},
+)
 async def update_consent(
     consent_type: ConsentType,
     granted: bool,
+    request: Request,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    """Update the current user's consent for a given consent type."""
 
     if consent_type == ConsentType.GDPR and not granted:
         raise HTTPException(
@@ -225,18 +262,41 @@ async def update_consent(
             detail="GDPR consent cannot be revoked. Use data deletion instead."
         )
 
-    setattr(current_user, f"{consent_type.value}_consent", granted)
-    setattr(current_user, f"{consent_type.value}_consent_date", datetime.utcnow())
-    
-    # Add to consent history
-    current_user.consent_history.append({
+    # current_user comes from get_current_active_user -> get_current_user,
+    # which depends on app.api.deps.get_db - a *different* get_db than the
+    # one this route depends on (app.core.database.get_db). Those are two
+    # distinct dependency callables, so FastAPI's per-request dependency
+    # cache gives each its own DB session: current_user is attached to the
+    # security session, not this route's `db`. Mutating current_user and
+    # calling this route's db.commit() was a silent no-op - the session
+    # holding the pending change was never committed, so consent updates
+    # never actually persisted despite the endpoint returning 200 with the
+    # (in-memory-only) updated value. Re-querying through `db` attaches the
+    # row to the session this route actually commits.
+    user = db.query(User).filter(User.id == current_user.id).first()
+
+    setattr(user, f"{consent_type.value}_consent", granted)
+    setattr(user, f"{consent_type.value}_consent_date", datetime.utcnow())
+
+    # Add to consent history (Art. 7(1): controller must be able to
+    # demonstrate consent was given). Shape matches
+    # GDPRService.update_user_consent so the audit trail is consistent
+    # regardless of which endpoint (this one, or POST /legal/consent) was used.
+    # Reassigning (not .append()-ing in place) is required: consent_history is
+    # a plain JSON column, and SQLAlchemy does not detect in-place mutations
+    # of mutable values on JSON columns, so an in-place append here silently
+    # fails to persist.
+    user.consent_history = user.consent_history + [{
         "type": consent_type.value,
         "granted": granted,
-        "timestamp": datetime.utcnow().isoformat()
-    })
-    
+        "timestamp": datetime.utcnow().isoformat(),
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
+    }]
+
     db.commit()
-    return APIResponse.success_response(UserResponse.from_orm(current_user))
+    db.refresh(user)
+    return APIResponse.success_response(UserResponse.from_orm(user))
 
 @router.get("/data/export", response_model=APIResponse[GDPRExportData])
 async def export_user_data(
@@ -244,12 +304,15 @@ async def export_user_data(
     db: Session = Depends(get_db),
     background_tasks: BackgroundTasks = None,
 ):
+    """Export the current user's personal data, consents, addresses, and orders (GDPR)."""
 
     consents = [
         ConsentHistory(
             type=entry["type"],
             granted=entry["granted"],
-            timestamp=datetime.fromisoformat(entry["timestamp"])
+            timestamp=datetime.fromisoformat(entry["timestamp"]),
+            ip_address=entry.get("ip_address"),
+            user_agent=entry.get("user_agent"),
         )
         for entry in current_user.consent_history
     ]
@@ -281,12 +344,17 @@ async def export_user_data(
 
     return APIResponse.success_response(export)
 
-@router.post("/data/delete", response_model=APIResponse[dict])
+@router.post(
+    "/data/delete",
+    response_model=APIResponse[dict],
+    responses={401: {"description": "Incorrect password"}},
+)
 async def delete_user_data(
     deletion: GDPRDelete,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    """Request deletion of the current user's account and data (GDPR)."""
 
     if not verify_password(deletion.password, current_user.hashed_password):
         raise HTTPException(
@@ -294,33 +362,51 @@ async def delete_user_data(
             detail="Incorrect password"
         )
 
-
-    current_user.is_active = False
-    current_user.data_deletion_requested = True
-    current_user.data_deletion_date = datetime.utcnow()
-    current_user.deletion_reason = deletion.reason
+    # See the identical note in update_consent above: current_user is bound
+    # to a different DB session than this route's `db` (get_current_active_user
+    # resolves through app.api.deps.get_db, this route through
+    # app.core.database.get_db), so mutating current_user directly and
+    # committing `db` silently discarded the deactivation/deletion flags -
+    # the account was never actually deactivated. Re-query through `db`.
+    # (The former `current_user.deletion_reason = deletion.reason` line is
+    # also dropped: User has no deletion_reason column, so it only ever set
+    # a transient, non-persisted Python attribute.)
+    user = db.query(User).filter(User.id == current_user.id).first()
+    user.is_active = False
+    user.data_deletion_requested = True
+    user.data_deletion_date = datetime.utcnow()
     db.commit()
 
-    logger.info(f"Scheduling hard delete for user {current_user.email} after 1 day")
+    logger.info(f"Scheduling hard delete for user {user.email} after 1 day")
 
     return APIResponse.success_response({
         "message": "Account will be permanently deleted within 24 hours",
-        "deletion_date": current_user.data_deletion_date
+        "deletion_date": user.data_deletion_date
     })
 
 @router.get("/me", response_model=APIResponse[UserResponse])
 async def get_current_user_data(
     current_user: User = Depends(get_current_active_user),
 ):
+    """Retrieve the current authenticated user's profile."""
 
     return APIResponse.success_response(UserResponse.from_orm(current_user))
 
-@router.put("/me", response_model=APIResponse[UserResponse])
+@router.put(
+    "/me",
+    response_model=APIResponse[UserResponse],
+    responses={
+        400: {"description": "No fields to update"},
+        404: {"description": "User not found"},
+        500: {"description": "Failed to update profile"},
+    },
+)
 async def update_current_user(
     user_in: UserUpdate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    """Update fields on the current authenticated user's profile."""
 
     logger.info(f"Updating profile for user {current_user.email}")
     logger.debug(f"Received update request: {user_in.model_dump(exclude_unset=True)}")
@@ -377,6 +463,7 @@ async def list_addresses(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    """List the current user's active addresses, paginated."""
 
     total = db.query(Address).filter(
         Address.user_id == current_user.id,
@@ -402,12 +489,20 @@ async def list_addresses(
         has_more=total > (pagination.page * pagination.size)
     ))
 
-@router.post("/addresses", response_model=APIResponse[AddressResponse])
+@router.post(
+    "/addresses",
+    response_model=APIResponse[AddressResponse],
+    responses={
+        409: {"description": "This address already exists for the current user"},
+        422: {"description": "Invalid address data"},
+    },
+)
 async def create_address(
     address_in: AddressCreate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    """Add a new address for the current user."""
 
     try:
 
@@ -461,19 +556,27 @@ async def create_address(
             detail="This address already exists for the current user"
         )
 
-@router.put("/addresses/{address_id}", response_model=APIResponse[AddressResponse])
+@router.put(
+    "/addresses/{address_id}",
+    response_model=APIResponse[AddressResponse],
+    responses={
+        400: {"description": "Address is not active"},
+        404: {"description": "Address not found"},
+    },
+)
 async def update_address(
     address_id: int,
     address_in: AddressUpdate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    """Update fields on one of the current user's addresses."""
 
     address = db.query(Address).filter(
         Address.id == address_id,
         Address.user_id == current_user.id
     ).first()
-    
+
     logger.info(f"Found address {address_id} for update request from user {current_user.email}")
     
     if not address:
@@ -510,18 +613,26 @@ async def update_address(
     
     return APIResponse.success_response(AddressResponse.from_orm(address))
 
-@router.delete("/addresses/{address_id}", response_model=APIResponse[dict])
+@router.delete(
+    "/addresses/{address_id}",
+    response_model=APIResponse[dict],
+    responses={
+        400: {"description": "Address is not active"},
+        404: {"description": "Address not found"},
+    },
+)
 async def delete_address(
     address_id: int,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    """Deactivate one of the current user's addresses."""
 
     address = db.query(Address).filter(
         Address.id == address_id,
         Address.user_id == current_user.id
     ).first()
-    
+
     logger.info(f"Processing deletion request for address {address_id} from user {current_user.email}")
     
     if not address:
@@ -555,12 +666,20 @@ async def delete_address(
         "message": "Address deleted successfully"
     })
 
-@router.post("/addresses/default", response_model=APIResponse[dict])
+@router.post(
+    "/addresses/default",
+    response_model=APIResponse[dict],
+    responses={
+        400: {"description": "Address is not active"},
+        404: {"description": "Address not found"},
+    },
+)
 async def set_default_address(
     default_address: SetDefaultAddress,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    """Mark one of the current user's addresses as the default shipping address."""
 
     address = db.query(Address).filter(
         Address.id == default_address.address_id,
@@ -603,9 +722,17 @@ async def get_user_orders(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    """List the current user's orders, most recent first, paginated."""
 
+    # Eager-load shipping_address (many-to-one) and items->product
+    # (one-to-many): OrderResponse serializes both for every order in the
+    # page, so without this each row triggers its own lazy-load queries.
     orders = (
         db.query(Order)
+        .options(
+            joinedload(Order.shipping_address),
+            selectinload(Order.items).joinedload(OrderItem.product),
+        )
         .filter(Order.user_id == current_user.id)
         .order_by(Order.created_at.desc())
         .offset((pagination.page - 1) * pagination.size)
@@ -622,6 +749,7 @@ async def request_password_reset(
     db: Session = Depends(get_db),
     background_tasks: BackgroundTasks = None,
 ):
+    """Request a password reset email; always succeeds to avoid leaking registered emails."""
 
     user = db.query(User).filter(User.email == reset_request.email).first()
     if user:
@@ -640,11 +768,19 @@ async def request_password_reset(
         "message": "If the email exists, a password reset link will be sent"
     })
 
-@router.get("/password/reset/{token}", response_model=APIResponse[dict])
+@router.get(
+    "/password/reset/{token}",
+    response_model=APIResponse[dict],
+    responses={
+        400: {"description": "Invalid or expired reset token"},
+        404: {"description": "User not found"},
+    },
+)
 async def validate_reset_token(
     token: str,
     db: Session = Depends(get_db),
 ):
+    """Check whether a password reset token is still valid."""
 
     email = verify_password_reset_token(token)
     if not email:
@@ -652,25 +788,34 @@ async def validate_reset_token(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset token"
         )
-    
+
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     return APIResponse.success_response({
         "message": "Token is valid",
         "email": email
     })
 
-@router.post("/password/reset/{token}", response_model=APIResponse[dict])
+@router.post(
+    "/password/reset/{token}",
+    response_model=APIResponse[dict],
+    responses={
+        400: {"description": "Invalid or expired reset token"},
+        404: {"description": "User not found"},
+        422: {"description": "Invalid password format"},
+    },
+)
 async def reset_password(
     token: str,
     new_password: PasswordUpdate,
     db: Session = Depends(get_db),
 ):
+    """Reset a user's password using a valid reset token."""
 
     try:
         email = verify_password_reset_token(token)

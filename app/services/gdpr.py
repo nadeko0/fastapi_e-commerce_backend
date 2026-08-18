@@ -28,11 +28,14 @@ class GDPRService:
         # Create consent history entry
         consent_entries = []
         
+        # Entry shape matches app/api/v1/users.py::update_consent so that
+        # consent_history is consistent (and demonstrable per Art. 7(1))
+        # regardless of which endpoint the client used.
         # Handle marketing consent
         if user.marketing_consent != consent_update.marketing_consent:
             consent_entries.append({
-                "consent_type": "marketing",
-                "value": consent_update.marketing_consent,
+                "type": "marketing",
+                "granted": consent_update.marketing_consent,
                 "timestamp": current_time.isoformat(),
                 "ip_address": ip_address,
                 "user_agent": user_agent
@@ -43,8 +46,8 @@ class GDPRService:
         # Handle privacy policy acceptance
         if user.privacy_policy_accepted != consent_update.privacy_policy_accepted:
             consent_entries.append({
-                "consent_type": "privacy_policy",
-                "value": consent_update.privacy_policy_accepted,
+                "type": "privacy_policy",
+                "granted": consent_update.privacy_policy_accepted,
                 "timestamp": current_time.isoformat(),
                 "ip_address": ip_address,
                 "user_agent": user_agent
@@ -152,15 +155,14 @@ class GDPRService:
             from app.services.email import send_gdpr_request_received
             send_gdpr_request_received(user.email, "deletion", request_id)
 
-            # Mark user for deletion
+            # Mark user for deletion and deactivate immediately, matching
+            # POST /users/data/delete. The scheduled cleanup_inactive_accounts
+            # Celery task (app/tasks.py) performs the actual hard delete once
+            # DATA_DELETION_GRACE_PERIOD_DAYS has passed.
+            user.is_active = False
             user.data_deletion_requested = True
             user.data_deletion_date = datetime.utcnow()
-            
-            # In production, this would trigger a background task to:
-            # 1. Anonymize user data
-            # 2. Delete personal information
-            # 3. Maintain minimal records for legal compliance
-            
+
             self.db.commit()
 
             # Send deletion confirmation email
@@ -180,9 +182,15 @@ class GDPRService:
         """
         Get current consent status for a user
         """
+        # GET /legal/consent-status (app/api/v1/legal.py) declares
+        # response_model=UserConsent, which requires marketing_consent_date
+        # and privacy_policy_accepted_date - omitting them here always
+        # raised a 500 ResponseValidationError on every call.
         return {
             "marketing_consent": user.marketing_consent,
+            "marketing_consent_date": user.marketing_consent_date,
             "privacy_policy_accepted": user.privacy_policy_accepted,
+            "privacy_policy_accepted_date": user.privacy_policy_accepted_date,
             "consent_history": user.consent_history
         }
 
