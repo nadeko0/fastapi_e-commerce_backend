@@ -1,8 +1,10 @@
 from datetime import datetime
-from typing import List, Optional
 from decimal import Decimal
-from pydantic import BaseModel, Field, ConfigDict, validator
 from enum import Enum
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
+
 
 class OrderStatus(str, Enum):
     NEW = "new"
@@ -17,6 +19,11 @@ class PaymentStatus(str, Enum):
     PAID = "paid"
     FAILED = "failed"
     REFUNDED = "refunded"
+    # Not a valid value for Order.payment_status (the orders table's check
+    # constraint, derived from app.models.enums.PaymentStatus, intentionally
+    # does not include this) - only used to represent a single payment
+    # attempt's state in PaymentResponse while 3D Secure / SCA is pending.
+    REQUIRES_ACTION = "requires_action"
 
 class OrderItemBase(BaseModel):
     product_id: int
@@ -30,9 +37,6 @@ class OrderItemBase(BaseModel):
 class OrderItemCreate(OrderItemBase):
     pass
 
-class OrderItemUpdate(BaseModel):
-    quantity: int = Field(..., gt=0)
-
 class OrderItemInDB(OrderItemBase):
     id: int
     order_id: int
@@ -45,6 +49,35 @@ class OrderItemResponse(OrderItemInDB):
     product_image: str
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_product_fields_from_relationship(cls, values):
+        # app.models.order_items.OrderItem has no product_name/product_image
+        # columns - only product_id and a `product` relationship. Every
+        # OrderResponse.from_orm(order) (create_order, get_order,
+        # update_order_status, and the order-listing endpoints) always
+        # raised "product_name: Field required" / "product_image: Field
+        # required" for any order that actually has items, i.e. always.
+        # mode="before" hands us the raw ORM instance (not a GetterDict),
+        # so the `product` relationship is reachable directly; pull the
+        # display fields from it. Dict input (already-shaped, e.g. from
+        # tests) is left untouched.
+        if isinstance(values, dict):
+            return values
+        product = getattr(values, "product", None)
+        if product is not None:
+            return {
+                "id": values.id,
+                "order_id": values.order_id,
+                "product_id": values.product_id,
+                "quantity": values.quantity,
+                "price_at_time": values.price_at_time,
+                "created_at": values.created_at,
+                "product_name": product.name,
+                "product_image": product.images[0] if product.images else "",
+            }
+        return values
 
 class OrderBase(BaseModel):
     shipping_address_id: int
@@ -100,37 +133,18 @@ class OrderListResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class OrderFilter(BaseModel):
-    """Schema for order filtering"""
-    status: Optional[OrderStatus] = None
-    payment_status: Optional[PaymentStatus] = None
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
-    min_amount: Optional[Decimal] = Field(None, ge=0)
-    max_amount: Optional[Decimal] = Field(None, ge=0)
-    page: int = Field(1, ge=1)
-    size: int = Field(20, ge=1, le=100)
-
-    @validator('end_date')
-    def validate_date_range(cls, v, values):
-        if v and 'start_date' in values and values['start_date']:
-            if v < values['start_date']:
-                raise ValueError('end_date must be after start_date')
-        return v
-
-    @validator('max_amount')
-    def validate_amount_range(cls, v, values):
-        if v and 'min_amount' in values and values['min_amount']:
-            if v < values['min_amount']:
-                raise ValueError('max_amount must be greater than min_amount')
-        return v
-
 class PaymentCreate(BaseModel):
     """Schema for payment processing"""
     order_id: int
     payment_method: str = Field(..., pattern="^(stripe|paypal)$")
     amount: Decimal
     currency: str = Field(..., pattern="^[A-Z]{3}$")
+    # Stripe PaymentMethod token to confirm the intent with (e.g.
+    # "pm_card_visa"). Optional and defaults to a successful mock card in
+    # the provider - a real integration would require this (the client's
+    # Stripe.js/Elements collects it), but making it optional here keeps
+    # the existing request shape backward compatible.
+    payment_method_token: Optional[str] = None
 
     @validator('amount')
     def validate_amount(cls, v):
@@ -141,6 +155,34 @@ class PaymentResponse(PaymentCreate):
     status: PaymentStatus
     created_at: datetime
     transaction_id: Optional[str] = None
+    # Client-side secret needed to complete 3D Secure authentication via
+    # Stripe.js when status == requires_action; mirrors the real
+    # PaymentIntent.client_secret / next_action shape.
+    client_secret: Optional[str] = None
+    requires_action: bool = False
+    next_action: Optional[dict] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class RefundCreate(BaseModel):
+    """Schema for issuing a refund on a paid order."""
+    amount: Optional[Decimal] = Field(
+        None, gt=0, description="Amount to refund; omit for a full refund"
+    )
+
+    @validator('amount')
+    def validate_amount(cls, v):
+        if v is None:
+            return v
+        return Decimal(str(v)).quantize(Decimal('0.01'))
+
+class RefundResponse(BaseModel):
+    id: str
+    order_id: int
+    amount: Decimal
+    currency: str
+    status: str
+    payment_status: PaymentStatus
 
     model_config = ConfigDict(from_attributes=True)
 
