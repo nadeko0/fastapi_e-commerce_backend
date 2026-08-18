@@ -153,7 +153,19 @@ async def list_products(
         query = query.filter(Product.stock_quantity > 0)
     if filter_params.characteristics:
         for key, value in filter_params.characteristics.items():
-            query = query.filter(Product.characteristics[key].astext == str(value))
+            # Stored characteristics are structured ProductCharacteristic
+            # objects ({"color": {"name": "Color", "value": "red", ...}}),
+            # not flat key->value pairs - must index into ["value"], not
+            # compare the whole nested object's string form.
+            # .as_string() is the cross-dialect equivalent of Postgres's
+            # ->> operator (.astext) - .astext only exists on the
+            # Postgres-specific JSON/JSONB comparator, and Product.
+            # characteristics is a generic JSON column (with a Postgres
+            # JSONB variant for storage, but with_variant doesn't swap the
+            # Python-side indexing Comparator used to build this
+            # expression) - using .astext here raised AttributeError on
+            # every request that passed a characteristics filter.
+            query = query.filter(Product.characteristics[key]["value"].as_string() == str(value))
     if filter_params.search_query:
         query = query.filter(
             or_(

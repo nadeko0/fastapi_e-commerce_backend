@@ -54,21 +54,30 @@ CREATE DATABASE ecommerce;
 ```
 
 6. **Run Migrations**
-
-`migrations/versions/` is now tracked in git (it was previously
-gitignored, so the repo had no schema history at all). If it's still
-empty, generate the initial migration against your running Postgres
-instance before upgrading:
-```bash
-uv run alembic revision --autogenerate -m "initial schema"
-uv run alembic upgrade head
-```
-Otherwise just:
 ```bash
 uv run alembic upgrade head
 ```
+The initial migration (`migrations/versions/`, tracked in git) has been
+generated and applied against a real local PostgreSQL 18 instance, verified
+with `alembic check` (zero drift between the migration and the current
+models) and `scripts/pg_smoke_test.py` (see below). If you change a model,
+regenerate with `uv run alembic revision --autogenerate -m "description"`
+and re-run `alembic check` before committing the new revision.
 
-7. **Start Redis Server**
+7. **(Optional) Run the Postgres-specific smoke test**
+
+The main test suite (`uv run pytest`) runs against an in-memory SQLite
+database for speed - it does not have Postgres available and cannot
+validate Postgres-only behavior (ARRAY columns, JSONB path filtering,
+partial unique indexes). After `alembic upgrade head` against a real,
+disposable Postgres database, run:
+```bash
+uv run python scripts/pg_smoke_test.py
+```
+This TRUNCATEs the tables it touches - point it at a throwaway database,
+never a real one.
+
+8. **Start Redis Server**
 ```bash
 # Windows (if using WSL)
 wsl sudo service redis-server start
@@ -77,7 +86,7 @@ wsl sudo service redis-server start
 sudo service redis-server start
 ```
 
-8. **Run the Application**
+9. **Run the Application**
 ```bash
 uv run python main.py
 # or: uv run uvicorn app.main:app --reload

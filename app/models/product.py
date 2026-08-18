@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
@@ -21,6 +22,16 @@ from app.models.base import Base
 # array column type, so this column falls back to JSON there. Behavior is
 # equivalent for a Python-side list of strings either way.
 _string_array = ARRAY(String).with_variant(JSON(), "sqlite")
+
+# The generic sqlalchemy.JSON type's [key] indexing comparator has no
+# .astext accessor - only the Postgres-specific JSON/JSONB types do. Since
+# list_products (app/api/v1/products.py) filters on
+# Product.characteristics[key].astext, plain JSON here would raise
+# AttributeError on every request using the characteristics filter against
+# real Postgres (never caught by the SQLite-backed test suite, which
+# doesn't exercise this path). JSONB is also the idiomatic/indexable choice
+# for Postgres; SQLite keeps generic JSON, matching the pattern above.
+_characteristics_json = JSON().with_variant(JSONB(), "postgresql")
 
 class Product(Base):
     __tablename__ = "products"
@@ -31,7 +42,7 @@ class Product(Base):
     price = Column(Numeric(10, 2), nullable=False)
     stock_quantity = Column(Integer, nullable=False, default=0)
     images = Column(_string_array, nullable=False, default=[])
-    characteristics = Column(JSON, nullable=False, default={})
+    characteristics = Column(_characteristics_json, nullable=False, default={})
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     # Soft-delete flag: admin.delete_product deactivates instead of hard
     # deleting when a product has existing order history, so past orders
