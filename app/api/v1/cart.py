@@ -34,10 +34,18 @@ async def get_cart(
 async def get_user_cart(
     cart: Cart = Depends(get_cart),
 ):
+    """Retrieve the current user's cart."""
 
     return APIResponse.success_response(CartResponse.from_cart(cart))
 
-@router.post("/items", response_model=APIResponse[CartResponse])
+@router.post(
+    "/items",
+    response_model=APIResponse[CartResponse],
+    responses={
+        400: {"description": "Not enough stock available"},
+        404: {"description": "Product not found"},
+    },
+)
 async def add_to_cart(
     product_id: int,
     quantity: int = 1,
@@ -45,6 +53,7 @@ async def add_to_cart(
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
+    """Add a product to the current user's cart, or increase its quantity."""
 
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
@@ -52,7 +61,7 @@ async def add_to_cart(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found"
         )
-    
+
 
     str_id = str(product_id)
     current_quantity = cart.items[str_id].quantity if str_id in cart.items else 0
@@ -76,7 +85,14 @@ async def add_to_cart(
 
     return APIResponse.success_response(CartResponse.from_cart(cart))
 
-@router.put("/items/{product_id}", response_model=APIResponse[CartResponse])
+@router.put(
+    "/items/{product_id}",
+    response_model=APIResponse[CartResponse],
+    responses={
+        400: {"description": "Not enough stock available"},
+        404: {"description": "Product not found, or item not in cart"},
+    },
+)
 async def update_cart_item(
     product_id: int,
     quantity: int,
@@ -84,6 +100,7 @@ async def update_cart_item(
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
+    """Update the quantity of an item already in the current user's cart."""
 
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
@@ -115,12 +132,17 @@ async def update_cart_item(
 
     return APIResponse.success_response(CartResponse.from_cart(cart))
 
-@router.delete("/items/{product_id}", response_model=APIResponse[CartResponse])
+@router.delete(
+    "/items/{product_id}",
+    response_model=APIResponse[CartResponse],
+    responses={404: {"description": "Item not in cart"}},
+)
 async def remove_from_cart(
     product_id: int,
     cart: Cart = Depends(get_cart),
     redis: RedisService = Depends(),
 ):
+    """Remove an item from the current user's cart."""
 
     str_id = str(product_id)
     if str_id not in cart.items:
@@ -142,6 +164,7 @@ async def clear_cart(
     cart: Cart = Depends(get_cart),
     redis: RedisService = Depends(),
 ):
+    """Remove all items from the current user's cart."""
 
     cart.clear()
     redis.update_cart(cart)
@@ -152,6 +175,7 @@ async def validate_cart(
     cart: Cart = Depends(get_cart),
     db: Session = Depends(get_db),
 ):
+    """Check the current user's cart items against live stock and availability."""
 
     issues = []
     for item in cart.items.values():

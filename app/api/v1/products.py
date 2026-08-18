@@ -1,7 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import or_, and_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql import func
 
 from app.core.config import settings
@@ -27,12 +27,24 @@ from app.services.redis import RedisService
 
 router = APIRouter(tags=["catalog"])
 
+
+def _to_product_response(product: Product) -> ProductResponse:
+    # ProductResponse requires category_name, which is not a Product
+    # column - ProductResponse.from_orm(product) always raised a 500
+    # ValidationError ("category_name: Field required") for every route
+    # that didn't build the response this way. app/api/v1/admin.py's
+    # create/update endpoints already do this; list_products, get_product,
+    # and search_products below did not, and always 500'd.
+    return ProductResponse(**product.__dict__, category_name=product.category.name)
+
+
 @router.get("/categories", response_model=APIResponse[CategoryListResponse])
 async def list_categories(
     pagination: PaginationParams = Depends(),
     parent_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
+    """List categories, optionally filtered by parent, with pagination."""
 
     query = db.query(Category)
     if parent_id is not None:
@@ -58,6 +70,7 @@ async def get_category_tree(
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
+    """Retrieve the full category tree, nested from root categories down."""
 
     cached_tree = redis.get_cached_category_tree()
     if cached_tree:
@@ -101,11 +114,16 @@ async def get_category_tree(
 
     return APIResponse.success_response(response)
 
-@router.get("/categories/{category_id}", response_model=APIResponse[CategoryResponse])
+@router.get(
+    "/categories/{category_id}",
+    response_model=APIResponse[CategoryResponse],
+    responses={404: {"description": "Category not found"}},
+)
 async def get_category(
     category_id: int,
     db: Session = Depends(get_db),
 ):
+    """Retrieve a single category by ID."""
 
     category = db.query(Category).filter(Category.id == category_id).first()
     if not category:
@@ -121,8 +139,11 @@ async def list_products(
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
+    """List products with optional filtering, sorting, and pagination."""
 
-    query = db.query(Product)
+    query = db.query(Product).options(joinedload(Product.category)).filter(
+        Product.is_active == True
+    )
 
 
     if filter_params.category_id:
@@ -158,45 +179,26 @@ async def list_products(
     )
 
     return APIResponse.success_response(ProductListResponse(
-        items=[ProductResponse.from_orm(p) for p in products],
+        items=[_to_product_response(p) for p in products],
         total=total,
         page=filter_params.page,
         size=filter_params.size,
         has_more=total > filter_params.page * filter_params.size
     ))
 
-@router.get("/products/{product_id}", response_model=APIResponse[ProductResponse])
-async def get_product(
-    product_id: int,
-    db: Session = Depends(get_db),
-    redis: RedisService = Depends(),
-):
-
-    cached_product = redis.get_cached_product(product_id)
-    if cached_product:
-        return APIResponse.success_response(cached_product)
-
-    product = db.query(Product).filter(Product.id == product_id).first()
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found"
-        )
-
-    response = ProductResponse.from_orm(product)
-    
-
-    redis.cache_product(product_id, response.dict())
-
-    return APIResponse.success_response(response)
-
+# /products/search must be registered before /products/{product_id}:
+# Starlette matches routes in registration order, and {product_id}: int
+# would otherwise greedily match the literal path segment "search" first
+# (failing int validation -> 422), making this endpoint unreachable.
 @router.get("/products/search", response_model=APIResponse[ProductListResponse])
 async def search_products(
     search: ProductSearch = Depends(),
     db: Session = Depends(get_db),
 ):
+    """Search products by name/description, optionally scoped to a category."""
 
-    query = db.query(Product).filter(
+    query = db.query(Product).options(joinedload(Product.category)).filter(
+        Product.is_active == True,
         or_(
             Product.name.ilike(f"%{search.query}%"),
             Product.description.ilike(f"%{search.query}%")
@@ -214,9 +216,42 @@ async def search_products(
     )
 
     return APIResponse.success_response(ProductListResponse(
-        items=[ProductResponse.from_orm(p) for p in products],
+        items=[_to_product_response(p) for p in products],
         total=total,
         page=search.page,
         size=search.size,
         has_more=total > search.page * search.size
     ))
+
+@router.get(
+    "/products/{product_id}",
+    response_model=APIResponse[ProductResponse],
+    responses={404: {"description": "Product not found"}},
+)
+async def get_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    redis: RedisService = Depends(),
+):
+    """Retrieve a single product by ID."""
+
+    cached_product = redis.get_cached_product(product_id)
+    if cached_product:
+        return APIResponse.success_response(cached_product)
+
+    product = db.query(Product).options(joinedload(Product.category)).filter(
+        Product.id == product_id,
+        Product.is_active == True,
+    ).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found"
+        )
+
+    response = _to_product_response(product)
+
+
+    redis.cache_product(product_id, response.dict())
+
+    return APIResponse.success_response(response)

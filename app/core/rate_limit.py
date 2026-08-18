@@ -88,7 +88,7 @@ class RateLimiter:
         try:
             # Clean old requests and add new request atomically using Redis pipeline
             pipeline = self.redis._redis.pipeline()
-            
+
             # Remove requests older than the window
             pipeline.zremrangebyscore(window_key, "-inf", window_start)
             # Add current request
@@ -97,27 +97,33 @@ class RateLimiter:
             pipeline.zcount(window_key, window_start, "+inf")
             # Set key expiration
             pipeline.expire(window_key, window_seconds)
-            
+
             # Execute pipeline
             _, _, request_count, _ = pipeline.execute()
-
-            # Check if rate limit is exceeded
-            if request_count > rate_limit:
-                retry_after = window_seconds - (current_time - window_start)
-                raise HTTPException(
-                    status_code=HTTP_429_TOO_MANY_REQUESTS,
-                    detail={
-                        "error": "Rate limit exceeded",
-                        "retry_after": retry_after,
-                        "limit": rate_limit,
-                        "window_seconds": window_seconds
-                    }
-                )
-
         except Exception as e:
-            # Log the error but allow the request in case of Redis failure
+            # Log the error but allow the request in case of Redis failure.
+            # This except previously also wrapped the exceeded-limit check
+            # below, so raise HTTPException(429, ...) - a subclass of
+            # Exception - was caught right here and silently swallowed:
+            # rate limiting never actually blocked a single request,
+            # regardless of how many were made. Only the Redis pipeline
+            # call itself may fail open; the limit check must run outside
+            # this try/except so its 429 actually propagates.
             print(f"Rate limiting error: {str(e)}")
             return None
+
+        # Check if rate limit is exceeded
+        if request_count > rate_limit:
+            retry_after = window_seconds - (current_time - window_start)
+            raise HTTPException(
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "error": "Rate limit exceeded",
+                    "retry_after": retry_after,
+                    "limit": rate_limit,
+                    "window_seconds": window_seconds
+                }
+            )
 
 async def rate_limit(request: Request):
     """FastAPI dependency for rate limiting."""
