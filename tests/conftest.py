@@ -14,17 +14,19 @@ os.environ.setdefault("EMAILS_FROM_EMAIL", "test@example.com")
 os.environ.setdefault("EMAILS_FROM_NAME", "Test Shop")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # no Redis available in this test env
 
+import fakeredis
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from fastapi.testclient import TestClient
 
-from app.core.database import get_db as database_get_db
-from app.api.deps import get_db as deps_get_db
-from app.models.base import Base
 import app.models  # noqa: F401 registers all tables on Base
+from app.api.deps import get_db as deps_get_db
+from app.core.database import get_db as database_get_db
 from app.main import app
+from app.models.base import Base
+from app.services.redis import RedisService
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -55,14 +57,56 @@ def _reset_database():
     Base.metadata.drop_all(bind=engine)
 
 
+@pytest.fixture(autouse=True)
+def fake_redis(monkeypatch):
+    """Back RedisService with fakeredis instead of a real Redis connection.
+
+    RedisService is a singleton (_instance/_pool class attrs): every
+    RedisService() call anywhere - app.core.security's module-level
+    redis_service, RateLimiter.__init__, the per-request `Depends()`
+    instances in cart/orders/products/admin - returns the *same* object.
+    __init__ reruns on every call though, always overwriting self._redis
+    with a fresh client. So patching app.services.redis.Redis (the name
+    imported into that module) to return one shared FakeRedis instance,
+    then constructing RedisService() once here, rewrites _redis on the
+    single shared singleton object - which every existing reference
+    (including ones captured at import time, like app.core.security's
+    module-level redis_service) already points at. A fresh FakeRedis per
+    test keeps state (cart contents, blacklist entries, caches) from
+    leaking between tests.
+    """
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("app.services.redis.Redis", lambda *a, **k: fake)
+    RedisService()
+    yield fake
+
+
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, fake_redis):
     monkeypatch.setattr("app.api.v1.users.send_welcome_email", lambda *a, **k: True)
-    # is_blacklisted() fails closed (returns True) when Redis is unreachable,
-    # which would 401 every authenticated request in this Redis-less test env.
-    monkeypatch.setattr("app.core.security.redis_service.is_blacklisted", lambda token: False)
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def db_session():
+    """Direct DB session for test setup that has no HTTP endpoint (e.g.
+    creating an admin user - there is no signup-as-admin route)."""
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def tasks_db(monkeypatch):
+    """app/tasks.py builds its own SessionLocal bound to settings.DATABASE_URI
+    (real Postgres) and calls next(get_db()) inside each Celery task body -
+    it never goes through app.core.database.get_db/app.api.deps.get_db, so
+    the dependency_overrides above don't reach it. Point its SessionLocal at
+    the same in-memory SQLite engine the rest of the suite uses instead."""
+    monkeypatch.setattr("app.tasks.SessionLocal", TestingSessionLocal)
 
 
 @pytest.fixture
