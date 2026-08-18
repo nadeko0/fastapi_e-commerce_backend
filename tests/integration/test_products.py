@@ -12,14 +12,14 @@ def _make_category(db_session, name="Electronics", parent_id=None, level=0, path
     return category
 
 
-def _make_product(db_session, category_id, name="Widget", price="9.99", stock=10):
+def _make_product(db_session, category_id, name="Widget", price="9.99", stock=10, characteristics=None):
     product = Product(
         name=name,
         description="A fine widget for all your widget needs",
         price=price,
         stock_quantity=stock,
         images=["https://example.com/widget.png"],
-        characteristics={},
+        characteristics=characteristics or {},
         category_id=category_id,
     )
     db_session.add(product)
@@ -165,3 +165,35 @@ def test_search_products_matches_name(client, db_session):
     body = response.json()["data"]
     assert body["total"] == 1
     assert body["items"][0]["name"] == "Special Gadget"
+
+
+def test_list_products_with_characteristics_filter_does_not_crash(client, db_session):
+    # Regression test: the characteristics filter used
+    # Product.characteristics[key].astext, which only exists on Postgres's
+    # JSON/JSONB comparator - Product.characteristics is a generic
+    # sqlalchemy.JSON column, so this raised AttributeError on every
+    # request that passed a characteristics filter. Fixed to use the
+    # cross-dialect .as_string() accessor, and to index into ["value"]
+    # since stored characteristics are structured ProductCharacteristic
+    # objects ({"color": {"name": "Color", "value": "red", ...}}), not
+    # flat key->value pairs.
+    #
+    # This only asserts the endpoint doesn't crash (200, not 500) - SQLite
+    # (this test's DB) doesn't reliably compile the double-nested JSON path
+    # this filter needs (characteristics[key]["value"]), so it can't be
+    # asserted to actually *filter* correctly here. That's verified against
+    # real PostgreSQL instead, see scripts/pg_smoke_test.py (run manually
+    # against a local Postgres - not part of this suite, which has no
+    # Postgres available).
+    category = _make_category(db_session)
+    _make_product(
+        db_session, category.id, name="Red Widget",
+        characteristics={"color": {"name": "Color", "value": "red"}},
+    )
+
+    response = client.get(
+        f"{CATALOG_PREFIX}/products",
+        params={"characteristics": '{"color": "red"}'},
+    )
+
+    assert response.status_code == 200
