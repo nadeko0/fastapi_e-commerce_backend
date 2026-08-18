@@ -1,11 +1,13 @@
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
+from uuid import uuid4
 from celery import Celery
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 from decimal import Decimal
 
 from app.core.config import settings
+from app.core.security import get_password_hash
 from app.models.user import User
 from app.models.order import Order
 from app.models.product import Product
@@ -99,27 +101,68 @@ def cleanup_expired_carts() -> int:
     redis = RedisService()
     return redis.cleanup_expired_carts()
 
+def purge_expired_deletion_requests(db) -> int:
+    """
+    Anonymizes accounts whose GDPR Article 17 erasure request has passed
+    the grace period. This only targets users who explicitly requested
+    deletion (data_deletion_requested=True) - it is not a general inactivity
+    purge, so it uses DATA_DELETION_GRACE_PERIOD_DAYS (default: 1 day, to
+    match what users are told at request time), not
+    INACTIVE_ACCOUNT_DELETE_DAYS.
+
+    Scrubs PII rather than hard-deleting the User row: User.orders and
+    Address.user both cascade="all, delete-orphan", so db.delete(user)
+    would also wipe the user's order/invoice history. Most EU member
+    states require invoices retained ~10 years for tax purposes - Article
+    17(3)(b) exempts data still needed for a legal obligation from
+    erasure, so financial records must survive account erasure while the
+    personal identifiers on them do not. Anonymizing in place keeps
+    Order/OrderItem/Address rows (and the Order.shipping_address_id FK)
+    intact for that retention requirement while removing anything that
+    identifies the person.
+
+    Extracted from the cleanup_inactive_accounts task so it can be unit
+    tested against a session without going through Celery/the real DB.
+    """
+    grace_cutoff = datetime.utcnow() - timedelta(days=settings.DATA_DELETION_GRACE_PERIOD_DAYS)
+
+    accounts = db.query(User).filter(
+        User.is_active == False,
+        User.data_deletion_requested == True,
+        User.data_deletion_date <= grace_cutoff
+    ).all()
+
+    purged_count = 0
+    for account in accounts:
+        account.email = f"deleted-user-{account.id}@deleted.invalid"
+        account.hashed_password = get_password_hash(str(uuid4()))
+        account.full_name = None
+        account.phone = None
+        account.marketing_consent = False
+
+        for address in account.addresses:
+            if not address.is_active:
+                continue
+            address.street = "REDACTED"
+            address.city = "REDACTED"
+            address.state = "REDACTED"
+            address.postal_code = "REDACTED"
+            address.delivery_phone = None
+            address.delivery_instructions = None
+            address.is_active = False
+
+        purged_count += 1
+
+    db.commit()
+    return purged_count
+
 @celery.task(
     name="cleanup_inactive_accounts",
     queue="cleanup",
 )
 def cleanup_inactive_accounts() -> int:
     db = next(get_db())
-    retention_date = datetime.utcnow() - timedelta(days=settings.INACTIVE_ACCOUNT_DELETE_DAYS)
-    
-    accounts = db.query(User).filter(
-        User.is_active == False,
-        User.data_deletion_requested == True,
-        User.data_deletion_date <= retention_date
-    ).all()
-
-    deleted_count = 0
-    for account in accounts:
-        db.delete(account)
-        deleted_count += 1
-
-    db.commit()
-    return deleted_count
+    return purge_expired_deletion_requests(db)
 
 @celery.task(
     name="update_product_stats",
@@ -162,7 +205,11 @@ def update_product_stats() -> None:
         "updated_at": datetime.utcnow().isoformat()
     }
 
-    redis.set_product_stats(stats)
+    # RedisService has no set_product_stats method (never did) - this
+    # always raised AttributeError, so update_product_stats has never
+    # completed successfully. Use the generic setex it does provide,
+    # matching the caching pattern already used by admin.get_statistics.
+    redis.setex("product_stats", 3600, stats)
 
 @celery.task(
     name="check_low_stock",
@@ -175,7 +222,7 @@ def check_low_stock(threshold: int = 5) -> None:
         db.query(Product)
         .filter(
             Product.is_active == True,
-            Product.stock_quantity <= threshold
+            Product.stock_quantity <= threshold,
         )
         .all()
     )
