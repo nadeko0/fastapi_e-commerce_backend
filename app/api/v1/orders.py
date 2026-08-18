@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, Header, HTTPException, status, BackgroundTasks
+from fastapi import status as http_status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from decimal import Decimal
 
@@ -37,6 +39,7 @@ async def create_order(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
 
     if not current_user.is_email_verified:
@@ -44,13 +47,23 @@ async def create_order(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email verification required before placing orders"
         )
-    
+
     if not current_user.full_name or not current_user.phone:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Complete profile information (full name and phone) required for placing orders"
         )
 
+    # A retried checkout request (e.g. client timeout + retry, double-click)
+    # with the same key returns the order already created instead of
+    # double-charging stock/placing a duplicate order.
+    if idempotency_key:
+        existing = db.query(Order).filter(
+            Order.user_id == current_user.id,
+            Order.idempotency_key == idempotency_key,
+        ).first()
+        if existing:
+            return APIResponse.success_response(OrderResponse.from_orm(existing))
 
     cart = redis.get_cart(current_user.id)
     if not cart or not cart.items:
@@ -76,6 +89,7 @@ async def create_order(
         status=OrderStatus.NEW,
         payment_status=PaymentStatus.PENDING,
         shipping_address_id=shipping_address_id,
+        idempotency_key=idempotency_key,
         total_amount=Decimal('0.00')
     )
     db.add(order)
@@ -84,13 +98,31 @@ async def create_order(
     total_amount = Decimal('0.00')
     for item in cart.items.values():
         product = db.query(Product).filter(Product.id == item.product_id).first()
-        if not product or product.stock_quantity < item.quantity:
+        if not product:
             db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Product {item.product_id} not available in requested quantity"
             )
 
+        # Atomic conditional decrement instead of read-then-write: under
+        # concurrent checkouts, two requests reading stock_quantity=1 and
+        # both deciding "enough stock" would oversell. The WHERE clause
+        # makes the check-and-decrement a single database operation, so
+        # only one of two concurrent requests for the last unit can win.
+        updated_rows = db.query(Product).filter(
+            Product.id == item.product_id,
+            Product.stock_quantity >= item.quantity,
+        ).update(
+            {Product.stock_quantity: Product.stock_quantity - item.quantity},
+            synchronize_session=False,
+        )
+        if updated_rows == 0:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Product {item.product_id} not available in requested quantity"
+            )
 
         order_item = OrderItem(
             order_id=order.id,
@@ -100,12 +132,22 @@ async def create_order(
         )
         db.add(order_item)
 
-
-        product.stock_quantity -= item.quantity
         total_amount += product.price * item.quantity
 
     order.total_amount = total_amount
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two concurrent requests with the same idempotency key both passed
+        # the pre-check above; the unique index catches the duplicate here.
+        db.rollback()
+        existing = db.query(Order).filter(
+            Order.user_id == current_user.id,
+            Order.idempotency_key == idempotency_key,
+        ).first()
+        if existing:
+            return APIResponse.success_response(OrderResponse.from_orm(existing))
+        raise
 
 
     redis.delete_cart(current_user.id)
@@ -140,6 +182,11 @@ async def get_order(
 @router.put("/{order_id}/status", response_model=APIResponse[OrderResponse])
 async def update_order_status(
     order_id: int,
+    # Named "status" for the public API/query param, but that shadows the
+    # `status` module (fastapi.status) imported above within this function
+    # body - HTTPException below must use the http_status alias instead,
+    # or status.HTTP_404_NOT_FOUND resolves against this OrderStatus value
+    # and raises AttributeError instead of a proper 404/400 response.
     status: OrderStatus,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_admin_user),  # Admin only
@@ -149,14 +196,14 @@ async def update_order_status(
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
 
 
     if not _is_valid_status_transition(order.status, status):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Invalid status transition"
         )
 

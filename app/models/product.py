@@ -4,6 +4,11 @@ from sqlalchemy.orm import relationship
 
 from app.models.base import Base
 
+# ARRAY is Postgres-only; SQLite (used for the in-memory test DB) has no
+# array column type, so this column falls back to JSON there. Behavior is
+# equivalent for a Python-side list of strings either way.
+_string_array = ARRAY(String).with_variant(JSON(), "sqlite")
+
 class Product(Base):
     __tablename__ = "products"
 
@@ -12,7 +17,7 @@ class Product(Base):
     description = Column(Text, nullable=False)
     price = Column(Numeric(10, 2), nullable=False)
     stock_quantity = Column(Integer, nullable=False, default=0)
-    images = Column(ARRAY(String), nullable=False, default=[])
+    images = Column(_string_array, nullable=False, default=[])
     characteristics = Column(JSON, nullable=False, default={})
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

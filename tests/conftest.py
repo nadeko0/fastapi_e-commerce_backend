@@ -48,17 +48,11 @@ app.dependency_overrides[database_get_db] = _override_get_db
 app.dependency_overrides[deps_get_db] = _override_get_db
 
 
-POSTGRES_ONLY_TABLES = {"categories", "products"}  # use ARRAY columns, unsupported by the SQLite test engine
-testable_tables = [
-    table for name, table in Base.metadata.tables.items() if name not in POSTGRES_ONLY_TABLES
-]
-
-
 @pytest.fixture(autouse=True)
 def _reset_database():
-    Base.metadata.create_all(bind=engine, tables=testable_tables)
+    Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=engine, tables=testable_tables)
+    Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture
