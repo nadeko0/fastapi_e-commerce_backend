@@ -138,16 +138,18 @@ async def health_check():
             result = connection.execute(text("SELECT 1"))
             result.scalar()  # Fetch the result
     except SQLAlchemyError as e:
-        health_status["services"]["database"] = f"unhealthy: {str(e)}"
+        logger.error(f"Database health check failed: {e}")
+        health_status["services"]["database"] = "unhealthy"
         health_status["status"] = "degraded"
-    
+
 
     logger.debug("Checking Redis connection")
     try:
         global redis_service
         redis_service._redis.ping()
     except RedisError as e:
-        health_status["services"]["redis"] = f"unhealthy: {str(e)}"
+        logger.error(f"Redis health check failed: {e}")
+        health_status["services"]["redis"] = "unhealthy"
         health_status["status"] = "degraded"
     
     status_code = 200 if health_status["status"] == "healthy" else 503
