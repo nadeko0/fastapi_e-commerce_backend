@@ -31,6 +31,7 @@ from app.schemas.user import (
     PasswordReset,
     PasswordUpdate,
     GDPRExport,
+    GDPRExportData,
     GDPRDelete,
     ConsentHistory,
     ConsentType,
@@ -237,7 +238,7 @@ async def update_consent(
     db.commit()
     return APIResponse.success_response(UserResponse.from_orm(current_user))
 
-@router.get("/data/export", response_model=APIResponse[GDPRExport])
+@router.get("/data/export", response_model=APIResponse[GDPRExportData])
 async def export_user_data(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -253,13 +254,19 @@ async def export_user_data(
         for entry in current_user.consent_history
     ]
 
-
-    export = GDPRExport(
+    now = datetime.utcnow()
+    export_metadata = GDPRExport(
+        request_id=f"export_{current_user.id}_{now.timestamp()}",
+        request_date=now,
+        expires_at=now + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS),
+        status="completed",
+    )
+    export = GDPRExportData(
         personal_data=current_user,
         consents=consents,
         addresses=current_user.addresses,
         orders=current_user.orders,
-        expires_at=datetime.utcnow() + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS)
+        export_metadata=export_metadata,
     )
 
 
@@ -268,7 +275,7 @@ async def export_user_data(
         background_tasks.add_task(
             send_gdpr_export_email,
             current_user.email,
-            export
+            export_metadata
         )
         logger.info(f"GDPR data export email task queued for user {current_user.email}")
 
