@@ -37,11 +37,18 @@ class EmailService:
             print(f"Failed to send email: {str(e)}")
             return False
 
-def send_order_confirmation_email(to_email: str, order: Order) -> bool:
+def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool:
     email_service = EmailService()
-    
+
+    # order is always an OrderResponse (Pydantic), not the SQLAlchemy Order
+    # model: the caller in app/api/v1/orders.py snapshots it via
+    # OrderResponse.from_orm(order) before handing off to a FastAPI
+    # BackgroundTask, since by the time that task runs the request's DB
+    # session is already closed and lazy-loading order.items[i].product
+    # would raise DetachedInstanceError. OrderItemResponse carries a
+    # denormalized product_name instead of a live product relationship.
     items_html = "".join([
-        f"<tr><td>{item.product.name}</td><td>{item.quantity}</td><td>${item.price_at_time}</td></tr>"
+        f"<tr><td>{item.product_name}</td><td>{item.quantity}</td><td>${item.price_at_time}</td></tr>"
         for item in order.items
     ])
     

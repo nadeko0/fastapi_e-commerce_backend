@@ -31,3 +31,71 @@ def test_data_export_returns_personal_data_and_consents(client, valid_registrati
     assert isinstance(data["orders"], list)
     assert data["export_metadata"]["request_id"]
     assert data["export_metadata"]["status"] == "completed"
+
+
+def test_update_consent_grants_marketing_consent(client, valid_registration_payload):
+    access_token = _register_and_login(client, valid_registration_payload)
+
+    response = client.post(
+        f"{API_PREFIX}/consent",
+        params={"consent_type": "marketing", "granted": True},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["email"] == valid_registration_payload["email"]
+
+
+def test_update_consent_rejects_gdpr_revocation(client, valid_registration_payload):
+    access_token = _register_and_login(client, valid_registration_payload)
+
+    response = client.post(
+        f"{API_PREFIX}/consent",
+        params={"consent_type": "gdpr", "granted": False},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_data_delete_rejects_wrong_password(client, valid_registration_payload):
+    access_token = _register_and_login(client, valid_registration_payload)
+
+    response = client.post(
+        f"{API_PREFIX}/data/delete",
+        json={"confirmation": True, "password": "wrong-password"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_data_delete_deactivates_account(client, valid_registration_payload):
+    access_token = _register_and_login(client, valid_registration_payload)
+
+    response = client.post(
+        f"{API_PREFIX}/data/delete",
+        json={
+            "confirmation": True,
+            "password": valid_registration_payload["password"],
+            "reason": "no longer needed",
+        },
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 200
+    assert "deletion_date" in response.json()["data"]
+
+    # Deactivated account can no longer authenticate.
+    login_response = client.post(
+        f"{API_PREFIX}/login",
+        data={
+            "username": valid_registration_payload["email"],
+            "password": valid_registration_payload["password"],
+        },
+    )
+    me_response = client.get(
+        f"{API_PREFIX}/me",
+        headers={"Authorization": f"Bearer {login_response.json()['data']['access_token']}"},
+    )
+    assert me_response.status_code == 400
