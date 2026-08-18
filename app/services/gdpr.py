@@ -113,7 +113,7 @@ class GDPRService:
                             {
                                 "product_id": item.product_id,
                                 "quantity": item.quantity,
-                                "price": str(item.price),
+                                "price": str(item.price_at_time),
                             }
                             for item in order.items
                         ],
