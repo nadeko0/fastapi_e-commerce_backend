@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
+from fastapi import status as http_status
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session, joinedload
 from decimal import Decimal
@@ -178,6 +179,10 @@ async def delete_product(
 
 @router.get("/orders", response_model=APIResponse[List[OrderResponse]])
 async def list_orders(
+    # Named "status" for the public API/query param; see the identical note
+    # in orders.update_order_status - this shadows the fastapi.status
+    # module within this function body, so error responses below must use
+    # the http_status alias instead.
     status: Optional[str] = None,
     payment_status: Optional[str] = None,
     start_date: Optional[datetime] = None,
@@ -196,7 +201,7 @@ async def list_orders(
             query = query.filter(Order.status == order_status)
         except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid order status. Valid values are: {', '.join([s.value for s in OrderStatus])}"
             )
             
@@ -206,7 +211,7 @@ async def list_orders(
             query = query.filter(Order.payment_status == pay_status)
         except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid payment status. Valid values are: {', '.join([s.value for s in PaymentStatus])}"
             )
     if start_date:
@@ -224,14 +229,14 @@ async def list_orders(
 
             if not hasattr(Order, field):
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"Invalid sort field: {field}"
                 )
             
 
             if order not in ('asc', 'desc'):
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Sort order must be either 'asc' or 'desc'"
                 )
                 
@@ -239,7 +244,7 @@ async def list_orders(
             query = query.order_by(desc(column) if order == 'desc' else column)
         except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="sort_by must be in format: field_asc or field_desc"
             )
     else:
