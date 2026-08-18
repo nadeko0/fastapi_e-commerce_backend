@@ -1,8 +1,10 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, ForeignKey, DateTime, Numeric
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
+
 
 class OrderItem(Base):
     __tablename__ = "order_items"

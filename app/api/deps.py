@@ -2,6 +2,7 @@ from typing import Generator
 
 from app.core.database import SessionLocal
 
+
 # Authentication lives only in app.core.security (get_current_user,
 # get_current_active_user, get_current_admin_user). This module used to
 # carry a second, parallel get_current_user that never checked the Redis

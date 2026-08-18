@@ -1,9 +1,20 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Numeric, CheckConstraint, Index
+
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+)
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
 from app.models.enums import OrderStatus, PaymentStatus, create_string_enum
+
 
 class Order(Base):
     __tablename__ = "orders"

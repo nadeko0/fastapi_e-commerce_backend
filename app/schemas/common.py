@@ -1,7 +1,10 @@
 from datetime import datetime
-from typing import Optional, Any, Generic, TypeVar, Dict, List, Union
-from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
+from typing import Any, Dict, Generic, List, Optional, TypeVar, Union
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
 class TokenPayload(BaseModel):
     """Schema for JWT token payload"""
     sub: Union[int, str]  # Subject (user ID)

@@ -1,5 +1,6 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Index, ARRAY, JSON
+
+from sqlalchemy import ARRAY, JSON, Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
@@ -21,7 +22,7 @@ class Category(Base):
 
     parent = relationship("Category", back_populates="children", remote_side=[id])
     children = relationship("Category", back_populates="parent", cascade="all, delete-orphan")
-    
+
     products = relationship("Product", back_populates="category", cascade="all, delete-orphan")
     __table_args__ = (
         Index('idx_category_path', 'path'),

@@ -1,15 +1,16 @@
 from datetime import datetime, timedelta
 from typing import Optional, Union
+
 import bcrypt
-from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_db
 from app.core.config import settings
 from app.models.user import User, UserRole
 from app.services.redis import RedisService
-from app.api.deps import get_db
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
 redis_service = RedisService()
@@ -59,10 +60,10 @@ async def get_current_user(
         )
         user_id: str = payload.get("sub")
         token_type: str = payload.get("type")
-        
+
         if user_id is None or token_type != "access":
             raise credentials_exception
-            
+
     except JWTError:
         raise credentials_exception
 

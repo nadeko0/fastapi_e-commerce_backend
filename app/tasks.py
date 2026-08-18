@@ -1,25 +1,23 @@
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
 from uuid import uuid4
+
 from celery import Celery
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
-from decimal import Decimal
 
 from app.core.config import settings
 from app.core.security import get_password_hash
-from app.models.user import User
 from app.models.order import Order
-from app.models.product import Product
 from app.models.order_items import OrderItem
+from app.models.product import Product
+from app.models.user import User
 from app.schemas.order import OrderStatus, PaymentStatus
-from app.services.redis import RedisService
 from app.services.email import (
+    send_low_stock_alert_email,
     send_order_confirmation_email,
     send_order_status_update_email,
-    send_order_cancellation_email,
-    send_low_stock_alert_email,
 )
+from app.services.redis import RedisService
 
 celery = Celery(
     'ecommerce_tasks',
@@ -127,8 +125,10 @@ def purge_expired_deletion_requests(db) -> int:
     grace_cutoff = datetime.utcnow() - timedelta(days=settings.DATA_DELETION_GRACE_PERIOD_DAYS)
 
     accounts = db.query(User).filter(
-        User.is_active == False,
-        User.data_deletion_requested == True,
+        User.is_active == False,  # noqa: E712 - `not User.is_active` evaluates in
+        # Python immediately instead of building a SQL clause and silently
+        # produces an always-false filter; explicit `== False` is required.
+        User.data_deletion_requested,
         User.data_deletion_date <= grace_cutoff
     ).all()
 
@@ -217,11 +217,11 @@ def update_product_stats() -> None:
 )
 def check_low_stock(threshold: int = 5) -> None:
     db = next(get_db())
-    
+
     low_stock_products = (
         db.query(Product)
         .filter(
-            Product.is_active == True,
+            Product.is_active,
             Product.stock_quantity <= threshold,
         )
         .all()

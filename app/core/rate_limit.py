@@ -1,11 +1,12 @@
-from typing import Optional, Tuple
-from datetime import datetime
 import time
-from fastapi import Request, HTTPException, Depends
+from typing import Tuple
+
+from fastapi import HTTPException, Request
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
-from app.services.redis import RedisService
 from app.core.config import settings
+from app.services.redis import RedisService
+
 
 class RateLimiter:
     def __init__(self):
@@ -74,14 +75,14 @@ class RateLimiter:
         """
         # Get client identifier and type
         client_ip, user_type = self._get_client_identifier(request)
-        
+
         # Generate unique key for this client and endpoint
         path = request.url.path
         window_key = self._get_window_key(f"{client_ip}:{path}")
-        
+
         # Get rate limit for this endpoint/user combination
         rate_limit = self._get_rate_limit(path, user_type)
-        
+
         current_time = int(time.time())
         window_start = current_time - window_seconds
 

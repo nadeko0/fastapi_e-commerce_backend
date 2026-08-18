@@ -276,7 +276,14 @@ def test_admin_lists_orders_returns_empty_when_none_exist(client, db_session):
     response = client.get(f"{ADMIN_PREFIX}/orders", headers=_auth_headers(admin_token))
 
     assert response.status_code == 200
-    assert response.json()["data"] == []
+    # Regression test: this endpoint used to return a bare list with no
+    # pagination metadata at all (total/page/size/has_more were computed
+    # and then silently discarded) - now wraps in OrderListResponse like
+    # every other list endpoint in this API.
+    data = response.json()["data"]
+    assert data["items"] == []
+    assert data["total"] == 0
+    assert data["has_more"] is False
 
 
 def test_admin_stats_requires_admin(client, db_session):
