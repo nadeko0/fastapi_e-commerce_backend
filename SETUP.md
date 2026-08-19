@@ -6,8 +6,9 @@ This document provides detailed instructions for setting up the E-commerce Backe
 
 ### Local Development
 - Python 3.13 or higher
-- PostgreSQL 15
-- Redis 7
+- PostgreSQL 15+ (the Docker setup pins `postgres:15-alpine`; local dev has
+  been tested against PostgreSQL 18 too)
+- Redis 7+
 - Git
 
 ### Docker Development
@@ -19,8 +20,8 @@ This document provides detailed instructions for setting up the E-commerce Backe
 
 1. **Clone the Repository**
 ```bash
-git clone <repository-url>
-cd fastapi-ecommerce
+git clone https://github.com/nadeko0/fastapi_e-commerce_backend.git
+cd fastapi_e-commerce_backend
 ```
 
 2. **Install [uv](https://docs.astral.sh/uv/getting-started/installation/)**
@@ -111,8 +112,8 @@ uv run python main.py
 
 1. **Clone the Repository**
 ```bash
-git clone <repository-url>
-cd fastapi-ecommerce
+git clone https://github.com/nadeko0/fastapi_e-commerce_backend.git
+cd fastapi_e-commerce_backend
 ```
 
 2. **Set Up Environment Variables**
@@ -125,23 +126,23 @@ cp .env.example .env
 3. **Build and Start Services**
 ```bash
 # Build and start all services
-docker-compose up --build -d
+docker compose up --build -d
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Check service status
-docker-compose ps
+docker compose ps
 ```
 
 4. **Run Migrations**
 ```bash
-docker-compose exec api alembic upgrade head
+docker compose exec api alembic upgrade head
 ```
 
 5. **(Optional) Seed Demo Data (creates an admin user, among other things)**
 ```bash
-docker-compose exec api python scripts/seed_demo_data.py
+docker compose exec api python scripts/seed_demo_data.py
 ```
 
 ## Development Workflow
@@ -168,10 +169,10 @@ git push origin feature/your-feature
 3. **Running Tests**
 ```bash
 # Local
-pytest
+uv run pytest --cov=app
 
 # Docker
-docker-compose exec api pytest
+docker compose exec api uv run pytest --cov=app
 ```
 
 4. **API Documentation**
@@ -231,10 +232,10 @@ DEBUG=False
 4. **Backup Setup**
 ```bash
 # Database backup
-docker-compose exec db pg_dump -U postgres ecommerce > backup.sql
+docker compose exec db pg_dump -U postgres ecommerce > backup.sql
 
 # Restore if needed
-docker-compose exec db psql -U postgres ecommerce < backup.sql
+docker compose exec db psql -U postgres ecommerce < backup.sql
 ```
 
 ## Additional Resources
@@ -250,4 +251,4 @@ docker-compose exec db psql -U postgres ecommerce < backup.sql
 
 For technical issues:
 - Open an issue in the repository
-- Check the logs: `docker-compose logs -f service_name`
+- Check the logs: `docker compose logs -f service_name`

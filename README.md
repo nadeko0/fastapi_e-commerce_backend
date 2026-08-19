@@ -120,9 +120,9 @@ smoke test in `scripts/pg_smoke_test.py`, Docker).
 ## Docker
 
 ```bash
-docker-compose up --build -d
-docker-compose exec api alembic upgrade head
-docker-compose exec api python scripts/seed_demo_data.py   # optional
+docker compose up --build -d
+docker compose exec api alembic upgrade head
+docker compose exec api python scripts/seed_demo_data.py   # optional
 ```
 
 [`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml) are
