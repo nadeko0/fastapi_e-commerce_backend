@@ -109,3 +109,56 @@ class ProductSearch(BaseModel):
     page: int = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
 
+
+class ProductVariantBase(BaseModel):
+    """Shared fields for creating/reading a product variant.
+
+    `attributes` is intentionally free-form (e.g. {"size": "M", "color":
+    "red"}) rather than fixed columns, so this stays usable for any product
+    domain, not just apparel.
+    """
+    sku: str = Field(..., min_length=1, max_length=100)
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+    price_override: Optional[Decimal] = Field(None, ge=0)
+    stock_quantity: int = Field(0, ge=0)
+    is_active: bool = True
+
+    @validator('price_override')
+    def validate_price_override(cls, v):
+        if v is None:
+            return v
+        return Decimal(str(v)).quantize(Decimal('0.01'))
+
+class ProductVariantCreate(ProductVariantBase):
+    pass
+
+class ProductVariantUpdate(BaseModel):
+    """Schema for updating an existing product variant. All fields optional."""
+    sku: Optional[str] = Field(None, min_length=1, max_length=100)
+    attributes: Optional[Dict[str, Any]] = None
+    price_override: Optional[Decimal] = Field(None, ge=0)
+    stock_quantity: Optional[int] = Field(None, ge=0)
+    is_active: Optional[bool] = None
+
+    @validator('price_override')
+    def validate_price_override(cls, v):
+        if v is None:
+            return v
+        return Decimal(str(v)).quantize(Decimal('0.01'))
+
+class ProductVariantResponse(ProductVariantBase):
+    id: int
+    product_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ProductVariantListResponse(BaseModel):
+    """Schema for a list of variants under a product (no pagination - a
+    single product's variant count is expected to be small)."""
+    items: List[ProductVariantResponse]
+    total: int
+
+    model_config = ConfigDict(from_attributes=True)
+

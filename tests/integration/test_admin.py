@@ -149,6 +149,35 @@ def test_admin_creates_subcategory_with_correct_level_and_path(client, db_sessio
     assert body["path"] == [parent.id]
 
 
+def test_admin_creates_grandchild_category_with_correct_level_and_path(client, db_session):
+    # Verifies level/path computation walks correctly beyond a single
+    # parent->child hop: a grandchild's path must be [root.id, child.id],
+    # not just [child.id] or a repeat of the child's own path.
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    root = _make_category(db_session, name="Root")
+
+    child_response = client.post(
+        f"{ADMIN_PREFIX}/categories",
+        json={"name": "Child", "parent_id": root.id},
+        headers=_auth_headers(admin_token),
+    )
+    assert child_response.status_code == 200
+    child = child_response.json()["data"]
+    assert child["level"] == 1
+    assert child["path"] == [root.id]
+
+    grandchild_response = client.post(
+        f"{ADMIN_PREFIX}/categories",
+        json={"name": "Grandchild", "parent_id": child["id"]},
+        headers=_auth_headers(admin_token),
+    )
+    assert grandchild_response.status_code == 200
+    grandchild = grandchild_response.json()["data"]
+    assert grandchild["level"] == 2
+    assert grandchild["path"] == [root.id, child["id"]]
+
+
 def test_admin_create_category_rejects_missing_parent(client, db_session):
     admin = _make_admin(db_session)
     admin_token = _login_as(client, admin.email, "AdminPass1")
@@ -304,3 +333,153 @@ def test_admin_stats_returns_zeroed_stats_when_no_orders(client, db_session):
     body = response.json()["data"]
     assert body["order_count"] == 0
     assert body["total_revenue"] == 0
+
+
+# --- Admin product variant CRUD -------------------------------------------
+#
+# ProductVariant is additive data model + CRUD only - not wired into
+# cart/checkout stock logic (see app/models/product.py docstring).
+
+
+def _create_product(client, admin_token, category_id):
+    return client.post(
+        f"{ADMIN_PREFIX}/products",
+        json=_valid_product_payload(category_id),
+        headers=_auth_headers(admin_token),
+    ).json()["data"]
+
+
+def test_admin_creates_product_variant(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+
+    response = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={
+            "sku": "WIDGET-RED-M",
+            "attributes": {"size": "M", "color": "red"},
+            "stock_quantity": 5,
+        },
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["sku"] == "WIDGET-RED-M"
+    assert body["attributes"] == {"size": "M", "color": "red"}
+    assert body["stock_quantity"] == 5
+    assert body["price_override"] is None
+    assert body["product_id"] == product["id"]
+
+
+def test_admin_create_variant_rejects_missing_product(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+
+    response = client.post(
+        f"{ADMIN_PREFIX}/products/999999/variants",
+        json={"sku": "GHOST-SKU"},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 404
+
+
+def test_admin_create_variant_rejects_duplicate_sku(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+
+    client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "DUP-SKU"},
+        headers=_auth_headers(admin_token),
+    )
+    response = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "DUP-SKU"},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 409
+
+
+def test_admin_lists_product_variants(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "VARIANT-A"},
+        headers=_auth_headers(admin_token),
+    )
+    client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "VARIANT-B"},
+        headers=_auth_headers(admin_token),
+    )
+
+    response = client.get(f"{ADMIN_PREFIX}/products/{product['id']}/variants")
+
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["total"] == 2
+    assert {v["sku"] for v in body["items"]} == {"VARIANT-A", "VARIANT-B"}
+
+
+def test_admin_updates_product_variant(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    variant = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "VARIANT-C", "stock_quantity": 1},
+        headers=_auth_headers(admin_token),
+    ).json()["data"]
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
+        json={"stock_quantity": 20, "price_override": "15.50"},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["stock_quantity"] == 20
+    assert body["price_override"] == "15.50"
+
+
+def test_admin_update_variant_returns_404_for_missing_variant(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/999999",
+        json={"stock_quantity": 5},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 404
+
+
+def test_admin_variant_endpoints_require_admin(client, db_session):
+    category = _make_category(db_session)
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    product = _create_product(client, admin_token, category.id)
+    user_token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "SNEAKY-SKU"},
+        headers=_auth_headers(user_token),
+    )
+
+    assert response.status_code == 403

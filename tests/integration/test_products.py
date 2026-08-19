@@ -68,6 +68,39 @@ def test_category_tree_reflects_parent_child_relationship(client, db_session):
     assert tree[0]["children"][0]["name"] == "Child"
 
 
+def test_category_tree_nests_correctly_at_three_levels(client, db_session):
+    # Regression coverage: get_category_tree (app/api/v1/products.py)
+    # recursively attaches children by parent_id, so a shallow (2-level)
+    # tree alone wouldn't catch a build_tree bug that only breaks past the
+    # first level. Assert the full root -> child -> grandchild nesting.
+    root = _make_category(db_session, name="Root")
+    child = _make_category(db_session, name="Child", parent_id=root.id, level=1, path=[root.id])
+    _make_category(
+        db_session, name="Grandchild", parent_id=child.id, level=2, path=[root.id, child.id]
+    )
+
+    response = client.get(f"{CATALOG_PREFIX}/categories/tree")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total_categories"] == 3
+    assert data["max_depth"] == 2
+
+    tree = data["tree"]
+    assert len(tree) == 1
+    root_node = tree[0]
+    assert root_node["name"] == "Root"
+    assert len(root_node["children"]) == 1
+
+    child_node = root_node["children"][0]
+    assert child_node["name"] == "Child"
+    assert len(child_node["children"]) == 1
+
+    grandchild_node = child_node["children"][0]
+    assert grandchild_node["name"] == "Grandchild"
+    assert grandchild_node["children"] == []
+
+
 def test_list_products_returns_created_product(client, db_session):
     category = _make_category(db_session)
     _make_product(db_session, category.id)

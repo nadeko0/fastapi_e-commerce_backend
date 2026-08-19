@@ -52,9 +52,53 @@ class Product(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     category = relationship("Category", back_populates="products")
+    variants = relationship(
+        "ProductVariant", back_populates="product", cascade="all, delete-orphan"
+    )
     __table_args__ = (
         Index('idx_product_name_description', 'name', 'description'),
         Index('idx_product_price', 'price'),
         Index('idx_product_category', 'category_id'),
         Index('idx_product_active', 'is_active'),
+    )
+
+
+class ProductVariant(Base):
+    """
+    An optional purchasable variation of a Product (e.g. a specific
+    size/color combination), keyed by its own SKU. A Product with no
+    variants is a complete, ordinary "simple" product on its own - nothing
+    here is required, and Product.price/Product.stock_quantity keep working
+    exactly as before for that common case. `attributes` is deliberately
+    free-form JSON (not fixed columns like `size`/`color`) so this stays
+    usable for any product domain, not just apparel.
+
+    Scope note: this is data model + admin CRUD only. Cart/checkout
+    (app/api/v1/orders.py, app/api/v1/cart.py) does not know about variants
+    yet - it still reads/decrements Product.stock_quantity directly. Wiring
+    variant-aware stock into checkout is a separate, larger change left for
+    a future pass.
+    """
+
+    __tablename__ = "product_variants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    sku = Column(String, nullable=False, unique=True, index=True)
+    # e.g. {"size": "M", "color": "red"} - arbitrary key/value pairs, no
+    # fixed schema, matching Product.characteristics' domain-neutral intent.
+    attributes = Column(_characteristics_json, nullable=False, default={})
+    # NULL means "use the parent Product's price" - most variants of a
+    # priced-per-unit product won't need a per-variant override.
+    price_override = Column(Numeric(10, 2), nullable=True)
+    stock_quantity = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    product = relationship("Product", back_populates="variants")
+
+    __table_args__ = (
+        Index("idx_product_variant_product", "product_id"),
+        Index("idx_product_variant_active", "is_active"),
     )

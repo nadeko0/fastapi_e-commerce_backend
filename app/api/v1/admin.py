@@ -11,7 +11,7 @@ from app.core.security import get_current_admin_user
 from app.models.category import Category
 from app.models.order import Order
 from app.models.order_items import OrderItem
-from app.models.product import Product
+from app.models.product import Product, ProductVariant
 from app.models.user import User
 from app.schemas.category import (
     CategoryCreate,
@@ -29,6 +29,10 @@ from app.schemas.product import (
     ProductInDB,
     ProductResponse,
     ProductUpdate,
+    ProductVariantCreate,
+    ProductVariantListResponse,
+    ProductVariantResponse,
+    ProductVariantUpdate,
 )
 from app.services.redis import RedisService
 
@@ -399,3 +403,126 @@ async def get_statistics(
     redis.setex(cache_key, 300, stats)
 
     return APIResponse.success_response(stats)
+
+# --- Product variants -------------------------------------------------
+#
+# ProductVariant (app/models/product.py) is additive: a Product with no
+# variants still works exactly as before, using its own price/stock_quantity.
+# These endpoints are data model + CRUD only - cart/checkout
+# (app/api/v1/orders.py, app/api/v1/cart.py) does not read or decrement
+# variant stock; that integration is explicitly out of scope here.
+
+
+def _get_product_or_404(db: Session, product_id: int) -> Product:
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found"
+        )
+    return product
+
+
+@router.post(
+    "/products/{product_id}/variants",
+    response_model=APIResponse[ProductVariantResponse],
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Product not found"},
+        409: {"description": "SKU already in use"},
+    },
+)
+async def create_product_variant(
+    product_id: int,
+    variant: ProductVariantCreate,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new variant (e.g. a size/color combination) under a product."""
+
+    _get_product_or_404(db, product_id)
+
+    if db.query(ProductVariant).filter(ProductVariant.sku == variant.sku).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A variant with this SKU already exists"
+        )
+
+    db_variant = ProductVariant(product_id=product_id, **variant.dict())
+    db.add(db_variant)
+    db.commit()
+    db.refresh(db_variant)
+
+    return APIResponse.success_response(ProductVariantResponse.from_orm(db_variant))
+
+@router.get(
+    "/products/{product_id}/variants",
+    response_model=APIResponse[ProductVariantListResponse],
+    responses={404: {"description": "Product not found"}},
+)
+async def list_product_variants(
+    product_id: int,
+    db: Session = Depends(get_db),
+):
+    """List all variants belonging to a product."""
+
+    _get_product_or_404(db, product_id)
+
+    variants = (
+        db.query(ProductVariant)
+        .filter(ProductVariant.product_id == product_id)
+        .order_by(ProductVariant.id)
+        .all()
+    )
+
+    return APIResponse.success_response(ProductVariantListResponse(
+        items=[ProductVariantResponse.from_orm(v) for v in variants],
+        total=len(variants),
+    ))
+
+@router.put(
+    "/products/{product_id}/variants/{variant_id}",
+    response_model=APIResponse[ProductVariantResponse],
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Product or variant not found"},
+        409: {"description": "SKU already in use"},
+    },
+)
+async def update_product_variant(
+    product_id: int,
+    variant_id: int,
+    variant: ProductVariantUpdate,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Update fields on an existing variant of a product."""
+
+    _get_product_or_404(db, product_id)
+
+    db_variant = db.query(ProductVariant).filter(
+        ProductVariant.id == variant_id,
+        ProductVariant.product_id == product_id,
+    ).first()
+    if not db_variant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Variant not found"
+        )
+
+    update_data = variant.dict(exclude_unset=True)
+    if "sku" in update_data and update_data["sku"] != db_variant.sku:
+        if db.query(ProductVariant).filter(ProductVariant.sku == update_data["sku"]).first():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A variant with this SKU already exists"
+            )
+
+    for field, value in update_data.items():
+        setattr(db_variant, field, value)
+
+    db_variant.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(db_variant)
+
+    return APIResponse.success_response(ProductVariantResponse.from_orm(db_variant))
