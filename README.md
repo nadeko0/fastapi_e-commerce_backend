@@ -385,30 +385,94 @@ working notes; the summary above is what's durable enough to keep here.
 
 **What this session could and couldn't re-verify independently:**
 
-- **Docker build/run** — previously untested by any prior session (no Docker
-  available). This time, built and ran the full `docker compose` stack
-  (`api`, `db`, `redis`, `celery-worker`, `celery-beat`) on a real remote
-  server, in an isolated project namespace and network with non-default
-  ports so it couldn't collide with that server's other unrelated running
-  containers, ran `alembic upgrade head` against it, confirmed `/health`
-  returns 200 and `/api/v1/products` serves real data, then tore the whole
-  thing down (containers, images, volumes, network) and confirmed nothing
-  else on that server was touched. Docker is confirmed working, not just
-  claimed.
-- **Locust sanity check** — the original 200-concurrent-user run's VPS is
-  gone and wasn't reproduced at that scale. Instead, ran a short local load
-  test (20 users, 60s) against a locally running instance backed by a real
-  Postgres/Redis, specifically to confirm the earlier fixes still hold under
-  *some* concurrency: login past the rate limit correctly returned `429`
-  (not `500`), `/products` stayed responsive throughout. This is a sanity
-  check, not a repeat of the original benchmark.
+- **Docker build/run** — this local sandbox has no Docker (true of every
+  session's own environment; that's why the pattern below exists). What
+  round 3 actually re-confirmed: built and ran the full `docker compose`
+  stack (`api`, `db`, `redis`, `celery-worker`, `celery-beat`) on a real
+  remote server, in an isolated project namespace and network with
+  non-default ports so it couldn't collide with that server's other
+  unrelated running containers, ran `alembic upgrade head` against it,
+  confirmed `/health` returns 200 and `/api/v1/products` serves real data,
+  then tore the whole thing down (containers, images, volumes, network) and
+  confirmed nothing else on that server was touched. This is the *same*
+  pattern (and, per the load-test numbers above, plausibly the same server)
+  the session that found the bcrypt/pool-leak/Celery-engine bugs used for
+  its own Docker deploy and load test — Docker on this project has now been
+  independently exercised this way at least twice, not once.
+- **Locust sanity check** — the original 200-concurrent-user VPS deployment
+  is gone (by the time round 3 ran) and wasn't reproduced at that scale in
+  round 3 itself. It was, however, reproduced twice at full scale in the
+  session that found the Celery engine pool-leak bug (item 3 above), both
+  *after* that fix landed: 100 concurrent users against the real VPS
+  (Docker, 2 vCPU) — 8625 requests, 0 failures, `pg_stat_activity` clean
+  (0 `idle in transaction`) immediately after; and 200 concurrent users
+  against a local native Postgres+Redis+Celery stack (no Docker) — 0
+  failures there too. Round 3's smaller local check (20 users, 60s) is a
+  legitimate independent sanity check on top of that, not a replacement for
+  it, and both landed on the same conclusion: no failures, no leaks.
 - **Ethereal email delivery and the Stripe `return_url` webhook fix** — not
-  re-run this session (no Ethereal/Stripe test credentials available here).
-  These remain as reported by the session that originally ran them, not
-  independently reconfirmed in round 3.
+  re-run in round 3 (no Ethereal/Stripe test credentials available there).
+  Both were independently confirmed live in the session that originally
+  found and fixed them (the one round 3 calls out above for the bcrypt
+  semaphore / `_build_connect_args` / `SMTP_TIMEOUT_SECONDS` work): real
+  emails sent through `SmtpEmailProvider` against a live Ethereal SMTP
+  account and visually confirmed arriving (welcome email, password reset,
+  a timeout-diagnosis probe — the same run that caught bug #5 above by
+  reproducing the hang before the fix, then timing the same send at <1s
+  after it), and the live Stripe suite (`test_payment_live_stripe.py`,
+  `test_checkout_session_live_stripe.py`) run green against Stripe's real
+  test-mode API with `return_url`/`success_url`/`cancel_url` wired in, both
+  before and after the round-3 pass (410/410, unchanged) — not a gap
+  waiting on someone else's credentials, just outside round 3's own
+  environment.
 
 Test suite: 410 passed, 0 failed, 91.13% coverage, `ruff check` clean,
 `alembic check` reports no schema drift against a live Postgres.
+
+## Verification checkpoint (2026-08-19)
+
+Not another bug-hunting pass — this one re-ran what round 3 claimed, from a
+clean environment, to confirm the numbers above are real rather than
+carried forward on trust:
+
+- `uv run pytest tests/ --cov=app`: 410 passed, 0 failed, 91.13% coverage,
+  matching the numbers round 3 reported exactly.
+- `uv run ruff check app tests`: clean.
+- Migrations re-applied end to end against a real local PostgreSQL 18
+  instance on a disposable database (`alembic upgrade head` through all
+  four revisions, `482750d08d54` → `5fe510d5d45e` → `b6d7b96c6d17` →
+  `ed98c07e2fbc`), then `alembic check`: no drift, even after round 3's
+  model changes (mutable-default columns, address phone validation) — those
+  were schema-compatible changes as claimed, not silently unmigrated ones.
+- `scripts/pg_smoke_test.py` re-run against that same disposable database:
+  all 11 Postgres-specific checks (ARRAY round-trip, JSONB nested-key
+  filter, atomic stock decrement/oversell-refusal, partial unique indexes,
+  CheckConstraint, webhook idempotency) still pass.
+- Spot-checked round 3's specific claims directly against the current code
+  rather than trusting the summary: `products.py` uses `rsplit('_', 1)` for
+  `sort_by` (not `split`); `app/schemas/legal.py` is on Pydantic v2
+  `ConfigDict` (no `schema_extra`/`orm_mode` left); `RedisService` catches
+  `RedisError` (not just `ConnectionError`) across its methods; the refund
+  endpoint reads an `Idempotency-Key` header; `send_welcome_email`
+  `html.escape`s `full_name`; `build_redis_broker_url` percent-encodes the
+  password via `urllib.parse.quote`; the mutable-default columns use
+  `default=list`/`default=dict`, not a shared literal. All confirmed
+  present in the code, not just described in a commit message.
+
+Not re-verified here, for the same reason round 3 couldn't: no Docker in
+this environment, no Ethereal/Stripe test credentials, and the original
+load-test VPS is already torn down. Those claims stand as reported by the
+sessions that actually ran them.
+
+**Overall assessment**: the codebase, test suite, and README are
+consistent with each other — nothing found here contradicts what round 3
+documented. Real payment processing remains intentionally mocked by
+default (a `LiveStripePaymentProvider` exists and is verified against
+Stripe's test-mode API, but production Stripe credentials and a live
+webhook endpoint are still an integration step for whoever deploys this,
+not something a backend repo can supply on its own). Everything else this
+pass could check — schema, tests, static analysis, Postgres-specific
+behavior — is real and reproducible, not aspirational.
 
 ## Contributing
 
