@@ -5,7 +5,7 @@ from app.core.security import get_password_hash
 from app.models.category import Category
 from app.models.enums import UserRole
 from app.models.order import Order
-from app.models.product import Product
+from app.models.product import Product, ProductVariant
 from app.models.user import User
 
 USERS_PREFIX = "/api/v1/users"
@@ -51,6 +51,21 @@ def _make_product(db_session, category_id, stock=10, price="9.99"):
     db_session.commit()
     db_session.refresh(product)
     return product
+
+
+def _make_variant(db_session, product_id, sku="WIDGET-M-RED", stock=5, price_override=None, is_active=True):
+    variant = ProductVariant(
+        product_id=product_id,
+        sku=sku,
+        attributes={"size": "M", "color": "red"},
+        price_override=price_override,
+        stock_quantity=stock,
+        is_active=is_active,
+    )
+    db_session.add(variant)
+    db_session.commit()
+    db_session.refresh(variant)
+    return variant
 
 
 def _make_admin(db_session, email="admin@example.com"):
@@ -671,3 +686,183 @@ def test_order_total_sums_multiple_odd_priced_items_without_drift(client, db_ses
     body = response.json()["data"]
     # 10.10 * 3 + 0.03 * 7 = 30.30 + 0.21 = 30.51
     assert body["total_amount"] == "30.51"
+
+
+# ---------------------------------------------------------------------------
+# Product variants at checkout
+# ---------------------------------------------------------------------------
+
+def test_checkout_with_variant_decrements_only_variant_stock(client, db_session):
+    """The parent product's own stock_quantity must be left untouched when
+    the cart line is for a variant - only ProductVariant.stock_quantity
+    for that specific variant is decremented."""
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=10, price="9.99")
+    variant = _make_variant(db_session, product.id, stock=5, price_override="14.50")
+
+    client.post(
+        f"{CART_PREFIX}/items",
+        params={"product_id": product.id, "variant_id": variant.id, "quantity": 2},
+        headers=_auth_headers(token),
+    )
+
+    response = client.post(
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+    )
+
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert len(body["items"]) == 1
+    assert body["items"][0]["variant_id"] == variant.id
+    assert float(body["total_amount"]) == 29.00  # 14.50 * 2, the variant's price
+
+    db_session.refresh(product)
+    db_session.refresh(variant)
+    assert variant.stock_quantity == 3
+    assert product.stock_quantity == 10  # untouched
+
+
+def test_checkout_rejects_insufficient_variant_stock_without_partial_decrement(client, db_session):
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=10, price="9.99")
+    variant = _make_variant(db_session, product.id, stock=2)
+
+    client.post(
+        f"{CART_PREFIX}/items",
+        params={"product_id": product.id, "variant_id": variant.id, "quantity": 2},
+        headers=_auth_headers(token),
+    )
+    # Stock drops below the cart's requested quantity after adding.
+    db_session.query(ProductVariant).filter(ProductVariant.id == variant.id).update(
+        {"stock_quantity": 1}
+    )
+    db_session.commit()
+
+    response = client.post(
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+    )
+
+    assert response.status_code == 400
+
+    db_session.refresh(variant)
+    db_session.refresh(product)
+    assert variant.stock_quantity == 1  # unchanged - no partial decrement
+    assert product.stock_quantity == 10
+
+
+def test_checkout_with_plain_and_variant_line_decrements_each_correctly(client, db_session):
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    plain_product = _make_product(db_session, category.id, stock=10, price="5.00")
+    variant_product = _make_product(db_session, category.id, stock=10, price="9.99")
+    variant = _make_variant(db_session, variant_product.id, stock=5, price_override=None)
+
+    client.post(
+        f"{CART_PREFIX}/items",
+        params={"product_id": plain_product.id, "quantity": 2},
+        headers=_auth_headers(token),
+    )
+    client.post(
+        f"{CART_PREFIX}/items",
+        params={"product_id": variant_product.id, "variant_id": variant.id, "quantity": 3},
+        headers=_auth_headers(token),
+    )
+
+    response = client.post(
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+    )
+
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert len(body["items"]) == 2
+    # 5.00 * 2 + 9.99 * 3 = 10.00 + 29.97 = 39.97
+    assert float(body["total_amount"]) == 39.97
+
+    db_session.refresh(plain_product)
+    db_session.refresh(variant_product)
+    db_session.refresh(variant)
+    assert plain_product.stock_quantity == 8
+    assert variant.stock_quantity == 2
+    assert variant_product.stock_quantity == 10  # the variant's parent product's own stock is untouched
+
+
+def test_cancel_order_with_variant_line_restocks_variant_not_product(client, db_session):
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=10, price="9.99")
+    variant = _make_variant(db_session, product.id, stock=5)
+
+    client.post(
+        f"{CART_PREFIX}/items",
+        params={"product_id": product.id, "variant_id": variant.id, "quantity": 2},
+        headers=_auth_headers(token),
+    )
+    order = client.post(
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+    ).json()["data"]
+
+    db_session.refresh(variant)
+    assert variant.stock_quantity == 3
+
+    admin = _make_admin(db_session, email="admin-variant-cancel@example.com")
+    admin_token = _login(client, admin.email, "AdminPass1")
+    response = _transition(client, admin_token, order["id"], "cancelled")
+
+    assert response.status_code == 200
+
+    db_session.refresh(variant)
+    db_session.refresh(product)
+    assert variant.stock_quantity == 5  # restored
+    assert product.stock_quantity == 10  # never touched
+
+
+def test_concurrent_checkout_for_last_variant_unit_only_one_succeeds(client, db_session):
+    """Mirrors test_concurrent_checkout_for_last_unit_only_one_succeeds
+    above, but for a variant's own stock_quantity=1 instead of the
+    product's - the same atomic conditional-UPDATE pattern must prevent
+    overselling the variant."""
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=100, price="9.99")
+    variant = _make_variant(db_session, product.id, stock=1)
+
+    n = 5
+    accounts = []
+    for i in range(n):
+        token, address_id = _checkout_ready_buyer(
+            client, db_session, email=f"variant-racer{i}@example.com"
+        )
+        client.post(
+            f"{CART_PREFIX}/items",
+            params={"product_id": product.id, "variant_id": variant.id, "quantity": 1},
+            headers=_auth_headers(token),
+        )
+        accounts.append((token, address_id))
+
+    results = [None] * n
+    barrier = threading.Barrier(n)
+
+    def worker(i):
+        token, address_id = accounts[i]
+        barrier.wait()
+        response = client.post(
+            ORDERS_PREFIX,
+            params={"shipping_address_id": address_id},
+            headers=_auth_headers(token),
+        )
+        results[i] = response.status_code
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert results.count(200) == 1
+    assert results.count(400) == n - 1
+
+    db_session.refresh(variant)
+    db_session.refresh(product)
+    assert variant.stock_quantity == 0
+    assert product.stock_quantity == 100  # untouched throughout
