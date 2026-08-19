@@ -1,238 +1,155 @@
 # FastAPI E-commerce Backend
 
-A production-ready e-commerce backend API built with FastAPI, implementing SOLID principles and providing comprehensive features for managing products, orders, users, and more. The project follows best practices for scalability, maintainability, and security.
+[![CI](https://github.com/nadeko0/fastapi_e-commerce_backend/actions/workflows/ci.yml/badge.svg)](https://github.com/nadeko0/fastapi_e-commerce_backend/actions/workflows/ci.yml)
+![coverage](https://img.shields.io/badge/coverage-91%25-brightgreen)
+![python](https://img.shields.io/badge/python-3.13-blue)
+[![license](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 
-## SOLID Principles Implementation
+A domain-neutral e-commerce backend API built with FastAPI, SQLAlchemy, and
+PostgreSQL. It's meant to be a **foundation** to build a real store on top of
+(clothing, electronics, whatever the product actually is), not a finished
+demo — the catalog, orders, and payment layer are deliberately not tied to
+any one kind of product. Backend-only; there is no frontend and none is
+planned.
 
-### Single Responsibility Principle (SRP)
-- Each service class has a single responsibility (e.g., `EmailService`, `GDPRService`)
-- Clear separation between models, schemas, and services
-- Dedicated modules for specific functionalities (auth, email, GDPR)
+Auth, order/inventory concurrency, and the payment layer have all been
+through a dedicated adversarial testing pass (rate-limit bypass, token
+fixation, race conditions on the last unit of stock, payment amount/currency
+fuzzing) — see [Known limitations](#known-limitations) for what that pass
+found and left as documented, not silently ignored.
 
-### Open/Closed Principle (OCP)
-- Base models and schemas that can be extended
-- Middleware system for adding new functionality
-- Plugin-based architecture for easy feature additions
+## Architecture
 
-### Liskov Substitution Principle (LSP)
-- Proper inheritance in models (Base model classes)
-- Consistent interface implementations
-- Type hints and proper abstract classes usage
+```mermaid
+flowchart LR
+    Client(["Client / API consumer"]) --> API
 
-### Interface Segregation Principle (ISP)
-- Focused API endpoints for specific functionalities
-- Granular Pydantic schemas
-- Specific dependencies for different authentication levels
+    subgraph App["FastAPI application"]
+        API["API layer<br/>app/api/v1/*<br/>auth · products · cart · orders · admin · legal"]
+        Services["Service layer<br/>app/services/*<br/>redis · email · gdpr · payment"]
+        Models["Models & schemas<br/>app/models · app/schemas<br/>SQLAlchemy ORM + Pydantic"]
+        API --> Services
+        Services --> Models
+    end
 
-### Dependency Inversion Principle (DIP)
-- Dependency injection throughout the application
-- Abstract base classes for services
-- Configuration through environment variables
+    Models --> DB[("PostgreSQL")]
+    Services --> Redis[("Redis<br/>cart · cache · rate limit · JWT blacklist")]
+    Services -.enqueues.-> Celery["Celery workers<br/>email · cleanup · stats"]
+    Celery --> DB
+    Celery --> Redis
+    Services -."mocked, no real network".-> Stripe(["Stripe API"])
+```
 
 ## Features
 
-### User Management
-- Registration and authentication with JWT
-- Role-based access control (Admin/Client)
-- Email verification
-- Password reset functionality
-- GDPR compliance with consent management
-- User profile management
+**Users & auth** — JWT access/refresh tokens, role-based access (client/admin),
+email verification, password reset with token invalidation on reset (fixes
+token fixation), Redis-backed token blacklist on logout, sliding-window rate
+limiting (stricter limits on login/register).
 
-### Product Management
-- Product CRUD operations
-- Category management with hierarchical structure
-- Product search and filtering
-- Stock management
-- Image handling
+**Catalog** — products with a `characteristics` JSON attribute bag, nested
+categories (arbitrary depth, verified), optional `ProductVariant`s (SKU,
+free-form attributes like size/color, price override, own stock — additive,
+a product without variants still works exactly as a simple product; see
+[Known limitations](#known-limitations) for what's not wired up yet), Redis
+caching for the category tree and hot products.
 
-### Order Management
-- Shopping cart functionality
-- Order processing
-- Order status tracking
-- Order history
-- Email notifications
+**Cart & orders** — Redis-backed cart, idempotency-key checkout (a retried
+request returns the original order instead of creating a duplicate), an
+atomic `UPDATE ... WHERE stock >= quantity` stock decrement (no oversell
+under concurrent checkout for the last unit), an explicit order status state
+machine, and stock restoration on cancellation.
 
-### Security
-- JWT authentication with refresh tokens
-- Token blacklisting
-- Password hashing with bcrypt
-- CORS protection
-- Rate limiting
-- Security headers
-- SQL injection protection
-- XSS protection
-- CSRF protection
+**Payments** — a `PaymentProvider` abstraction with a `StripePaymentProvider`
+implementation shaped like the real Stripe SDK (Payment Intents, refunds,
+webhook signature verification) but fully mocked — no real Stripe account
+exists for this project and no outbound network call is ever made. Covers
+idempotent intent creation, idempotent webhook processing, 3D Secure
+(`requires_action`) as a distinct state, and amount/currency validation
+(property-tested with `hypothesis`).
 
-### Data Management
-- Redis caching
-- Database migrations
-- GDPR data export
-- Data retention policies
+**GDPR** — consent tracking with a full audit trail (type, timestamp, IP,
+user agent), data export (Art. 15/20), and erasure (Art. 17) that anonymizes
+the account in place rather than hard-deleting it, so order/invoice history
+required for tax-law retention survives with personal identifiers scrubbed.
+Full technical breakdown in [GDPR / Data Protection](#gdpr--data-protection).
 
-## CRUD Operations Overview
+**Ops** — structured JSON logging, a `/health` endpoint checking DB/Redis
+reachability, graceful shutdown via uvicorn's own signal handling, and a
+demo-data seed script (`scripts/seed_demo_data.py`) to get a populated
+catalog running in minutes.
 
-### Products
-```python
-# Create
-POST /api/v1/products
-{
-    "name": "Product Name",
-    "description": "Description",
-    "price": 99.99,
-    "stock": 100
-}
+## Tech stack
 
-# Read
-GET /api/v1/products
-GET /api/v1/products/{id}
+| | |
+|---|---|
+| Runtime | Python 3.13 |
+| Framework | FastAPI 0.141.1 (Starlette 1.6.0) |
+| Database | PostgreSQL, SQLAlchemy 2.0.52, Alembic migrations |
+| Cache / queue broker | Redis 8.1.0 |
+| Background jobs | Celery 5.6.3 |
+| Auth | JWT (python-jose 3.5.0), bcrypt 5.0.0 (called directly, no passlib) |
+| Packaging | [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`) |
+| Testing | pytest, pytest-cov, hypothesis, fakeredis |
 
-# Update
-PUT /api/v1/products/{id}
-{
-    "name": "Updated Name",
-    "price": 89.99
-}
+Dependency versions are chosen deliberately, not just bumped to latest:
+`python-jose` 3.5.0 fixes CVE-2024-33663 (algorithm confusion); FastAPI jumped
+from the 0.115.x line straight to 0.141.x specifically to pull in a Starlette
+release patched against CVE-2025-62727 (a `Range`-header DoS) that FastAPI
+0.115.x's older Starlette pin can't take alone; `passlib` (unmaintained since
+2020) breaks outright on bcrypt ≥5 — rather than pin bcrypt back, `app/core/security.py`
+calls `bcrypt.hashpw`/`bcrypt.checkpw` directly and passlib was dropped.
 
-# Delete
-DELETE /api/v1/products/{id}
-```
-
-### Orders
-```python
-# Create
-POST /api/v1/orders
-{
-    "items": [
-        {"product_id": 1, "quantity": 2}
-    ],
-    "shipping_address_id": 1
-}
-
-# Read
-GET /api/v1/orders
-GET /api/v1/orders/{id}
-
-# Update (Status)
-PUT /api/v1/orders/{id}/status
-{
-    "status": "processing"
-}
-
-# Delete (Cancel)
-DELETE /api/v1/orders/{id}
-```
-
-### Users
-```python
-# Create
-POST /api/v1/users/register
-{
-    "email": "user@example.com",
-    "password": "secure_password",
-    "full_name": "John Doe"
-}
-
-# Read
-GET /api/v1/users/me
-GET /api/v1/users/{id} (admin only)
-
-# Update
-PUT /api/v1/users/me
-{
-    "full_name": "John Smith",
-    "phone": "+1234567890"
-}
-
-# Delete
-DELETE /api/v1/users/me
-```
-
-## Technical Stack
-
-- **Runtime**: Python 3.13
-- **Framework**: FastAPI 0.141.1 (Starlette 1.6.0)
-- **Database**: PostgreSQL with SQLAlchemy 2.0.52
-- **Caching**: Redis 8.1.0 (redis-py client)
-- **Task Queue**: Celery 5.6.3
-- **Authentication**: JWT (python-jose 3.5.0) with refresh tokens
-- **Password hashing**: bcrypt 5.0.0, called directly (no passlib wrapper)
-- **Email**: SMTP integration
-- **Documentation**: OpenAPI (Swagger)
-- **Packaging**: [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`)
-
-All dependencies track latest stable. Two version decisions are worth
-calling out because they weren't just "bump and go":
-- `python-jose` 3.3.0 had CVE-2024-33663 (algorithm confusion); 3.5.0 fixes it.
-- `fastapi` jumped from the 0.115.x line straight to 0.141.x specifically to
-  pull in a Starlette release patched against CVE-2025-62727 (a DoS via a
-  crafted `Range` header) - FastAPI 0.115.x pins an older Starlette that
-  can't take the fix alone.
-- `passlib` (last released 2020, unmaintained) breaks outright on bcrypt
-  5.x - hashing raises `ValueError: password cannot be longer than 72
-  bytes` for any password, because its bcrypt-version-detection shim relies
-  on an attribute bcrypt 5.x removed. Rather than pin bcrypt back to 4.x,
-  `app/core/security.py` now calls `bcrypt.hashpw`/`bcrypt.checkpw`
-  directly and passlib was dropped entirely.
-
-## Project Structure
-
-```
-app/
-├── api/                    # API endpoints
-│   ├── v1/                # API version 1
-│   │   ├── admin.py       # Admin endpoints
-│   │   ├── cart.py        # Shopping cart
-│   │   ├── orders.py      # Order management
-│   │   ├── products.py    # Product catalog
-│   │   ├── users.py       # User management
-│   │   └── legal.py       # Legal & GDPR
-│   └── deps.py            # Dependencies
-├── core/                  # Core functionality
-│   ├── config.py          # Settings
-│   ├── database.py        # DB setup
-│   ├── security.py        # Security
-│   └── logging_config.py  # Logging
-├── models/                # Database models
-├── schemas/               # Pydantic schemas
-├── services/             # Business logic
-└── main.py               # Entry point
-```
-
-## Quick Start (uv)
-
-### Prerequisites
-- [uv](https://docs.astral.sh/uv/getting-started/installation/)
-- PostgreSQL 15 and Redis 7 (or Docker, see below)
+## Quick start
 
 ```bash
-git clone <repository-url>
-cd fastapi-ecommerce
+git clone https://github.com/nadeko0/fastapi_e-commerce_backend.git
+cd fastapi_e-commerce_backend
 cp .env.example .env        # edit with your local DB/Redis/SMTP settings
-uv sync                     # creates .venv and installs pinned deps from uv.lock
+uv sync                     # creates .venv, installs pinned deps from uv.lock
 uv run alembic upgrade head
+uv run python scripts/seed_demo_data.py   # optional: populated demo catalog + admin user
 uv run python main.py       # or: uv run uvicorn app.main:app --reload
 ```
 
-Run the test suite with `uv run pytest --cov=app`.
+API docs at `http://localhost:8000/api/v1/docs` (Swagger) or `/redoc`.
+Run the test suite with `uv run pytest --cov=app`. See [SETUP.md](SETUP.md)
+for the full walkthrough (Postgres/Redis setup, migrations, the Postgres-only
+smoke test in `scripts/pg_smoke_test.py`, Docker).
 
-## Docker Setup
+## Docker
 
-The actual [`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml)
-in the repo root are the source of truth; they build the API image with `uv`
-(dependencies resolved from `uv.lock`, not re-resolved at build time) and run
-Postgres and Redis alongside it.
-
-### Running with Docker
-
-1. Build and start services:
 ```bash
-docker-compose up --build
+docker-compose up --build -d
+docker-compose exec api alembic upgrade head
+docker-compose exec api python scripts/seed_demo_data.py   # optional
 ```
 
-2. Run migrations:
-```bash
-docker-compose exec api alembic upgrade head
+[`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml) are
+the source of truth — they build the image with `uv` (deps resolved from
+`uv.lock`, not re-resolved at build time) and run Postgres + Redis alongside
+the API. This has been deployed and smoke-tested against a real server, not
+just built locally: healthy startup, migrations, the seed script, and a full
+login-and-fetch-products round trip all verified end to end. Two port
+settings matter and are intentionally separate — `PORT` in `.env` is the
+port uvicorn binds to *inside* the container (must stay `8000`, matching the
+Dockerfile's `HEALTHCHECK`); `DOCKER_API_PORT` is the host-published port,
+change that one if `8000` is already taken on your host.
+
+## Project structure
+
+```
+app/
+├── api/v1/          # Routers: users, products, cart, orders, admin, legal
+├── core/            # Settings, DB session, JWT/password logic, rate limiter
+├── models/          # SQLAlchemy ORM models
+├── schemas/         # Pydantic request/response schemas
+├── services/        # Redis, email, GDPR, payment (Stripe abstraction)
+├── tasks.py         # Celery tasks (email sending, cleanup, stats)
+└── main.py          # FastAPI app, middleware, /health
+migrations/          # Alembic migrations (tracked in git)
+scripts/             # seed_demo_data.py, pg_smoke_test.py
+tests/                # unit/ + integration/, pytest + fakeredis + hypothesis
 ```
 
 ## GDPR / Data Protection
@@ -267,39 +184,77 @@ implemented here targets the technical requirements of EU GDPR
 - **Data minimization (Art. 5(1)(c))** — no collection beyond what
   registration/checkout/delivery actually need.
 
-**Known gaps, deliberately not built** (see `.agent-notes/gdpr.md` for the
-full reasoning — that file is local/gitignored, not part of the repo):
-automatic deletion purely on retention-period expiry (only explicit erasure
-requests are acted on), Art. 18 restriction-of-processing as a distinct
-state, a separate Art. 21 objection endpoint (covered by the marketing
-toggle for the one unconditional objection right, Art. 21(2)), Art. 30
-records of processing and Art. 33/34 breach notification (both
-organizational/process documents, not app features), and field-level
-envelope encryption for crypto-shredding PII (the anonymize-in-place
-approach above reaches the same legal outcome without a KMS dependency).
+Deliberately not built: automatic deletion purely on retention-period expiry
+(only explicit erasure requests are acted on), Art. 18 restriction-of-processing
+as a distinct state, a separate Art. 21 objection endpoint (the one
+unconditional objection right, Art. 21(2), is already served by the
+marketing-consent toggle), Art. 30 records-of-processing and Art. 33/34
+breach notification (both organizational/process documents, not app
+features), and field-level envelope encryption for crypto-shredding PII (the
+anonymize-in-place approach above reaches the same legal outcome without a
+KMS dependency).
 
-## API Documentation
+## How this compares to mature commerce platforms
 
-- Swagger UI: `http://localhost:8000/api/v1/docs`
-- ReDoc: `http://localhost:8000/api/v1/redoc`
+Checked the architecture here against [Saleor](https://docs.saleor.io/),
+[Medusa](https://docs.medusajs.com/), and [Vendure](https://docs.vendure.io/)
+(docs/public source only — nothing cloned or copied, comparisons written
+from scratch):
 
-## Production Deployment Checklist
+- **Product/variant modeling.** Saleor and Medusa both split "product"
+  (template) from "variant" (purchasable SKU with its own price/stock).
+  `ProductVariant` here follows the same idea, added as a purely additive
+  extension — a product without variants still behaves exactly like a
+  simple product. It is **not** yet wired into cart/checkout, which still
+  reads and decrements `Product.stock_quantity` directly; that's a real,
+  larger integration (idempotency keys, atomic decrement, and order-line
+  pricing all currently assume product-level granularity), deliberately
+  scoped out rather than rushed in.
+- **Order state.** Vendure formalizes order/payment transitions as an
+  explicit pluggable FSM; Saleor separates whole-order status from a
+  per-fulfillment status (since one order can ship in several parts). This
+  project fulfills an order as a single unit, so one `OrderStatus` enum plus
+  a hardcoded adjacency check is a proportionate substitute — it would need
+  to grow toward Vendure's approach only if partial fulfillment became a
+  real requirement.
+- **Payment layering.** `app/services/payment/`'s `PaymentProvider`
+  abstraction (rather than calling a payment SDK directly from route
+  handlers) matches how Saleor and Vendure isolate payment gateways so a
+  second provider could be added without touching order logic. The honest
+  caveat: because `StripePaymentProvider` is a deterministic mock, this has
+  never been exercised against real network failure modes (partial
+  timeouts, out-of-order webhook delivery, rate limiting) the way a
+  production integration eventually would be.
 
-- [ ] Set `ENVIRONMENT=production` in .env
-- [ ] Configure proper logging
-- [ ] Set up monitoring (e.g., Prometheus + Grafana)
-- [ ] Configure proper CORS origins
-- [ ] Use secure SMTP settings
-- [ ] Set up database backups
-- [ ] Configure rate limiting
-- [ ] Set up proper caching strategies
-- [ ] Enable HTTPS
-- [ ] Set up CI/CD pipeline
-- [ ] Configure error tracking (e.g., Sentry)
-- [ ] Set up load balancing
-- [ ] Configure database connection pooling
-- [ ] Set up automated backups
-- [ ] Configure monitoring alerts
+## Known limitations
+
+- **Stripe integration is fully mocked.** No real Stripe account exists for
+  this project; `StripePaymentProvider` never makes a network call. The
+  abstraction and the failure-mode tests (declines, timeouts, idempotency,
+  webhook signature checks) are real, but none of it has been run against
+  Stripe's actual API or sandbox.
+- **`ProductVariant` is not wired into checkout.** See the comparison
+  section above — cart/orders still operate at the product level.
+- **No `/refresh` token endpoint.** `create_refresh_token` issues a token at
+  login, but nothing currently exchanges it for a new access token — a
+  15-minute access token requires a full re-login once it expires. Not a
+  vulnerability (there's nothing to gain from a leaked, unusable refresh
+  token today), but a real gap if session extension is ever needed.
+- **A real, reproduced race condition in cart quantity updates.** Concurrent
+  `add-to-cart` calls for the same product do a plain Redis GET-then-SETEX
+  with no compare-and-set guard, and can lose updates under real contention
+  — reproduced with concurrent threads, not theoretical. Captured as a
+  non-fatal `xfail` test (`test_concurrent_add_to_cart_can_lose_updates` in
+  `tests/integration/test_cart.py`) rather than silently ignored; fixing it
+  needs an atomic primitive added to `app/services/redis.py`.
+- **`/health` is a single combined endpoint**, not split into
+  liveness/readiness. Deliberate: nothing in this project's deployment
+  target (a single Docker Compose stack, no k8s) consumes that distinction.
+- **No dedicated CI Postgres service.** CI runs the test suite against an
+  in-memory SQLite database for speed; Postgres-only behavior (ARRAY
+  columns, JSONB path filtering, partial unique indexes) is instead covered
+  by `scripts/pg_smoke_test.py`, run manually against a real Postgres
+  instance (see [SETUP.md](SETUP.md)) — not on every push.
 
 ## Contributing
 
@@ -307,8 +262,8 @@ approach above reaches the same legal outcome without a KMS dependency).
 2. Create a feature branch
 3. Commit your changes
 4. Push to the branch
-5. Create a Pull Request
+5. Open a Pull Request
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT — see [LICENSE](LICENSE).
