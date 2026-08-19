@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
+from app.core.database import _build_connect_args
 from app.core.security import get_password_hash
 from app.models.order import Order
 from app.models.order_items import OrderItem
@@ -19,9 +20,30 @@ from app.services.email import (
 )
 from app.services.redis import RedisService
 
+
+def build_redis_broker_url(
+    host: str, port: int, db: int, password: str | None = None
+) -> str:
+    """Build a redis:// broker URL, including auth when a password is
+    configured. docker-compose.yml's redis service runs with
+    --requirepass ${REDIS_PASSWORD} (app/services/redis.py's connection
+    pool already authenticates with it), but this URL previously carried
+    no credentials at all - a real worker pointed at that
+    password-protected Redis would fail to connect. Local dev commonly
+    runs Redis without a password, so an empty/None password must not
+    produce a broken `redis://:@host:port/db` URL with a dangling empty
+    auth segment - the `:<password>@` segment is only included when a
+    password is actually set.
+    """
+    auth = f':{password}@' if password else ''
+    return f'redis://{auth}{host}:{port}/{db}'
+
+
 celery = Celery(
     'ecommerce_tasks',
-    broker=f'redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}'
+    broker=build_redis_broker_url(
+        settings.REDIS_HOST, settings.REDIS_PORT, settings.REDIS_DB, settings.REDIS_PASSWORD
+    ),
 )
 
 celery.conf.update(
@@ -57,7 +79,25 @@ celery.conf.update(
     task_soft_time_limit=240,
 )
 
-engine = create_engine(settings.DATABASE_URI)
+# Celery has its own DB engine, separate from app/core/database.py's (the
+# FastAPI app and the worker are different processes) - it must not skip the
+# same idle_in_transaction_session_timeout/statement_timeout/pool_pre_ping
+# defense-in-depth that engine has (see the long comment on
+# _build_connect_args in app/core/database.py for why). A task that raises,
+# times out (task_time_limit above), or is killed mid-transaction leaks a
+# connection exactly the same way a cancelled request can - confirmed live:
+# running this worker locally left 2 Postgres connections stuck permanently
+# idle-in-transaction (still stuck 38+ minutes later) because this engine
+# had no timeout protection at all.
+engine = create_engine(
+    settings.DATABASE_URI,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
+    pool_pre_ping=settings.DB_POOL_PRE_PING,
+    pool_recycle=3600,
+    connect_args=_build_connect_args(settings.DATABASE_URI),
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():

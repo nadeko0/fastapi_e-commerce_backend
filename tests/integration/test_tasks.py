@@ -176,6 +176,42 @@ def test_check_low_stock_sends_alert_when_products_below_threshold(
     assert sent[0][1] == [low_stock_product.id]
 
 
+def test_build_redis_broker_url_includes_auth_when_password_set():
+    url = tasks.build_redis_broker_url("redis-host", 6379, 0, "s3cret")
+
+    assert url == "redis://:s3cret@redis-host:6379/0"
+
+
+def test_build_redis_broker_url_omits_auth_when_password_none():
+    url = tasks.build_redis_broker_url("redis-host", 6379, 0, None)
+
+    assert url == "redis://redis-host:6379/0"
+    assert "@" not in url
+
+
+def test_build_redis_broker_url_omits_auth_when_password_empty_string():
+    url = tasks.build_redis_broker_url("redis-host", 6379, 0, "")
+
+    assert url == "redis://redis-host:6379/0"
+    assert "@" not in url
+
+
+def test_beat_schedule_registers_all_periodic_tasks():
+    schedule = tasks.celery.conf.beat_schedule
+
+    assert schedule["cleanup-expired-carts"]["task"] == "app.tasks.cleanup_expired_carts"
+    assert schedule["cleanup-expired-carts"]["schedule"] == tasks.timedelta(hours=1)
+
+    assert schedule["cleanup-inactive-accounts"]["task"] == "app.tasks.cleanup_inactive_accounts"
+    assert schedule["cleanup-inactive-accounts"]["schedule"] == tasks.timedelta(days=1)
+
+    assert schedule["update-product-stats"]["task"] == "app.tasks.update_product_stats"
+    assert schedule["update-product-stats"]["schedule"] == tasks.timedelta(hours=1)
+
+    assert schedule["check-low-stock"]["task"] == "app.tasks.check_low_stock"
+    assert schedule["check-low-stock"]["schedule"] == tasks.timedelta(hours=4)
+
+
 def test_check_low_stock_sends_nothing_when_all_products_well_stocked(
     db_session, tasks_db, monkeypatch
 ):

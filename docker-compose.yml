@@ -36,6 +36,52 @@ services:
       retries: 3
       start_period: 40s
 
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["celery", "-A", "app.tasks", "worker", "--loglevel=info"]
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks inspect ping -d celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["celery", "-A", "app.tasks", "beat", "--loglevel=info"]
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: unless-stopped
+    # Without this, celery-beat inherits the Dockerfile's HEALTHCHECK (an
+    # HTTP GET to :8000/health) built for the api image - beat runs no web
+    # server, so that check always fails and Docker permanently reports it
+    # "unhealthy" even when beat itself is fine. There's no equivalent
+    # non-invasive liveness probe for beat (unlike celery-worker's `celery
+    # inspect ping`), so disable the inherited check instead of failing it.
+    healthcheck:
+      disable: true
+
   db:
     image: postgres:15-alpine
     volumes:
