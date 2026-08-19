@@ -1,16 +1,26 @@
-version: '3.8'
-
 services:
   api:
     build: 
       context: .
       dockerfile: Dockerfile
     ports:
-      - "${PORT}:8000"
+      # Host-exposed port (DOCKER_API_PORT) is deliberately a separate
+      # variable from the app's own PORT setting: PORT also controls what
+      # port uvicorn binds to *inside* the container (app/core/config.py,
+      # read by main.py) - reusing the same variable for both meant
+      # changing the host-published port (e.g. to avoid a conflict with
+      # another service on the same host) also silently changed the
+      # container-internal bind port away from 8000, which this file's own
+      # hardcoded container-side "8000" and the Dockerfile's HEALTHCHECK
+      # both still assumed. Confirmed by actually deploying this image to a
+      # real server: the container ran and reported healthy startup, but
+      # nothing was reachable on the mapped host port because uvicorn was
+      # listening on a different port than the one being forwarded to.
+      - "${DOCKER_API_PORT:-8000}:8000"
     env_file:
       - .env
     volumes:
-      - ./logs:/app/logs
+      - api_logs:/app/logs
     depends_on:
       db:
         condition: service_healthy
@@ -75,3 +85,12 @@ volumes:
     name: ${DOCKER_NETWORK_NAME:-ecommerce}-postgres-data
   redis_data:
     name: ${DOCKER_NETWORK_NAME:-ecommerce}-redis-data
+  # Named volume, not a ./logs bind mount: a bind mount always takes the
+  # ownership of the host directory, which Docker auto-creates as root on
+  # first `up` - the container's non-root appuser (Dockerfile) then can't
+  # write app.log and crashes on startup. A named volume initializes from
+  # the image's own /app/logs (already chown'd to appuser in the
+  # Dockerfile) instead of the host filesystem, avoiding the mismatch.
+  # Confirmed by actually deploying this Docker image to a real server.
+  api_logs:
+    name: ${DOCKER_NETWORK_NAME:-ecommerce}-api-logs
