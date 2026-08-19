@@ -176,7 +176,17 @@ async def list_products(
 
 
     if filter_params.sort_by:
-        field, order = filter_params.sort_by.split('_')
+        # rsplit(..., 1), not split('_'): ProductFilter.sort_by's own regex
+        # ("^(name|price|created_at)_(asc|desc)$") allows "created_at_desc",
+        # whose field name itself contains an underscore. split('_') on that
+        # yields 3 pieces ('created', 'at', 'desc'), and unpacking into
+        # (field, order) raised an unhandled ValueError - a 500 for a value
+        # the schema explicitly documents as valid. rsplit from the right
+        # with maxsplit=1 always yields exactly (field, order) regardless of
+        # how many underscores the field name contains. Mirrors
+        # app/api/v1/admin.py's list_orders, which already uses rsplit for
+        # the same reason.
+        field, order = filter_params.sort_by.rsplit('_', 1)
         column = getattr(Product, field)
         query = query.order_by(column.desc() if order == 'desc' else column.asc())
 

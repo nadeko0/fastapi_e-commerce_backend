@@ -407,6 +407,47 @@ def test_admin_create_variant_rejects_duplicate_sku(client, db_session):
     assert response.status_code == 409
 
 
+def test_admin_create_variant_race_returns_409_not_500(client, db_session, monkeypatch):
+    # Regression test: create_product_variant's SKU-uniqueness check is a
+    # plain read-then-write (query for an existing SKU, then insert) with no
+    # row locking - two concurrent requests for the same never-before-seen
+    # SKU can both pass the pre-check before either commits, leaving the
+    # DB's unique constraint on ProductVariant.sku as the real guarantee.
+    # Before this fix, the loser's IntegrityError from that constraint was
+    # uncaught in the endpoint: still caught safely upstream by
+    # app.core.database.get_db's session_scope (so no raw SQL ever leaked to
+    # the client), but surfaced as a generic 500 instead of the same 409 the
+    # sequential-duplicate case already returns.
+    #
+    # Forcing genuine thread interleaving against this test suite's single
+    # shared SQLite connection (StaticPool) is unreliable (see the identical
+    # note in test_payment.py's webhook concurrency test), so the race
+    # window is instead forced deterministically: monkeypatch the pre-check
+    # helper to report "no conflict" on the second call despite a real
+    # conflicting row already committed, exercising exactly the code path a
+    # true race would hit - the commit-time IntegrityError catch.
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+
+    first = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "RACE-SKU"},
+        headers=_auth_headers(admin_token),
+    )
+    assert first.status_code == 200
+
+    monkeypatch.setattr("app.api.v1.admin._variant_sku_exists", lambda db, sku: False)
+
+    second = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "RACE-SKU"},
+        headers=_auth_headers(admin_token),
+    )
+    assert second.status_code == 409
+
+
 def test_admin_lists_product_variants(client, db_session):
     admin = _make_admin(db_session)
     admin_token = _login_as(client, admin.email, "AdminPass1")

@@ -127,6 +127,38 @@ def test_list_products_paginates(client, db_session):
     assert body["has_more"] is True
 
 
+def test_list_products_sorts_by_price(client, db_session):
+    category = _make_category(db_session)
+    _make_product(db_session, category.id, name="Pricey", price="99.99")
+    _make_product(db_session, category.id, name="Cheap", price="1.00")
+
+    response = client.get(f"{CATALOG_PREFIX}/products", params={"sort_by": "price_asc"})
+
+    assert response.status_code == 200
+    names = [item["name"] for item in response.json()["data"]["items"]]
+    assert names == ["Cheap", "Pricey"]
+
+
+def test_list_products_sorts_by_created_at_does_not_500(client, db_session):
+    # Regression test: sort_by used field, order = sort_by.split('_'),
+    # but ProductFilter.sort_by's own regex
+    # ("^(name|price|created_at)_(asc|desc)$") allows "created_at_desc" -
+    # a field name that itself contains an underscore. split('_') on that
+    # yields 3 pieces, and unpacking into two variables raised an unhandled
+    # ValueError (500) for a value the schema explicitly documents as
+    # valid. rsplit('_', 1) fixes this the same way
+    # app/api/v1/admin.py's list_orders already handles its own sort_by.
+    category = _make_category(db_session)
+    _make_product(db_session, category.id, name="First")
+    _make_product(db_session, category.id, name="Second")
+
+    response = client.get(f"{CATALOG_PREFIX}/products", params={"sort_by": "created_at_desc"})
+
+    assert response.status_code == 200
+    names = [item["name"] for item in response.json()["data"]["items"]]
+    assert names == ["Second", "First"]
+
+
 def test_list_products_filters_by_min_price(client, db_session):
     category = _make_category(db_session)
     _make_product(db_session, category.id, name="Cheap", price="1.00")

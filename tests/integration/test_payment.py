@@ -668,6 +668,72 @@ def test_full_refund_marks_order_refunded(client, db_session):
     assert payments[0].amount_refunded == payments[0].amount
 
 
+def test_refund_with_idempotency_key_is_not_double_applied(client, db_session):
+    # Regression test: refund_payment previously accepted no Idempotency-Key
+    # at all, unlike /pay and /checkout-session - a retried refund request
+    # (client timeout, double-click "Refund") created a second, distinct
+    # refund each time instead of returning the first one's result. Two
+    # identical requests with the same key must be applied exactly once.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    admin = _create_admin(db_session)
+
+    client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order),
+        headers=setup["headers"],
+    )
+
+    headers_with_key = {**admin["headers"], "Idempotency-Key": "refund-key-1"}
+
+    first = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/refund",
+        json={"amount": "5.00"},
+        headers=headers_with_key,
+    )
+    second = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/refund",
+        json={"amount": "5.00"},
+        headers=headers_with_key,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["data"]["id"] == second.json()["data"]["id"]
+
+    payments = _get_payments(db_session, order["id"])
+    # Only one $5.00 refund actually applied, not two.
+    assert payments[0].amount_refunded == 500
+
+
+def test_refund_with_reused_idempotency_key_and_different_amount_is_rejected(client, db_session):
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    admin = _create_admin(db_session)
+
+    client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order),
+        headers=setup["headers"],
+    )
+
+    headers_with_key = {**admin["headers"], "Idempotency-Key": "refund-key-2"}
+
+    first = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/refund",
+        json={"amount": "5.00"},
+        headers=headers_with_key,
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/refund",
+        json={"amount": "3.00"},
+        headers=headers_with_key,
+    )
+    assert second.status_code == 409
+
+
 def test_refund_requires_a_paid_order(client, db_session):
     setup = _create_verified_buyer_with_order(client, db_session)
     order = setup["order"]

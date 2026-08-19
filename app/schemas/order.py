@@ -185,6 +185,26 @@ class CheckoutSessionCreate(BaseModel):
     success_url: Optional[str] = None
     cancel_url: Optional[str] = None
 
+    # These are client-controlled redirect targets with no frontend-origin
+    # allowlist available yet (no FRONTEND_URL setting exists), so this is
+    # deliberately minimal defense-in-depth rather than a full fix: reject
+    # anything that isn't a plain http(s) URL up front (400, not a
+    # provider-side error) so a caller can't hand out an authenticated,
+    # Stripe-hosted payment link that redirects to a javascript:/data:/other
+    # non-http(s) URI after a real payment completes. It does NOT restrict
+    # the URL to this site's own origin - open-redirect-style reuse of an
+    # arbitrary http(s) URL is still possible and is a known, unresolved gap
+    # (see .agent-notes/part_a_self_inventory.md) pending a real frontend
+    # origin to allowlist against.
+    @validator('success_url', 'cancel_url')
+    def validate_redirect_scheme(cls, v):
+        if v is None:
+            return v
+        scheme = v.split(':', 1)[0].lower() if ':' in v else ''
+        if scheme not in ('http', 'https'):
+            raise ValueError('must be an http:// or https:// URL')
+        return v
+
 class CheckoutSessionResponse(BaseModel):
     order_id: int
     payment_id: int

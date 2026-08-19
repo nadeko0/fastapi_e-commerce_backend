@@ -127,6 +127,7 @@ class StripePaymentProvider(PaymentProvider):
     _intents_by_id: Dict[str, PaymentIntent] = {}
     _sessions_by_key: Dict[str, CheckoutSession] = {}
     _sessions_by_id: Dict[str, CheckoutSession] = {}
+    _refunds_by_key: Dict[str, Refund] = {}
 
     @classmethod
     def reset_mock_state(cls) -> None:
@@ -134,6 +135,7 @@ class StripePaymentProvider(PaymentProvider):
         cls._intents_by_id.clear()
         cls._sessions_by_key.clear()
         cls._sessions_by_id.clear()
+        cls._refunds_by_key.clear()
 
     def _simulate_network_call(self) -> None:
         """No-op hook standing in for the real HTTP call to api.stripe.com.
@@ -343,6 +345,26 @@ class StripePaymentProvider(PaymentProvider):
 
         self._simulate_network_call()
 
+        # Same idempotency-cache pattern as create_payment_intent/
+        # create_checkout_session above: without this, a caller that retries
+        # a refund request (client timeout, double-click "Refund") with the
+        # same Idempotency-Key would create a second, distinct Refund each
+        # time it retries - real Stripe dedupes by idempotency key on its
+        # servers, so the mock must too, or tests (and callers) relying on
+        # that guarantee would pass against the mock while a real
+        # integration double-refunds.
+        if idempotency_key is not None:
+            cached = self._refunds_by_key.get(idempotency_key)
+            if cached is not None:
+                if cached.payment_intent != payment_intent_id or (
+                    amount is not None and cached.amount != amount
+                ):
+                    raise IdempotencyError(
+                        f"Idempotency key '{idempotency_key}' has already been used "
+                        "with different request parameters"
+                    )
+                return cached
+
         intent = self._intents_by_id.get(payment_intent_id)
         if intent is None:
             raise CardError(
@@ -363,13 +385,16 @@ class StripePaymentProvider(PaymentProvider):
             )
 
         intent.amount_refunded += refund_amount
-        return Refund(
+        refund = Refund(
             id=f"re_{uuid.uuid4().hex[:24]}",
             payment_intent=payment_intent_id,
             amount=refund_amount,
             currency=intent.currency,
             status=RefundStatus.SUCCEEDED,
         )
+        if idempotency_key is not None:
+            self._refunds_by_key[idempotency_key] = refund
+        return refund
 
     # -- Webhooks --------------------------------------------------------
 

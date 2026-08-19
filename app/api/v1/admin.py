@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import status as http_status
 from sqlalchemy import desc, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import get_db
@@ -425,6 +426,18 @@ def _get_product_or_404(db: Session, product_id: int) -> Product:
     return product
 
 
+def _variant_sku_exists(db: Session, sku: str) -> bool:
+    """Pre-check only - the real guarantee against a duplicate SKU is the
+    unique constraint on ProductVariant.sku, since this read-then-write
+    check has a race window between two concurrent requests (see the
+    IntegrityError handling in create_product_variant/update_product_variant
+    below). Factored out mainly so tests can force the race window (make
+    this return False despite a real conflicting row already existing)
+    without needing genuine thread interleaving against the test suite's
+    single shared SQLite connection."""
+    return db.query(ProductVariant).filter(ProductVariant.sku == sku).first() is not None
+
+
 @router.post(
     "/products/{product_id}/variants",
     response_model=APIResponse[ProductVariantResponse],
@@ -444,7 +457,7 @@ async def create_product_variant(
 
     _get_product_or_404(db, product_id)
 
-    if db.query(ProductVariant).filter(ProductVariant.sku == variant.sku).first():
+    if _variant_sku_exists(db, variant.sku):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A variant with this SKU already exists"
@@ -452,7 +465,23 @@ async def create_product_variant(
 
     db_variant = ProductVariant(product_id=product_id, **variant.dict())
     db.add(db_variant)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # The pre-check above is a plain read-then-write: two concurrent
+        # requests creating a variant with the same SKU can both pass it
+        # before either commits, so the real guarantee is the DB's unique
+        # constraint on ProductVariant.sku, not the pre-check. Without this
+        # catch, the loser's IntegrityError (a SQLAlchemyError) would still
+        # be caught by app.core.database.get_db's session_scope - so it
+        # never leaks raw SQL to the client - but would surface as a generic
+        # 500 instead of the same 409 the pre-check path already returns for
+        # the sequential case.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A variant with this SKU already exists"
+        )
     db.refresh(db_variant)
 
     return APIResponse.success_response(ProductVariantResponse.from_orm(db_variant))
@@ -514,7 +543,7 @@ async def update_product_variant(
 
     update_data = variant.dict(exclude_unset=True)
     if "sku" in update_data and update_data["sku"] != db_variant.sku:
-        if db.query(ProductVariant).filter(ProductVariant.sku == update_data["sku"]).first():
+        if _variant_sku_exists(db, update_data["sku"]):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A variant with this SKU already exists"
@@ -524,7 +553,17 @@ async def update_product_variant(
         setattr(db_variant, field, value)
 
     db_variant.updated_at = datetime.utcnow()
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Same read-then-write race as create_product_variant above: the
+        # "sku" != db_variant.sku pre-check can be stale by the time this
+        # commits if a concurrent request claimed the same SKU in between.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A variant with this SKU already exists"
+        )
     db.refresh(db_variant)
 
     return APIResponse.success_response(ProductVariantResponse.from_orm(db_variant))
