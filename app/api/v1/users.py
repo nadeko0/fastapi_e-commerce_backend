@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -17,10 +17,10 @@ from app.core.security import (
     generate_email_verification_token,
     generate_password_reset_token,
     get_current_active_user,
-    get_current_user,
     get_password_hash_async,
     invalidate_tokens_issued_before_now,
     issue_refresh_token,
+    oauth2_scheme,
     rotate_refresh_token,
     verify_email_token,
     verify_password_async,
@@ -71,7 +71,13 @@ from app.services.redis import RedisService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
+# oauth2_scheme is imported from app.core.security rather than redefined here
+# with a second OAuth2PasswordBearer instance: a prior local definition used
+# tokenUrl="users/login" (missing the /api/v1 prefix, unlike security.py's
+# f"{settings.API_V1_STR}/users/login") - functionally harmless for token
+# validation itself (that only inspects the bearer token, not the URL), but
+# wrong for the Swagger "Authorize" button's login request and an
+# unnecessary second source of truth for the same value.
 
 
 
@@ -206,7 +212,7 @@ async def verify_email(
     responses={400: {"description": "Email already verified"}},
 )
 async def resend_verification_email(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     background_tasks: BackgroundTasks = None,
 ):
     """Resend the email verification link to the current user."""

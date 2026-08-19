@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -45,6 +46,8 @@ from app.services.payment.exceptions import (
 )
 from app.services.payment.types import PaymentIntentStatus
 from app.services.redis import RedisService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -775,6 +778,7 @@ async def create_checkout_session(
         400: {"description": "Order not paid, or no successful payment found"},
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
+        409: {"description": "Idempotency key already used with different refund parameters"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
 )
@@ -784,8 +788,20 @@ async def refund_payment(
     current_user: User = Depends(get_current_admin_user),  # Refunds are a support/admin action
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_payment_provider),
+    redis: RedisService = Depends(),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
-    """Issue a full or partial refund for a paid order (admin only)."""
+    """Issue a full or partial refund for a paid order (admin only).
+
+    Unlike /pay and /checkout-session, there is no local Payment-row table to
+    key a pre-check off of (Payment rows model charge attempts, not refunds,
+    and a single payment can be refunded multiple times). The
+    Idempotency-Key header is instead forwarded to the payment provider
+    as-is, which is where real Stripe already dedupes refund requests by key
+    - see StripePaymentProvider.create_refund's own idempotency cache, which
+    mirrors that behavior for the mock. Without this, a retried refund
+    request (client timeout, double-click "Refund") would create a second,
+    distinct refund instead of returning the first one's result."""
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(
@@ -819,23 +835,50 @@ async def refund_payment(
         refund = provider.create_refund(
             payment_intent_id=payment_row.payment_intent_id,
             amount=refund_amount_cents,
+            idempotency_key=idempotency_key,
         )
     except PaymentProviderTimeoutError:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
         )
+    except IdempotencyError:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Idempotency key already used with different refund parameters",
+        )
     except (CardError, InvalidRequestError) as e:
         raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message)
 
-    payment_row.amount_refunded += refund.amount
-    is_full_refund = payment_row.amount_refunded >= payment_row.amount
-    # A full refund moves the order to REFUNDED; a partial refund leaves it
-    # PAID (the order was fulfilled - only part of the charge was returned).
-    if is_full_refund:
-        order.payment_status = PaymentStatus.REFUNDED
-    order.updated_at = datetime.utcnow()
-    db.commit()
+    # provider.create_refund's own idempotency cache means a retried request
+    # with the same Idempotency-Key returns the *same* refund.id instead of
+    # creating a new one - but that alone doesn't stop this endpoint from
+    # double-applying it to payment_row.amount_refunded, since this code
+    # would otherwise run unconditionally on both the original call and the
+    # replay. SETNX on the refund's own id guards the local bookkeeping the
+    # same way the provider guards its own side: the second call sees its
+    # key already set and skips straight to returning the (unchanged)
+    # current state instead of incrementing amount_refunded a second time.
+    # Fails open (treats as new/never-applied) on a Redis error - the
+    # provider-level guard above already prevents refunding more than the
+    # original charge, so the worst case here is only ever this
+    # bookkeeping-accuracy layer, not an actual double refund at Stripe.
+    try:
+        already_applied = not redis._redis.set(f"refund_applied:{refund.id}", "1", nx=True)
+    except Exception as e:
+        logger.error("Redis error guarding refund idempotency for %s: %s", refund.id, e)
+        already_applied = False
+
+    if not already_applied:
+        payment_row.amount_refunded += refund.amount
+        is_full_refund = payment_row.amount_refunded >= payment_row.amount
+        # A full refund moves the order to REFUNDED; a partial refund leaves
+        # it PAID (the order was fulfilled - only part of the charge was
+        # returned).
+        if is_full_refund:
+            order.payment_status = PaymentStatus.REFUNDED
+        order.updated_at = datetime.utcnow()
+        db.commit()
 
     return APIResponse.success_response(RefundResponse(
         id=refund.id,

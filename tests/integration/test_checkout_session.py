@@ -266,6 +266,36 @@ class TestCreateCheckoutSessionEndpoint:
         payments = _get_payments(db_session, order["id"])
         assert len(payments) == 1
 
+    @pytest.mark.parametrize("field", ["success_url", "cancel_url"])
+    @pytest.mark.parametrize(
+        "bad_url",
+        [
+            "javascript:alert(document.cookie)",
+            "data:text/html,<script>alert(1)</script>",
+            "ftp://example.com/whatever",
+            "not-a-url-at-all",
+        ],
+    )
+    def test_rejects_non_http_redirect_urls(self, client, db_session, field, bad_url):
+        # success_url/cancel_url are client-supplied redirect targets Stripe
+        # sends the customer's browser to after a real payment - a
+        # non-http(s) scheme here has no legitimate use and must be rejected
+        # up front (422) rather than passed through to the payment provider.
+        setup = _create_verified_buyer_with_order(client, db_session)
+        order = setup["order"]
+
+        payload = {
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+        }
+        payload[field] = bad_url
+
+        response = client.post(
+            CHECKOUT_SESSION_URL(order["id"]), json=payload, headers=setup["headers"]
+        )
+
+        assert response.status_code == 422
+
 
 # -- Webhook: checkout.session.* ----------------------------------------------
 

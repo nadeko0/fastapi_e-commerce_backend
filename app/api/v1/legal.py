@@ -265,7 +265,13 @@ async def update_user_consent(
     updated_consents = gdpr_service.update_user_consent(
         user=current_user,
         consent_update=consent_update,
-        ip_address=request.client.host,
+        # request.client can be None (e.g. some ASGI transports/test
+        # clients don't set it) - every other endpoint in this codebase that
+        # records an IP address (see register_user/update_consent in
+        # app/api/v1/users.py) guards against that instead of assuming
+        # .client is always present, which would otherwise raise
+        # AttributeError and turn a routine consent update into a 500.
+        ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent")
     )
 

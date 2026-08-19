@@ -90,6 +90,32 @@ def test_update_consent_updates_marketing_preference(client):
     assert body["data"]["updated_consents"]["marketing"] is True
 
 
+def test_update_consent_succeeds_when_request_has_no_client(client, monkeypatch):
+    # Regression test: update_user_consent used to read request.client.host
+    # unguarded. request.client can be None (some ASGI transports don't set
+    # it - Starlette's own docs note this), which would raise
+    # AttributeError and turn a routine consent update into a 500, unlike
+    # every other endpoint recording an IP address (see register_user/
+    # update_consent in app/api/v1/users.py), which already guards against
+    # this with `request.client.host if request.client else None`.
+    from starlette.requests import Request
+
+    monkeypatch.setattr(Request, "client", property(lambda self: None))
+
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/consent",
+        json={"marketing_consent": True, "privacy_policy_accepted": True},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_envelope(body)
+    assert body["data"]["updated_consents"]["marketing"] is True
+
+
 def test_data_request_export_returns_processing_status(client, monkeypatch):
     monkeypatch.setattr(
         "app.services.email.send_gdpr_request_received", lambda *a, **k: True
