@@ -64,7 +64,22 @@ models) and `scripts/pg_smoke_test.py` (see below). If you change a model,
 regenerate with `uv run alembic revision --autogenerate -m "description"`
 and re-run `alembic check` before committing the new revision.
 
-7. **(Optional) Run the Postgres-specific smoke test**
+7. **(Optional) Seed demo data**
+
+To get a working catalog to develop against without hand-creating
+categories/products, run the demo seed script after migrating:
+```bash
+uv run python scripts/seed_demo_data.py
+```
+This creates a small illustrative category tree (a generic "general
+store" catalog - replace it with your own domain), a dozen or so
+products (a couple with `ProductVariant`s), and one admin user plus one
+regular user. Credentials are generated fresh each run and printed to
+stdout - they are not stored anywhere, so save them from the terminal
+output. Safe to re-run: existing categories/products/users (matched by
+name/email) are skipped rather than duplicated.
+
+8. **(Optional) Run the Postgres-specific smoke test**
 
 The main test suite (`uv run pytest`) runs against an in-memory SQLite
 database for speed - it does not have Postgres available and cannot
@@ -77,7 +92,7 @@ uv run python scripts/pg_smoke_test.py
 This TRUNCATEs the tables it touches - point it at a throwaway database,
 never a real one.
 
-8. **Start Redis Server**
+9. **Start Redis Server**
 ```bash
 # Windows (if using WSL)
 wsl sudo service redis-server start
@@ -86,7 +101,7 @@ wsl sudo service redis-server start
 sudo service redis-server start
 ```
 
-9. **Run the Application**
+10. **Run the Application**
 ```bash
 uv run python main.py
 # or: uv run uvicorn app.main:app --reload
@@ -124,9 +139,9 @@ docker-compose ps
 docker-compose exec api alembic upgrade head
 ```
 
-5. **Create Initial Admin User**
+5. **(Optional) Seed Demo Data (creates an admin user, among other things)**
 ```bash
-docker-compose exec api python -m scripts.create_admin
+docker-compose exec api python scripts/seed_demo_data.py
 ```
 
 ## Development Workflow
@@ -190,18 +205,6 @@ redis-cli ping
    - Check database connection settings
    - Verify migration files exist
 
-## Monitoring
-
-### Prometheus & Grafana (Optional)
-1. Enable monitoring services:
-```bash
-docker-compose --profile monitoring up -d
-```
-
-2. Access monitoring:
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000 (admin/admin)
-
 ## Production Deployment
 
 1. **Update Environment Variables**
@@ -246,6 +249,5 @@ docker-compose exec db psql -U postgres ecommerce < backup.sql
 ## Support
 
 For technical issues:
-- Create an issue in the repository
-- Contact technical support: {TECHNICAL_CONTACT}
+- Open an issue in the repository
 - Check the logs: `docker-compose logs -f service_name`
