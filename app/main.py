@@ -1,8 +1,6 @@
 import logging
-import signal
-import sys
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
@@ -30,7 +28,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.limiter = RateLimiter()
 
     async def dispatch(self, request: Request, call_next):
-        await self.limiter.check_rate_limit(request)
+        # Starlette builds its middleware stack as ServerErrorMiddleware ->
+        # user middleware (this one included) -> ExceptionMiddleware ->
+        # router, so this middleware sits *outside* ExceptionMiddleware.
+        # An HTTPException raised here (e.g. the 429 from check_rate_limit)
+        # is therefore never converted to its intended status/body by
+        # ExceptionMiddleware - it falls through to ServerErrorMiddleware
+        # and becomes a generic, unhelpful 500. That silently defeated the
+        # login rate limiter's 429 response in production: exceeding the
+        # limit returned "500 Internal Server Error" instead of 429 with
+        # the retry_after/limit detail. Catch it here and build the
+        # response ourselves.
+        try:
+            await self.limiter.check_rate_limit(request)
+        except HTTPException as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+                headers=exc.headers,
+            )
         return await call_next(request)
 logger.info("Initializing FastAPI application with rate limiting")
 app = FastAPI(
@@ -98,13 +114,17 @@ def cleanup():
 
     logger.info("Graceful shutdown completed")
 
-def signal_handler(signum, frame):
-    logger.info(f"Received signal {signum}")
-    cleanup()
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+# No custom SIGINT/SIGTERM handlers here: uvicorn's own Server already
+# installs signal handlers for both signals and performs a graceful
+# shutdown - it stops accepting new connections, lets in-flight requests
+# finish (up to its graceful-shutdown timeout), *then* runs the ASGI
+# lifespan "shutdown" phase, which is what triggers the shutdown_event
+# below. Registering our own signal.signal() handlers here previously
+# raced with that: our handler called sys.exit(0) as soon as cleanup()
+# returned, with no regard for requests still in flight, and could run
+# before or instead of uvicorn's own handler depending on import timing.
+# That's strictly worse than doing nothing and letting uvicorn's handling
+# (which this app already relies on via the shutdown event) do its job.
 app.include_router(users.router, prefix=settings.API_V1_STR)
 app.include_router(products.router, prefix=settings.API_V1_STR)
 app.include_router(orders.router, prefix=settings.API_V1_STR)

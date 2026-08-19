@@ -23,19 +23,37 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 def get_password_hash(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return bcrypt.hashpw(
+        password.encode("utf-8"), bcrypt.gensalt(rounds=settings.BCRYPT_ROUNDS)
+    ).decode("utf-8")
 
 def create_access_token(subject: Union[str, int]) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode = {"exp": expire, "sub": str(subject), "type": "access"}
+    now = datetime.utcnow()
+    expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode = {"exp": expire, "iat": now, "sub": str(subject), "type": "access"}
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
 def create_refresh_token(subject: Union[str, int]) -> str:
-    expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode = {"exp": expire, "sub": str(subject), "type": "refresh"}
+    now = datetime.utcnow()
+    expire = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode = {"exp": expire, "iat": now, "sub": str(subject), "type": "refresh"}
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
+
+# Token fixation mitigation: a token issued before a password reset must not
+# remain usable afterward, otherwise a user resetting their password because
+# they suspect their current token/password is compromised gains nothing.
+# There is no per-token registry (JWTs are stateless and the reset flow has
+# no access token to blacklist - the user may not even be logged in when
+# requesting a reset), so instead of blacklisting individual tokens we record
+# a per-user "password changed at" watermark in Redis and reject any access
+# token whose `iat` predates it. TTL matches the longest-lived token
+# (refresh) so the watermark outlives every token that could still exist.
+def invalidate_tokens_issued_before_now(user_id: Union[str, int]) -> bool:
+    key = f"pwd_changed:{user_id}"
+    ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    return redis_service.setex(key, ttl_seconds, int(datetime.utcnow().timestamp()))
 
 async def get_current_user(
     db: Session = Depends(get_db),
@@ -60,11 +78,16 @@ async def get_current_user(
         )
         user_id: str = payload.get("sub")
         token_type: str = payload.get("type")
+        issued_at = payload.get("iat")
 
         if user_id is None or token_type != "access":
             raise credentials_exception
 
     except JWTError:
+        raise credentials_exception
+
+    password_changed_at = redis_service.get(f"pwd_changed:{user_id}")
+    if password_changed_at is not None and (issued_at is None or issued_at < password_changed_at):
         raise credentials_exception
 
     user = db.query(User).filter(User.id == int(user_id)).first()

@@ -40,6 +40,12 @@ class Settings(BaseSettings):
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
+    # bcrypt cost factor. 12 (bcrypt's own default) is the deliberately slow,
+    # brute-force-resistant setting production must use. Tests don't need
+    # that security margin and pay real wall-clock cost for it (~400ms per
+    # hash at 12 rounds) - tests/conftest.py overrides this via
+    # BCRYPT_ROUNDS=4 to keep the suite fast without weakening production.
+    BCRYPT_ROUNDS: int = 12
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 

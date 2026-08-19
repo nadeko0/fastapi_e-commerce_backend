@@ -94,3 +94,65 @@ def test_check_rate_limit_fails_open_when_redis_errors(monkeypatch, fake_redis):
     # Must not raise - a Redis failure fails open (allows the request)
     # rather than blocking all traffic.
     asyncio.run(limiter.check_rate_limit(request))
+
+
+# --- Login brute-force scenario -----------------------------------------
+
+
+def test_login_rate_limit_is_keyed_per_client_ip_not_globally(monkeypatch, fake_redis):
+    # A blocked attacker must not block every other user - the rate limit
+    # bucket is per (client IP, path), not a single global counter for the
+    # login endpoint.
+    monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
+    login_path = f"{settings.API_V1_STR}/users/login"
+    limiter = RateLimiter()
+    limiter.endpoint_limits[login_path] = 2
+
+    attacker = _make_request(path=login_path, client_host="198.51.100.10")
+    victim = _make_request(path=login_path, client_host="198.51.100.20")
+
+    with freeze_time("2026-01-01 00:00:00") as frozen:
+        asyncio.run(limiter.check_rate_limit(attacker))
+        frozen.tick(delta=1)
+        asyncio.run(limiter.check_rate_limit(attacker))
+        frozen.tick(delta=1)
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(limiter.check_rate_limit(attacker))
+        assert exc_info.value.status_code == 429
+
+        # The victim's own budget on the same endpoint is untouched.
+        asyncio.run(limiter.check_rate_limit(victim))
+
+
+def test_login_rate_limit_not_bypassable_by_spoofing_x_forwarded_for(monkeypatch, fake_redis):
+    # An attacker who is not behind a trusted proxy cannot dodge the login
+    # rate limit by sending a different X-Forwarded-For value on every
+    # request - since the socket peer isn't in TRUSTED_PROXIES, the header
+    # is ignored entirely and every attempt is bucketed under the real peer
+    # IP regardless of what the attacker claims.
+    monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
+    monkeypatch.setattr(settings, "TRUSTED_PROXIES", [])
+    login_path = f"{settings.API_V1_STR}/users/login"
+    limiter = RateLimiter()
+    limiter.endpoint_limits[login_path] = 2
+
+    def _spoofed_request(fake_ip: str) -> Request:
+        scope = {
+            "type": "http",
+            "path": login_path,
+            "headers": [(b"x-forwarded-for", fake_ip.encode())],
+            "client": ("203.0.113.99", 12345),  # real, untrusted socket peer
+        }
+        return Request(scope)
+
+    with freeze_time("2026-01-01 00:00:00") as frozen:
+        asyncio.run(limiter.check_rate_limit(_spoofed_request("1.1.1.1")))
+        frozen.tick(delta=1)
+        asyncio.run(limiter.check_rate_limit(_spoofed_request("2.2.2.2")))
+        frozen.tick(delta=1)
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(limiter.check_rate_limit(_spoofed_request("3.3.3.3")))
+
+    assert exc_info.value.status_code == 429
