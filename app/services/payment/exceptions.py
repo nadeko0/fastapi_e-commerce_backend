@@ -60,6 +60,28 @@ class IdempotencyError(PaymentProviderError):
         super().__init__(message, code="idempotency_key_in_use")
 
 
+class InvalidRequestError(PaymentProviderError):
+    """
+    Raised when a call's parameters are structurally invalid regardless of
+    what a real charge outcome would be - e.g. a non-integer/non-positive
+    amount, or a currency code that is not a real ISO 4217 code. Mirrors
+    stripe.error.InvalidRequestError. Distinct from CardError: a CardError
+    means the provider processed the request and the card was declined; an
+    InvalidRequestError means the request itself was malformed and nothing
+    was ever "sent to the processor" (no PaymentIntent is created/mutated).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        param: Optional[str] = None,
+        code: str = "parameter_invalid",
+    ):
+        super().__init__(message, code=code)
+        self.param = param
+
+
 class PaymentProviderTimeoutError(PaymentProviderError):
     """
     The provider could not be reached / did not respond in time.

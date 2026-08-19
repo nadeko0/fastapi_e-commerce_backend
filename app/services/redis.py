@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 if TYPE_CHECKING:
     from app.schemas.category import CategoryTreeResponse
 
+from pydantic import ValidationError
 from redis import ConnectionError, ConnectionPool, Redis
 
 from app.core.config import settings
@@ -69,7 +70,7 @@ class RedisService:
                         parsed = parsed.dict() if hasattr(parsed, 'dict') else {'tree': [], 'total_categories': 0, 'max_depth': 0}
                 return model_class.model_validate(parsed)
             return parsed
-        except (json.JSONDecodeError, AttributeError) as e:
+        except (json.JSONDecodeError, AttributeError, TypeError, KeyError, ValidationError) as e:
             print(f"Deserialization error: {str(e)}")
             return None
 

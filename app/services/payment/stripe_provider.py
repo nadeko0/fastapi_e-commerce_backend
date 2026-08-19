@@ -27,6 +27,7 @@ from app.services.payment.base import PaymentProvider
 from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
+    InvalidRequestError,
     SignatureVerificationError,
 )
 from app.services.payment.types import (
@@ -44,6 +45,67 @@ TOKEN_REQUIRES_ACTION = "pm_card_authenticationRequired"
 TOKEN_SUCCESS_DEFAULT = "pm_card_visa"
 
 DEFAULT_WEBHOOK_TOLERANCE_SECONDS = 300
+
+# Real Stripe amounts are always a non-negative integer number of the
+# smallest currency unit and are rejected outright (InvalidRequestError) if
+# they are a float/Decimal/string, negative, or zero (a $0 PaymentIntent is
+# not chargeable - see https://docs.stripe.com/api/payment_intents/create).
+# We additionally reject anything implausibly large as a sanity ceiling
+# against integer-overflow-adjacent input; this is not Stripe's exact
+# per-currency maximum (which varies), just a conservative guard.
+MAX_AMOUNT = 999_999_999_99  # 999,999,999.99 in major units
+
+# A representative subset of real ISO 4217 currency codes Stripe supports,
+# used to reject arbitrary/typo'd currency strings ("XYZ", "usd1", "dollars")
+# rather than silently accepting anything matching a 3-letter shape. Not
+# exhaustive (Stripe supports ~135 currencies) but enough to catch the
+# common real-world mistake of a made-up or malformed currency code slipping
+# past a naive regex-only check.
+VALID_CURRENCIES = {
+    "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "SEK", "NZD",
+    "MXN", "SGD", "HKD", "NOK", "KRW", "TRY", "RUB", "INR", "BRL", "ZAR",
+    "DKK", "PLN", "THB", "IDR", "HUF", "CZK", "ILS", "CLP", "PHP", "AED",
+    "COP", "SAR", "MYR", "RON",
+}
+
+
+def _require_valid_amount(amount: Any) -> None:
+    """Mirrors real Stripe's validation of the `amount` parameter: must be a
+    plain int (never bool, float, Decimal, or numeric string - those are the
+    classic "cents vs dollars"/float-rounding integration mistakes), a
+    positive number of the smallest currency unit, and below our sanity
+    ceiling."""
+    if isinstance(amount, bool) or not isinstance(amount, int):
+        raise InvalidRequestError(
+            f"Invalid integer: amount must be an int in the smallest currency "
+            f"unit (e.g. cents), got {amount!r} ({type(amount).__name__})",
+            param="amount",
+            code="parameter_invalid_integer",
+        )
+    if amount <= 0:
+        raise InvalidRequestError(
+            f"Invalid positive integer: amount must be > 0, got {amount}",
+            param="amount",
+            code="parameter_invalid_integer",
+        )
+    if amount > MAX_AMOUNT:
+        raise InvalidRequestError(
+            f"Amount {amount} exceeds the maximum allowed amount ({MAX_AMOUNT})",
+            param="amount",
+            code="parameter_invalid_integer",
+        )
+
+
+def _require_valid_currency(currency: Any) -> None:
+    """Rejects anything that is not a real, known 3-letter ISO 4217 currency
+    code - not just anything matching a `^[A-Z]{3}$`-shaped string."""
+    if not isinstance(currency, str) or currency.upper() not in VALID_CURRENCIES:
+        raise InvalidRequestError(
+            f"Invalid currency: {currency!r} is not a supported ISO 4217 "
+            "currency code",
+            param="currency",
+            code="parameter_invalid_string",
+        )
 
 
 class StripePaymentProvider(PaymentProvider):
@@ -83,6 +145,13 @@ class StripePaymentProvider(PaymentProvider):
         payment_method: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> PaymentIntent:
+        # Validate before the (simulated) network call and before touching
+        # the idempotency cache: a structurally invalid request was never
+        # "sent to the processor" and must not consume/pollute an
+        # idempotency key or return a cached response.
+        _require_valid_amount(amount)
+        _require_valid_currency(currency)
+
         self._simulate_network_call()
 
         cached = self._intents_by_key.get(idempotency_key)
@@ -177,6 +246,14 @@ class StripePaymentProvider(PaymentProvider):
         amount: Optional[int] = None,
         idempotency_key: Optional[str] = None,
     ) -> Refund:
+        if amount is not None and (isinstance(amount, bool) or not isinstance(amount, int)):
+            raise InvalidRequestError(
+                f"Invalid integer: amount must be an int in the smallest currency "
+                f"unit (e.g. cents), got {amount!r} ({type(amount).__name__})",
+                param="amount",
+                code="parameter_invalid_integer",
+            )
+
         self._simulate_network_call()
 
         intent = self._intents_by_id.get(payment_intent_id)
