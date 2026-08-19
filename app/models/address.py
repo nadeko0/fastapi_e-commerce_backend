@@ -28,7 +28,7 @@ class Address(Base):
     postal_code = Column(String, nullable=False)
     country = Column(String, nullable=False)
 
-    address_type = Column(*create_string_enum(AddressType, "address_type")[0:1], nullable=False, server_default="home")
+    address_type = Column(create_string_enum(AddressType, "address_type"), nullable=False, server_default="home")
     is_default = Column(Boolean, nullable=False, default=False)
     delivery_phone = Column(String)
     delivery_instructions = Column(String)

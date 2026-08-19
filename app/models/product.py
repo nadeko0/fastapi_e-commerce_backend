@@ -41,8 +41,13 @@ class Product(Base):
     description = Column(Text, nullable=False)
     price = Column(Numeric(10, 2), nullable=False)
     stock_quantity = Column(Integer, nullable=False, default=0)
-    images = Column(_string_array, nullable=False, default=[])
-    characteristics = Column(_characteristics_json, nullable=False, default={})
+    # Callable defaults (list/dict, not literal [] / {}): a literal default
+    # is one shared object reused by SQLAlchemy for every row that doesn't
+    # set the column explicitly, so mutating one Product's images/
+    # characteristics would silently mutate every other defaulted Product's
+    # too (see app/models/category.py's `path` column for the same fix).
+    images = Column(_string_array, nullable=False, default=list)
+    characteristics = Column(_characteristics_json, nullable=False, default=dict)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     # Soft-delete flag: admin.delete_product deactivates instead of hard
     # deleting when a product has existing order history, so past orders
@@ -86,7 +91,8 @@ class ProductVariant(Base):
     sku = Column(String, nullable=False, unique=True, index=True)
     # e.g. {"size": "M", "color": "red"} - arbitrary key/value pairs, no
     # fixed schema, matching Product.characteristics' domain-neutral intent.
-    attributes = Column(_characteristics_json, nullable=False, default={})
+    # Callable default - see the Product.images/characteristics comment above.
+    attributes = Column(_characteristics_json, nullable=False, default=dict)
     # NULL means "use the parent Product's price" - most variants of a
     # priced-per-unit product won't need a per-variant override.
     price_override = Column(Numeric(10, 2), nullable=True)
