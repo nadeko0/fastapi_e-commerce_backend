@@ -339,6 +339,77 @@ sharing a small product catalog with zero lost updates; and the
 `idle_in_transaction_session_timeout` fix specifically re-verified by
 querying `pg_stat_activity` mid- and post-load-test on the real deployment.
 
+## Independent re-verification (round 3)
+
+Everything above had already been through two review passes. This pass
+existed specifically to stop trusting that on its own: a full line-by-line
+read of every file in `app/` (not diffs — each file read whole, as a
+stranger's PR), including the code that had accumulated as a side effect of
+earlier bug fixes (the bcrypt semaphore, `_build_connect_args`,
+`build_redis_broker_url`, the live-Stripe `return_url` handling,
+`SMTP_TIMEOUT_SECONDS`, the `APIResponse` wrapper) and had never itself been
+independently reviewed. It found and fixed 20 more genuine bugs, each with a
+regression test — none of them the same class as the six below, since those
+were checked most carefully already:
+
+- **Idempotency gaps**: `POST /orders/{id}/refund` had no `Idempotency-Key`
+  handling at all (unlike `/pay` and `/checkout-session`) and its own local
+  bookkeeping could double-apply a replayed refund even with the provider
+  itself deduped; Celery's `send_order_confirmation`/`send_order_status_update`
+  had no redelivery guard, so Celery's at-least-once delivery could send a
+  customer the same order email twice.
+- **Security-relevant gaps**: the Redis broker password in
+  `build_redis_broker_url` wasn't percent-encoded, so a password containing
+  `@`, `:`, `/`, `#`, or `%` could corrupt or truncate the broker URL;
+  `CheckoutSessionCreate.success_url`/`cancel_url` had no scheme validation
+  (potential open redirect via a non-http(s) URL); `send_welcome_email`
+  interpolated the attacker-controlled `full_name` into HTML unescaped.
+- **Correctness bugs surfaced by the "check every occurrence of a known
+  pattern" pass**: `GET /products?sort_by=created_at_desc` 500'd (a
+  `"..._desc".split('_')` that should have been `rsplit('_', 1)` — the same
+  pattern `admin.py` already had right); concurrent duplicate product-variant
+  SKUs raised an uncaught `IntegrityError` (500) instead of the 409 the
+  sequential case already returned; `RedisService` only caught
+  `ConnectionError`, not the broader `RedisError`, so a Redis *timeout*
+  (rather than a dropped connection) bypassed the documented fail-open
+  contract on all 23 methods; SQLAlchemy `Column(default=[])`/`default={}`
+  on three models shared one mutable object across every row that didn't set
+  the column explicitly.
+- **Quality/consistency**: `app/schemas/legal.py` was still on Pydantic v1
+  config keys (`schema_extra`, `orm_mode`), silently dropped by Pydantic v2 —
+  every documented OpenAPI example in that module was dead; `redis.py` used
+  `print()` instead of the app logger for error paths.
+
+Full per-finding detail (file:line, fix, test) lived in this session's
+working notes; the summary above is what's durable enough to keep here.
+
+**What this session could and couldn't re-verify independently:**
+
+- **Docker build/run** — previously untested by any prior session (no Docker
+  available). This time, built and ran the full `docker compose` stack
+  (`api`, `db`, `redis`, `celery-worker`, `celery-beat`) on a real remote
+  server, in an isolated project namespace and network with non-default
+  ports so it couldn't collide with that server's other unrelated running
+  containers, ran `alembic upgrade head` against it, confirmed `/health`
+  returns 200 and `/api/v1/products` serves real data, then tore the whole
+  thing down (containers, images, volumes, network) and confirmed nothing
+  else on that server was touched. Docker is confirmed working, not just
+  claimed.
+- **Locust sanity check** — the original 200-concurrent-user run's VPS is
+  gone and wasn't reproduced at that scale. Instead, ran a short local load
+  test (20 users, 60s) against a locally running instance backed by a real
+  Postgres/Redis, specifically to confirm the earlier fixes still hold under
+  *some* concurrency: login past the rate limit correctly returned `429`
+  (not `500`), `/products` stayed responsive throughout. This is a sanity
+  check, not a repeat of the original benchmark.
+- **Ethereal email delivery and the Stripe `return_url` webhook fix** — not
+  re-run this session (no Ethereal/Stripe test credentials available here).
+  These remain as reported by the session that originally ran them, not
+  independently reconfirmed in round 3.
+
+Test suite: 410 passed, 0 failed, 91.13% coverage, `ruff check` clean,
+`alembic check` reports no schema drift against a live Postgres.
+
 ## Contributing
 
 1. Fork the repository
