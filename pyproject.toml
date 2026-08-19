@@ -29,6 +29,7 @@ dev = [
     "ruff",
     "freezegun",
     "fakeredis",
+    "hypothesis",
 ]
 
 [tool.pytest.ini_options]

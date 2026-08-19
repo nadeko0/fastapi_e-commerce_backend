@@ -13,6 +13,7 @@ confirmed to still be current concerns via a web search done before writing
 this integration (see PR description / task notes for sources).
 """
 import json
+import threading
 import time
 import uuid
 from decimal import Decimal
@@ -27,6 +28,9 @@ import pytest
 # sys.path (because conftest.py lives there with no __init__.py alongside
 # it), which is what makes this plain top-level import resolve.
 from conftest import TestingSessionLocal
+from hypothesis import HealthCheck, given
+from hypothesis import settings as hyp_settings
+from hypothesis import strategies as st
 
 from app.core.config import settings
 from app.core.security import create_access_token, get_password_hash
@@ -36,13 +40,23 @@ from app.models.order import Order
 from app.models.payment import Payment, WebhookEvent
 from app.models.product import Product
 from app.models.user import User
-from app.services.payment.exceptions import PaymentProviderTimeoutError
+from app.services.payment.base import PaymentProvider
+from app.services.payment.exceptions import (
+    CardError,
+    IdempotencyError,
+    InvalidRequestError,
+    PaymentProviderTimeoutError,
+    SignatureVerificationError,
+)
 from app.services.payment.stripe_provider import (
+    MAX_AMOUNT,
     TOKEN_DECLINE,
     TOKEN_REQUIRES_ACTION,
     TOKEN_SUCCESS_DEFAULT,
+    VALID_CURRENCIES,
     StripePaymentProvider,
 )
+from app.services.payment.types import PaymentIntentStatus
 
 USERS_PREFIX = "/api/v1/users"
 CART_PREFIX = "/api/v1/cart"
@@ -666,3 +680,507 @@ def test_refund_requires_a_paid_order(client, db_session):
     )
 
     assert response.status_code == 400
+
+
+# =============================================================================
+# Part 1: direct provider-level tests closing coverage gaps on base.py and
+# stripe_provider.py that the endpoint-level tests above cannot reach (the
+# API layer never calls retrieve_payment_intent, never re-confirms an
+# already-succeeded or requires_action intent, and never sends a
+# structurally malformed webhook signature/timestamp/payload).
+# =============================================================================
+
+# -- base.py: the abstract interface itself -----------------------------------
+
+class _IncompleteProvider(PaymentProvider):
+    """A concrete subclass that implements every abstract method by
+    delegating straight back to the base class - the only way to exercise
+    the `raise NotImplementedError` line inside each @abstractmethod body,
+    since ABC prevents ever instantiating PaymentProvider directly and no
+    real call site invokes the base implementation (StripePaymentProvider
+    always overrides it)."""
+
+    def create_payment_intent(self, **kwargs):
+        return super().create_payment_intent(**kwargs)
+
+    def confirm_payment_intent(self, payment_intent_id, **kwargs):
+        return super().confirm_payment_intent(payment_intent_id, **kwargs)
+
+    def retrieve_payment_intent(self, payment_intent_id):
+        return super().retrieve_payment_intent(payment_intent_id)
+
+    def create_refund(self, **kwargs):
+        return super().create_refund(**kwargs)
+
+    def construct_webhook_event(self, payload, sig_header, webhook_secret, tolerance_seconds=300):
+        return super().construct_webhook_event(
+            payload, sig_header, webhook_secret, tolerance_seconds
+        )
+
+
+def test_base_provider_abstract_methods_all_raise_not_implemented():
+    # Coverage/contract test: every abstract method's body is just
+    # `raise NotImplementedError` - if a future concrete provider forgets to
+    # override one, it must fail loudly, not silently no-op.
+    provider = _IncompleteProvider()
+
+    with pytest.raises(NotImplementedError):
+        provider.create_payment_intent(amount=100, currency="USD", idempotency_key="k")
+    with pytest.raises(NotImplementedError):
+        provider.confirm_payment_intent("pi_x")
+    with pytest.raises(NotImplementedError):
+        provider.retrieve_payment_intent("pi_x")
+    with pytest.raises(NotImplementedError):
+        provider.create_refund(payment_intent_id="pi_x")
+    with pytest.raises(NotImplementedError):
+        provider.construct_webhook_event(b"{}", "t=1,v1=x", "secret")
+
+
+# -- stripe_provider.py: idempotency key reuse with different parameters -----
+
+def test_provider_idempotency_key_reused_with_different_amount_raises():
+    # Regression test for: reusing an Idempotency-Key with materially
+    # different request parameters must be rejected (real Stripe behavior),
+    # not silently return a mismatched cached PaymentIntent or silently
+    # create a second one.
+    provider = StripePaymentProvider()
+    provider.create_payment_intent(amount=1000, currency="USD", idempotency_key="dup-key")
+
+    with pytest.raises(IdempotencyError):
+        provider.create_payment_intent(amount=2000, currency="USD", idempotency_key="dup-key")
+
+    with pytest.raises(IdempotencyError):
+        provider.create_payment_intent(amount=1000, currency="EUR", idempotency_key="dup-key")
+
+
+def test_provider_idempotency_key_reused_with_same_amount_returns_cached_intent():
+    provider = StripePaymentProvider()
+    first = provider.create_payment_intent(amount=1000, currency="USD", idempotency_key="same-key")
+    second = provider.create_payment_intent(amount=1000, currency="USD", idempotency_key="same-key")
+    assert first.id == second.id
+
+
+# -- stripe_provider.py: confirm_payment_intent branches ----------------------
+
+def test_provider_confirm_unknown_payment_intent_raises_card_error():
+    provider = StripePaymentProvider()
+    with pytest.raises(CardError) as exc_info:
+        provider.confirm_payment_intent("pi_does_not_exist")
+    assert exc_info.value.code == "resource_missing"
+
+
+def test_provider_confirm_already_succeeded_intent_is_a_noop():
+    # Defends against a client retrying a confirm call whose response it
+    # never received: confirming an already-succeeded intent a second time
+    # must return the same intent, not raise or re-run side effects.
+    provider = StripePaymentProvider()
+    intent = provider.create_payment_intent(
+        amount=1000, currency="USD", idempotency_key="k1", payment_method=TOKEN_SUCCESS_DEFAULT
+    )
+    first = provider.confirm_payment_intent(intent.id)
+    assert first.status == PaymentIntentStatus.SUCCEEDED
+
+    second = provider.confirm_payment_intent(intent.id)
+    assert second.status == PaymentIntentStatus.SUCCEEDED
+    assert second is first
+
+
+def test_provider_confirm_requires_action_intent_finalizes_on_second_confirm():
+    # Simulates the customer completing 3D Secure out-of-band, then a
+    # follow-up confirm call (not just the webhook path) finalizing it -
+    # the direct-confirm route the process_payment endpoint itself never
+    # exercises a second time, but a real client-driven re-confirm would.
+    provider = StripePaymentProvider()
+    intent = provider.create_payment_intent(
+        amount=1000, currency="USD", idempotency_key="k2", payment_method=TOKEN_REQUIRES_ACTION
+    )
+    first = provider.confirm_payment_intent(intent.id)
+    assert first.status == PaymentIntentStatus.REQUIRES_ACTION
+    assert first.next_action is not None
+
+    second = provider.confirm_payment_intent(intent.id)
+    assert second.status == PaymentIntentStatus.SUCCEEDED
+    assert second.next_action is None
+
+
+# -- stripe_provider.py: retrieve_payment_intent -------------------------------
+
+def test_provider_retrieve_payment_intent_returns_the_intent():
+    provider = StripePaymentProvider()
+    created = provider.create_payment_intent(amount=1000, currency="USD", idempotency_key="k3")
+    fetched = provider.retrieve_payment_intent(created.id)
+    assert fetched.id == created.id
+    assert fetched.amount == 1000
+
+
+def test_provider_retrieve_unknown_payment_intent_raises_card_error():
+    provider = StripePaymentProvider()
+    with pytest.raises(CardError) as exc_info:
+        provider.retrieve_payment_intent("pi_does_not_exist")
+    assert exc_info.value.code == "resource_missing"
+
+
+# -- stripe_provider.py: create_refund branches --------------------------------
+
+def test_provider_refund_unknown_payment_intent_raises_card_error():
+    provider = StripePaymentProvider()
+    with pytest.raises(CardError) as exc_info:
+        provider.create_refund(payment_intent_id="pi_does_not_exist")
+    assert exc_info.value.code == "resource_missing"
+
+
+def test_provider_refund_unconfirmed_intent_raises_card_error():
+    provider = StripePaymentProvider()
+    intent = provider.create_payment_intent(amount=1000, currency="USD", idempotency_key="k4")
+    # Never confirmed - still requires_confirmation, not succeeded.
+    with pytest.raises(CardError) as exc_info:
+        provider.create_refund(payment_intent_id=intent.id)
+    assert exc_info.value.code == "invalid_request"
+
+
+def test_provider_refund_amount_exceeding_refundable_raises_card_error():
+    provider = StripePaymentProvider()
+    intent = provider.create_payment_intent(
+        amount=1000, currency="USD", idempotency_key="k5", payment_method=TOKEN_SUCCESS_DEFAULT
+    )
+    provider.confirm_payment_intent(intent.id)
+
+    with pytest.raises(CardError) as exc_info:
+        provider.create_refund(payment_intent_id=intent.id, amount=1001)
+    assert exc_info.value.code == "invalid_request"
+
+    # A second refund attempt after the intent is already fully refunded
+    # must also be rejected (refundable balance is now zero).
+    provider.create_refund(payment_intent_id=intent.id)
+    with pytest.raises(CardError):
+        provider.create_refund(payment_intent_id=intent.id, amount=1)
+
+
+# -- stripe_provider.py: webhook signature/timestamp/payload edge cases -------
+
+def test_provider_webhook_signature_header_missing_t_or_v1_raises():
+    provider = StripePaymentProvider()
+    with pytest.raises(SignatureVerificationError):
+        provider.construct_webhook_event(b"{}", "not_a_valid_header_shape", "secret")
+
+
+def test_provider_webhook_signature_non_numeric_timestamp_raises():
+    provider = StripePaymentProvider()
+    with pytest.raises(SignatureVerificationError):
+        provider.construct_webhook_event(b"{}", "t=not-a-number,v1=deadbeef", "secret")
+
+
+def test_provider_webhook_timestamp_outside_tolerance_is_rejected():
+    # Regression test for replay attacks: a validly-signed payload captured
+    # long ago and resubmitted must be rejected once its timestamp is
+    # outside the tolerance window, even though the HMAC itself is correct
+    # for that (payload, timestamp) pair.
+    provider = StripePaymentProvider()
+    body = _webhook_body("payment_intent.succeeded", "pi_old")
+    old_timestamp = int(time.time()) - 10_000
+    signature = StripePaymentProvider.sign_payload(
+        body, settings.STRIPE_WEBHOOK_SECRET, timestamp=old_timestamp
+    )
+    with pytest.raises(SignatureVerificationError):
+        provider.construct_webhook_event(
+            body, signature, settings.STRIPE_WEBHOOK_SECRET, tolerance_seconds=300
+        )
+
+
+def test_provider_webhook_payload_not_valid_json_raises():
+    # A validly-*signed* payload that isn't valid JSON must still be
+    # rejected - signature verification alone isn't enough; the body must
+    # also parse.
+    provider = StripePaymentProvider()
+    body = b"not json at all"
+    signature = StripePaymentProvider.sign_payload(body, settings.STRIPE_WEBHOOK_SECRET)
+    with pytest.raises(SignatureVerificationError):
+        provider.construct_webhook_event(body, signature, settings.STRIPE_WEBHOOK_SECRET)
+
+
+# =============================================================================
+# Part 2: property-based / fuzz testing of amounts and currency codes.
+#
+# Verifies (rather than assumes) that the provider layer itself rejects
+# non-integer/negative/zero amounts and non-ISO currency codes, independent
+# of whatever validation app/schemas/order.py's PaymentCreate/RefundCreate
+# happen to apply at the API boundary - this is the money-handling code the
+# task asked to be hardened directly, since PaymentCreate.amount (unlike
+# RefundCreate.amount) has no gt=0 constraint of its own.
+# =============================================================================
+
+_SUPPRESSED_HEALTH_CHECKS = [HealthCheck.function_scoped_fixture]
+
+
+@given(
+    amount=st.one_of(
+        st.integers(max_value=0),  # zero and negative integers
+        st.floats(allow_nan=False, allow_infinity=False),
+        st.decimals(allow_nan=False, allow_infinity=False),
+        st.text(min_size=1, max_size=8),
+    )
+)
+@hyp_settings(max_examples=60, suppress_health_check=_SUPPRESSED_HEALTH_CHECKS)
+def test_fuzz_create_payment_intent_rejects_non_positive_integer_amounts(amount):
+    # Fuzzes the "amount" parameter across the exact wrong shapes a real
+    # integration bug would pass: negative/zero ints, floats (the classic
+    # float-rounding mistake), Decimals (the classic dollars-not-cents
+    # mistake), and numeric-looking strings. All must be rejected up front.
+    provider = StripePaymentProvider()
+    with pytest.raises(InvalidRequestError):
+        provider.create_payment_intent(
+            amount=amount, currency="USD", idempotency_key=f"fuzz-{uuid.uuid4().hex}"
+        )
+
+
+@given(amount=st.integers(min_value=MAX_AMOUNT + 1, max_value=MAX_AMOUNT + 10**12))
+@hyp_settings(max_examples=25, suppress_health_check=_SUPPRESSED_HEALTH_CHECKS)
+def test_fuzz_create_payment_intent_rejects_amounts_near_and_past_overflow_boundary(amount):
+    provider = StripePaymentProvider()
+    with pytest.raises(InvalidRequestError):
+        provider.create_payment_intent(
+            amount=amount, currency="USD", idempotency_key=f"fuzz-{uuid.uuid4().hex}"
+        )
+
+
+@given(amount=st.integers(min_value=1, max_value=MAX_AMOUNT))
+@hyp_settings(max_examples=40, suppress_health_check=_SUPPRESSED_HEALTH_CHECKS)
+def test_fuzz_create_payment_intent_accepts_all_valid_positive_integer_amounts(amount):
+    # The inverse of the rejection fuzz tests above: every legitimate
+    # positive-int-within-ceiling amount must still work, so the validation
+    # added for the fuzz cases isn't accidentally over-broad.
+    provider = StripePaymentProvider()
+    intent = provider.create_payment_intent(
+        amount=amount, currency="USD", idempotency_key=f"fuzz-{uuid.uuid4().hex}"
+    )
+    assert intent.amount == amount
+
+
+@given(
+    currency=st.text(
+        alphabet=st.characters(whitelist_categories=("Lu", "Ll", "Nd")), min_size=1, max_size=6
+    ).filter(lambda c: c.upper() not in VALID_CURRENCIES)
+)
+@hyp_settings(max_examples=40, suppress_health_check=_SUPPRESSED_HEALTH_CHECKS)
+def test_fuzz_create_payment_intent_rejects_non_iso_currency_codes(currency):
+    # Verifies only real 3-letter ISO 4217 codes are accepted - not merely
+    # anything matching a `^[A-Z]{3}$`-shaped regex (which PaymentCreate's
+    # own schema-level check would let through for a typo'd/made-up code
+    # like "ZZZ" or "USX").
+    provider = StripePaymentProvider()
+    with pytest.raises(InvalidRequestError):
+        provider.create_payment_intent(
+            amount=1000, currency=currency, idempotency_key=f"fuzz-{uuid.uuid4().hex}"
+        )
+
+
+@given(currency=st.sampled_from(sorted(VALID_CURRENCIES)))
+@hyp_settings(max_examples=len(VALID_CURRENCIES), suppress_health_check=_SUPPRESSED_HEALTH_CHECKS)
+def test_fuzz_create_payment_intent_accepts_all_known_currencies(currency):
+    provider = StripePaymentProvider()
+    intent = provider.create_payment_intent(
+        amount=1000, currency=currency, idempotency_key=f"fuzz-{uuid.uuid4().hex}"
+    )
+    assert intent.currency == currency
+
+
+def test_provider_create_refund_rejects_non_integer_amount():
+    # Same class of bug (float/Decimal/str amount slipping through), on the
+    # refund path this time.
+    provider = StripePaymentProvider()
+    intent = provider.create_payment_intent(
+        amount=1000, currency="USD", idempotency_key="refund-fuzz", payment_method=TOKEN_SUCCESS_DEFAULT
+    )
+    provider.confirm_payment_intent(intent.id)
+
+    for bad_amount in (5.0, Decimal("5.00"), "500", True):
+        with pytest.raises(InvalidRequestError):
+            provider.create_refund(payment_intent_id=intent.id, amount=bad_amount)
+
+
+def test_pay_with_currency_code_that_matches_regex_but_is_not_real_iso_returns_400(
+    client, db_session
+):
+    # API-level companion to the fuzz tests above: PaymentCreate's own
+    # `^[A-Z]{3}$` pattern lets "ZZZ" through the schema layer, so this
+    # proves the provider layer's own ISO-code check is what actually stops
+    # it, and that process_payment surfaces that as a clean 400 (not a
+    # 500/uncaught exception) with the attempt's own Payment row marked
+    # failed rather than left dangling as "processing".
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+
+    response = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order, currency="ZZZ"),
+        headers=setup["headers"],
+    )
+
+    assert response.status_code == 400
+    db_order = _get_order(db_session, order["id"])
+    assert db_order.payment_status == "pending"
+    payments = _get_payments(db_session, order["id"])
+    assert len(payments) == 1
+    assert payments[0].status == "failed"
+
+
+# =============================================================================
+# Part 2 continued: deeper adversarial cases (concurrency, partial failure).
+# =============================================================================
+
+def test_concurrent_identical_webhook_deliveries_do_not_double_apply(client, db_session, monkeypatch):
+    # Regression test for a race condition class that is still commonly
+    # cited as a live Stripe-webhook integration mistake: a naive
+    # "SELECT to check if event.id was already seen, THEN INSERT" has a
+    # race window where two near-simultaneous deliveries both pass the
+    # SELECT check and both proceed to apply the event twice. The correct,
+    # currently-recommended fix is exactly what stripe_webhook already does
+    # - INSERT the WebhookEvent row first and let the DB's own UNIQUE
+    # constraint (not an app-level check) be the single source of truth,
+    # catching IntegrityError on the loser.
+    #
+    # True unsynchronized multi-thread concurrency against this test suite's
+    # actual DB layer was verified (separately, empirically) to be unsafe
+    # for reasons unrelated to the app code under test: tests/conftest.py's
+    # in-memory SQLite engine uses SQLAlchemy's StaticPool, which hands out
+    # the *same* raw sqlite3 connection object to every Session regardless
+    # of which thread asked for it - sqlite3 connections are not safe for
+    # concurrent use from multiple threads even when wrapped in separate
+    # ORM Sessions, and unsynchronized concurrent commits against it raise
+    # spurious sqlite3.InterfaceError ("bad parameter or other API misuse")
+    # unrelated to the WebhookEvent race being tested. So this test drives
+    # two real OS threads that start together (Barrier) to genuinely race
+    # to be first past the gate, but serializes only the DB-touching part of
+    # each request with a lock - proving the *outcome* invariant (the DB
+    # constraint, not accidental request ordering, is what prevents double
+    # application) without corrupting the test harness's shared connection.
+    email_calls = []
+    monkeypatch.setattr(
+        "app.api.v1.orders.send_order_status_update_email",
+        lambda *a, **k: email_calls.append(a) or True,
+    )
+
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    pay_response = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
+        headers=setup["headers"],
+    )
+    intent_id = pay_response.json()["data"]["transaction_id"]
+
+    event_id = f"evt_{uuid.uuid4().hex[:24]}"
+    body = _webhook_body("payment_intent.succeeded", intent_id, event_id=event_id)
+    signature = _sign(body)
+
+    barrier = threading.Barrier(2)
+    db_lock = threading.Lock()
+    results = []
+
+    def _deliver():
+        barrier.wait()
+        with db_lock:
+            results.append(_post_webhook(client, body, signature))
+
+    threads = [threading.Thread(target=_deliver) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert [r.status_code for r in results] == [200, 200]
+    outcomes = sorted(r.json()["data"]["status"] for r in results)
+    assert outcomes == ["already_processed", "processed"]
+
+    db_order = _get_order(db_session, order["id"])
+    assert db_order.payment_status == "paid"
+    assert len(email_calls) == 1
+    assert db_session.query(WebhookEvent).filter(WebhookEvent.event_id == event_id).count() == 1
+
+
+def test_provider_failure_between_create_and_confirm_leaves_well_defined_state(
+    client, db_session, monkeypatch
+):
+    # Regression test for a "connection drop mid-confirmation" failure
+    # boundary distinct from test_provider_timeout_leaves_order_state_unchanged
+    # above (which fails on the *first* provider call, before any intent
+    # exists). Here create_payment_intent succeeds (Stripe has a real
+    # PaymentIntent, and process_payment has already persisted its id/
+    # client_secret and committed - see app/api/v1/orders.py's process_payment,
+    # the `payment_row.payment_intent_id = intent.id; ... db.commit()` lines
+    # between the create and confirm calls) and only the *second* provider
+    # call (confirm_payment_intent) drops. The order/payment record must be
+    # left well-defined: the real PaymentIntent id must be persisted (not
+    # the "pending-..." placeholder, and not silently discarded), the
+    # Payment row marked failed (a dead attempt, distinguishable from a
+    # fresh one), and the order's own status/payment_status untouched -
+    # exactly like a total transport failure, not a half-applied state.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+
+    real_confirm = StripePaymentProvider.confirm_payment_intent
+    call_count = {"n": 0}
+
+    def _flaky_confirm(self, payment_intent_id, *, idempotency_key=None):
+        call_count["n"] += 1
+        raise PaymentProviderTimeoutError("simulated drop during confirm")
+
+    monkeypatch.setattr(
+        "app.services.payment.stripe_provider.StripePaymentProvider.confirm_payment_intent",
+        _flaky_confirm,
+    )
+
+    response = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order),
+        headers=setup["headers"],
+    )
+
+    assert response.status_code == 503
+    assert call_count["n"] == 1
+
+    db_order = _get_order(db_session, order["id"])
+    # The order itself must be exactly as before the attempt.
+    assert db_order.payment_status == "pending"
+    assert db_order.status == "new"
+
+    payments = _get_payments(db_session, order["id"])
+    assert len(payments) == 1
+    # The real PaymentIntent id from the successful create() call must be
+    # persisted, not lost/overwritten - it identifies a real (if orphaned,
+    # never-confirmed) PaymentIntent on the provider's side for
+    # reconciliation, distinguishing this failure from one where create()
+    # itself never ran.
+    assert payments[0].payment_intent_id.startswith("pi_")
+    assert not payments[0].payment_intent_id.startswith("pending-")
+    assert payments[0].status == "failed"
+
+    # A retry with a fresh Idempotency-Key must still be able to succeed -
+    # the dead attempt must not have left anything in a state that blocks
+    # a subsequent attempt.
+    monkeypatch.setattr(
+        "app.services.payment.stripe_provider.StripePaymentProvider.confirm_payment_intent",
+        real_confirm,
+    )
+    retry = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order),
+        headers={**setup["headers"], "Idempotency-Key": "retry-after-confirm-drop"},
+    )
+    assert retry.status_code == 200
+    assert retry.json()["data"]["status"] == "paid"
+
+
+def test_webhook_for_unknown_payment_intent_is_acknowledged_but_not_applied(client, db_session):
+    # Regression test for: a webhook event referencing a payment_intent
+    # this system never created (a stale/foreign event, e.g. sent from the
+    # Stripe dashboard's "send test webhook" feature) must be acknowledged
+    # (200, so Stripe stops retrying it) but must not touch any order/
+    # payment state, and must not raise.
+    body = _webhook_body("payment_intent.succeeded", "pi_totally_unknown_to_us")
+    response = _post_webhook(client, body, _sign(body))
+
+    assert response.status_code == 200
+    body_data = response.json()["data"]
+    assert body_data["status"] == "processed"
+    assert body_data["applied"] is False
