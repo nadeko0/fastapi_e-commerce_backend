@@ -73,11 +73,10 @@ class ProductVariant(Base):
     free-form JSON (not fixed columns like `size`/`color`) so this stays
     usable for any product domain, not just apparel.
 
-    Scope note: this is data model + admin CRUD only. Cart/checkout
-    (app/api/v1/orders.py, app/api/v1/cart.py) does not know about variants
-    yet - it still reads/decrements Product.stock_quantity directly. Wiring
-    variant-aware stock into checkout is a separate, larger change left for
-    a future pass.
+    Cart/checkout (app/api/v1/cart.py, app/api/v1/orders.py) are
+    variant-aware: an optional variant_id on a cart line/OrderItem prices
+    and decrements/restocks stock against this ProductVariant instead of
+    the parent Product.
     """
 
     __tablename__ = "product_variants"

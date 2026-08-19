@@ -19,6 +19,7 @@ dependencies = [
     "python-dotenv",
     "redis",
     "celery",
+    "stripe",
 ]
 
 [dependency-groups]

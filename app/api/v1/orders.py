@@ -14,10 +14,12 @@ from app.core.security import get_current_active_user, get_current_admin_user
 from app.models.order import Order
 from app.models.order_items import OrderItem
 from app.models.payment import Payment, WebhookEvent
-from app.models.product import Product
+from app.models.product import Product, ProductVariant
 from app.models.user import User
 from app.schemas.common import APIResponse
 from app.schemas.order import (
+    CheckoutSessionCreate,
+    CheckoutSessionResponse,
     OrderResponse,
     OrderStatus,
     PaymentCreate,
@@ -134,18 +136,48 @@ async def create_order(
                 detail=f"Product {item.product_id} not available in requested quantity"
             )
 
+        variant = None
+        if item.variant_id is not None:
+            variant = db.query(ProductVariant).filter(
+                ProductVariant.id == item.variant_id,
+                ProductVariant.product_id == item.product_id,
+            ).first()
+            if not variant:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Product {item.product_id} not available in requested quantity"
+                )
+
+        price_at_time = (
+            variant.price_override
+            if variant and variant.price_override is not None
+            else product.price
+        )
+
         # Atomic conditional decrement instead of read-then-write: under
         # concurrent checkouts, two requests reading stock_quantity=1 and
         # both deciding "enough stock" would oversell. The WHERE clause
         # makes the check-and-decrement a single database operation, so
         # only one of two concurrent requests for the last unit can win.
-        updated_rows = db.query(Product).filter(
-            Product.id == item.product_id,
-            Product.stock_quantity >= item.quantity,
-        ).update(
-            {Product.stock_quantity: Product.stock_quantity - item.quantity},
-            synchronize_session=False,
-        )
+        # A variant line decrements the variant's own stock_quantity, not
+        # the parent Product's - the two are independent counters.
+        if variant is not None:
+            updated_rows = db.query(ProductVariant).filter(
+                ProductVariant.id == variant.id,
+                ProductVariant.stock_quantity >= item.quantity,
+            ).update(
+                {ProductVariant.stock_quantity: ProductVariant.stock_quantity - item.quantity},
+                synchronize_session=False,
+            )
+        else:
+            updated_rows = db.query(Product).filter(
+                Product.id == item.product_id,
+                Product.stock_quantity >= item.quantity,
+            ).update(
+                {Product.stock_quantity: Product.stock_quantity - item.quantity},
+                synchronize_session=False,
+            )
         if updated_rows == 0:
             db.rollback()
             raise HTTPException(
@@ -156,12 +188,13 @@ async def create_order(
         order_item = OrderItem(
             order_id=order.id,
             product_id=product.id,
+            variant_id=variant.id if variant else None,
             quantity=item.quantity,
-            price_at_time=product.price
+            price_at_time=price_at_time
         )
         db.add(order_item)
 
-        total_amount += product.price * item.quantity
+        total_amount += price_at_time * item.quantity
 
     order.total_amount = total_amount
     try:
@@ -208,6 +241,7 @@ async def get_order(
     order = db.query(Order).options(
         joinedload(Order.shipping_address),
         selectinload(Order.items).joinedload(OrderItem.product),
+        selectinload(Order.items).joinedload(OrderItem.variant),
     ).filter(
         Order.id == order_id,
         Order.user_id == current_user.id
@@ -247,6 +281,7 @@ async def update_order_status(
     order = db.query(Order).options(
         joinedload(Order.shipping_address),
         selectinload(Order.items).joinedload(OrderItem.product),
+        selectinload(Order.items).joinedload(OrderItem.variant),
     ).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(
@@ -275,10 +310,16 @@ async def update_order_status(
     # outgoing transitions).
     if status == OrderStatus.CANCELLED:
         for item in order.items:
-            db.query(Product).filter(Product.id == item.product_id).update(
-                {Product.stock_quantity: Product.stock_quantity + item.quantity},
-                synchronize_session=False,
-            )
+            if item.variant_id is not None:
+                db.query(ProductVariant).filter(ProductVariant.id == item.variant_id).update(
+                    {ProductVariant.stock_quantity: ProductVariant.stock_quantity + item.quantity},
+                    synchronize_session=False,
+                )
+            else:
+                db.query(Product).filter(Product.id == item.product_id).update(
+                    {Product.stock_quantity: Product.stock_quantity + item.quantity},
+                    synchronize_session=False,
+                )
 
     db.commit()
 
@@ -329,6 +370,21 @@ def _payment_row_to_response(payment_row: Payment, order: Order) -> PaymentRespo
     )
 
 
+def _checkout_session_row_to_response(payment_row: Payment, order: Order) -> CheckoutSessionResponse:
+    return CheckoutSessionResponse(
+        order_id=order.id,
+        payment_id=payment_row.id,
+        checkout_session_id=payment_row.checkout_session_id,
+        url=payment_row.checkout_session_url or "",
+        status=_PAYMENT_ROW_STATUS_TO_API_STATUS.get(
+            payment_row.status, PaymentStatus.PENDING
+        ).value,
+        amount=_cents_to_decimal(payment_row.amount),
+        currency=payment_row.currency,
+        created_at=payment_row.created_at,
+    )
+
+
 def _apply_payment_success(
     db: Session,
     order: Order,
@@ -359,6 +415,31 @@ def _apply_payment_success(
         notify_email,
         OrderResponse.from_orm(order)
     )
+
+
+def _guard_order_payable(order: Order) -> None:
+    """
+    Shared by /pay and /checkout-session: an order that is already paid or
+    cancelled must never accept a new payment attempt of either kind.
+    Factored out rather than duplicated so a future third payment flow
+    (or a change to either guard) only has one place to update.
+    """
+    if order.payment_status == PaymentStatus.PAID:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order already paid"
+        )
+
+    # An order already cancelled (e.g. by an admin, or by the customer)
+    # must never accept a new payment attempt - the resolution for a
+    # payment somehow succeeding for a cancelled order is handled
+    # separately in the webhook path (flagged for manual review, not
+    # silently applied); here we simply refuse to start one.
+    if order.status == OrderStatus.CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot pay for a cancelled order"
+        )
 
 
 @router.post(
@@ -413,22 +494,7 @@ async def process_payment(
                 _payment_row_to_response(existing_payment, order)
             )
 
-    if order.payment_status == PaymentStatus.PAID:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Order already paid"
-        )
-
-    # An order already cancelled (e.g. by an admin, or by the customer)
-    # must never accept a new payment attempt - the resolution for a
-    # payment somehow succeeding for a cancelled order is handled
-    # separately in the webhook path (flagged for manual review, not
-    # silently applied); here we simply refuse to start one.
-    if order.status == OrderStatus.CANCELLED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot pay for a cancelled order"
-        )
+    _guard_order_payable(order)
 
     if payment.amount != order.total_amount:
         raise HTTPException(
@@ -568,6 +634,141 @@ async def process_payment(
 
 
 @router.post(
+    "/{order_id}/checkout-session",
+    response_model=APIResponse[CheckoutSessionResponse],
+    responses={
+        400: {"description": "Order already paid or cancelled"},
+        404: {"description": "Order not found"},
+        409: {"description": "Idempotency key already used with different checkout session parameters"},
+        503: {"description": "Payment provider unavailable, retry the request"},
+    },
+)
+async def create_checkout_session(
+    order_id: int,
+    background_tasks: BackgroundTasks,
+    payload: Optional[CheckoutSessionCreate] = None,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+    provider: PaymentProvider = Depends(get_payment_provider),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
+    """
+    Create a Stripe Checkout Session (the fully-hosted-redirect flow) for an
+    order's total. Unlike /pay - which confirms a PaymentIntent server-side
+    using a payment_method_token the client already collected via
+    Stripe.js/Elements - this flow hands card entry/3DS/the entire payment
+    UI to Stripe's own hosted page: the caller redirects the customer to the
+    returned `url`, and the eventual outcome is reported back asynchronously
+    via /webhooks/stripe (checkout.session.completed/.expired/
+    .async_payment_failed), never in this response. Both flows remain
+    available side by side; this does not replace or change /pay.
+    """
+    payload = payload or CheckoutSessionCreate()
+
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.user_id == current_user.id
+    ).first()
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
+    # Same idempotent-retry guard as /pay: a retried checkout-session
+    # request (client timeout + retry, double click) with the same key
+    # returns the original attempt's session instead of creating a second
+    # one. Checked before the paid/cancelled guard below for the same
+    # reason as /pay - a successful retry against an order that is now
+    # paid must not be rejected as a fresh duplicate attempt.
+    if idempotency_key:
+        existing_payment = db.query(Payment).filter(
+            Payment.order_id == order.id,
+            Payment.idempotency_key == idempotency_key,
+        ).first()
+        if existing_payment and existing_payment.checkout_session_id:
+            return APIResponse.success_response(
+                _checkout_session_row_to_response(existing_payment, order)
+            )
+
+    _guard_order_payable(order)
+
+    amount_cents = _decimal_to_cents(order.total_amount)
+    provider_idempotency_key = idempotency_key or f"auto-{uuid.uuid4().hex}"
+    success_url = payload.success_url or (
+        "https://example.com/checkout/success?session_id={CHECKOUT_SESSION_ID}"
+    )
+    cancel_url = payload.cancel_url or "https://example.com/checkout/cancel"
+
+    payment_row = Payment(
+        order_id=order.id,
+        provider="stripe",
+        payment_intent_id=f"pending-{uuid.uuid4().hex[:24]}",
+        idempotency_key=idempotency_key,
+        amount=amount_cents,
+        currency=payload.currency,
+        status="processing",
+    )
+    db.add(payment_row)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two concurrent requests with the same idempotency key both passed
+        # the pre-check above; the unique index catches the duplicate here.
+        db.rollback()
+        existing_payment = db.query(Payment).filter(
+            Payment.order_id == order.id,
+            Payment.idempotency_key == idempotency_key,
+        ).first()
+        if existing_payment and existing_payment.checkout_session_id:
+            return APIResponse.success_response(
+                _checkout_session_row_to_response(existing_payment, order)
+            )
+        raise
+
+    try:
+        session = provider.create_checkout_session(
+            amount=amount_cents,
+            currency=payload.currency,
+            idempotency_key=provider_idempotency_key,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            description=f"Order #{order.id}",
+            metadata={"order_id": str(order.id)},
+        )
+    except PaymentProviderTimeoutError:
+        # Same reasoning as /pay: unknown whether Stripe actually created
+        # the session, so only this attempt's own Payment row is marked
+        # failed - the order's payment_status/status stay untouched.
+        payment_row.status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Payment provider unavailable, please retry",
+        )
+    except IdempotencyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Idempotency key already used with different checkout session parameters",
+        )
+    except InvalidRequestError as e:
+        payment_row.status = "failed"
+        order.updated_at = datetime.utcnow()
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=e.message,
+        )
+
+    payment_row.checkout_session_id = session.id
+    payment_row.checkout_session_url = session.url
+    db.commit()
+
+    return APIResponse.success_response(_checkout_session_row_to_response(payment_row, order))
+
+
+@router.post(
     "/{order_id}/refund",
     response_model=APIResponse[RefundResponse],
     responses={
@@ -659,9 +860,15 @@ async def stripe_webhook(
     stripe_signature: Optional[str] = Header(default=None, alias="Stripe-Signature"),
 ):
     """
-    Receive Stripe webhook events (payment_intent.succeeded/failed) and
-    reconcile order/payment state. Idempotent - duplicate deliveries of the
-    same event.id are detected and short-circuited.
+    Receive Stripe webhook events for both payment flows and reconcile
+    order/payment state:
+      - payment_intent.succeeded / payment_intent.payment_failed - the
+        server-confirmed-PaymentIntent flow (/pay).
+      - checkout.session.completed / .async_payment_succeeded /
+        .async_payment_failed / .expired - the hosted-redirect Checkout
+        Session flow (/checkout-session).
+    Idempotent - duplicate deliveries of the same event.id are detected and
+    short-circuited.
 
     No auth dependency: Stripe webhooks are unauthenticated by design and
     are instead trusted via the HMAC signature on the payload (verified
@@ -699,19 +906,34 @@ async def stripe_webhook(
         db.rollback()
         return APIResponse.success_response({"status": "already_processed"})
 
-    payment_intent_data = event.data.get("object", {}) if isinstance(event.data, dict) else {}
-    payment_intent_id = payment_intent_data.get("id")
-    payment_row = (
-        db.query(Payment).filter(Payment.payment_intent_id == payment_intent_id).first()
-        if payment_intent_id
-        else None
-    )
+    object_data = event.data.get("object", {}) if isinstance(event.data, dict) else {}
+    is_checkout_session_event = event.type.startswith("checkout.session.")
+
+    if is_checkout_session_event:
+        # Session events key off Payment.checkout_session_id, not
+        # payment_intent_id - a fresh Checkout Session's payment_intent is
+        # null until the customer actually completes the hosted page (see
+        # CheckoutSession's docstring in app/services/payment/types.py), so
+        # it cannot be used to find the Payment row at all event types
+        # (e.g. checkout.session.expired never gets one).
+        payment_row = (
+            db.query(Payment).filter(Payment.checkout_session_id == object_data.get("id")).first()
+            if object_data.get("id")
+            else None
+        )
+    else:
+        payment_intent_id = object_data.get("id")
+        payment_row = (
+            db.query(Payment).filter(Payment.payment_intent_id == payment_intent_id).first()
+            if payment_intent_id
+            else None
+        )
 
     if payment_row is None:
-        # Unknown/foreign payment_intent (e.g. a webhook for a test event
-        # sent from the Stripe dashboard, or one that predates this
-        # payment) - acknowledge so Stripe stops retrying, but there is
-        # nothing to apply.
+        # Unknown/foreign payment_intent or checkout.session (e.g. a
+        # webhook for a test event sent from the Stripe dashboard, or one
+        # that predates this payment) - acknowledge so Stripe stops
+        # retrying, but there is nothing to apply.
         return APIResponse.success_response({"status": "processed", "applied": False})
 
     order = db.query(Order).filter(Order.id == payment_row.order_id).first()
@@ -737,6 +959,59 @@ async def stripe_webhook(
             db, order, payment_row, background_tasks, order.user.email
         )
     elif event.type == "payment_intent.payment_failed":
+        if payment_row.status != "succeeded":
+            payment_row.status = "failed"
+            order.payment_status = PaymentStatus.FAILED
+            order.updated_at = datetime.utcnow()
+            db.commit()
+    elif event.type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+        # Backfill the real PaymentIntent id now that Stripe has attached
+        # one - Session.payment_intent is a string id on the webhook
+        # payload (confirmed via Stripe's own docs example for this event:
+        # https://docs.stripe.com/payments/momo/save-during-payment), not
+        # an expanded object. payment_row.payment_intent_id started out as
+        # a "pending-..." placeholder set at session-creation time (see
+        # create_checkout_session), matching /pay's own placeholder
+        # convention for the same not-yet-known-value situation.
+        session_payment_intent = object_data.get("payment_intent")
+        if isinstance(session_payment_intent, dict):
+            session_payment_intent = session_payment_intent.get("id")
+        if session_payment_intent:
+            payment_row.payment_intent_id = session_payment_intent
+
+        # checkout.session.completed can fire with payment_status="unpaid"
+        # for delayed/async payment methods (e.g. bank debits) - Stripe
+        # documents that the real outcome then arrives later via a
+        # checkout.session.async_payment_succeeded/_failed event. Only a
+        # session that is actually paid (or needs no payment at all) is
+        # applied as a success here; an unpaid "completed" session is
+        # acknowledged but left pending.
+        payment_status_raw = object_data.get("payment_status")
+        if event.type == "checkout.session.completed" and payment_status_raw not in (
+            "paid",
+            "no_payment_required",
+        ):
+            db.commit()
+            return APIResponse.success_response({"status": "processed", "applied": False})
+
+        if order.status == OrderStatus.CANCELLED:
+            # Same conflict-handling as payment_intent.succeeded above.
+            payment_row.status = "succeeded"
+            payment_row.requires_manual_review = True
+            db.commit()
+            return APIResponse.success_response(
+                {"status": "processed", "applied": False, "requires_manual_review": True}
+            )
+
+        _apply_payment_success(
+            db, order, payment_row, background_tasks, order.user.email
+        )
+    elif event.type in ("checkout.session.expired", "checkout.session.async_payment_failed"):
+        # Mirrors payment_intent.payment_failed's handling: a terminal
+        # failure/expiry for this attempt, applied only if this attempt
+        # hasn't already succeeded (defends against an expired/failed event
+        # arriving after a completed one due to Stripe's at-least-once,
+        # not-strictly-ordered delivery).
         if payment_row.status != "succeeded":
             payment_row.status = "failed"
             order.payment_status = PaymentStatus.FAILED

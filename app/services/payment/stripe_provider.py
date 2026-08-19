@@ -31,6 +31,8 @@ from app.services.payment.exceptions import (
     SignatureVerificationError,
 )
 from app.services.payment.types import (
+    CheckoutSession,
+    CheckoutSessionStatus,
     PaymentIntent,
     PaymentIntentStatus,
     Refund,
@@ -123,11 +125,15 @@ class StripePaymentProvider(PaymentProvider):
 
     _intents_by_key: Dict[str, PaymentIntent] = {}
     _intents_by_id: Dict[str, PaymentIntent] = {}
+    _sessions_by_key: Dict[str, CheckoutSession] = {}
+    _sessions_by_id: Dict[str, CheckoutSession] = {}
 
     @classmethod
     def reset_mock_state(cls) -> None:
         cls._intents_by_key.clear()
         cls._intents_by_id.clear()
+        cls._sessions_by_key.clear()
+        cls._sessions_by_id.clear()
 
     def _simulate_network_call(self) -> None:
         """No-op hook standing in for the real HTTP call to api.stripe.com.
@@ -184,6 +190,7 @@ class StripePaymentProvider(PaymentProvider):
         payment_intent_id: str,
         *,
         idempotency_key: Optional[str] = None,
+        return_url: Optional[str] = None,
     ) -> PaymentIntent:
         self._simulate_network_call()
 
@@ -236,6 +243,86 @@ class StripePaymentProvider(PaymentProvider):
                 f"No such payment_intent: '{payment_intent_id}'", code="resource_missing"
             )
         return intent
+
+    # -- Checkout Session ------------------------------------------------
+
+    def create_checkout_session(
+        self,
+        *,
+        amount: int,
+        currency: str,
+        idempotency_key: str,
+        success_url: str,
+        cancel_url: str,
+        description: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> CheckoutSession:
+        # Same validate-before-touching-state ordering as create_payment_intent:
+        # a structurally invalid request never "reached Stripe" and must not
+        # consume an idempotency key.
+        _require_valid_amount(amount)
+        _require_valid_currency(currency)
+        if not success_url or not cancel_url:
+            raise InvalidRequestError(
+                "success_url and cancel_url are required to create a Checkout Session",
+                param="success_url" if not success_url else "cancel_url",
+                code="parameter_missing",
+            )
+
+        self._simulate_network_call()
+
+        cached = self._sessions_by_key.get(idempotency_key)
+        if cached is not None:
+            if cached.amount_total != amount or cached.currency != currency:
+                raise IdempotencyError(
+                    f"Idempotency key '{idempotency_key}' has already been used "
+                    "with different request parameters"
+                )
+            return cached
+
+        session_id = f"cs_test_{uuid.uuid4().hex}"
+        session = CheckoutSession(
+            id=session_id,
+            url=f"https://checkout.stripe.com/mock/pay/{session_id}",
+            status=CheckoutSessionStatus.OPEN,
+            payment_status="unpaid",
+            amount_total=amount,
+            currency=currency,
+            payment_intent=None,
+            idempotency_key=idempotency_key,
+            metadata=dict(metadata or {}),
+        )
+        self._sessions_by_key[idempotency_key] = session
+        self._sessions_by_id[session.id] = session
+        return session
+
+    def retrieve_checkout_session(self, session_id: str) -> CheckoutSession:
+        self._simulate_network_call()
+        session = self._sessions_by_id.get(session_id)
+        if session is None:
+            raise CardError(
+                f"No such checkout.session: '{session_id}'", code="resource_missing"
+            )
+        return session
+
+    def expire_checkout_session(self, session_id: str) -> CheckoutSession:
+        self._simulate_network_call()
+        session = self._sessions_by_id.get(session_id)
+        if session is None:
+            raise CardError(
+                f"No such checkout.session: '{session_id}'", code="resource_missing"
+            )
+        if session.status != CheckoutSessionStatus.OPEN:
+            # Mirrors real Stripe: only an open Session can be expired -
+            # already-complete or already-expired is a no-op error, not a
+            # silent success.
+            raise CardError(
+                f"Checkout Session '{session_id}' cannot be expired from status "
+                f"'{session.status.value}'",
+                code="checkout_session_expire_failed",
+            )
+        session.status = CheckoutSessionStatus.EXPIRED
+        return session
 
     # -- Refund --------------------------------------------------------
 
