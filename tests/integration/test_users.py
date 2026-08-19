@@ -77,6 +77,70 @@ def test_update_profile_changes_full_name(client, valid_registration_payload):
     assert response.json()["data"]["full_name"] == "Jane Updated"
 
 
+def test_update_profile_returns_404_when_user_deleted_after_token_issued(
+    client, valid_registration_payload, monkeypatch
+):
+    # Regression test: PUT /users/me raised HTTPException(404, "User not
+    # found") inside a try block whose `except Exception` also catches
+    # HTTPException (it IS an Exception), rewriting it to a 500 with a
+    # generic body. This is reachable when the user row disappears (e.g. a
+    # concurrent GDPR deletion) *between* get_current_active_user resolving
+    # current_user (its own DB session, from app.api.deps.get_db) and this
+    # route's own re-query of the same user (a separate session, from
+    # app.core.database.get_db). Both dependency resolution and the route
+    # body each do exactly one `Query(User)...first()` call for this
+    # request; simulate the race deterministically by making the second
+    # such call - the route's - return None as if the row were gone by then.
+    access_token = _register_and_login(client, valid_registration_payload)
+
+    import sqlalchemy.orm
+
+    original_first = sqlalchemy.orm.Query.first
+    call_count = {"n": 0}
+
+    def patched_first(self):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            return None
+        return original_first(self)
+
+    monkeypatch.setattr(sqlalchemy.orm.Query, "first", patched_first)
+
+    response = client.put(
+        f"{API_PREFIX}/me",
+        json={"full_name": "Ghost User"},
+        headers=_auth_headers(access_token),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "User not found"
+
+
+def test_update_profile_returns_500_on_genuine_db_error(
+    client, valid_registration_payload, monkeypatch
+):
+    # Companion regression test: confirm the fix to the 404 case above didn't
+    # simply remove error handling altogether - a real unexpected failure
+    # during the update (here, db.commit() raising) must still produce a 500.
+    access_token = _register_and_login(client, valid_registration_payload)
+
+    from sqlalchemy.orm import Session
+
+    def _boom(self, *args, **kwargs):
+        raise RuntimeError("simulated database failure")
+
+    monkeypatch.setattr(Session, "commit", _boom)
+
+    response = client.put(
+        f"{API_PREFIX}/me",
+        json={"full_name": "Should Fail"},
+        headers=_auth_headers(access_token),
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to update profile"
+
+
 def test_update_profile_rejects_empty_body(client, valid_registration_payload):
     access_token = _register_and_login(client, valid_registration_payload)
 
