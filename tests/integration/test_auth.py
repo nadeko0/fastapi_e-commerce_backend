@@ -1,5 +1,9 @@
+import asyncio
+import threading
+import time
 from datetime import timedelta
 
+import pytest
 from freezegun import freeze_time
 
 from app.core.config import settings
@@ -117,6 +121,37 @@ def test_login_rejects_nonexistent_email_with_same_wording_as_wrong_password(
 
     assert wrong_password_response.status_code == 401
     assert wrong_password_response.json()["detail"] == "Incorrect email or password"
+
+
+def test_login_runs_bcrypt_even_for_nonexistent_email(client, monkeypatch):
+    # Regression test: the login route used to be written as
+    # `if user_id is None or not await verify_password_async(...)`. Python's
+    # `or` short-circuits, so for a nonexistent email (user_id is None) the
+    # right-hand side was never evaluated at all - bcrypt never ran. That
+    # made a "no such account" login return near-instantly while a "wrong
+    # password for a real account" login took the full bcrypt cost (~300ms
+    # in production), a timing side-channel that reveals whether an email is
+    # registered - the exact same information the identical-response-message
+    # test above exists to hide. Fixed by always computing the password
+    # check first (against a dummy hash when the user doesn't exist) and
+    # only then combining it with the existence check.
+    calls = []
+    import app.core.security as security_module
+    original = security_module.verify_password_async
+
+    async def spy(*args, **kwargs):
+        calls.append(args)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr("app.api.v1.users.verify_password_async", spy)
+
+    response = client.post(
+        f"{API_PREFIX}/login",
+        data={"username": "does-not-exist@example.com", "password": "whatever-Pass1"},
+    )
+
+    assert response.status_code == 401
+    assert len(calls) == 1, "verify_password_async must run even when the account doesn't exist"
 
 
 def test_me_rejects_expired_access_token(client, valid_registration_payload):
@@ -407,24 +442,229 @@ def test_reset_password_invalidates_previously_issued_access_token(
     assert fresh_check.status_code == 200
 
 
-def test_no_refresh_token_exchange_endpoint_exists(client, valid_registration_payload):
-    # create_refresh_token's output is only ever handed out at login and
-    # never consumed anywhere in the app - there is no POST /refresh (or
-    # similar) route to exchange it for a new access token. This is a real
-    # gap (refresh tokens are effectively dead weight: 7-day-lived bearer
-    # secrets shipped to the client with no way to redeem them, and
-    # correspondingly no rotation/blacklist-on-refresh to verify), flagged
-    # in the accompanying findings notes rather than fixed here, since
-    # building a full refresh flow is out of scope for this pass.
-    access_token = _register_and_login(client, valid_registration_payload)
+def _login_tokens(client, payload):
+    client.post(f"{API_PREFIX}/register", json=payload)
+    login_response = client.post(
+        f"{API_PREFIX}/login",
+        data={"username": payload["email"], "password": payload["password"]},
+    )
+    return login_response.json()["data"]
 
-    for candidate_path in (
-        f"{API_PREFIX}/refresh",
-        f"{API_PREFIX}/token/refresh",
-        f"{API_PREFIX}/login/refresh",
-    ):
-        response = client.post(candidate_path, json={"refresh_token": access_token})
-        assert response.status_code in (404, 405)
+
+def test_refresh_returns_new_access_and_refresh_tokens_and_rotates_old_one(
+    client, valid_registration_payload
+):
+    tokens = _login_tokens(client, valid_registration_payload)
+    old_refresh_token = tokens["refresh_token"]
+
+    response = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": old_refresh_token}
+    )
+
+    assert response.status_code == 200
+    new_tokens = response.json()["data"]
+    assert new_tokens["access_token"]
+    assert new_tokens["refresh_token"]
+    assert new_tokens["refresh_token"] != old_refresh_token
+    # Note: the new access token can be byte-identical to the old one if
+    # both were minted within the same second - access tokens carry no jti,
+    # only second-granularity iat/exp, so that's expected and not a bug.
+
+    # New access token works.
+    me_response = client.get(
+        f"{API_PREFIX}/me",
+        headers={"Authorization": f"Bearer {new_tokens['access_token']}"},
+    )
+    assert me_response.status_code == 200
+
+    # Old refresh token is now dead (rotation makes it single-use).
+    replay_response = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": old_refresh_token}
+    )
+    assert replay_response.status_code == 401
+
+
+def test_refresh_does_not_require_a_valid_access_token(client, valid_registration_payload):
+    # Refreshing is the whole mechanism by which a client recovers from an
+    # expired access token, so an expired (or entirely absent) access token
+    # must not block it.
+    with freeze_time("2026-01-01 12:00:00") as frozen:
+        tokens = _login_tokens(client, valid_registration_payload)
+        refresh_token = tokens["refresh_token"]
+
+        past_expiry = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES + 1)
+        frozen.tick(delta=past_expiry)
+
+        expired_access_check = client.get(
+            f"{API_PREFIX}/me",
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert expired_access_check.status_code == 401
+
+        response = client.post(
+            f"{API_PREFIX}/refresh", json={"refresh_token": refresh_token}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["access_token"]
+
+
+def test_refresh_rejects_malformed_token(client):
+    response = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": "not-a-real-token"}
+    )
+    assert response.status_code == 401
+
+
+def test_refresh_rejects_token_with_tampered_signature(client, valid_registration_payload):
+    tokens = _login_tokens(client, valid_registration_payload)
+    refresh_token = tokens["refresh_token"]
+    tampered = refresh_token[:-1] + ("A" if refresh_token[-1] != "A" else "B")
+
+    response = client.post(f"{API_PREFIX}/refresh", json={"refresh_token": tampered})
+    assert response.status_code == 401
+
+
+def test_refresh_rejects_missing_body_field(client):
+    response = client.post(f"{API_PREFIX}/refresh", json={})
+    assert response.status_code == 422
+
+
+def test_refresh_rejects_access_token_presented_as_refresh_token(
+    client, valid_registration_payload
+):
+    tokens = _login_tokens(client, valid_registration_payload)
+
+    response = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": tokens["access_token"]}
+    )
+    assert response.status_code == 401
+
+
+def test_refresh_rejects_expired_refresh_token(client, valid_registration_payload):
+    with freeze_time("2026-01-01 12:00:00") as frozen:
+        tokens = _login_tokens(client, valid_registration_payload)
+        refresh_token = tokens["refresh_token"]
+
+        past_expiry = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS + 1)
+        frozen.tick(delta=past_expiry)
+
+        response = client.post(
+            f"{API_PREFIX}/refresh", json={"refresh_token": refresh_token}
+        )
+
+    assert response.status_code == 401
+
+
+def test_refresh_rejects_reused_token_and_revokes_the_rest_of_its_family(
+    client, valid_registration_payload
+):
+    tokens = _login_tokens(client, valid_registration_payload)
+    original_refresh_token = tokens["refresh_token"]
+
+    first_use = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": original_refresh_token}
+    )
+    assert first_use.status_code == 200
+    rotated_refresh_token = first_use.json()["data"]["refresh_token"]
+
+    # Replaying the already-rotated token is a stolen-token signal.
+    replay = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": original_refresh_token}
+    )
+    assert replay.status_code == 401
+
+    # The rest of the family (the token the replay attempt "raced" against)
+    # must be revoked too, not just the reused one.
+    downstream = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": rotated_refresh_token}
+    )
+    assert downstream.status_code == 401
+
+
+def test_logout_invalidates_refresh_token(client, valid_registration_payload):
+    tokens = _login_tokens(client, valid_registration_payload)
+
+    logout_response = client.post(
+        f"{API_PREFIX}/logout",
+        json={"refresh_token": tokens["refresh_token"]},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert logout_response.status_code == 200
+
+    refresh_response = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": tokens["refresh_token"]}
+    )
+    assert refresh_response.status_code == 401
+
+
+def test_logout_blacklists_the_access_token_too(client, valid_registration_payload):
+    tokens = _login_tokens(client, valid_registration_payload)
+
+    client.post(
+        f"{API_PREFIX}/logout",
+        json={"refresh_token": tokens["refresh_token"]},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+
+    me_response = client.get(
+        f"{API_PREFIX}/me",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert me_response.status_code == 401
+
+
+def test_refresh_rejects_token_for_deactivated_user(
+    client, valid_registration_payload, db_session
+):
+    from app.models.user import User as UserModel
+
+    tokens = _login_tokens(client, valid_registration_payload)
+
+    user = (
+        db_session.query(UserModel)
+        .filter(UserModel.email == valid_registration_payload["email"])
+        .first()
+    )
+    user.is_active = False
+    db_session.commit()
+
+    response = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": tokens["refresh_token"]}
+    )
+    assert response.status_code == 401
+
+
+def test_concurrent_refresh_with_same_token_only_one_succeeds(
+    client, valid_registration_payload
+):
+    # Reuse detection (RedisService.consume_refresh_token) does an atomic
+    # GET+DELETE inside a Redis transaction, so of N threads racing to
+    # redeem the same refresh token, exactly one should see it as
+    # "unconsumed" and get new tokens back - the rest must fail cleanly
+    # (401), never crash or double-issue tokens.
+    tokens = _login_tokens(client, valid_registration_payload)
+    refresh_token = tokens["refresh_token"]
+
+    n = 8
+    barrier = threading.Barrier(n)
+    results = [None] * n
+
+    def worker(i):
+        barrier.wait()
+        response = client.post(
+            f"{API_PREFIX}/refresh", json={"refresh_token": refresh_token}
+        )
+        results[i] = response.status_code
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert results.count(200) == 1
+    assert results.count(401) == n - 1
 
 
 def test_verify_password_delegates_entirely_to_bcrypt_checkpw(monkeypatch):
@@ -457,3 +697,138 @@ def test_verify_password_delegates_entirely_to_bcrypt_checkpw(monkeypatch):
     assert len(calls) == 2
     assert calls[0][2] is True
     assert calls[1][2] is False
+
+
+def test_verify_password_async_offloads_to_threadpool_without_blocking_event_loop(
+    monkeypatch,
+):
+    # verify_password_async is what login/delete-account actually call. If it
+    # ran bcrypt.checkpw directly on the event loop thread instead of
+    # dispatching to run_in_threadpool's worker threads, N concurrent calls
+    # would serialize and take N * per-call-delay. Simulating each bcrypt
+    # call as a fixed-cost sleep and running several concurrently via
+    # asyncio.gather proves they overlap: total wall time is close to a
+    # single call's delay, not the sum of all of them.
+    import bcrypt as bcrypt_module
+
+    from app.core.security import verify_password_async
+
+    delay = 0.2
+    call_count = 0
+
+    def slow_checkpw(password, hashed):
+        nonlocal call_count
+        call_count += 1
+        time.sleep(delay)
+        return password == hashed
+
+    monkeypatch.setattr(bcrypt_module, "checkpw", slow_checkpw)
+
+    async def run_concurrently():
+        n = 5
+        started = time.monotonic()
+        results = await asyncio.gather(
+            *[verify_password_async("pw", "pw") for _ in range(n)]
+        )
+        elapsed = time.monotonic() - started
+        return results, elapsed
+
+    results, elapsed = asyncio.run(run_concurrently())
+
+    assert results == [True] * 5
+    assert call_count == 5
+    # Fully serial would take ~1.0s (5 * 0.2s); concurrent execution across
+    # threadpool workers should land close to a single call's delay. Use a
+    # generous cutoff (well under the serial time) to avoid flakiness.
+    assert elapsed < delay * 3, (
+        f"expected concurrent bcrypt calls to overlap, took {elapsed:.2f}s "
+        f"for 5 calls of {delay}s each (serial would be ~{delay * 5:.2f}s)"
+    )
+
+
+def test_get_password_hash_async_offloads_to_threadpool_without_blocking_event_loop(
+    monkeypatch,
+):
+    import bcrypt as bcrypt_module
+
+    from app.core.security import get_password_hash_async
+
+    delay = 0.2
+    original_hashpw = bcrypt_module.hashpw
+
+    def slow_hashpw(password, salt):
+        time.sleep(delay)
+        return original_hashpw(password, salt)
+
+    monkeypatch.setattr(bcrypt_module, "hashpw", slow_hashpw)
+
+    async def run_concurrently():
+        n = 5
+        started = time.monotonic()
+        results = await asyncio.gather(
+            *[get_password_hash_async("Str0ngPass") for _ in range(n)]
+        )
+        elapsed = time.monotonic() - started
+        return results, elapsed
+
+    results, elapsed = asyncio.run(run_concurrently())
+
+    assert len(results) == 5
+    assert all(h.startswith("$2b$") for h in results)
+    assert elapsed < delay * 3, (
+        f"expected concurrent bcrypt calls to overlap, took {elapsed:.2f}s "
+        f"for 5 calls of {delay}s each (serial would be ~{delay * 5:.2f}s)"
+    )
+
+
+def test_async_password_wrappers_match_sync_semantics():
+    # The async wrappers must be pure offloading shims - same hash format,
+    # same verify result, wrong password still rejected - not a different
+    # code path with different behavior.
+    import asyncio
+
+    from app.core.security import (
+        get_password_hash,
+        get_password_hash_async,
+        verify_password,
+        verify_password_async,
+    )
+
+    async def run():
+        hashed = await get_password_hash_async("Str0ngPass")
+        correct = await verify_password_async("Str0ngPass", hashed)
+        wrong = await verify_password_async("wrong-password", hashed)
+        return hashed, correct, wrong
+
+    hashed, correct, wrong = asyncio.run(run())
+
+    assert hashed.startswith("$2b$")
+    assert correct is True
+    assert wrong is False
+    # Cross-check against the sync functions directly: a hash produced by
+    # the async wrapper verifies correctly through the sync path, and
+    # vice versa - confirming they're the same bcrypt calls, not divergent
+    # implementations.
+    assert verify_password("Str0ngPass", hashed) is True
+    sync_hashed = get_password_hash("Str0ngPass")
+    assert asyncio.run(verify_password_async("Str0ngPass", sync_hashed)) is True
+
+
+def test_sync_password_helpers_still_work_outside_an_event_loop():
+    # Celery tasks (app/tasks.py's GDPR purge) and one-off scripts
+    # (scripts/seed_demo_data.py, scripts/pg_smoke_test.py) call
+    # get_password_hash/verify_password directly with no event loop running.
+    # These must keep working as plain sync functions - they must NOT
+    # require asyncio.run or an active event loop to succeed.
+    import asyncio
+
+    from app.core.security import get_password_hash, verify_password
+
+    with pytest.raises(RuntimeError):
+        # Sanity check this test genuinely has no running event loop.
+        asyncio.get_running_loop()
+
+    hashed = get_password_hash("Str0ngPass")
+    assert hashed.startswith("$2b$")
+    assert verify_password("Str0ngPass", hashed) is True
+    assert verify_password("wrong-password", hashed) is False

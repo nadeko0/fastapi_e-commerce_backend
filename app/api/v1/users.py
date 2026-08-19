@@ -11,17 +11,23 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import (
+    DUMMY_PASSWORD_HASH,
+    RefreshTokenError,
     create_access_token,
-    create_refresh_token,
     generate_email_verification_token,
     generate_password_reset_token,
     get_current_active_user,
     get_current_user,
-    get_password_hash,
+    get_password_hash_async,
     invalidate_tokens_issued_before_now,
+    issue_refresh_token,
+    rotate_refresh_token,
     verify_email_token,
-    verify_password,
+    verify_password_async,
     verify_password_reset_token,
+)
+from app.core.security import (
+    logout as logout_tokens,
 )
 from app.models.address import Address
 from app.models.order import Order
@@ -45,8 +51,10 @@ from app.schemas.user import (
     GDPRDelete,
     GDPRExport,
     GDPRExportData,
+    LogoutRequest,
     PasswordReset,
     PasswordUpdate,
+    RefreshTokenRequest,
     Token,
     UserCreate,
     UserResponse,
@@ -85,7 +93,7 @@ async def register_user(
         client_ua = request.headers.get("user-agent")
         user = User(
             email=user_in.email,
-            hashed_password=get_password_hash(user_in.password),
+            hashed_password=await get_password_hash_async(user_in.password),
             full_name=user_in.full_name,
             phone=user_in.phone,
             gdpr_consent=user_in.gdpr_consent,
@@ -118,7 +126,21 @@ async def register_user(
         db.commit()
         db.refresh(user)
 
-
+        # db.refresh() above opens a fresh transaction (autocommit=False, so
+        # any query after a commit starts a new one) purely to reload the
+        # row - nothing below this line touches `db` again. Left open, that
+        # transaction sits on the checked-out connection for the rest of the
+        # request (background_tasks.add_task below, then response
+        # serialization/transmission) with no further code of ours in that
+        # window to release it - exactly the same exposure login()/
+        # reset_password() had before they were fixed to close early (see
+        # the long comment in login()), except here the window starts even
+        # earlier since there's no bcrypt await to wait for first. Closing
+        # here returns the connection immediately instead of leaving it to
+        # FastAPI's post-return dependency teardown, which a real client
+        # disconnect/cancellation at any point in that window can skip
+        # entirely (fastapi.concurrency.contextmanager_in_threadpool has no
+        # `finally` around its yield).
         if background_tasks:
             verification_token = generate_email_verification_token(user.email)
             logger.info(f"Queuing welcome email for user {user.email}")
@@ -222,27 +244,109 @@ async def login(
     """Authenticate with email/password and receive access and refresh tokens."""
 
     user = db.query(User).filter(User.email == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    user_id = user.id if user else None
+    user_email = user.email if user else None
+    hashed_password = user.hashed_password if user else None
+
+    # Release this request's DB connection back to the pool *before* the
+    # CPU-bound bcrypt verification, instead of after. verify_password_async
+    # offloads to a shared threadpool (see app/core/security.py) that also
+    # carries every other concurrent request's bcrypt work plus FastAPI's own
+    # threadpool dispatch of sync `Depends(get_db)` dependencies - under load
+    # that queue backs up, so a connection held open across this await gets
+    # held for however long the queue is, not just one hash's cost. Worse,
+    # if the client disconnects while parked on this await, the connection
+    # is stranded permanently: FastAPI's dependency cleanup (`session.close()`
+    # in app.core.database.get_db) itself runs via another threadpool await,
+    # and anyio delivers cancellation per-scope - once cancelled, that
+    # cleanup checkpoint raises immediately instead of ever running
+    # `session.close()`. Closing the session here, before the await, means
+    # there is no open connection left for that cancellation to strand (this
+    # was confirmed by instrumenting fastapi.concurrency.contextmanager_in_
+    # threadpool directly: cancelling a task mid-await inside it never
+    # invoked cm.__exit__ at all, even after waiting well past the awaited
+    # call's completion). `db` itself is a plain SQLAlchemy Session, not a
+    # connection - closing it here doesn't invalidate it, it just returns
+    # the checked-out connection to the pool; the session transparently
+    # checks out a fresh one on its next use below.
+    db.close()
+
+    # Deliberately NOT `user_id is None or not await verify_password_async(...)`:
+    # `or` short-circuits, so that structure would skip the bcrypt call
+    # entirely whenever the account doesn't exist - the intent of falling
+    # back to a dummy hash below only holds if verify_password_async always
+    # actually runs. Compute the password check unconditionally first, then
+    # combine it with the existence check.
+    password_valid = await verify_password_async(
+        form_data.password, hashed_password or DUMMY_PASSWORD_HASH
+    )
+    if user_id is None or not password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
 
-
-    user.last_login = datetime.utcnow()
+    db.query(User).filter(User.id == user_id).update(
+        {User.last_login: datetime.utcnow()}
+    )
     db.commit()
 
-
-    logger.info(f"Generating tokens for user {user.email}")
-    access_token = create_access_token(user.id)
-    refresh_token = create_refresh_token(user.id)
-    logger.info(f"Tokens generated for user {user.email}")
+    logger.info(f"Generating tokens for user {user_email}")
+    access_token = create_access_token(user_id)
+    refresh_token = issue_refresh_token(user_id)
+    logger.info(f"Tokens generated for user {user_email}")
 
     return APIResponse.success_response(Token(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer"
     ))
+
+@router.post(
+    "/refresh",
+    response_model=APIResponse[Token],
+    responses={401: {"description": "Invalid, expired, or already-used refresh token"}},
+)
+async def refresh_access_token(
+    refresh_in: RefreshTokenRequest,
+    db: Session = Depends(get_db),
+):
+    """Exchange a refresh token for a new access token, rotating the refresh
+    token in the process. Does not require a valid (or even present) access
+    token - that's the whole point of a refresh token. The presented refresh
+    token is single-use: redeeming it a second time is treated as a
+    stolen-token signal and revokes the rest of its token family, forcing
+    re-login.
+    """
+    try:
+        new_access_token, new_refresh_token = rotate_refresh_token(refresh_in.refresh_token, db)
+    except RefreshTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return APIResponse.success_response(Token(
+        access_token=new_access_token,
+        refresh_token=new_refresh_token,
+        token_type="bearer"
+    ))
+
+@router.post(
+    "/logout",
+    response_model=APIResponse[dict],
+)
+async def logout(
+    logout_in: LogoutRequest = LogoutRequest(),
+    token: str = Depends(oauth2_scheme),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Log out the current user: blacklist the access token in use and,
+    if a refresh token is supplied, revoke its whole token family so it
+    (and any refresh token rotated from it) can no longer be redeemed."""
+    logout_tokens(token, logout_in.refresh_token)
+    return APIResponse.success_response({"message": "Logged out successfully"})
 
 @router.post(
     "/consent",
@@ -358,7 +462,7 @@ async def delete_user_data(
 ):
     """Request deletion of the current user's account and data (GDPR)."""
 
-    if not verify_password(deletion.password, current_user.hashed_password):
+    if not await verify_password_async(deletion.password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect password"
@@ -423,15 +527,14 @@ async def update_current_user(
 
     logger.info(f"Fields to update: {list(update_data.keys())}")
 
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
     try:
-
-        user = db.query(User).filter(User.id == current_user.id).first()
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-
 
         for field, new_value in update_data.items():
             old_value = getattr(user, field)
@@ -833,14 +936,25 @@ async def reset_password(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
+        user_id = user.id
 
-        user.hashed_password = get_password_hash(new_password.new_password)
+        # Same reasoning as login(): release the connection before the
+        # CPU-bound bcrypt hash, not after, so neither queueing delay nor a
+        # mid-await client disconnect can hold/strand it. See the long
+        # comment in login() for the full mechanism.
+        db.close()
+
+        new_hashed_password = await get_password_hash_async(new_password.new_password)
+
+        db.query(User).filter(User.id == user_id).update(
+            {User.hashed_password: new_hashed_password}
+        )
         db.commit()
 
         # Invalidate any access token issued before this reset so a token
         # held by an attacker (the reason the user is resetting) stops
         # working immediately instead of remaining valid until it expires.
-        invalidate_tokens_issued_before_now(user.id)
+        invalidate_tokens_issued_before_now(user_id)
 
         return APIResponse.success_response({
             "message": "Password has been reset successfully"

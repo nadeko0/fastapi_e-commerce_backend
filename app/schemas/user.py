@@ -119,6 +119,12 @@ class Token(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+class LogoutRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
 class TokenPayload(BaseModel):
     sub: int  # user_id
     exp: datetime
