@@ -24,6 +24,14 @@ class RedisService:
                 host=settings.REDIS_HOST,
                 port=settings.REDIS_PORT,
                 db=settings.REDIS_DB,
+                # Never passed before: settings.REDIS_PASSWORD exists and
+                # docker-compose.yml's redis service requires one
+                # (--requirepass), but this connection pool silently never
+                # authenticated with it - every Redis operation against a
+                # password-protected instance failed. Invisible locally
+                # (tests use fakeredis, which doesn't enforce auth) until
+                # actually deployed against docker-compose's real Redis.
+                password=settings.REDIS_PASSWORD,
                 decode_responses=True,
                 max_connections=50
             )
