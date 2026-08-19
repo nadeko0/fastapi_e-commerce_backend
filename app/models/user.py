@@ -16,7 +16,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
     phone = Column(String, nullable=True)
-    role = Column(*create_string_enum(UserRole, "role")[0:1], nullable=False, server_default="client")
+    role = Column(create_string_enum(UserRole, "role"), nullable=False, server_default="client")
     is_active = Column(Boolean, nullable=False, default=True)
     is_email_verified = Column(Boolean, nullable=False, default=False)
     email_verification_date = Column(DateTime)
@@ -31,8 +31,11 @@ class User(Base):
     data_deletion_requested = Column(Boolean, nullable=False, default=False)
     data_deletion_date = Column(DateTime)
     data_retention_period = Column(Integer, nullable=False, default=settings.USER_DATA_RETENTION_DAYS)
-    consent_history = Column(JSON, nullable=False, default=[])
-    data_export_requests = Column(JSON, nullable=False, default=[])
+    # Callable defaults - see app/models/category.py's `path` column comment:
+    # a literal [] would be one list object shared (and mutated together)
+    # across every User row that doesn't set this column explicitly.
+    consent_history = Column(JSON, nullable=False, default=list)
+    data_export_requests = Column(JSON, nullable=False, default=list)
     last_login = Column(DateTime)
     last_activity_date = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

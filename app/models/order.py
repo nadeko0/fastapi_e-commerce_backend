@@ -20,8 +20,8 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
-    status = Column(*create_string_enum(OrderStatus, "status")[0:1], nullable=False, server_default="new")
-    payment_status = Column(*create_string_enum(PaymentStatus, "payment_status")[0:1], nullable=False, server_default="pending")
+    status = Column(create_string_enum(OrderStatus, "status"), nullable=False, server_default="new")
+    payment_status = Column(create_string_enum(PaymentStatus, "payment_status"), nullable=False, server_default="pending")
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     total_amount = Column(Numeric(10, 2), nullable=False)
     shipping_address_id = Column(Integer, ForeignKey("addresses.id"), nullable=False)

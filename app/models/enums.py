@@ -31,6 +31,13 @@ class PaymentStatus(str, Enum):
 
 
 def create_string_enum(enum_class, name):
-    """Create a String column with check constraint for enum values"""
-    values = [e.value for e in enum_class]
-    return String, {'name': name, 'check': f"{name} IN {tuple(values)}"}
+    """Return the String column type used to store `enum_class` values.
+
+    Every caller (app/models/user.py, order.py, address.py) pairs this with
+    its own explicit CheckConstraint in __table_args__ enforcing the same
+    enum_class values, so this only needs to hand back the column type -
+    it previously also returned a {'name', 'check'} dict that no caller
+    ever consumed (all four call sites sliced it off with `[0:1]`), which
+    was dead, misleading code.
+    """
+    return String
