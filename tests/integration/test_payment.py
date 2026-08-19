@@ -712,6 +712,15 @@ class _IncompleteProvider(PaymentProvider):
     def create_refund(self, **kwargs):
         return super().create_refund(**kwargs)
 
+    def create_checkout_session(self, **kwargs):
+        return super().create_checkout_session(**kwargs)
+
+    def retrieve_checkout_session(self, session_id):
+        return super().retrieve_checkout_session(session_id)
+
+    def expire_checkout_session(self, session_id):
+        return super().expire_checkout_session(session_id)
+
     def construct_webhook_event(self, payload, sig_header, webhook_secret, tolerance_seconds=300):
         return super().construct_webhook_event(
             payload, sig_header, webhook_secret, tolerance_seconds
@@ -732,6 +741,18 @@ def test_base_provider_abstract_methods_all_raise_not_implemented():
         provider.retrieve_payment_intent("pi_x")
     with pytest.raises(NotImplementedError):
         provider.create_refund(payment_intent_id="pi_x")
+    with pytest.raises(NotImplementedError):
+        provider.create_checkout_session(
+            amount=100,
+            currency="USD",
+            idempotency_key="k",
+            success_url="https://example.com/s",
+            cancel_url="https://example.com/c",
+        )
+    with pytest.raises(NotImplementedError):
+        provider.retrieve_checkout_session("cs_x")
+    with pytest.raises(NotImplementedError):
+        provider.expire_checkout_session("cs_x")
     with pytest.raises(NotImplementedError):
         provider.construct_webhook_event(b"{}", "t=1,v1=x", "secret")
 

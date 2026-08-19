@@ -27,6 +27,7 @@ class PaymentStatus(str, Enum):
 
 class OrderItemBase(BaseModel):
     product_id: int
+    variant_id: Optional[int] = None
     quantity: int = Field(..., gt=0)
     price_at_time: Decimal = Field(..., ge=0, decimal_places=2)
 
@@ -47,6 +48,9 @@ class OrderItemInDB(OrderItemBase):
 class OrderItemResponse(OrderItemInDB):
     product_name: str
     product_image: str
+    # None for the common no-variant line - only set when this line was for
+    # a specific ProductVariant (app/models/product.py).
+    variant_sku: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -71,11 +75,13 @@ class OrderItemResponse(OrderItemInDB):
                 "id": values.id,
                 "order_id": values.order_id,
                 "product_id": values.product_id,
+                "variant_id": values.variant_id,
                 "quantity": values.quantity,
                 "price_at_time": values.price_at_time,
                 "created_at": values.created_at,
                 "product_name": product.name,
                 "product_image": product.images[0] if product.images else "",
+                "variant_sku": values.variant_sku,
             }
         return values
 
@@ -161,6 +167,33 @@ class PaymentResponse(PaymentCreate):
     client_secret: Optional[str] = None
     requires_action: bool = False
     next_action: Optional[dict] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class CheckoutSessionCreate(BaseModel):
+    """
+    Optional overrides for creating a Stripe Checkout Session for an order
+    (the hosted-redirect payment flow - see /orders/{id}/checkout-session).
+    Unlike PaymentCreate, the amount is never client-supplied: it is always
+    derived from the order's own total_amount server-side, since the entire
+    point of this flow is that the client never handles payment details.
+    """
+    currency: str = Field("USD", pattern="^[A-Z]{3}$")
+    # Where Stripe sends the customer after the hosted page. This backend
+    # has no real frontend (see live_stripe_provider.py's confirm_payment_intent
+    # return_url note for the same situation) - omit to use a placeholder.
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+class CheckoutSessionResponse(BaseModel):
+    order_id: int
+    payment_id: int
+    checkout_session_id: str
+    url: str
+    status: str
+    amount: Decimal
+    currency: str
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 

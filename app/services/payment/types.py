@@ -28,6 +28,15 @@ class RefundStatus(str, Enum):
     FAILED = "failed"
 
 
+class CheckoutSessionStatus(str, Enum):
+    """Mirrors the real checkout.Session.status lifecycle - see
+    https://docs.stripe.com/api/checkout/sessions/object."""
+
+    OPEN = "open"
+    COMPLETE = "complete"
+    EXPIRED = "expired"
+
+
 @dataclass
 class PaymentIntent:
     id: str
@@ -50,6 +59,29 @@ class Refund:
     amount: int  # smallest currency unit
     currency: str
     status: RefundStatus
+
+
+@dataclass
+class CheckoutSession:
+    """Mirrors stripe.checkout.Session - the fully-hosted-redirect payment
+    flow (distinct from PaymentIntent's server-side confirm flow above).
+    `payment_intent` is None until Stripe attaches one, which does not
+    happen at creation time (a fresh Session's payment_intent is null) -
+    only once the customer actually completes the hosted page, at which
+    point it is a real PaymentIntent id."""
+
+    id: str
+    url: Optional[str]
+    status: CheckoutSessionStatus
+    # Mirrors Stripe's own "paid" / "unpaid" / "no_payment_required" string
+    # verbatim rather than a closed enum - Stripe documents this as an open
+    # set of values, unlike `status`.
+    payment_status: str
+    amount_total: int  # smallest currency unit (e.g. cents)
+    currency: str
+    payment_intent: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

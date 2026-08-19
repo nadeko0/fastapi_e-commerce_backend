@@ -8,6 +8,8 @@ from app.services.payment.exceptions import (
 )
 from app.services.payment.stripe_provider import StripePaymentProvider
 from app.services.payment.types import (
+    CheckoutSession,
+    CheckoutSessionStatus,
     PaymentIntent,
     PaymentIntentStatus,
     Refund,
@@ -29,6 +31,8 @@ __all__ = [
     "PaymentIntentStatus",
     "Refund",
     "RefundStatus",
+    "CheckoutSession",
+    "CheckoutSessionStatus",
     "WebhookEventData",
     "PaymentProviderError",
     "CardError",

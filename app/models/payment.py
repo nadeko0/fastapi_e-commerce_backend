@@ -38,6 +38,13 @@ class Payment(Base):
     currency = Column(String(3), nullable=False)
     status = Column(String, nullable=False, default="processing")
     client_secret = Column(String, nullable=True)
+    # Set only for the Checkout Session flow (create_checkout_session) - a
+    # second, independent way to pay this attempt, distinct from the
+    # PaymentIntent-based /pay flow above. NULL for every /pay attempt.
+    # Unique (not composite with order_id) because Stripe session ids are
+    # already globally unique - mirrors payment_intent_id's own uniqueness.
+    checkout_session_id = Column(String, nullable=True, unique=True, index=True)
+    checkout_session_url = Column(String, nullable=True)
     # Set when a webhook reports an outcome that conflicts with the current
     # order state (e.g. "succeeded" for an order already cancelled) - the
     # payment record is kept truthful but the order is NOT silently
