@@ -4,6 +4,21 @@ from pydantic import AnyHttpUrl, validator
 from pydantic_settings import BaseSettings, NoDecode
 
 
+def _split_comma_separated(v: str | List[str]) -> List[str]:
+    # Shared by every plain-string-list env setting (TRUSTED_PROXIES,
+    # ESSENTIAL_COOKIES): see the longer NoDecode explanation on
+    # BACKEND_CORS_ORIGINS below - same underlying pydantic-settings
+    # behavior, same fix.
+    if isinstance(v, str):
+        if not v.strip():
+            return []
+        if v.startswith("["):
+            import json
+            return json.loads(v)
+        return [i.strip() for i in v.split(",") if i.strip()]
+    return v
+
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "E-commerce Backend"
     VERSION: str = "1.0.0"
@@ -42,17 +57,8 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: Annotated[List[AnyHttpUrl], NoDecode] = []
 
     @validator("BACKEND_CORS_ORIGINS", pre=True)
-    def assemble_cors_origins(cls, v: str | List[str]) -> List[AnyHttpUrl]:
-        if isinstance(v, str):
-            if not v.strip():
-                return []
-            if v.startswith("["):
-                import json
-                return json.loads(v)
-            return [i.strip() for i in v.split(",") if i.strip()]
-        elif isinstance(v, list):
-            return v
-        raise ValueError(v)
+    def assemble_cors_origins(cls, v: str | List[str]) -> List[str]:
+        return _split_comma_separated(v)
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
@@ -111,7 +117,11 @@ class Settings(BaseSettings):
     # IPs of reverse proxies/load balancers allowed to set X-Forwarded-For.
     # Empty by default: with no trusted proxy in front, X-Forwarded-For is
     # attacker-controlled and must be ignored in favor of the socket peer IP.
-    TRUSTED_PROXIES: List[str] = []
+    TRUSTED_PROXIES: Annotated[List[str], NoDecode] = []
+
+    @validator("TRUSTED_PROXIES", pre=True)
+    def split_trusted_proxies(cls, v: str | List[str]) -> List[str]:
+        return _split_comma_separated(v)
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_ANONYMOUS: int = 30  # requests per minute
     RATE_LIMIT_AUTHENTICATED: int = 60  # requests per minute
@@ -149,7 +159,11 @@ class Settings(BaseSettings):
     # Cookie Consent Settings
     COOKIE_CONSENT_ENABLED: bool = True
     COOKIE_CONSENT_EXPIRE_DAYS: int = 365
-    ESSENTIAL_COOKIES: List[str] = ["session", "csrf_token"]
+    ESSENTIAL_COOKIES: Annotated[List[str], NoDecode] = ["session", "csrf_token"]
+
+    @validator("ESSENTIAL_COOKIES", pre=True)
+    def split_essential_cookies(cls, v: str | List[str]) -> List[str]:
+        return _split_comma_separated(v)
 
     # GDPR Email Templates
     GDPR_EXPORT_READY_TEMPLATE: str = "gdpr_export_ready"

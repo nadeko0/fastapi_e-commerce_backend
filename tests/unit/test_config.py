@@ -5,11 +5,11 @@ import sys
 import pytest
 
 # These run Settings() construction in a clean subprocess rather than
-# importing app.core.config in-process: pydantic-settings reads
-# BACKEND_CORS_ORIGINS at class-instantiation time (module import time for
-# the app's own `settings = Settings()`), and the app is already imported
-# with a fixed env by the time this test module loads - a subprocess is the
-# only way to exercise different raw env-var values against Settings().
+# importing app.core.config in-process: pydantic-settings reads these
+# fields at class-instantiation time (module import time for the app's own
+# `settings = Settings()`), and the app is already imported with a fixed
+# env by the time this test module loads - a subprocess is the only way to
+# exercise different raw env-var values against Settings().
 _BASE_ENV = {
     "JWT_SECRET_KEY": "x",
     "POSTGRES_SERVER": "x",
@@ -26,14 +26,14 @@ _BASE_ENV = {
 }
 
 
-def _settings_cors_origins(backend_cors_origins):
+def _construct_settings(env_var, raw_value):
     env = {**os.environ, **_BASE_ENV}
-    if backend_cors_origins is not None:
-        env["BACKEND_CORS_ORIGINS"] = backend_cors_origins
+    if raw_value is not None:
+        env[env_var] = raw_value
     else:
-        env.pop("BACKEND_CORS_ORIGINS", None)
+        env.pop(env_var, None)
     result = subprocess.run(
-        [sys.executable, "-c", "from app.core.config import settings; print(settings.BACKEND_CORS_ORIGINS)"],
+        [sys.executable, "-c", f"from app.core.config import settings; print(settings.{env_var})"],
         cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         env=env,
         capture_output=True,
@@ -43,27 +43,32 @@ def _settings_cors_origins(backend_cors_origins):
     return result
 
 
+# Regression tests: pydantic-settings' default env-var handling for any
+# "complex" (list) field type runs the raw env string through json.loads()
+# before pydantic validation ever sees it, regardless of whether the value
+# looks like JSON. Without a NoDecode annotation, every one of these three
+# List-typed settings fields raised a raw SettingsError/JSONDecodeError at
+# process startup - crashing the whole app - for an empty string and for
+# a plain comma-separated value (the format .env.example itself documents
+# for BACKEND_CORS_ORIGINS). Confirmed by actually building and running the
+# Docker image against a real .env, not just running the local test suite,
+# which never sets any of these three env vars and so never exercised the
+# parsing path for any of them.
 @pytest.mark.parametrize(
-    "raw_value",
+    "env_var,raw_value",
     [
-        None,  # unset - the field's default
-        "",  # empty string - a real deploy left this unset in .env
-        "http://localhost:3000,http://localhost:8080",  # .env.example's own documented format
-        '["http://localhost:3000"]',  # JSON list, also valid
+        (env_var, raw_value)
+        for env_var in ("BACKEND_CORS_ORIGINS", "TRUSTED_PROXIES", "ESSENTIAL_COOKIES")
+        for raw_value in (
+            None,  # unset - the field's default
+            "",  # empty string - what an unfilled-in .env line becomes
+            "10.0.0.1,10.0.0.2" if env_var != "BACKEND_CORS_ORIGINS" else
+            "http://localhost:3000,http://localhost:8080",  # comma-separated
+            '["a"]' if env_var != "BACKEND_CORS_ORIGINS" else
+            '["http://localhost:3000"]',  # JSON list, also valid
+        )
     ],
 )
-def test_backend_cors_origins_does_not_crash_settings_construction(raw_value):
-    # Regression test: pydantic-settings' default env-var handling for any
-    # "complex" (list) field type runs the raw env string through
-    # json.loads() before pydantic validation ever sees it, regardless of
-    # whether the value looks like JSON. Without the NoDecode annotation on
-    # this field (app/core/config.py), Settings() raised a raw
-    # SettingsError/JSONDecodeError at process startup for every case above
-    # except a real JSON array - including .env.example's own documented
-    # comma-separated format. This crashed the app on every real deploy
-    # (confirmed by actually building and running the Docker image) and was
-    # invisible to the rest of the test suite, which never sets this env
-    # var at all (conftest.py doesn't set it, so it silently used the
-    # in-process default instead of going through env parsing).
-    result = _settings_cors_origins(raw_value)
+def test_list_setting_does_not_crash_settings_construction(env_var, raw_value):
+    result = _construct_settings(env_var, raw_value)
     assert result.returncode == 0, result.stderr
