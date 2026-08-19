@@ -1,9 +1,7 @@
-import smtplib
 from datetime import datetime
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import TYPE_CHECKING, List
 
+import app.services.email as email
 from app.core.config import settings
 from app.models.order import Order
 from app.models.product import Product
@@ -12,38 +10,8 @@ if TYPE_CHECKING:
     from app.schemas.order import OrderResponse
     from app.schemas.user import GDPRExport
 
-class EmailService:
-    def __init__(self):
-        self.smtp_host = settings.SMTP_HOST
-        self.smtp_port = settings.SMTP_PORT
-        self.smtp_user = settings.SMTP_USER
-        self.smtp_password = settings.SMTP_PASSWORD
-        self.from_email = settings.EMAILS_FROM_EMAIL
-        self.from_name = settings.EMAILS_FROM_NAME
-
-    def _create_message(self, to_email: str, subject: str, html_content: str) -> MIMEMultipart:
-        message = MIMEMultipart('alternative')
-        message['Subject'] = subject
-        message['From'] = f"{self.from_name} <{self.from_email}>"
-        message['To'] = to_email
-        message.attach(MIMEText(html_content, 'html'))
-        return message
-
-    def _send_email(self, to_email: str, subject: str, html_content: str) -> bool:
-        try:
-            message = self._create_message(to_email, subject, html_content)
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-                server.starttls()
-                server.login(self.smtp_user, self.smtp_password)
-                server.send_message(message)
-            return True
-        except Exception as e:
-            print(f"Failed to send email: {str(e)}")
-            return False
 
 def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool:
-    email_service = EmailService()
-
     # order is always an OrderResponse (Pydantic), not the SQLAlchemy Order
     # model: the caller in app/api/v1/orders.py snapshots it via
     # OrderResponse.from_orm(order) before handing off to a FastAPI
@@ -82,15 +50,13 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
     </html>
     """
 
-    return email_service._send_email(
+    return email.get_email_provider().send(
         to_email,
         f"Order Confirmation #{order.id}",
         html_content
     )
 
 def send_order_status_update_email(to_email: str, order: Order) -> bool:
-    email_service = EmailService()
-
     html_content = f"""
     <html>
         <body>
@@ -108,15 +74,13 @@ def send_order_status_update_email(to_email: str, order: Order) -> bool:
     </html>
     """
 
-    return email_service._send_email(
+    return email.get_email_provider().send(
         to_email,
         f"Order Status Update - #{order.id}",
         html_content
     )
 
 def send_order_cancellation_email(to_email: str, order: Order) -> bool:
-    email_service = EmailService()
-
     html_content = f"""
     <html>
         <body>
@@ -132,15 +96,13 @@ def send_order_cancellation_email(to_email: str, order: Order) -> bool:
     </html>
     """
 
-    return email_service._send_email(
+    return email.get_email_provider().send(
         to_email,
         f"Order Cancellation - #{order.id}",
         html_content
     )
 
 def send_low_stock_alert_email(to_email: str, products: List[Product]) -> bool:
-    email_service = EmailService()
-
     products_html = "".join([
         f"<tr><td>{product.name}</td><td>{product.stock_quantity}</td></tr>"
         for product in products
@@ -166,16 +128,13 @@ def send_low_stock_alert_email(to_email: str, products: List[Product]) -> bool:
     </html>
     """
 
-    return email_service._send_email(
+    return email.get_email_provider().send(
         to_email,
         "Low Stock Alert",
         html_content
     )
 
 def send_welcome_email(to_email: str, full_name: str, verification_token: str) -> bool:
-    email_service = EmailService()
-
-
     base_url = f"http://localhost:{settings.PORT}"
     verification_link = f"{base_url}{settings.API_V1_STR}/users/verify-email/{verification_token}"
 
@@ -206,16 +165,13 @@ def send_welcome_email(to_email: str, full_name: str, verification_token: str) -
     </html>
     """
 
-    return email_service._send_email(
+    return email.get_email_provider().send(
         to_email,
         f"Welcome to {settings.PROJECT_NAME}! Please Verify Your Email",
         html_content
     )
 
 def send_email_verification(to_email: str, verification_token: str) -> bool:
-    email_service = EmailService()
-
-
     base_url = f"http://localhost:{settings.PORT}"
     verification_link = f"{base_url}{settings.API_V1_STR}/users/verify-email/{verification_token}"
 
@@ -236,16 +192,13 @@ def send_email_verification(to_email: str, verification_token: str) -> bool:
     </html>
     """
 
-    return email_service._send_email(
+    return email.get_email_provider().send(
         to_email,
         "Verify Your Email Address",
         html_content
     )
 
 def send_password_reset_email(to_email: str, reset_token: str) -> bool:
-    email_service = EmailService()
-
-
     base_url = f"http://localhost:{settings.PORT}"
     reset_link = f"{base_url}{settings.API_V1_STR}/users/password/reset/{reset_token}"
 
@@ -267,15 +220,13 @@ def send_password_reset_email(to_email: str, reset_token: str) -> bool:
     </html>
     """
 
-    return email_service._send_email(
+    return email.get_email_provider().send(
         to_email,
         "Password Reset Request",
         html_content
     )
 
 def send_gdpr_export_email(to_email: str, export_data: "GDPRExport") -> bool:
-    email_service = EmailService()
-
     html_content = f"""
     <html>
         <body>
@@ -312,15 +263,13 @@ def send_gdpr_export_email(to_email: str, export_data: "GDPRExport") -> bool:
     </html>
     """
 
-    return email_service._send_email(
+    return email.get_email_provider().send(
         to_email,
         "Your Personal Data Export (GDPR Request)",
         html_content
     )
 
 def send_gdpr_deletion_confirmation(to_email: str, request_id: str) -> bool:
-    email_service = EmailService()
-
     html_content = f"""
     <html>
         <body>
@@ -359,15 +308,13 @@ def send_gdpr_deletion_confirmation(to_email: str, request_id: str) -> bool:
     </html>
     """
 
-    return email_service._send_email(
+    return email.get_email_provider().send(
         to_email,
         "Data Deletion Confirmation (GDPR Request)",
         html_content
     )
 
 def send_gdpr_request_received(to_email: str, request_type: str, request_id: str) -> bool:
-    email_service = EmailService()
-
     request_type_text = "deletion" if request_type == "deletion" else "export"
     gdpr_article = "17" if request_type == "deletion" else "15"
 
@@ -410,7 +357,7 @@ def send_gdpr_request_received(to_email: str, request_type: str, request_id: str
     </html>
     """
 
-    return email_service._send_email(
+    return email.get_email_provider().send(
         to_email,
         f"GDPR {request_type.title()} Request Received",
         html_content

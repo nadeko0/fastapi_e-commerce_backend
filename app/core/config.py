@@ -175,9 +175,15 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str
     SMTP_PASSWORD: str
+    SMTP_TIMEOUT_SECONDS: int = 10
     EMAILS_FROM_EMAIL: str
     EMAILS_FROM_NAME: str
     EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = 48
+    # Which EmailProvider app.services.email.get_email_provider() hands out:
+    # "smtp" actually sends via SMTP_HOST; "logging" (or anything else) only
+    # logs and never touches the network - used by tests/local dev so they
+    # don't need a real SMTP server.
+    EMAIL_PROVIDER: str = "smtp"
 
     # Payment settings (mock Stripe integration - no real Stripe account
     # exists for this project; these are placeholder values, never real

@@ -1,23 +1,27 @@
+import logging
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from app.schemas.user import GDPRExport
 from app.services import email as email_module
+from app.services.email import smtp_provider as smtp_provider_module
+from app.services.email.logging_provider import LoggingEmailProvider
+from app.services.email.smtp_provider import SmtpEmailProvider
 
 
 def _no_real_smtp(monkeypatch):
-    # None of these tests should touch the network - _send_email is the
-    # single choke point that calls smtplib.SMTP, so short-circuit it
-    # and record what it was called with.
+    # None of these tests should touch the network - get_email_provider() is
+    # the single choke point every send_*_email function goes through,
+    # so short-circuit it with a fake provider and record what it was
+    # called with.
     calls = []
-    monkeypatch.setattr(
-        email_module.EmailService,
-        "_send_email",
-        lambda self, to_email, subject, html_content: calls.append(
-            (to_email, subject, html_content)
-        )
-        or True,
-    )
+
+    class _FakeProvider:
+        def send(self, to_email, subject, html_content):
+            calls.append((to_email, subject, html_content))
+            return True
+
+    monkeypatch.setattr(email_module, "get_email_provider", lambda: _FakeProvider())
     return calls
 
 
@@ -153,14 +157,131 @@ def test_send_gdpr_request_received_deletion(monkeypatch):
     assert "Article 17" in calls[0][2]
 
 
-def test_send_email_returns_false_and_does_not_raise_on_smtp_failure(monkeypatch):
+# -- SmtpEmailProvider --------------------------------------------------
+
+
+def test_smtp_provider_send_success(monkeypatch):
+    sent = {}
+
+    class _FakeServer:
+        def __init__(self, *a, **k):
+            sent["init_args"] = a
+            sent["init_kwargs"] = k
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self):
+            sent["starttls"] = True
+
+        def login(self, user, password):
+            sent["login"] = (user, password)
+
+        def send_message(self, message):
+            sent["message"] = message
+
+    monkeypatch.setattr(smtp_provider_module.smtplib, "SMTP", _FakeServer)
+
+    provider = SmtpEmailProvider()
+    result = provider.send("user@example.com", "subject", "<p>body</p>")
+
+    assert result is True
+    assert sent["starttls"] is True
+    assert sent["message"]["To"] == "user@example.com"
+    assert sent["message"]["Subject"] == "subject"
+    # Regression: smtplib.SMTP(host, port) with no timeout blocks on the OS
+    # default socket timeout, which can hang effectively forever against a
+    # stalled/unresponsive server - reproduced live against a real SMTP
+    # server during manual verification. Must always pass an explicit
+    # bounded timeout.
+    assert sent["init_kwargs"].get("timeout") == provider.smtp_timeout
+    assert sent["init_kwargs"]["timeout"] is not None
+
+
+def test_smtp_provider_send_returns_false_and_does_not_raise_on_connection_refused(monkeypatch):
     class _BoomSMTP:
         def __init__(self, *a, **k):
             raise OSError("connection refused")
 
-    monkeypatch.setattr(email_module.smtplib, "SMTP", _BoomSMTP)
+    monkeypatch.setattr(smtp_provider_module.smtplib, "SMTP", _BoomSMTP)
 
-    service = email_module.EmailService()
-    result = service._send_email("user@example.com", "subject", "<p>body</p>")
+    provider = SmtpEmailProvider()
+    result = provider.send("user@example.com", "subject", "<p>body</p>")
 
     assert result is False
+
+
+def test_smtp_provider_send_returns_false_and_does_not_raise_on_auth_failure(monkeypatch):
+    import smtplib as real_smtplib
+
+    class _AuthFailsServer:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self):
+            pass
+
+        def login(self, user, password):
+            raise real_smtplib.SMTPAuthenticationError(535, b"Authentication failed")
+
+        def send_message(self, message):
+            raise AssertionError("send_message should not be reached after a failed login")
+
+    monkeypatch.setattr(smtp_provider_module.smtplib, "SMTP", _AuthFailsServer)
+
+    provider = SmtpEmailProvider()
+    result = provider.send("user@example.com", "subject", "<p>body</p>")
+
+    assert result is False
+
+
+def test_smtp_provider_send_failure_is_logged_not_printed(monkeypatch, caplog):
+    class _BoomSMTP:
+        def __init__(self, *a, **k):
+            raise OSError("connection refused")
+
+    monkeypatch.setattr(smtp_provider_module.smtplib, "SMTP", _BoomSMTP)
+
+    provider = SmtpEmailProvider()
+    with caplog.at_level(logging.ERROR, logger="app.services.email.smtp_provider"):
+        result = provider.send("user@example.com", "subject", "<p>body</p>")
+
+    assert result is False
+    assert any("Failed to send email" in record.message for record in caplog.records)
+
+
+# -- LoggingEmailProvider -------------------------------------------------
+
+
+def test_logging_provider_is_a_noop_and_returns_true(caplog):
+    provider = LoggingEmailProvider()
+
+    with caplog.at_level(logging.INFO, logger="app.services.email.logging_provider"):
+        result = provider.send("user@example.com", "subject", "<p>body</p>")
+
+    assert result is True
+    assert any("Email suppressed" in record.message for record in caplog.records)
+
+
+# -- get_email_provider() factory -----------------------------------------
+
+
+def test_get_email_provider_returns_smtp_provider_when_configured(monkeypatch):
+    monkeypatch.setattr(email_module.settings, "EMAIL_PROVIDER", "smtp")
+
+    assert isinstance(email_module.get_email_provider(), SmtpEmailProvider)
+
+
+def test_get_email_provider_returns_logging_provider_by_default(monkeypatch):
+    monkeypatch.setattr(email_module.settings, "EMAIL_PROVIDER", "logging")
+
+    assert isinstance(email_module.get_email_provider(), LoggingEmailProvider)
