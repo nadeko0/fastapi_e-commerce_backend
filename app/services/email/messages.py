@@ -1,3 +1,4 @@
+import html
 from datetime import datetime
 from typing import TYPE_CHECKING, List
 
@@ -57,13 +58,22 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
     )
 
 def send_order_status_update_email(to_email: str, order: Order) -> bool:
+    # order.status.value assumed order.status is always an OrderStatus enum
+    # member. True for every real call site (app/api/v1/orders.py always
+    # passes OrderResponse, whose Pydantic field coerces the DB string into
+    # the enum) but not for the raw SQLAlchemy Order this function is
+    # type-hinted to accept: Order.status is a bare String column (see
+    # app/models/enums.py's create_string_enum), so a caller handing this a
+    # freshly-queried Order (e.g. app/tasks.py's send_order_status_update
+    # Celery task) got a plain str back and `.value` raised AttributeError.
+    status_value = order.status.value if hasattr(order.status, "value") else order.status
     html_content = f"""
     <html>
         <body>
             <h2>Order Status Update</h2>
             <p>Your order #{order.id} has been updated.</p>
 
-            <p>New Status: <strong>{order.status.value}</strong></p>
+            <p>New Status: <strong>{status_value}</strong></p>
 
             <h3>Order Details:</h3>
             <p>Order Date: {order.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
@@ -137,12 +147,21 @@ def send_low_stock_alert_email(to_email: str, products: List[Product]) -> bool:
 def send_welcome_email(to_email: str, full_name: str, verification_token: str) -> bool:
     base_url = f"http://localhost:{settings.PORT}"
     verification_link = f"{base_url}{settings.API_V1_STR}/users/verify-email/{verification_token}"
+    # full_name is attacker-controlled (the caller-supplied name at
+    # registration, app/api/v1/users.py) and was previously interpolated
+    # into this HTML email unescaped - a name like
+    # `<img src=x onerror=...>` would be embedded verbatim into the HTML
+    # body an email client renders. Escaped here at the point of use,
+    # matching how every other f-string-built HTML email in this module
+    # only ever interpolates server-controlled values (settings, IDs,
+    # enum .value, formatted dates).
+    safe_full_name = html.escape(full_name)
 
     html_content = f"""
     <html>
         <body>
             <h2>Welcome to {settings.PROJECT_NAME}!</h2>
-            <p>Dear {full_name},</p>
+            <p>Dear {safe_full_name},</p>
 
             <p>Thank you for registering with us. We're excited to have you as a member of our community!</p>
 

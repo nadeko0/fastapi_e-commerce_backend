@@ -64,6 +64,30 @@ def test_send_order_status_update_email(monkeypatch):
     assert "confirmed" in calls[0][2]
 
 
+def test_send_order_status_update_email_accepts_plain_string_status(monkeypatch):
+    """Regression test: send_order_status_update_email is type-hinted to
+    accept a raw SQLAlchemy Order, but Order.status is a bare String column
+    (app/models/enums.py's create_string_enum), not a SQLAlchemy Enum type -
+    a freshly-queried Order's .status is therefore a plain str with no
+    .value attribute, unlike OrderResponse.status (the Pydantic model every
+    real app/api/v1/orders.py call site actually passes, which does coerce
+    it to the OrderStatus enum). `order.status.value` used to raise
+    AttributeError whenever this function was handed a real Order - which
+    app/tasks.py's send_order_status_update Celery task does."""
+    calls = _no_real_smtp(monkeypatch)
+    order = SimpleNamespace(
+        id=1,
+        status="confirmed",  # plain str, as a real Order.status is
+        total_amount="19.98",
+        created_at=datetime.utcnow(),
+    )
+
+    result = email_module.send_order_status_update_email("buyer@example.com", order)
+
+    assert result is True
+    assert "confirmed" in calls[0][2]
+
+
 def test_send_order_cancellation_email(monkeypatch):
     calls = _no_real_smtp(monkeypatch)
 
@@ -92,6 +116,24 @@ def test_send_welcome_email(monkeypatch):
     assert result is True
     assert "Welcome" in calls[0][1]
     assert "tok123" in calls[0][2]
+
+
+def test_send_welcome_email_escapes_html_in_full_name(monkeypatch):
+    """Regression test: full_name is attacker-controlled (the caller-supplied
+    name at registration) and was previously interpolated into the welcome
+    email's HTML body unescaped - a name containing markup would be embedded
+    verbatim into HTML an email client renders. messages.py now
+    html.escape()s it before interpolation."""
+    calls = _no_real_smtp(monkeypatch)
+
+    result = email_module.send_welcome_email(
+        "new.user@example.com", "<img src=x onerror=alert(1)>", "tok123"
+    )
+
+    assert result is True
+    body = calls[0][2]
+    assert "<img src=x onerror=alert(1)>" not in body
+    assert "&lt;img src=x onerror=alert(1)&gt;" in body
 
 
 def test_send_email_verification(monkeypatch):

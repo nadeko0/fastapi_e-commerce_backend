@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta
 
+from sqlalchemy import event
+
 from app.core.config import settings
 from app.core.security import get_password_hash
+from app.models.address import Address
 from app.models.user import User
 from app.tasks import purge_expired_deletion_requests
 
@@ -59,6 +62,59 @@ def test_purge_leaves_accounts_within_grace_period(db_session):
 
     assert purged_count == 0
     assert db_session.query(User).filter(User.id == within_grace.id).first() is not None
+
+
+def test_purge_scrubs_addresses_without_an_n_plus_1_query_per_account(db_session):
+    """Regression test: `for address in account.addresses` inside the purge
+    loop used to lazy-load each account's addresses with a separate SELECT
+    per account (classic N+1) - fine for one test account, not fine for a
+    daily sweep over a real accounts table. purge_expired_deletion_requests
+    now eager-loads addresses via selectinload(User.addresses), so the
+    number of SELECTs stays flat (one extra query total) as the number of
+    matched accounts grows."""
+    accounts = [
+        _make_deletion_requested_user(
+            db_session, f"expired{i}@example.com",
+            days_since_request=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 1,
+        )
+        for i in range(5)
+    ]
+    for account in accounts:
+        address = Address(
+            user_id=account.id,
+            street="123 Main Street",
+            city="Springfield",
+            state="Illinois",
+            postal_code="62701",
+            country="US",
+            is_default=True,
+        )
+        db_session.add(address)
+    db_session.commit()
+
+    queries = []
+
+    def _count(conn, cursor, statement, parameters, context, executemany):
+        if statement.strip().upper().startswith("SELECT"):
+            queries.append(statement)
+
+    event.listen(db_session.bind, "before_cursor_execute", _count)
+    try:
+        purged_count = purge_expired_deletion_requests(db_session)
+    finally:
+        event.remove(db_session.bind, "before_cursor_execute", _count)
+
+    assert purged_count == 5
+    # One SELECT for the accounts query, one for the eager-loaded addresses
+    # (selectinload issues a single second query, not one per account) -
+    # strictly less than one-per-account (5), which is what an N+1 would
+    # produce.
+    assert len(queries) <= 3, queries
+    for account in accounts:
+        scrubbed_address = (
+            db_session.query(Address).filter(Address.user_id == account.id).first()
+        )
+        assert scrubbed_address.street == "REDACTED"
 
 
 def test_purge_ignores_active_accounts(db_session):
