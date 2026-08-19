@@ -28,25 +28,41 @@ def _auth_headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
+def _assert_envelope(body):
+    """Every router in this API wraps responses in the APIResponse envelope
+    (success/data/error/timestamp/request_id) - see app/schemas/common.py.
+    legal.py used to return raw dicts/models instead; these assertions guard
+    against that regressing."""
+    assert set(body.keys()) >= {"success", "data", "error", "timestamp", "request_id"}
+    assert body["success"] is True
+    assert body["error"] is None
+
+
 def test_privacy_policy_is_public(client):
     response = client.get(f"{LEGAL_PREFIX}/privacy-policy")
 
     assert response.status_code == 200
-    assert "Privacy Policy" in response.json()["content"]
+    body = response.json()
+    _assert_envelope(body)
+    assert "Privacy Policy" in body["data"]["content"]
 
 
 def test_terms_of_service_is_public(client):
     response = client.get(f"{LEGAL_PREFIX}/terms-of-service")
 
     assert response.status_code == 200
-    assert "Terms of Service" in response.json()["content"]
+    body = response.json()
+    _assert_envelope(body)
+    assert "Terms of Service" in body["data"]["content"]
 
 
 def test_cookie_policy_is_public(client):
     response = client.get(f"{LEGAL_PREFIX}/cookie-policy")
 
     assert response.status_code == 200
-    assert "Cookie Policy" in response.json()["content"]
+    body = response.json()
+    _assert_envelope(body)
+    assert "Cookie Policy" in body["data"]["content"]
 
 
 def test_update_consent_requires_authentication(client):
@@ -69,8 +85,9 @@ def test_update_consent_updates_marketing_preference(client):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "success"
-    assert body["updated_consents"]["marketing"] is True
+    _assert_envelope(body)
+    assert body["data"]["status"] == "success"
+    assert body["data"]["updated_consents"]["marketing"] is True
 
 
 def test_data_request_export_returns_processing_status(client, monkeypatch):
@@ -88,8 +105,9 @@ def test_data_request_export_returns_processing_status(client, monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "processing"
-    assert body["request_id"].startswith("export_")
+    _assert_envelope(body)
+    assert body["data"]["status"] == "processing"
+    assert body["data"]["request_id"].startswith("export_")
 
 
 def test_data_request_deletion_returns_processing_status(client, monkeypatch):
@@ -108,7 +126,9 @@ def test_data_request_deletion_returns_processing_status(client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["request_id"].startswith("deletion_")
+    body = response.json()
+    _assert_envelope(body)
+    assert body["data"]["request_id"].startswith("deletion_")
 
 
 def test_data_request_rejects_invalid_request_type(client):
@@ -130,8 +150,9 @@ def test_consent_status_returns_current_state(client):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["marketing_consent"] is False
-    assert body["privacy_policy_accepted"] is True
+    _assert_envelope(body)
+    assert body["data"]["marketing_consent"] is False
+    assert body["data"]["privacy_policy_accepted"] is True
 
 
 def test_data_retention_reports_within_period_for_new_account(client):
@@ -140,7 +161,9 @@ def test_data_retention_reports_within_period_for_new_account(client):
     response = client.get(f"{LEGAL_PREFIX}/data-retention", headers=_auth_headers(token))
 
     assert response.status_code == 200
-    assert response.json()["within_retention_period"] is True
+    body = response.json()
+    _assert_envelope(body)
+    assert body["data"]["within_retention_period"] is True
 
 
 def test_consent_status_rejects_blacklisted_token(client):
