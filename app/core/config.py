@@ -1,7 +1,7 @@
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from pydantic import AnyHttpUrl, validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, NoDecode
 
 
 class Settings(BaseSettings):
@@ -28,13 +28,29 @@ class Settings(BaseSettings):
             return True
         return False
 
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+    # NoDecode: pydantic-settings' default env-var handling for any "complex"
+    # (list/dict/etc) field type is to run the raw env string through
+    # json.loads() *before* pydantic validation ever sees it, regardless of
+    # whether the value looks like JSON. Without NoDecode, both an empty
+    # string and .env.example's own documented comma-separated format
+    # (BACKEND_CORS_ORIGINS=http://a.com,http://b.com) raised a raw
+    # json.JSONDecodeError/SettingsError at process startup, before the
+    # validator below - which exists specifically to handle the
+    # comma-separated case - ever ran. Confirmed by actually deploying the
+    # Docker image, not just running the local test suite (which never sets
+    # this env var and so never exercised the parsing path at all).
+    BACKEND_CORS_ORIGINS: Annotated[List[AnyHttpUrl], NoDecode] = []
 
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v: str | List[str]) -> List[AnyHttpUrl]:
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
+        if isinstance(v, str):
+            if not v.strip():
+                return []
+            if v.startswith("["):
+                import json
+                return json.loads(v)
+            return [i.strip() for i in v.split(",") if i.strip()]
+        elif isinstance(v, list):
             return v
         raise ValueError(v)
 
