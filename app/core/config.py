@@ -189,5 +189,16 @@ class Settings(BaseSettings):
     class Config:
         case_sensitive = True
         env_file = ".env"
+        # docker-compose.yml's api service loads the whole .env file via
+        # env_file, which also contains docker-compose-only variables
+        # (DOCKER_POSTGRES_PORT, DOCKER_REDIS_PORT, DOCKER_NETWORK_NAME -
+        # used for host port mapping/network naming, not read by the app).
+        # pydantic-settings' BaseSettings defaults to forbidding unknown
+        # fields, so those leaked straight through as a startup-crashing
+        # ValidationError. Confirmed by actually deploying the Docker
+        # image, not just running the local test suite (which sets only
+        # the exact env vars Settings expects and so never exercised this
+        # path)
+        extra = "ignore"
 
 settings = Settings()

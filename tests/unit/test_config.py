@@ -72,3 +72,29 @@ def _construct_settings(env_var, raw_value):
 def test_list_setting_does_not_crash_settings_construction(env_var, raw_value):
     result = _construct_settings(env_var, raw_value)
     assert result.returncode == 0, result.stderr
+
+
+def test_unknown_env_vars_from_shared_env_file_do_not_crash_settings():
+    # Regression test: docker-compose.yml's api service loads the whole
+    # .env file via env_file, which also contains docker-compose-only
+    # variables (DOCKER_POSTGRES_PORT, DOCKER_REDIS_PORT,
+    # DOCKER_NETWORK_NAME - used for host port mapping/network naming, not
+    # read by the app itself). pydantic-settings' BaseSettings defaults to
+    # forbidding unrecognized fields, so those leaked straight through as a
+    # startup-crashing ValidationError - confirmed by actually deploying
+    # the built Docker image to a real server, not just running the local
+    # test suite (which sets only the exact env vars Settings expects and
+    # so never exercised this path).
+    env = {**os.environ, **_BASE_ENV}
+    env["DOCKER_POSTGRES_PORT"] = "15432"
+    env["DOCKER_REDIS_PORT"] = "16379"
+    env["DOCKER_NETWORK_NAME"] = "some-network"
+    result = subprocess.run(
+        [sys.executable, "-c", "from app.core.config import settings; print(settings.PROJECT_NAME)"],
+        cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
