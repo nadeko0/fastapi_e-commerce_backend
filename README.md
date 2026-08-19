@@ -143,6 +143,13 @@ smoke test in `scripts/pg_smoke_test.py`, Docker).
 
 ## Docker
 
+`.env`'s defaults (`POSTGRES_SERVER=localhost`, `REDIS_HOST=localhost`) are
+for the non-Docker Quick Start above, where Postgres/Redis run on the host
+itself. Inside `docker compose`, the api/worker containers reach the `db`
+and `redis` containers by their service name, not `localhost` — set
+`POSTGRES_SERVER=db` and `REDIS_HOST=redis` in `.env` before starting the
+stack, or the api container will fail every DB/Redis call.
+
 ```bash
 docker compose up --build -d
 docker compose exec api alembic upgrade head
@@ -459,10 +466,54 @@ carried forward on trust:
   `default=list`/`default=dict`, not a shared literal. All confirmed
   present in the code, not just described in a commit message.
 
-Not re-verified here, for the same reason round 3 couldn't: no Docker in
-this environment, no Ethereal/Stripe test credentials, and the original
-load-test VPS is already torn down. Those claims stand as reported by the
-sessions that actually ran them.
+At that point Docker, Ethereal, and Stripe credentials weren't available in
+this session's own sandbox, so those three items were left as reported by
+the sessions that originally ran them. They were then made available
+mid-session, so this checkpoint went back and closed all three itself
+rather than leave them on trust:
+
+- **Ethereal**: sent a new email through the real `SmtpEmailProvider` code
+  path (not a mock) against the live `royal59@ethereal.email` account, then
+  independently confirmed delivery via IMAP (not just a `send()` return
+  value) — the new message showed up in the mailbox alongside the four
+  from the original bug-fixing session, visually confirmed by the project
+  owner via screenshot.
+- **Stripe**: ran `test_payment_live_stripe.py` and
+  `test_checkout_session_live_stripe.py` against a real `sk_test_...` key —
+  20/20 passed against Stripe's actual test-mode API.
+- **Docker + load test**: cloned the repo fresh onto the same VPS
+  (`188.34.161.221`) into an isolated `docker compose -p` project with a
+  dedicated network and non-default host ports, built and ran the full
+  stack (`api`, `db`, `redis`, `celery-worker`, `celery-beat`), ran
+  `alembic upgrade head` (all four revisions applied cleanly) and the seed
+  script, and manually dispatched a real Celery task
+  (`update_product_stats.delay()`) — confirmed `received` → `succeeded` in
+  the worker's own logs, not inferred. Along the way, hit (and fixed in
+  this deploy only, not a code change) two setup mistakes of this
+  session's own making: `.env` copied from `.env.example` verbatim leaves
+  `POSTGRES_SERVER=localhost`/`REDIS_HOST=localhost`, which only work for
+  the non-Docker Quick Start — SETUP.md already documents that Docker needs
+  `db`/`redis` instead, but the README's own Docker section doesn't repeat
+  that reminder inline, which is a real gap worth fixing in the README
+  text itself, not just in SETUP.md. Second, `docker compose restart`
+  doesn't reload `.env` changes into already-created containers (needs
+  `up -d --force-recreate` instead) — also a session mistake, not a bug.
+  With those fixed, an initial 100-concurrent-request burst against
+  `GET /api/v1/products` produced 277/300 timeouts — traced to
+  `ENVIRONMENT=development` (`.env.example`'s own default), which
+  `app/core/config.py`'s `adjust_pool_size` validator deliberately halves
+  the DB pool for (5+10=15 max connections per worker, intentional so a
+  laptop dev setup doesn't try to open 30 Postgres connections). Redeployed
+  with `ENVIRONMENT=production` and reran the identical burst: 300/300 in
+  3.1s. A follow-up 80-concurrent register+login burst from a single
+  source IP correctly hit the documented stricter rate limit on those
+  endpoints (`429`s, not `500`s or hangs) — expected behavior for a flood
+  from one IP, not a bug. `pg_stat_activity` immediately after: 0 rows in
+  `idle in transaction` — the round-3 connection-pool-leak fix holds under
+  a real burst, re-confirmed independently rather than taken on trust. Tore
+  the whole thing down afterward (`docker compose down -v --rmi all`,
+  directory removed) and confirmed the server's other containers (`caddy`,
+  `vaultwarden`, `duckdns`) were never touched.
 
 **Overall assessment**: the codebase, test suite, and README are
 consistent with each other — nothing found here contradicts what round 3
