@@ -1,3 +1,7 @@
+import threading
+
+import pytest
+
 from app.models.category import Category
 from app.models.product import Product
 
@@ -247,3 +251,87 @@ def test_cart_requires_authentication(client):
     response = client.get(CART_PREFIX)
 
     assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Concurrency: rapid add-to-cart for the same product
+# ---------------------------------------------------------------------------
+
+def test_sequential_add_to_cart_accumulates_quantity(client, db_session):
+    """Two add-to-cart calls for the same product, one after another,
+    must accumulate (2 + 3 = 5), not overwrite. This proves add_to_cart's
+    read-modify-write logic is correct when calls do not overlap - it does
+    NOT by itself prove safety under genuine concurrent requests; see
+    test_concurrent_add_to_cart_can_lose_updates below for that."""
+    token = _register_and_login(client, _valid_registration_payload())
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=10)
+
+    client.post(
+        f"{CART_PREFIX}/items",
+        params={"product_id": product.id, "quantity": 2},
+        headers=_auth_headers(token),
+    )
+    response = client.post(
+        f"{CART_PREFIX}/items",
+        params={"product_id": product.id, "quantity": 3},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["items_count"] == 1
+    assert body["items"][0]["quantity"] == 5
+
+
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "Known lost-update race, not fixed in this pass: add_to_cart "
+        "(app/api/v1/cart.py) does a plain Redis GET (RedisService.get_cart) "
+        "then, after mutating the in-process Cart object, a plain SETEX "
+        "(RedisService.update_cart) with no compare-and-set / WATCH-MULTI / "
+        "Lua guard. Two requests that read the same cart before either "
+        "writes back will both compute their own 'old quantity + delta', and "
+        "the second SETEX unconditionally overwrites the first - one "
+        "addition is silently lost instead of both accumulating. Reproduced "
+        "reliably (3/3 runs) with N=10 concurrent threads collapsing to "
+        "quantity=1 instead of 10. Fixing this correctly needs an atomic "
+        "primitive (WATCH/MULTI transaction or a Lua script) added to "
+        "RedisService (app/services/redis.py), which is out of scope for "
+        "this pass (owned by another agent) - see "
+        ".agent-notes/orders_inventory_review.md."
+    ),
+)
+def test_concurrent_add_to_cart_can_lose_updates(client, db_session):
+    token = _register_and_login(client, _valid_registration_payload())
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=100)
+
+    n = 10
+    barrier = threading.Barrier(n)
+    results = [None] * n
+
+    def worker(i):
+        barrier.wait()
+        response = client.post(
+            f"{CART_PREFIX}/items",
+            params={"product_id": product.id, "quantity": 1},
+            headers=_auth_headers(token),
+        )
+        results[i] = response.status_code
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert all(code == 200 for code in results)
+
+    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    final_quantity = final["items"][0]["quantity"] if final["items"] else 0
+
+    # Desired behavior: all 10 concurrent +1 additions accumulate to 10.
+    # Currently fails: last writer wins, earlier additions are lost.
+    assert final_quantity == n

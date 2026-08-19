@@ -37,6 +37,7 @@ from app.services.payment import (
 from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
+    InvalidRequestError,
     PaymentProviderTimeoutError,
     SignatureVerificationError,
 )
@@ -264,6 +265,21 @@ async def update_order_status(
     old_status = order.status
     order.status = status
     order.updated_at = datetime.utcnow()
+
+    # Cancelling an order must release the stock that create_order reserved
+    # for it (the atomic UPDATE...WHERE decrement at checkout time) - without
+    # this, every cancelled order permanently leaks its quantity out of
+    # stock_quantity, understating real availability forever. Only applies
+    # when transitioning INTO cancelled (not a no-op re-cancel, which
+    # _is_valid_status_transition already rejects since CANCELLED has no
+    # outgoing transitions).
+    if status == OrderStatus.CANCELLED:
+        for item in order.items:
+            db.query(Product).filter(Product.id == item.product_id).update(
+                {Product.stock_quantity: Product.stock_quantity + item.quantity},
+                synchronize_session=False,
+            )
+
     db.commit()
 
 
@@ -484,6 +500,18 @@ async def process_payment(
             status_code=status.HTTP_409_CONFLICT,
             detail="Idempotency key already used with different payment parameters",
         )
+    except InvalidRequestError as e:
+        # A structurally invalid amount/currency (e.g. a non-integer or
+        # non-positive amount, or a currency code that isn't a real ISO
+        # 4217 code) - the request was never "sent to the processor", so
+        # this attempt is a hard failure, not a retryable transport issue.
+        payment_row.status = "failed"
+        order.updated_at = datetime.utcnow()
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=e.message,
+        )
     except CardError as e:
         # The provider *did* respond - with a decline. This is a terminal
         # outcome for this attempt (not a transport failure), so the order
@@ -596,7 +624,7 @@ async def refund_payment(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
         )
-    except CardError as e:
+    except (CardError, InvalidRequestError) as e:
         raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message)
 
     payment_row.amount_refunded += refund.amount
