@@ -12,6 +12,11 @@ os.environ.setdefault("SMTP_USER", "test@example.com")
 os.environ.setdefault("SMTP_PASSWORD", "test")
 os.environ.setdefault("EMAILS_FROM_EMAIL", "test@example.com")
 os.environ.setdefault("EMAILS_FROM_NAME", "Test Shop")
+# Never let the suite attempt a real SMTP connection - the LoggingEmailProvider
+# only logs and always returns True. Individual tests that need to assert on
+# what would have been sent monkeypatch app.services.email.get_email_provider
+# (or the specific send_*_email name) directly.
+os.environ.setdefault("EMAIL_PROVIDER", "logging")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # no Redis available in this test env
 # bcrypt's default cost factor (12 rounds) is deliberately slow (~400ms/hash)
 # for brute-force resistance in production; tests register/log in dozens of
