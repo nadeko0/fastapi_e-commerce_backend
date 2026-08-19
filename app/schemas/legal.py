@@ -3,6 +3,15 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
+# Reused rather than redefined: app.schemas.user.ConsentHistory has the
+# identical shape (both were unified to match the one
+# User.consent_history entry format written by app/api/v1/users.py and
+# app/services/gdpr.py) - two classes with the same name and shape in
+# different modules also collided in the generated OpenAPI schema
+# (FastAPI disambiguates same-named schemas with an ugly
+# module-qualified name), which this avoids.
+from app.schemas.user import ConsentHistory  # noqa: F401 (re-exported for this module's callers)
+
 
 class ConsentUpdate(BaseModel):
     marketing_consent: bool
@@ -13,27 +22,6 @@ class ConsentUpdate(BaseModel):
             "example": {
                 "marketing_consent": True,
                 "privacy_policy_accepted": True
-            }
-        }
-
-class ConsentHistory(BaseModel):
-    # Shape matches app.models.user.User.consent_history entries, written
-    # consistently by both app/api/v1/users.py::update_consent and
-    # app/services/gdpr.py::GDPRService.update_user_consent.
-    type: str
-    granted: bool
-    timestamp: datetime
-    ip_address: Optional[str] = None
-    user_agent: Optional[str] = None
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "type": "marketing",
-                "granted": True,
-                "timestamp": "2025-01-14T19:21:32.388Z",
-                "ip_address": "192.168.1.1",
-                "user_agent": "Mozilla/5.0..."
             }
         }
 
