@@ -13,6 +13,11 @@ os.environ.setdefault("SMTP_PASSWORD", "test")
 os.environ.setdefault("EMAILS_FROM_EMAIL", "test@example.com")
 os.environ.setdefault("EMAILS_FROM_NAME", "Test Shop")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # no Redis available in this test env
+# bcrypt's default cost factor (12 rounds) is deliberately slow (~400ms/hash)
+# for brute-force resistance in production; tests register/log in dozens of
+# users and don't need that security margin, so use the minimum valid cost
+# factor here instead - this is the single biggest lever on suite runtime.
+os.environ.setdefault("BCRYPT_ROUNDS", "4")
 
 import fakeredis
 import pytest

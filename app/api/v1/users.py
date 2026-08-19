@@ -18,6 +18,7 @@ from app.core.security import (
     get_current_active_user,
     get_current_user,
     get_password_hash,
+    invalidate_tokens_issued_before_now,
     verify_email_token,
     verify_password,
     verify_password_reset_token,
@@ -835,6 +836,11 @@ async def reset_password(
 
         user.hashed_password = get_password_hash(new_password.new_password)
         db.commit()
+
+        # Invalidate any access token issued before this reset so a token
+        # held by an attacker (the reason the user is resetting) stops
+        # working immediately instead of remaining valid until it expires.
+        invalidate_tokens_issued_before_now(user.id)
 
         return APIResponse.success_response({
             "message": "Password has been reset successfully"
