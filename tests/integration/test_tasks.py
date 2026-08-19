@@ -107,6 +107,30 @@ def test_send_order_confirmation_sends_email_for_existing_order(
     assert sent == [(user.email, order.id)]
 
 
+def test_send_order_confirmation_does_not_resend_on_redelivery(
+    db_session, tasks_db, monkeypatch
+):
+    """Regression test: Celery's at-least-once delivery (task_acks_late +
+    task_reject_on_worker_lost, and now autoretry_for on this task) means
+    send_order_confirmation can legitimately run twice for the same
+    order_id (worker crash after send but before ack, or a retried
+    OperationalError). Without a dedup guard the customer would get the
+    "Order Confirmation" email twice."""
+    sent = []
+    monkeypatch.setattr(
+        "app.tasks.send_order_confirmation_email",
+        lambda to_email, order: sent.append((to_email, order.id)),
+    )
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product)
+
+    tasks.send_order_confirmation(order.id)
+    tasks.send_order_confirmation(order.id)  # simulated redelivery/retry
+
+    assert sent == [(user.email, order.id)]
+
+
 def test_send_order_confirmation_no_op_for_missing_order(db_session, tasks_db, monkeypatch):
     sent = []
     monkeypatch.setattr(
@@ -133,6 +157,48 @@ def test_send_order_status_update_sends_email_for_existing_order(
     tasks.send_order_status_update(order.id)
 
     assert sent == [(user.email, order.id)]
+
+
+def test_send_order_status_update_does_not_resend_for_same_status(
+    db_session, tasks_db, monkeypatch
+):
+    """Same redelivery/retry concern as order confirmation, but keyed on
+    (order_id, status): a redelivered/retried task for the *same* status
+    must not resend, but a genuine later status change must still email."""
+    sent = []
+    monkeypatch.setattr(
+        "app.tasks.send_order_status_update_email",
+        lambda to_email, order: sent.append((to_email, order.id, order.status)),
+    )
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product, status="new")
+
+    tasks.send_order_status_update(order.id)
+    tasks.send_order_status_update(order.id)  # simulated redelivery/retry
+
+    assert sent == [(user.email, order.id, "new")]
+
+    order.status = "confirmed"
+    db_session.commit()
+    tasks.send_order_status_update(order.id)
+
+    assert sent == [
+        (user.email, order.id, "new"),
+        (user.email, order.id, "confirmed"),
+    ]
+
+
+def test_send_order_confirmation_and_status_update_tasks_configure_autoretry():
+    """Regression test: retry_backoff=True/max_retries=3 alone do nothing -
+    Celery only honors them when the task calls self.retry() (requires
+    bind=True) or when autoretry_for is set. Without autoretry_for, any
+    transient DB error (e.g. a dropped connection) permanently failed the
+    task on the first attempt despite looking retry-configured."""
+    from sqlalchemy.exc import OperationalError
+
+    assert tasks.send_order_confirmation.autoretry_for == (OperationalError,)
+    assert tasks.send_order_status_update.autoretry_for == (OperationalError,)
 
 
 def test_cleanup_expired_carts_delegates_to_redis_service(monkeypatch):
@@ -194,6 +260,22 @@ def test_build_redis_broker_url_omits_auth_when_password_empty_string():
 
     assert url == "redis://redis-host:6379/0"
     assert "@" not in url
+
+
+def test_build_redis_broker_url_escapes_special_characters_in_password():
+    # A password containing URL-delimiter characters (@, :, /) must not
+    # split the userinfo segment early or otherwise corrupt the host/port
+    # Celery ends up connecting to.
+    url = tasks.build_redis_broker_url("redis-host", 6379, 0, "p@ss:w/rd#1%")
+
+    assert url == "redis://:p%40ss%3Aw%2Frd%231%25@redis-host:6379/0"
+
+    from urllib.parse import unquote, urlparse
+
+    parsed = urlparse(url)
+    assert parsed.hostname == "redis-host"
+    assert parsed.port == 6379
+    assert unquote(parsed.password) == "p@ss:w/rd#1%"
 
 
 def test_beat_schedule_registers_all_periodic_tasks():

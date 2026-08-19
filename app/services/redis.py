@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -6,11 +7,21 @@ if TYPE_CHECKING:
     from app.schemas.category import CategoryTreeResponse
 
 from pydantic import ValidationError
-from redis import ConnectionError, ConnectionPool, Redis
+
+# RedisError (not just ConnectionError) is caught throughout this file: every
+# public method below is meant to fail open/degrade gracefully rather than
+# raise out to its caller (cart/product/session endpoints), but ConnectionError
+# alone only covers a dropped/refused connection - a socket TimeoutError or a
+# ResponseError (both RedisError subclasses, distinct from ConnectionError)
+# during an otherwise-live connection previously bypassed every except clause
+# here and propagated as a raw, unhandled exception out of the request.
+from redis import ConnectionPool, Redis, RedisError
 
 from app.core.config import settings
 from app.schemas.cart import CART_KEY_PREFIX, CART_TTL_DAYS
 from app.schemas.common import Cart, CartItem, cart_item_key
+
+logger = logging.getLogger(__name__)
 
 
 class InsufficientStockError(Exception):
@@ -100,11 +111,17 @@ class RedisService:
                 return model_class.model_validate(parsed)
             return parsed
         except (json.JSONDecodeError, AttributeError, TypeError, KeyError, ValidationError) as e:
-            print(f"Deserialization error: {str(e)}")
+            # Logged via the app's logger (not print()) so this actually
+            # reaches the JSON log pipeline in production instead of being
+            # lost/interleaved on stdout - matches the reasoning in
+            # app/services/email/smtp_provider.py's module docstring. Only
+            # the exception string is logged, never the raw stored payload,
+            # to avoid leaking cart/session contents into logs.
+            logger.warning(f"Deserialization error: {str(e)}")
             return None
 
     def _handle_redis_error(self, operation: str) -> None:
-        print(f"Redis operation failed: {operation}")
+        logger.error(f"Redis operation failed: {operation}")
 
 
     def get_cart(self, user_id: int) -> Optional[Cart]:
@@ -113,7 +130,7 @@ class RedisService:
             if cart_data:
                 return self._deserialize(cart_data, Cart)
             return None
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"get_cart: {str(e)}")
             return None
 
@@ -125,14 +142,14 @@ class RedisService:
                 timedelta(days=CART_TTL_DAYS),
                 self._serialize(cart)
             )
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"update_cart: {str(e)}")
             return False
 
     def delete_cart(self, user_id: int) -> bool:
         try:
             return bool(self._redis.delete(self._get_cart_key(user_id)))
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"delete_cart: {str(e)}")
             return False
 
@@ -202,7 +219,7 @@ class RedisService:
         try:
             self._redis.transaction(_txn, cart_key)
             return outcome.get('cart')
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"_atomic_mutate_cart: {str(e)}")
             return None
 
@@ -294,16 +311,40 @@ class RedisService:
         try:
             key = f"blacklist:{token}"
             return self._redis.setex(key, expires_in, "1")
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"add_to_blacklist: {str(e)}")
             return False
 
     def is_blacklisted(self, token: str) -> bool:
         try:
             return bool(self._redis.exists(f"blacklist:{token}"))
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"is_blacklisted: {str(e)}")
             return True  # Safer to assume token is blacklisted on error
+
+    def mark_once(self, key: str, ttl_seconds: int) -> bool:
+        """Atomically claim `key` for a one-time side effect (e.g. "has this
+        order's confirmation email already been sent").
+
+        Returns True the first time `key` is claimed (the caller should
+        proceed with the side effect) and False on every subsequent call
+        while the key's TTL hasn't expired (the caller should skip the side
+        effect - it already happened). Backed by SET key val NX EX ttl,
+        which is atomic on the Redis server, so two callers racing to claim
+        the same key can never both get True.
+
+        On a connection error this fails *open* (returns True, i.e. "go
+        ahead and do it") rather than closed: for a duplicate-suppression
+        guard, false negatives (occasionally sending one extra email because
+        Redis was briefly unreachable) are far less harmful than false
+        positives (silently skipping an email because Redis looked
+        unreachable) would be.
+        """
+        try:
+            return bool(self._redis.set(key, "1", nx=True, ex=ttl_seconds))
+        except RedisError as e:
+            self._handle_redis_error(f"mark_once: {str(e)}")
+            return True
 
     # -- Refresh token tracking (rotation + reuse detection) -----------------
     #
@@ -325,7 +366,7 @@ class RedisService:
             self._redis.sadd(family_key, jti)
             self._redis.expire(family_key, ttl_seconds)
             return True
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"register_refresh_token: {str(e)}")
             return False
 
@@ -347,7 +388,7 @@ class RedisService:
             if not data or not deleted:
                 return None
             return json.loads(data)
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"consume_refresh_token: {str(e)}")
             return None
 
@@ -362,7 +403,7 @@ class RedisService:
                 self._redis.delete(*keys)
             self._redis.delete(family_key)
             return True
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"revoke_refresh_family: {str(e)}")
             return False
 
@@ -375,7 +416,7 @@ class RedisService:
                 timedelta(hours=1),  # 1 hour cache as per requirements
                 self._serialize(data)
             )
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"cache_product: {str(e)}")
             return False
 
@@ -392,7 +433,7 @@ class RedisService:
             if not result:
                 self._redis.delete("category:tree")
             return result
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"cache_category_tree: {str(e)}")
             return False
 
@@ -414,7 +455,7 @@ class RedisService:
                 return None
 
             return self._deserialize(data, CategoryTreeResponse)
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"get_cached_category_tree: {str(e)}")
             return None
 
@@ -422,7 +463,7 @@ class RedisService:
         try:
             data = self._redis.get(f"product:{product_id}")
             return self._deserialize(data) if data else None
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"get_cached_product: {str(e)}")
             return None
 
@@ -436,7 +477,7 @@ class RedisService:
                 self._serialize(session_data)
             )
             return session_id
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"create_session: {str(e)}")
             return ""
 
@@ -444,14 +485,14 @@ class RedisService:
         try:
             data = self._redis.get(session_id)
             return self._deserialize(data) if data else None
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"get_session: {str(e)}")
             return None
 
     def delete_session(self, session_id: str) -> bool:
         try:
             return bool(self._redis.delete(session_id))
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"delete_session: {str(e)}")
             return False
 
@@ -464,28 +505,28 @@ class RedisService:
                     self._redis.delete(key)
                     cleaned += 1
             return cleaned
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"cleanup_expired_carts: {str(e)}")
             return 0
 
     def delete(self, key: str) -> bool:
         try:
             return bool(self._redis.delete(key))
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"delete: {str(e)}")
             return False
 
     def invalidate_category_cache(self) -> bool:
         try:
             return self.delete("category:tree")
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"invalidate_category_cache: {str(e)}")
             return False
 
     def invalidate_product_cache(self, product_id: int) -> bool:
         try:
             return self.delete(f"product:{product_id}")
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"invalidate_product_cache: {str(e)}")
             return False
 
@@ -493,13 +534,13 @@ class RedisService:
         try:
             data = self._redis.get(key)
             return self._deserialize(data) if data else None
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"get: {str(e)}")
             return None
 
     def setex(self, key: str, seconds: int, value: Any) -> bool:
         try:
             return self._redis.setex(key, seconds, self._serialize(value))
-        except ConnectionError as e:
+        except RedisError as e:
             self._handle_redis_error(f"setex: {str(e)}")
             return False

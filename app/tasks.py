@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta
+from urllib.parse import quote
 from uuid import uuid4
 
 from celery import Celery
 from sqlalchemy import create_engine, func
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import selectinload, sessionmaker
 
 from app.core.config import settings
 from app.core.database import _build_connect_args
@@ -34,8 +36,17 @@ def build_redis_broker_url(
     produce a broken `redis://:@host:port/db` URL with a dangling empty
     auth segment - the `:<password>@` segment is only included when a
     password is actually set.
+
+    The password is percent-encoded (`urllib.parse.quote`, safe="") before
+    being embedded in the URL: it is an arbitrary operator-chosen secret
+    (see .env.example / docker-compose's REDIS_PASSWORD), not guaranteed to
+    be URL-safe. An unescaped `@`, `:`, `/`, `#`, or `%` in the password
+    would otherwise be parsed as a URL delimiter (e.g. an `@` splitting the
+    userinfo segment early) and either corrupt the host/port Celery connects
+    to or silently truncate the password, rather than raising - a case
+    Celery/kombu's own URL parser can't detect after the fact.
     """
-    auth = f':{password}@' if password else ''
+    auth = f':{quote(password, safe="")}@' if password else ''
     return f'redis://{auth}{host}:{port}/{db}'
 
 
@@ -107,13 +118,45 @@ def get_db():
     finally:
         db.close()
 
+# How long a "this email was already sent" marker (below) is kept in Redis.
+# Must comfortably outlive Celery's own redelivery window
+# (broker_transport_options['visibility_timeout'] above, 1 hour) plus the
+# max_retries/retry_backoff schedule on these tasks, so a legitimate retry
+# still sees the marker and skips resending; 7 days is generous slack for
+# both while still expiring rather than growing the keyspace forever.
+EMAIL_SENT_MARKER_TTL_SECONDS = 7 * 24 * 3600
+
 @celery.task(
     name="send_order_confirmation",
     queue="emails",
     retry_backoff=True,
     max_retries=3,
+    # Without autoretry_for, Celery's own max_retries/retry_backoff options
+    # above do nothing at all: they only configure what happens when the
+    # task body calls self.retry() (which requires bind=True) - a plain,
+    # unbound task that simply raises is marked FAILURE and acked (this task
+    # doesn't set bind=True, so it has no `self` to call .retry() on). That
+    # made this look like it retried transient DB hiccups when it never did.
+    # Scoped to OperationalError (the DB connectivity/timeout exception
+    # class) rather than all exceptions, so a genuine bug in this task still
+    # fails fast instead of being retried 3 times first.
+    autoretry_for=(OperationalError,),
 )
 def send_order_confirmation(order_id: int) -> None:
+    # Celery's at-least-once delivery (task_acks_late=True +
+    # task_reject_on_worker_lost=True, set above) means this task can be
+    # redelivered and re-run for the same order_id - a worker killed after
+    # the email was already sent but before the broker recorded the ack, or
+    # (now that autoretry_for is wired up) a genuine retry after a transient
+    # OperationalError raised partway through. Without a dedup guard, the
+    # customer would receive the same "Order Confirmation" email twice.
+    # mark_once claims the marker atomically in Redis before sending, so a
+    # redelivered/retried task sees its own prior success and skips the
+    # resend instead of sending it again.
+    if not RedisService().mark_once(
+        f"email_sent:order_confirmation:{order_id}", EMAIL_SENT_MARKER_TTL_SECONDS
+    ):
+        return
     db = next(get_db())
     order = db.query(Order).filter(Order.id == order_id).first()
     if order:
@@ -124,12 +167,29 @@ def send_order_confirmation(order_id: int) -> None:
     queue="emails",
     retry_backoff=True,
     max_retries=3,
+    autoretry_for=(OperationalError,),
 )
 def send_order_status_update(order_id: int) -> None:
     db = next(get_db())
     order = db.query(Order).filter(Order.id == order_id).first()
-    if order:
-        send_order_status_update_email(order.user.email, order)
+    if not order:
+        return
+    # Keyed by status (not just order_id): unlike the one-shot confirmation
+    # email above, this task legitimately fires again every time the order's
+    # status changes - only a redelivery/retry of the *same* status update
+    # should be deduped. order.status is a plain str here (Order.status is a
+    # bare String column, not a SQLAlchemy Enum type - see
+    # app/models/enums.py's create_string_enum) rather than an OrderStatus
+    # member, unlike OrderResponse.status (a Pydantic model, which does
+    # coerce it to the enum) - handle both shapes rather than assuming
+    # `.value` is always present.
+    status_value = order.status.value if hasattr(order.status, "value") else order.status
+    if not RedisService().mark_once(
+        f"email_sent:order_status_update:{order_id}:{status_value}",
+        EMAIL_SENT_MARKER_TTL_SECONDS,
+    ):
+        return
+    send_order_status_update_email(order.user.email, order)
 
 @celery.task(
     name="cleanup_expired_carts",
@@ -164,7 +224,14 @@ def purge_expired_deletion_requests(db) -> int:
     """
     grace_cutoff = datetime.utcnow() - timedelta(days=settings.DATA_DELETION_GRACE_PERIOD_DAYS)
 
-    accounts = db.query(User).filter(
+    # selectinload(User.addresses): without it, `for address in
+    # account.addresses` below lazy-loads addresses with one SELECT per
+    # account (classic N+1) - fine for the single-user regression tests, but
+    # this runs as a daily sweep over every account past the grace period,
+    # so it does not stay fine at any real scale. selectinload issues one
+    # extra query total (IN (...) over all matched account ids) instead of
+    # one per account.
+    accounts = db.query(User).options(selectinload(User.addresses)).filter(
         User.is_active == False,  # noqa: E712 - `not User.is_active` evaluates in
         # Python immediately instead of building a SQL clause and silently
         # produces an always-false filter; explicit `== False` is required.

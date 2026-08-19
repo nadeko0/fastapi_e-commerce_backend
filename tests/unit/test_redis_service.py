@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from redis import ConnectionError as RedisConnectionError
+from redis import TimeoutError as RedisTimeoutError
 
 from app.schemas.category import CategoryTreeResponse
 from app.schemas.common import Cart
@@ -19,6 +20,23 @@ def _break(monkeypatch, redis, method_name):
     def _raise(*args, **kwargs):
         raise RedisConnectionError("connection lost")
     monkeypatch.setattr(redis._redis, method_name, _raise)
+
+
+def test_get_cart_fails_open_on_redis_timeout_error(monkeypatch):
+    """Regression test: every method in RedisService only caught
+    ConnectionError, not the broader RedisError (TimeoutError, ResponseError,
+    etc are siblings of ConnectionError, not subclasses of it). A socket
+    timeout mid-operation used to bypass every fail-open except clause and
+    propagate as a raw, unhandled exception out of the cart/product/session
+    endpoint calling it."""
+    redis = _service()
+
+    def _raise(*args, **kwargs):
+        raise RedisTimeoutError("timed out")
+
+    monkeypatch.setattr(redis._redis, "get", _raise)
+
+    assert redis.get_cart(1) is None
 
 
 def test_cache_product_round_trips_through_get_cached_product():
@@ -121,6 +139,25 @@ def test_delete_cart_removes_cart_key():
 
     assert redis.delete_cart(7) is True
     assert redis.get_cart(7) is None
+
+
+def test_mark_once_returns_true_first_time_and_false_on_repeat():
+    redis = _service()
+
+    assert redis.mark_once("email_sent:confirmation:1", 3600) is True
+    assert redis.mark_once("email_sent:confirmation:1", 3600) is False
+    # A different key is independent.
+    assert redis.mark_once("email_sent:confirmation:2", 3600) is True
+
+
+def test_mark_once_fails_open_on_connection_error(monkeypatch):
+    """mark_once fails open (returns True, "go ahead") rather than closed -
+    for a duplicate-send guard, occasionally sending one extra email during
+    a Redis outage is far less harmful than silently never sending it."""
+    redis = _service()
+    _break(monkeypatch, redis, "set")
+
+    assert redis.mark_once("email_sent:confirmation:1", 3600) is True
 
 
 def test_add_to_blacklist_and_is_blacklisted():
