@@ -10,7 +10,28 @@ from redis import ConnectionError, ConnectionPool, Redis
 
 from app.core.config import settings
 from app.schemas.cart import CART_KEY_PREFIX, CART_TTL_DAYS
-from app.schemas.common import Cart, CartItem
+from app.schemas.common import Cart, CartItem, cart_item_key
+
+
+class InsufficientStockError(Exception):
+    """Raised by an atomic cart mutation when it would leave the item's
+    cart quantity above the available stock."""
+
+    def __init__(self, available: int, requested: int):
+        self.available = available
+        self.requested = requested
+        super().__init__(
+            f"Not enough stock: requested {requested}, available {available}"
+        )
+
+
+class ItemNotInCartError(Exception):
+    """Raised by an atomic cart mutation (update/remove) when the target
+    product isn't present in the cart at the moment the mutation runs."""
+
+    def __init__(self, product_id: int):
+        self.product_id = product_id
+        super().__init__(f"Item not in cart: {product_id}")
 
 
 class RedisService:
@@ -115,6 +136,159 @@ class RedisService:
             self._handle_redis_error(f"delete_cart: {str(e)}")
             return False
 
+    # -- Atomic cart mutations -------------------------------------------
+    #
+    # get_cart/update_cart above are a plain GET then SETEX with no
+    # compare-and-set guard: two concurrent mutations that both read the
+    # same base cart will both compute their own "new state", and whichever
+    # SETEX lands last silently clobbers the other (a lost update - e.g. two
+    # concurrent +1 add-to-cart calls collapsing to +1 instead of +2).
+    #
+    # The methods below fix this with WATCH/MULTI via redis-py's
+    # `Redis.transaction()` helper: it watches the cart key, lets the
+    # mutator read-and-mutate a fresh copy, then EXECs a MULTI'd SETEX -
+    # if another client wrote the key in between, EXEC fails, and
+    # `transaction()` transparently retries the whole read-mutate-write
+    # cycle. A Lua script (EVAL) would do the same read-modify-write
+    # server-side in one round trip and was considered, but this repo's
+    # tests run against fakeredis, whose EVAL support requires the
+    # optional `lupa` dependency (not installed here) - WATCH/MULTI needs
+    # nothing extra and fakeredis implements it faithfully, so it's the
+    # better fit for this codebase.
+    #
+    # Stock-limit checks are done *inside* the mutator, against the
+    # cart's item quantity as read on that attempt - not against a
+    # quantity read earlier outside the transaction. Because
+    # `transaction()` reruns the mutator on every WatchError retry, the
+    # check is always against the freshest cart state, so concurrent adds
+    # cannot collectively push a cart item's quantity past stock_quantity
+    # (matching, and hardening, the existing single-request stock check -
+    # no rollback/compensation is needed since nothing is written until
+    # the check passes).
+
+    def _load_or_create_cart(self, user_id: int, cart_data: Optional[str]) -> Cart:
+        cart = self._deserialize(cart_data, Cart) if cart_data else None
+        if cart is not None:
+            return cart
+        now = datetime.utcnow()
+        return Cart(
+            user_id=user_id,
+            items={},
+            created_at=now,
+            updated_at=now,
+            expires_at=now + timedelta(days=CART_TTL_DAYS),
+        )
+
+    def _atomic_mutate_cart(self, user_id: int, mutator) -> Optional[Cart]:
+        """Read-modify-write `user_id`'s cart atomically.
+
+        `mutator(cart)` is called with the current Cart (a fresh empty one
+        if none exists yet) and must mutate it in place; it may raise to
+        abort the whole operation, in which case nothing is written.
+        `mutator` must be safe to call more than once - it will be
+        re-invoked on a fresh cart read for every WatchError retry.
+        """
+        cart_key = self._get_cart_key(user_id)
+        outcome: Dict[str, Cart] = {}
+
+        def _txn(pipe):
+            cart_data = pipe.get(cart_key)
+            cart = self._load_or_create_cart(user_id, cart_data)
+            mutator(cart)
+            pipe.multi()
+            pipe.setex(cart_key, timedelta(days=CART_TTL_DAYS), self._serialize(cart))
+            outcome['cart'] = cart
+
+        try:
+            self._redis.transaction(_txn, cart_key)
+            return outcome.get('cart')
+        except ConnectionError as e:
+            self._handle_redis_error(f"_atomic_mutate_cart: {str(e)}")
+            return None
+
+    def add_to_cart_atomic(
+        self,
+        user_id: int,
+        product_id: int,
+        quantity: int,
+        price: float,
+        name: str,
+        image: str,
+        stock_quantity: int,
+        variant_id: Optional[int] = None,
+    ) -> Optional[Cart]:
+        """Atomically merge `quantity` more of product_id (optionally, a
+        specific variant_id) into the cart. A given product_id+variant_id
+        pair merges into one line; a different variant_id (or no
+        variant_id) is tracked as a distinct line.
+
+        Raises InsufficientStockError (nothing written) if the resulting
+        cart quantity for this item would exceed stock_quantity (the
+        variant's own stock when variant_id is given, else the product's).
+        """
+        def _mutator(cart: Cart) -> None:
+            str_id = cart_item_key(product_id, variant_id)
+            current_quantity = cart.items[str_id].quantity if str_id in cart.items else 0
+            if stock_quantity < current_quantity + quantity:
+                raise InsufficientStockError(stock_quantity, current_quantity + quantity)
+            cart.add_item(
+                product_id=product_id,
+                quantity=quantity,
+                price=price,
+                name=name,
+                image=image,
+                variant_id=variant_id,
+            )
+
+        return self._atomic_mutate_cart(user_id, _mutator)
+
+    def update_cart_quantity_atomic(
+        self,
+        user_id: int,
+        product_id: int,
+        quantity: int,
+        stock_quantity: int,
+        variant_id: Optional[int] = None,
+    ) -> Optional[Cart]:
+        """Atomically set an existing cart item's quantity.
+
+        Raises ItemNotInCartError if the item isn't in the cart, or
+        InsufficientStockError if quantity exceeds stock_quantity (nothing
+        written in either case).
+        """
+        def _mutator(cart: Cart) -> None:
+            str_id = cart_item_key(product_id, variant_id)
+            if str_id not in cart.items:
+                raise ItemNotInCartError(product_id)
+            if stock_quantity < quantity:
+                raise InsufficientStockError(stock_quantity, quantity)
+            cart.update_quantity(product_id, quantity, variant_id=variant_id)
+
+        return self._atomic_mutate_cart(user_id, _mutator)
+
+    def remove_from_cart_atomic(
+        self, user_id: int, product_id: int, variant_id: Optional[int] = None
+    ) -> Optional[Cart]:
+        """Atomically remove an item from the cart.
+
+        Raises ItemNotInCartError if the item isn't in the cart (nothing
+        written).
+        """
+        def _mutator(cart: Cart) -> None:
+            str_id = cart_item_key(product_id, variant_id)
+            if str_id not in cart.items:
+                raise ItemNotInCartError(product_id)
+            cart.remove_item(product_id, variant_id=variant_id)
+
+        return self._atomic_mutate_cart(user_id, _mutator)
+
+    def clear_cart_atomic(self, user_id: int) -> Optional[Cart]:
+        """Atomically remove all items from the cart."""
+        def _mutator(cart: Cart) -> None:
+            cart.clear()
+
+        return self._atomic_mutate_cart(user_id, _mutator)
+
 
     def add_to_blacklist(self, token: str, expires_in: int) -> bool:
         try:
@@ -130,6 +304,67 @@ class RedisService:
         except ConnectionError as e:
             self._handle_redis_error(f"is_blacklisted: {str(e)}")
             return True  # Safer to assume token is blacklisted on error
+
+    # -- Refresh token tracking (rotation + reuse detection) -----------------
+    #
+    # `refresh_active:{jti}` marks a refresh token jti as issued-and-not-yet-
+    # redeemed. Redemption (consume_refresh_token) atomically reads-and-
+    # deletes it: exactly one caller ever gets the data back, which is what
+    # makes concurrent replay of the same token safe to detect. Every jti
+    # ever issued for a given rotation chain is also recorded in
+    # `refresh_family:{family_id}` so that if a jti is redeemed a second time
+    # (a stolen-token signal - the legitimate rotation already consumed it)
+    # the whole chain can be revoked, not just the one reused token.
+
+    def register_refresh_token(self, jti: str, user_id: int, family_id: str, ttl_seconds: int) -> bool:
+        try:
+            key = f"refresh_active:{jti}"
+            value = json.dumps({"user_id": user_id, "family": family_id})
+            self._redis.setex(key, ttl_seconds, value)
+            family_key = f"refresh_family:{family_id}"
+            self._redis.sadd(family_key, jti)
+            self._redis.expire(family_key, ttl_seconds)
+            return True
+        except ConnectionError as e:
+            self._handle_redis_error(f"register_refresh_token: {str(e)}")
+            return False
+
+    def consume_refresh_token(self, jti: str) -> Optional[Dict[str, Any]]:
+        """Atomically redeem a refresh token jti (single use).
+
+        Returns the token's {"user_id", "family"} metadata if this call was
+        the first to redeem it, or None if it was never issued, has expired,
+        or was already redeemed by an earlier call (replay). GET+DELETE run
+        inside a Redis transaction so concurrent callers presenting the same
+        jti cannot both receive data back.
+        """
+        try:
+            key = f"refresh_active:{jti}"
+            pipe = self._redis.pipeline()
+            pipe.get(key)
+            pipe.delete(key)
+            data, deleted = pipe.execute()
+            if not data or not deleted:
+                return None
+            return json.loads(data)
+        except ConnectionError as e:
+            self._handle_redis_error(f"consume_refresh_token: {str(e)}")
+            return None
+
+    def revoke_refresh_family(self, family_id: str) -> bool:
+        """Revoke every jti ever issued in a rotation chain - used on reuse
+        detection (stolen-token signal) and on logout."""
+        try:
+            family_key = f"refresh_family:{family_id}"
+            members = self._redis.smembers(family_key)
+            if members:
+                keys = [f"refresh_active:{jti}" for jti in members]
+                self._redis.delete(*keys)
+            self._redis.delete(family_key)
+            return True
+        except ConnectionError as e:
+            self._handle_redis_error(f"revoke_refresh_family: {str(e)}")
+            return False
 
 
     def cache_product(self, product_id: int, data: Dict) -> bool:

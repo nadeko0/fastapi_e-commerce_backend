@@ -408,9 +408,11 @@ async def get_statistics(
 #
 # ProductVariant (app/models/product.py) is additive: a Product with no
 # variants still works exactly as before, using its own price/stock_quantity.
-# These endpoints are data model + CRUD only - cart/checkout
-# (app/api/v1/orders.py, app/api/v1/cart.py) does not read or decrement
-# variant stock; that integration is explicitly out of scope here.
+# Cart (app/api/v1/cart.py) and checkout (app/api/v1/orders.py) are
+# variant-aware: an optional variant_id on a cart line prices and checks
+# stock against that variant instead of the parent product, and
+# decrements/restocks ProductVariant.stock_quantity independently of
+# Product.stock_quantity.
 
 
 def _get_product_or_404(db: Session, product_id: int) -> Product:

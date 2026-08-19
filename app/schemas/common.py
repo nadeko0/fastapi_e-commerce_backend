@@ -76,18 +76,34 @@ class PaginationParams(BaseModel):
     sort_by: Optional[str] = None
     sort_order: Optional[str] = Field(None, pattern="^(asc|desc)$")
 
+def cart_item_key(product_id: int, variant_id: Optional[int] = None) -> str:
+    """The Cart.items dict key for a given product/variant combination.
+
+    A plain product (no variant) keeps the pre-existing "{product_id}" key
+    unchanged, so carts written before variant support existed still parse
+    and merge exactly as before. A variant line gets its own distinct key
+    ("{product_id}:{variant_id}") so two different variants of the same
+    product are separate cart lines, never merged with each other or with
+    the plain-product line.
+    """
+    if variant_id is None:
+        return str(product_id)
+    return f"{product_id}:{variant_id}"
+
 class CartItem(BaseModel):
     """Schema for cart items in Redis"""
     product_id: int
+    variant_id: Optional[int] = None
     quantity: int = Field(..., gt=0)
     added_at: datetime = Field(default_factory=datetime.utcnow)
-    price_snapshot: float  # Current price when added
+    price_snapshot: float  # Current price when added (variant override if present, else product price)
     name_snapshot: str  # Product name when added
     image_snapshot: str  # Main product image when added
 
 class CartResponseItem(BaseModel):
     """Schema for cart item in API response"""
     product_id: int
+    variant_id: Optional[int] = None
     quantity: int
     price_at_time: float
     added_at: datetime
@@ -107,6 +123,7 @@ class CartResponse(BaseModel):
         items = [
             CartResponseItem(
                 product_id=item.product_id,
+                variant_id=item.variant_id,
                 quantity=item.quantity,
                 price_at_time=item.price_snapshot,
                 added_at=item.added_at,
@@ -125,19 +142,30 @@ class CartResponse(BaseModel):
 class Cart(BaseModel):
     """Schema for shopping cart in Redis"""
     user_id: int
-    items: Dict[str, CartItem] = Field(default_factory=dict)  # product_id -> CartItem
+    items: Dict[str, CartItem] = Field(default_factory=dict)  # cart_item_key(product_id, variant_id) -> CartItem
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     expires_at: datetime  # TTL tracking
 
-    def add_item(self, product_id: int, quantity: int, price: float, name: str, image: str) -> None:
-        """Add or update item in cart"""
-        str_id = str(product_id)
+    def add_item(
+        self,
+        product_id: int,
+        quantity: int,
+        price: float,
+        name: str,
+        image: str,
+        variant_id: Optional[int] = None,
+    ) -> None:
+        """Add or update item in cart. A given product_id+variant_id pair
+        merges quantities; a different variant_id (or no variant_id) for
+        the same product_id is a distinct line."""
+        str_id = cart_item_key(product_id, variant_id)
         if str_id in self.items:
             self.items[str_id].quantity += quantity
         else:
             self.items[str_id] = CartItem(
                 product_id=product_id,
+                variant_id=variant_id,
                 quantity=quantity,
                 price_snapshot=price,
                 name_snapshot=name,
@@ -145,16 +173,16 @@ class Cart(BaseModel):
             )
         self.updated_at = datetime.utcnow()
 
-    def remove_item(self, product_id: int) -> None:
+    def remove_item(self, product_id: int, variant_id: Optional[int] = None) -> None:
         """Remove item from cart"""
-        str_id = str(product_id)
+        str_id = cart_item_key(product_id, variant_id)
         if str_id in self.items:
             del self.items[str_id]
             self.updated_at = datetime.utcnow()
 
-    def update_quantity(self, product_id: int, quantity: int) -> None:
+    def update_quantity(self, product_id: int, quantity: int, variant_id: Optional[int] = None) -> None:
         """Update item quantity"""
-        str_id = str(product_id)
+        str_id = cart_item_key(product_id, variant_id)
         if str_id in self.items:
             self.items[str_id].quantity = quantity
             self.updated_at = datetime.utcnow()
