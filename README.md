@@ -14,9 +14,11 @@ planned.
 
 Auth, order/inventory concurrency, and the payment layer have all been
 through a dedicated adversarial testing pass (rate-limit bypass, token
-fixation, race conditions on the last unit of stock, payment amount/currency
-fuzzing) — see [Known limitations](#known-limitations) for what that pass
-found and left as documented, not silently ignored.
+fixation, race conditions on the last unit of stock and on concurrent cart
+updates, payment amount/currency fuzzing) and a real-infrastructure pass
+(load testing against a real Postgres/Redis/Celery deployment, a live run
+against Stripe's actual test-mode API) that found and fixed genuine
+concurrency bugs rather than leaving them as theoretical.
 
 ## Architecture
 
@@ -37,36 +39,58 @@ flowchart LR
     Services -.enqueues.-> Celery["Celery workers<br/>email · cleanup · stats"]
     Celery --> DB
     Celery --> Redis
-    Services -."mocked, no real network".-> Stripe(["Stripe API"])
+    Services -.deterministic mock + real Stripe test-mode client.-> Stripe(["Stripe API"])
 ```
 
 ## Features
 
-**Users & auth** — JWT access/refresh tokens, role-based access (client/admin),
-email verification, password reset with token invalidation on reset (fixes
-token fixation), Redis-backed token blacklist on logout, sliding-window rate
-limiting (stricter limits on login/register).
+**Users & auth** — JWT access tokens plus a rotating refresh-token flow
+(`POST /users/refresh`): each refresh both issues a new access/refresh pair
+and invalidates the one it consumed, with reuse of an already-rotated token
+treated as a theft signal that revokes the whole token family. Role-based
+access (client/admin), email verification, password reset with token
+invalidation on reset (fixes token fixation), Redis-backed token blacklist
+on logout, sliding-window rate limiting (stricter limits on login/register).
 
 **Catalog** — products with a `characteristics` JSON attribute bag, nested
-categories (arbitrary depth, verified), optional `ProductVariant`s (SKU,
-free-form attributes like size/color, price override, own stock — additive,
-a product without variants still works exactly as a simple product; see
-[Known limitations](#known-limitations) for what's not wired up yet), Redis
-caching for the category tree and hot products.
+categories (arbitrary depth, verified), `ProductVariant`s (SKU, free-form
+attributes like size/color, price override, own stock) fully wired into cart
+and checkout — a variant line prices and decrements stock independently from
+its parent product, a product without variants still works exactly as a
+simple product — Redis caching for the category tree and hot products.
 
-**Cart & orders** — Redis-backed cart, idempotency-key checkout (a retried
-request returns the original order instead of creating a duplicate), an
-atomic `UPDATE ... WHERE stock >= quantity` stock decrement (no oversell
-under concurrent checkout for the last unit), an explicit order status state
-machine, and stock restoration on cancellation.
+**Cart & orders** — Redis-backed cart with atomic (WATCH/MULTI) add/update/
+remove, so concurrent requests for the same line can't lose an update;
+idempotency-key checkout (a retried request returns the original order
+instead of creating a duplicate); an atomic `UPDATE ... WHERE stock >=
+quantity` stock decrement, applied identically to plain products and
+variants (no oversell under concurrent checkout for the last unit); an
+explicit order status state machine; and stock restoration on cancellation.
 
-**Payments** — a `PaymentProvider` abstraction with a `StripePaymentProvider`
-implementation shaped like the real Stripe SDK (Payment Intents, refunds,
-webhook signature verification) but fully mocked — no real Stripe account
-exists for this project and no outbound network call is ever made. Covers
-idempotent intent creation, idempotent webhook processing, 3D Secure
-(`requires_action`) as a distinct state, and amount/currency validation
-(property-tested with `hypothesis`).
+**Payments** — a `PaymentProvider` abstraction with two implementations: a
+deterministic `StripePaymentProvider` mock (default, used by the main test
+suite — no network call, fast) and a `LiveStripePaymentProvider` that calls
+the real Stripe SDK against Stripe's test-mode API, exercised by dedicated
+opt-in test suites (`tests/integration/test_payment_live_stripe.py`,
+`tests/integration/test_checkout_session_live_stripe.py`) covering
+successful/declined/3-D-Secure-required cards, refunds, idempotency, and
+real webhook signature verification. Two payment flows sit behind the same
+contract: `POST /orders/{id}/pay` confirms a PaymentIntent server-side with
+a client-collected payment method token, and `POST
+/orders/{id}/checkout-session` creates a Stripe-hosted Checkout Session —
+the customer is redirected to Stripe's own page for card entry/3DS, and the
+result comes back asynchronously via webhook (`checkout.session.completed`
+and friends), so this backend never handles card data for that flow at all.
+Both flows: idempotent intent/session creation, idempotent webhook
+processing, 3D Secure (`requires_action`) as a distinct state, and
+amount/currency validation (property-tested with `hypothesis`).
+
+**Email** — an `EmailProvider` abstraction (`app/services/email/`) mirroring
+the payment layer's shape: `SmtpEmailProvider` (real smtplib, bounded
+`SMTP_TIMEOUT_SECONDS` connect/send timeout) and `LoggingEmailProvider`
+(no-op, used by tests/local dev), selected via `EMAIL_PROVIDER`. Verified
+against a real SMTP server (Ethereal), not just mocked — see the bug log
+below for what that caught.
 
 **GDPR** — consent tracking with a full audit trail (type, timestamp, IP,
 user agent), data export (Art. 15/20), and erasure (Art. 17) that anonymizes
@@ -127,14 +151,21 @@ docker compose exec api python scripts/seed_demo_data.py   # optional
 
 [`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml) are
 the source of truth — they build the image with `uv` (deps resolved from
-`uv.lock`, not re-resolved at build time) and run Postgres + Redis alongside
-the API. This has been deployed and smoke-tested against a real server, not
-just built locally: healthy startup, migrations, the seed script, and a full
-login-and-fetch-products round trip all verified end to end. Two port
-settings matter and are intentionally separate — `PORT` in `.env` is the
-port uvicorn binds to *inside* the container (must stay `8000`, matching the
-Dockerfile's `HEALTHCHECK`); `DOCKER_API_PORT` is the host-published port,
-change that one if `8000` is already taken on your host.
+`uv.lock`, not re-resolved at build time) and run five services: `api`,
+`db` (Postgres), `redis`, `celery-worker`, and `celery-beat` (the periodic
+scheduler for `cleanup_expired_carts`/`cleanup_inactive_accounts`/
+`update_product_stats`/`check_low_stock`). This isn't just built locally —
+it's been deployed to a real server (isolated `docker compose -p`,
+localhost-only ports, torn down after) and exercised for real: migrations,
+the seed script, a real Celery worker authenticating to password-protected
+Redis and actually consuming and completing queued tasks (confirmed via its
+own logs, not assumed), and a load test hitting the live containers — see
+[Verified against real infrastructure](#verified-against-real-infrastructure)
+for what that found and fixed. Two port settings matter and are
+intentionally separate — `PORT` in `.env` is the port uvicorn binds to
+*inside* the container (must stay `8000`, matching the Dockerfile's
+`HEALTHCHECK`); `DOCKER_API_PORT` is the host-published port, change that
+one if `8000` is already taken on your host.
 
 ## Project structure
 
@@ -205,11 +236,9 @@ from scratch):
   (template) from "variant" (purchasable SKU with its own price/stock).
   `ProductVariant` here follows the same idea, added as a purely additive
   extension — a product without variants still behaves exactly like a
-  simple product. It is **not** yet wired into cart/checkout, which still
-  reads and decrements `Product.stock_quantity` directly; that's a real,
-  larger integration (idempotency keys, atomic decrement, and order-line
-  pricing all currently assume product-level granularity), deliberately
-  scoped out rather than rushed in.
+  simple product — and is fully wired into cart and checkout: a variant
+  line prices and decrements stock independently, with the same atomic
+  `UPDATE ... WHERE stock >= quantity` guard used for plain products.
 - **Order state.** Vendure formalizes order/payment transitions as an
   explicit pluggable FSM; Saleor separates whole-order status from a
   per-fulfillment status (since one order can ship in several parts). This
@@ -220,41 +249,95 @@ from scratch):
 - **Payment layering.** `app/services/payment/`'s `PaymentProvider`
   abstraction (rather than calling a payment SDK directly from route
   handlers) matches how Saleor and Vendure isolate payment gateways so a
-  second provider could be added without touching order logic. The honest
-  caveat: because `StripePaymentProvider` is a deterministic mock, this has
-  never been exercised against real network failure modes (partial
-  timeouts, out-of-order webhook delivery, rate limiting) the way a
-  production integration eventually would be.
+  second provider could be added without touching order logic. Both a
+  deterministic mock and a real Stripe-backed implementation sit behind the
+  same abstraction; the live one has been exercised against Stripe's actual
+  test-mode API (successful/declined/3-D-Secure cards, refunds, idempotency,
+  webhook signatures) — see `tests/integration/test_payment_live_stripe.py`.
 
-## Known limitations
+## Verified against real infrastructure
 
-- **Stripe integration is fully mocked.** No real Stripe account exists for
-  this project; `StripePaymentProvider` never makes a network call. The
-  abstraction and the failure-mode tests (declines, timeouts, idempotency,
-  webhook signature checks) are real, but none of it has been run against
-  Stripe's actual API or sandbox.
-- **`ProductVariant` is not wired into checkout.** See the comparison
-  section above — cart/orders still operate at the product level.
-- **No `/refresh` token endpoint.** `create_refresh_token` issues a token at
-  login, but nothing currently exchanges it for a new access token — a
-  15-minute access token requires a full re-login once it expires. Not a
-  vulnerability (there's nothing to gain from a leaked, unusable refresh
-  token today), but a real gap if session extension is ever needed.
-- **A real, reproduced race condition in cart quantity updates.** Concurrent
-  `add-to-cart` calls for the same product do a plain Redis GET-then-SETEX
-  with no compare-and-set guard, and can lose updates under real contention
-  — reproduced with concurrent threads, not theoretical. Captured as a
-  non-fatal `xfail` test (`test_concurrent_add_to_cart_can_lose_updates` in
-  `tests/integration/test_cart.py`) rather than silently ignored; fixing it
-  needs an atomic primitive added to `app/services/redis.py`.
-- **`/health` is a single combined endpoint**, not split into
-  liveness/readiness. Deliberate: nothing in this project's deployment
-  target (a single Docker Compose stack, no k8s) consumes that distinction.
-- **No dedicated CI Postgres service.** CI runs the test suite against an
-  in-memory SQLite database for speed; Postgres-only behavior (ARRAY
-  columns, JSONB path filtering, partial unique indexes) is instead covered
-  by `scripts/pg_smoke_test.py`, run manually against a real Postgres
-  instance (see [SETUP.md](SETUP.md)) — not on every push.
+Most of what's listed above was validated by the test suite, which is
+useful but stops at the boundary of what a mock can catch. On top of that,
+this project was deployed to a real server (Docker Compose: Postgres,
+Redis, the API, a Celery worker, Celery beat) and to a real local machine
+(native Postgres + Redis, no Docker), then put under an actual `locust`
+load test (up to 200 concurrent simulated users) and a real Stripe
+test-mode account — specifically to catch the class of bug that only shows
+up under real concurrency, real I/O latency, and a real payment provider's
+actual API contract, not the idealized one a mock implements. It found six
+genuine bugs, all fixed and covered by a regression test:
+
+1. **Celery's Redis broker had no password.** `docker-compose.yml`'s
+   `redis` service runs `--requirepass`, but `app/tasks.py` built its broker
+   URL as `redis://host:port/db` with no auth — a real worker would fail to
+   connect entirely. Fixed by extracting URL construction into a tested
+   `build_redis_broker_url()` that includes the password when one's set.
+2. **`bcrypt` blocked the event loop under load.** `verify_password`/
+   `get_password_hash` are CPU-bound (bcrypt is deliberately slow) and were
+   called directly inside `async def` route handlers — under concurrent
+   auth traffic, one request's hash blocked *every* request on that uvicorn
+   worker, including unrelated ones. Measured impact: 100 concurrent users,
+   2 workers → ~15s median login latency, with `GET /products` degraded to
+   ~5.6s purely from being queued behind blocked event loops. Fixed by
+   offloading to a threadpool (`run_in_threadpool`) with a bounded
+   semaphore (sized to CPU count) so unbounded concurrent hashing can't
+   pile up and starve other resources.
+3. **That fix, in turn, caused a real Postgres connection-pool leak.**
+   `login()`/`reset_password()` queried the user (checking out a DB
+   connection, opening an implicit transaction) and then `await`ed the
+   now-threadpooled bcrypt call while still holding it. Under load this
+   inflated connection hold-time, and — confirmed by directly instrumenting
+   FastAPI's dependency-cleanup machinery — a cancelled request could skip
+   `session.close()` entirely (anyio's cancellation is scope-sticky: once
+   cancelled, cleanup code in the same scope never runs), permanently
+   leaking the connection as `idle in transaction`. Reproduced live: a
+   locust burst left 30-60 Postgres connections wedged, unrecoverable
+   without restarting the process. Fixed two ways: (a) release the session
+   *before* the bcrypt await in every affected handler, and (b) defense in
+   depth — Postgres itself now kills any connection idle-in-transaction
+   for >30s (`idle_in_transaction_session_timeout`) and SQLAlchemy's
+   `pool_pre_ping` transparently discards it on next checkout, so even an
+   unknown future variant of this bug self-heals instead of wedging the
+   pool permanently. **Found again, separately, for Celery**: `app/tasks.py`
+   has its own DB engine (a different process from the API), which had
+   none of this protection — a real worker run left 2 connections stuck
+   idle-in-transaction for 38+ minutes. Fixed by having it reuse the same
+   `_build_connect_args`/pool settings instead of a bare `create_engine(...)`.
+4. **Stripe's `PaymentIntent.confirm` needs `return_url`.** Confirmed the
+   hard way — a real notice from Stripe's own fraud/reliability monitoring,
+   received after the 3-D-Secure test ran without one. Pinning
+   `payment_method_types=["card"]` at creation avoids Stripe's *Dashboard
+   redirect-payment-method* return_url requirement, but a card's own 3DS
+   challenge is a redirect regardless, and still needs one at confirm time.
+   Fixed by always passing a `return_url`; the checkout-session flow sets
+   `success_url`/`cancel_url` for the same underlying reason.
+5. **`smtplib.SMTP(host, port)` had no timeout.** Reproduced live against a
+   real SMTP server (Ethereal): the send call hung indefinitely — with an
+   explicit `timeout=10` the identical email sent in under a second. Since
+   this runs from background tasks and Celery jobs, an unresponsive/slow
+   mail server could quietly exhaust worker threads. Fixed with a new
+   `SMTP_TIMEOUT_SECONDS` setting (default 10s), with a regression test
+   asserting the connection is always opened with an explicit timeout.
+6. **A deliberate 404 could get swallowed into a 500.**
+   `update_current_user` raised `HTTPException(404, ...)` inside a `try`
+   whose `except Exception` caught it too (`HTTPException` *is* an
+   `Exception`) and rewrote it to a generic 500 — misleading client retry
+   logic (500 implies retryable, 404 doesn't) and hiding the real cause.
+   Found by a dedicated read-only audit of the whole API surface for
+   status/body mismatches (the kind of bug a frontend checking only the
+   HTTP status code, not the body, would never notice). The same audit
+   found `app/api/v1/legal.py` was the only router not using the common
+   `APIResponse` envelope every other endpoint uses — fixed both.
+
+Also verified, not just claimed: a real Celery worker authenticating to
+password-protected Redis and consuming/completing real queued tasks
+(confirmed via its own logs — `Task update_product_stats[...] received` /
+`succeeded`, not inferred); Celery beat's periodic schedule; the atomic
+cart path holding up under concurrent add/remove/update from many users
+sharing a small product catalog with zero lost updates; and the
+`idle_in_transaction_session_timeout` fix specifically re-verified by
+querying `pg_stat_activity` mid- and post-load-test on the real deployment.
 
 ## Contributing
 
