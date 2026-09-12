@@ -1,0 +1,17 @@
+.venv
+.env
+.env.*
+!.env.example
+.git
+.github
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.hypothesis
+.coverage
+coverage.xml
+logs
+.agent-notes
+.claude
+brag-output
