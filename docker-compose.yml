@@ -1,3 +1,14 @@
+# Docker's default json-file driver keeps container stdout/stderr forever,
+# so a long-running stack (celery at --loglevel=info especially) eventually
+# fills the host disk under /var/lib/docker/containers. Cap it per container:
+# 3 files x 10 MB. app.log inside api_logs is rotated separately by the
+# app's own RotatingFileHandler (app/core/logging_config.py).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   api:
     build: 
@@ -29,6 +40,7 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    logging: *default-logging
     # Python, not curl: the runtime image is python:3.13-slim with nothing
     # installed on top (see Dockerfile), so there is no curl in it. Same
     # probe as the Dockerfile's own HEALTHCHECK; /health answers 503 when the
@@ -59,6 +71,7 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks inspect ping -d celery@$$HOSTNAME"]
       interval: 30s
@@ -70,7 +83,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["celery", "-A", "app.tasks", "beat", "--loglevel=info"]
+    # --schedule: beat keeps its last-run times in a file, by default
+    # "celerybeat-schedule" in the working directory. /app is owned by root
+    # in the image and the process runs as appuser, so the default location
+    # is not writable and beat would exit on startup. /tmp is.
+    command:
+      - celery
+      - -A
+      - app.tasks
+      - beat
+      - --loglevel=info
+      - --schedule=/tmp/celerybeat-schedule
     env_file:
       - .env
     depends_on:
@@ -81,6 +104,7 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    logging: *default-logging
     # Without this, celery-beat inherits the Dockerfile's HEALTHCHECK (an
     # HTTP GET to :8000/health) built for the api image - beat runs no web
     # server, so that check always fails and Docker permanently reports it
@@ -101,6 +125,7 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -122,6 +147,7 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
