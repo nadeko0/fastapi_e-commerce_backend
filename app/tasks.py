@@ -74,14 +74,26 @@ celery.conf.update(
         'cleanup': {},
         'stats': {},
     },
+    # Keyed by the tasks' registered names. Every task below is declared with
+    # an explicit name= ("send_order_confirmation", not
+    # "app.tasks.send_order_confirmation"), and Celery matches routes,
+    # annotations and beat entries against that name, not the import path.
+    # These used to be written with an "app.tasks." prefix and so matched
+    # nothing: routing only worked because each task also sets queue= in its
+    # decorator, and the rate limits were never applied at all.
     task_routes={
-        'app.tasks.send_*': {'queue': 'emails'},
-        'app.tasks.cleanup_*': {'queue': 'cleanup'},
-        'app.tasks.update_*': {'queue': 'stats'},
+        'send_*': {'queue': 'emails'},
+        'cleanup_*': {'queue': 'cleanup'},
+        'update_*': {'queue': 'stats'},
+        'check_*': {'queue': 'stats'},
     },
+    # No glob patterns here: task_annotations is looked up by exact task
+    # name (or '*' for all tasks), unlike task_routes.
     task_annotations={
-        'app.tasks.send_*': {'rate_limit': '100/m'},
-        'app.tasks.cleanup_*': {'rate_limit': '10/m'},
+        'send_order_confirmation': {'rate_limit': '100/m'},
+        'send_order_status_update': {'rate_limit': '100/m'},
+        'cleanup_expired_carts': {'rate_limit': '10/m'},
+        'cleanup_inactive_accounts': {'rate_limit': '10/m'},
     },
     broker_transport_options={
         'visibility_timeout': 3600,
@@ -340,21 +352,25 @@ def check_low_stock(threshold: int = 5) -> None:
             low_stock_products
         )
 
+# 'task' is the registered task name (see the note on task_routes above).
+# With the "app.tasks." prefix these entries used to carry, beat published
+# messages for four tasks no worker has: the worker logs "Received
+# unregistered task" and drops them, so none of the periodic jobs ever ran.
 celery.conf.beat_schedule = {
     'cleanup-expired-carts': {
-        'task': 'app.tasks.cleanup_expired_carts',
+        'task': 'cleanup_expired_carts',
         'schedule': timedelta(hours=1),
     },
     'cleanup-inactive-accounts': {
-        'task': 'app.tasks.cleanup_inactive_accounts',
+        'task': 'cleanup_inactive_accounts',
         'schedule': timedelta(days=1),
     },
     'update-product-stats': {
-        'task': 'app.tasks.update_product_stats',
+        'task': 'update_product_stats',
         'schedule': timedelta(hours=1),
     },
     'check-low-stock': {
-        'task': 'app.tasks.check_low_stock',
+        'task': 'check_low_stock',
         'schedule': timedelta(hours=4),
     },
 }
