@@ -281,17 +281,63 @@ def test_build_redis_broker_url_escapes_special_characters_in_password():
 def test_beat_schedule_registers_all_periodic_tasks():
     schedule = tasks.celery.conf.beat_schedule
 
-    assert schedule["cleanup-expired-carts"]["task"] == "app.tasks.cleanup_expired_carts"
+    assert schedule["cleanup-expired-carts"]["task"] == "cleanup_expired_carts"
     assert schedule["cleanup-expired-carts"]["schedule"] == tasks.timedelta(hours=1)
 
-    assert schedule["cleanup-inactive-accounts"]["task"] == "app.tasks.cleanup_inactive_accounts"
+    assert schedule["cleanup-inactive-accounts"]["task"] == "cleanup_inactive_accounts"
     assert schedule["cleanup-inactive-accounts"]["schedule"] == tasks.timedelta(days=1)
 
-    assert schedule["update-product-stats"]["task"] == "app.tasks.update_product_stats"
+    assert schedule["update-product-stats"]["task"] == "update_product_stats"
     assert schedule["update-product-stats"]["schedule"] == tasks.timedelta(hours=1)
 
-    assert schedule["check-low-stock"]["task"] == "app.tasks.check_low_stock"
+    assert schedule["check-low-stock"]["task"] == "check_low_stock"
     assert schedule["check-low-stock"]["schedule"] == tasks.timedelta(hours=4)
+
+
+def _registered_task_names():
+    return {name for name in tasks.celery.tasks if not name.startswith("celery.")}
+
+
+def test_every_beat_entry_names_a_task_the_worker_actually_has():
+    """Regression test. The schedule used to say 'app.tasks.<function>' while
+    every task is registered under an explicit short name, so beat published
+    four tasks no worker knew and none of the periodic jobs ever ran. The
+    previous version of the test above compared the schedule with those same
+    wrong strings, so it passed. Comparing against the registry is the check
+    that cannot drift."""
+    registered = _registered_task_names()
+
+    for entry_name, entry in tasks.celery.conf.beat_schedule.items():
+        assert entry["task"] in registered, (
+            f"beat entry {entry_name!r} schedules {entry['task']!r}, "
+            f"which is not a registered task ({sorted(registered)})"
+        )
+
+
+def test_routes_and_annotations_match_real_tasks():
+    import fnmatch
+
+    registered = _registered_task_names()
+
+    for pattern in tasks.celery.conf.task_routes:
+        assert fnmatch.filter(registered, pattern), (
+            f"task_routes pattern {pattern!r} matches no registered task"
+        )
+    # task_annotations is an exact-name lookup (or '*'); a glob there is
+    # silently ignored, which is how the rate limits went unapplied.
+    for name in tasks.celery.conf.task_annotations:
+        assert name == "*" or name in registered, (
+            f"task_annotations key {name!r} is not a registered task name"
+        )
+
+
+def test_rate_limits_are_actually_applied_to_the_tasks():
+    tasks.celery.finalize()
+
+    assert tasks.send_order_confirmation.rate_limit == "100/m"
+    assert tasks.send_order_status_update.rate_limit == "100/m"
+    assert tasks.cleanup_expired_carts.rate_limit == "10/m"
+    assert tasks.cleanup_inactive_accounts.rate_limit == "10/m"
 
 
 def test_check_low_stock_sends_nothing_when_all_products_well_stocked(
