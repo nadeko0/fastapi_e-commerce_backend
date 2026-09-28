@@ -30,11 +30,11 @@ def test_postgres_database_uri_gets_idle_in_transaction_timeout():
     assert "statement_timeout=60000" in connect_args["options"]
 
 
-def test_postgresql_psycopg2_uri_also_matches():
-    # The driver-qualified form (postgresql+psycopg2://...) is what
-    # app.core.config's DATABASE_URI validator can actually produce -
+def test_postgresql_psycopg_uri_also_matches():
+    # The driver-qualified form (postgresql+psycopg://...) is what
+    # app.core.config's DATABASE_URI validator actually produces -
     # confirm the dialect check isn't an exact-prefix match that misses it.
-    connect_args = _build_connect_args("postgresql+psycopg2://user:pw@localhost/dbname")
+    connect_args = _build_connect_args("postgresql+psycopg://user:pw@localhost/dbname")
 
     assert "options" in connect_args
     assert "idle_in_transaction_session_timeout=30000" in connect_args["options"]
