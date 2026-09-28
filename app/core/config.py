@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     def assemble_db_connection(cls, v: str | None, values: dict) -> str:
         if isinstance(v, str):
             return v
-        return f"postgresql://{values.get('POSTGRES_USER')}:{values.get('POSTGRES_PASSWORD')}@{values.get('POSTGRES_SERVER')}/{values.get('POSTGRES_DB')}"
+        return f"postgresql+psycopg://{values.get('POSTGRES_USER')}:{values.get('POSTGRES_PASSWORD')}@{values.get('POSTGRES_SERVER')}/{values.get('POSTGRES_DB')}"
 
     REDIS_HOST: str
     REDIS_PORT: int = 6379
