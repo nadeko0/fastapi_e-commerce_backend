@@ -44,7 +44,7 @@ jobs:
         run: uv sync --group dev
       - name: Run tests with coverage (gate at 85%)
         env:
-          JWT_SECRET_KEY: ci-test-secret-key
+          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
           POSTGRES_SERVER: localhost
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
