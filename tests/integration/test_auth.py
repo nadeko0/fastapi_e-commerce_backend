@@ -25,6 +25,16 @@ def _register_and_login(client, payload):
     return login_response.json()["data"]["access_token"]
 
 
+def _tamper_signature(token: str) -> str:
+    # Change the FIRST character of the signature, not the last. A JWT
+    # signature is 32 bytes in 43 base64url characters, so the final character
+    # carries only 4 significant bits: swapping it for another character can
+    # decode to the very same bytes, leaving a perfectly valid token and a
+    # test that fails now and then for no visible reason.
+    head, signature = token.rsplit(".", 1)
+    return f"{head}.{'A' if signature[0] != 'A' else 'B'}{signature[1:]}"
+
+
 def test_register_returns_created_user(client, valid_registration_payload):
     response = client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
 
@@ -193,7 +203,7 @@ def test_me_rejects_blacklisted_token(client, valid_registration_payload):
 
 def test_me_rejects_token_with_tampered_signature(client, valid_registration_payload):
     access_token = _register_and_login(client, valid_registration_payload)
-    tampered = access_token[:-1] + ("A" if access_token[-1] != "A" else "B")
+    tampered = _tamper_signature(access_token)
 
     response = client.get(
         f"{API_PREFIX}/me",
@@ -519,7 +529,7 @@ def test_refresh_rejects_malformed_token(client):
 def test_refresh_rejects_token_with_tampered_signature(client, valid_registration_payload):
     tokens = _login_tokens(client, valid_registration_payload)
     refresh_token = tokens["refresh_token"]
-    tampered = refresh_token[:-1] + ("A" if refresh_token[-1] != "A" else "B")
+    tampered = _tamper_signature(refresh_token)
 
     response = client.post(f"{API_PREFIX}/refresh", json={"refresh_token": tampered})
     assert response.status_code == 401
