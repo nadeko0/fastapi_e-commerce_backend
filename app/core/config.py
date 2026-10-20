@@ -1,7 +1,9 @@
-from typing import Annotated, List, Optional
+from typing import Annotated, ClassVar, List, Optional
 
 from pydantic import AnyHttpUrl, validator
 from pydantic_settings import BaseSettings, NoDecode
+
+from app import __version__
 
 
 def _split_comma_separated(v: str | List[str]) -> List[str]:
@@ -21,7 +23,9 @@ def _split_comma_separated(v: str | List[str]) -> List[str]:
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "E-commerce Backend"
-    VERSION: str = "1.0.0"
+    # Read from pyproject.toml (see app/__init__.py). ClassVar, not a field,
+    # so a VERSION environment variable cannot override it.
+    VERSION: ClassVar[str] = __version__
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
