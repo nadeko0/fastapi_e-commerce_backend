@@ -36,6 +36,8 @@ class Order(Base):
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
 
     __table_args__ = (
+        # See Product.__table_args__. Zero is allowed: a product can be free.
+        CheckConstraint("total_amount >= 0", name="ck_order_total_non_negative"),
         CheckConstraint(
             f"status IN {tuple(s.value for s in OrderStatus)}",
             name="ck_order_status"

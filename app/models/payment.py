@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -56,6 +57,12 @@ class Payment(Base):
     order = relationship("Order", backref="payments")
 
     __table_args__ = (
+        # See Product.__table_args__. amount >= 0 rather than > 0: the row
+        # is written before the provider is asked, and the provider is what
+        # turns down a zero amount (with a 4xx, not a database error).
+        CheckConstraint("amount >= 0", name="ck_payment_amount_non_negative"),
+        CheckConstraint("amount_refunded >= 0", name="ck_payment_refunded_non_negative"),
+        CheckConstraint("amount_refunded <= amount", name="ck_payment_refunded_within_amount"),
         UniqueConstraint(
             "order_id", "idempotency_key", name="uix_payment_order_idempotency_key"
         ),
