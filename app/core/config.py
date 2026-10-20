@@ -327,6 +327,13 @@ class Settings(BaseSettings):
     # create_checkout_session). The default is a local frontend; production
     # requires https (check_payment_settings_for_production).
     FRONTEND_URL: str = "http://localhost:3000"
+    # How long an order may stay unpaid before the cancel_expired_unpaid_orders
+    # task (app/tasks.py, every 5 minutes) cancels it and returns its stock.
+    # Stock is taken when the order is placed, so until then those units
+    # cannot be sold to anyone else. Long enough for a customer to finish
+    # paying, including 3D Secure; a payment that completes after expiry is
+    # flagged for manual review (a refund), not applied.
+    UNPAID_ORDER_EXPIRE_MINUTES: int = Field(30, ge=1)
 
     @validator("FRONTEND_URL")
     def validate_frontend_url(cls, v: str) -> str:

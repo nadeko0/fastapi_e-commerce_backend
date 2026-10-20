@@ -18,8 +18,14 @@ from app.models.user import User
 from app.schemas.order import OrderStatus, PaymentStatus
 from app.services.email import (
     send_low_stock_alert_email,
+    send_order_cancellation_email,
     send_order_confirmation_email,
     send_order_status_update_email,
+)
+from app.services.orders import (
+    UNPAID_PAYMENT_STATUSES,
+    cancel_order_and_restock,
+    is_unpaid_and_new,
 )
 from app.services.redis import RedisService
 
@@ -350,6 +356,59 @@ def cleanup_inactive_accounts() -> int:
     with task_session() as db:
         return purge_expired_deletion_requests(db)
 
+def expire_unpaid_orders(db) -> int:
+    """
+    Cancels every order still new and unpaid UNPAID_ORDER_EXPIRE_MINUTES
+    after it was placed, returning its stock through the same code as an
+    admin's cancellation (cancel_order_and_restock). Stock is taken when an
+    order is placed, so without this an order nobody pays for keeps its
+    items out of sale until someone cancels it by hand.
+
+    Each order is locked (FOR UPDATE SKIP LOCKED: one a request is working
+    on right now is left for the next run), re-checked under the lock, and
+    committed on its own, so a customer's cancel, an admin's, or a payment
+    that lands at the same moment is never undone or doubled. A payment that
+    completes after its order expired is flagged for manual review by the
+    payment code, not applied. The customer is told by email.
+
+    Extracted from the cancel_expired_unpaid_orders task so it can be tested
+    against a session without Celery, like purge_expired_deletion_requests.
+    """
+    cutoff = datetime.utcnow() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES)
+    candidates = [
+        order_id for (order_id,) in db.query(Order.id).filter(
+            Order.status == OrderStatus.NEW,
+            Order.payment_status.in_([s.value for s in UNPAID_PAYMENT_STATUSES]),
+            Order.created_at < cutoff,
+        ).all()
+    ]
+    db.commit()
+
+    cancelled = 0
+    for order_id in candidates:
+        order = (
+            db.query(Order)
+            .filter(Order.id == order_id)
+            .with_for_update(skip_locked=True)
+            .first()
+        )
+        if order is None or not is_unpaid_and_new(order) or order.created_at >= cutoff:
+            db.rollback()
+            continue
+        cancel_order_and_restock(db, order)
+        db.commit()
+        cancelled += 1
+        send_order_cancellation_email(order.user.email, order)
+    return cancelled
+
+@celery.task(
+    name="cancel_expired_unpaid_orders",
+    queue="cleanup",
+)
+def cancel_expired_unpaid_orders() -> int:
+    with task_session() as db:
+        return expire_unpaid_orders(db)
+
 @celery.task(
     name="update_product_stats",
     queue="stats",
@@ -438,5 +497,11 @@ celery.conf.beat_schedule = {
     'check-low-stock': {
         'task': 'check_low_stock',
         'schedule': timedelta(hours=4),
+    },
+    # Every 5 minutes, so an unpaid order holds its stock for at most
+    # UNPAID_ORDER_EXPIRE_MINUTES plus 5.
+    'cancel-expired-unpaid-orders': {
+        'task': 'cancel_expired_unpaid_orders',
+        'schedule': timedelta(minutes=5),
     },
 }

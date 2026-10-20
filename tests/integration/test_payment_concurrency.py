@@ -31,6 +31,7 @@ from test_payment import (
     ORDER_AMOUNT_CENTS,
     ORDER_CURRENCY_REPORTED,
     ORDERS_PREFIX,
+    _create_admin,
     _create_verified_buyer_with_order,
     _get_order,
     _get_payments,
@@ -172,6 +173,56 @@ def test_webhook_reads_the_order_only_with_a_row_lock(
     reads = _order_reads(postgres_sql)
     assert reads, "no read of the order was recorded"
     assert all("FOR UPDATE" in s for s in reads), reads
+
+
+@pytest.mark.parametrize("by", ["customer", "admin"])
+def test_cancellation_reads_the_order_only_with_a_row_lock(client, db_session, postgres_sql, by):
+    # Cancelling returns stock; two cancellations deciding on the same
+    # "new" status would return it twice. The admin route joins the
+    # shipping address (an outer join), so only the orders row is locked:
+    # Postgres refuses FOR UPDATE on the nullable side of an outer join.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    headers = setup["headers"] if by == "customer" else _create_admin(db_session)["headers"]
+    postgres_sql.clear()
+
+    if by == "customer":
+        response = client.post(f"{ORDERS_PREFIX}/{order['id']}/cancel", headers=headers)
+    else:
+        response = client.put(
+            f"{ORDERS_PREFIX}/{order['id']}/status", params={"status": "cancelled"}, headers=headers
+        )
+
+    assert response.status_code == 200, response.text
+    reads = _order_reads(postgres_sql)
+    assert reads, "no read of the order was recorded"
+    assert all("FOR UPDATE OF orders" in s for s in reads), reads
+
+
+def test_expiry_locks_each_order_and_skips_those_already_locked(
+    client, db_session, postgres_sql, tasks_db
+):
+    from datetime import datetime, timedelta
+
+    from app import tasks
+    from app.core.config import settings
+
+    setup = _create_verified_buyer_with_order(client, db_session)
+    db_order = db_session.get(Order, setup["order"]["id"])
+    db_order.created_at = datetime.utcnow() - timedelta(
+        minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES + 1
+    )
+    db_session.commit()
+    postgres_sql.clear()
+
+    assert tasks.cancel_expired_unpaid_orders() == 1
+
+    # The whole-row query per candidate, not the id-only candidate list
+    # (nothing to lock yet) or the reload of attributes the task's session
+    # (tasks_db: the suite's sessions, which expire on commit) does after
+    # each commit to address the email.
+    full_rows = [s for s in _order_reads(postgres_sql) if "orders.status AS" in s]
+    assert full_rows and all("FOR UPDATE SKIP LOCKED" in s for s in full_rows), full_rows
 
 
 # -- A second success for a paid order is flagged, not applied again ---------
