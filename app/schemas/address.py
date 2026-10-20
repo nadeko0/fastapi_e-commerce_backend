@@ -65,6 +65,14 @@ class AddressUpdate(BaseModel):
     delivery_instructions: Optional[str] = Field(None, max_length=500)
     delivery_phone: Optional[str] = None
 
+    @validator('street', 'city', 'state', 'postal_code', 'country', 'address_type', 'is_default')
+    def reject_null(cls, v):
+        """NOT NULL columns. delivery_instructions and delivery_phone are
+        nullable: null clears them."""
+        if v is None:
+            raise ValueError('may be omitted but cannot be null')
+        return v
+
     @validator('postal_code')
     def validate_postal_code(cls, v):
         if v is None:

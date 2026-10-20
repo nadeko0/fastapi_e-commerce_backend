@@ -46,6 +46,14 @@ class ProductUpdate(BaseModel):
     images: Optional[List[HttpUrl]] = None
     characteristics: Optional[Dict[str, ProductCharacteristic]] = None
 
+    @validator('name', 'description', 'price', 'stock_quantity', 'category_id', 'images', 'characteristics')
+    def reject_null(cls, v):
+        """Fields may be omitted, but every one maps to a NOT NULL column:
+        an explicit null must be a 422, not a database error."""
+        if v is None:
+            raise ValueError('may be omitted but cannot be null')
+        return v
+
     @validator('price')
     def validate_price(cls, v):
         if v is None:
@@ -139,6 +147,14 @@ class ProductVariantUpdate(BaseModel):
     price_override: Optional[Decimal] = Field(None, ge=0)
     stock_quantity: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
+
+    @validator('sku', 'attributes', 'stock_quantity', 'is_active')
+    def reject_null(cls, v):
+        """NOT NULL columns. price_override is left out on purpose: null
+        clears it (the variant then inherits the product's price)."""
+        if v is None:
+            raise ValueError('may be omitted but cannot be null')
+        return v
 
     @validator('price_override')
     def validate_price_override(cls, v):

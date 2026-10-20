@@ -91,6 +91,13 @@ class UserUpdate(BaseModel):
         return f"+{phone}"
     marketing_consent: Optional[bool] = None
 
+    @validator('marketing_consent')
+    def reject_null(cls, v):
+        """NOT NULL column. full_name and phone are nullable: null clears them."""
+        if v is None:
+            raise ValueError('may be omitted but cannot be null')
+        return v
+
 class UserInDB(UserBase):
     id: int
     role: UserRole
