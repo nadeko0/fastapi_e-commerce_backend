@@ -19,6 +19,7 @@ _GOOD_SECRETS = {
     "REDIS_PASSWORD": "r" * 24,
     "SMTP_PASSWORD": "an-smtp-app-password",
     "STRIPE_WEBHOOK_SECRET": "whsec_" + "w" * 32,
+    "STRIPE_SECRET_KEY": "stripe-secret-key-for-tests-not-a-real-key",
 }
 
 _ENV_EXAMPLE = os.path.join(
@@ -27,7 +28,12 @@ _ENV_EXAMPLE = os.path.join(
 
 
 def _settings(environment="production", **overrides):
-    return Settings(_env_file=None, ENVIRONMENT=environment, **{**_GOOD_SECRETS, **overrides})
+    return Settings(
+        _env_file=None,
+        ENVIRONMENT=environment,
+        PAYMENT_PROVIDER="stripe",
+        **{**_GOOD_SECRETS, **overrides},
+    )
 
 
 def _env_example_values():
@@ -67,7 +73,7 @@ def test_the_stripe_webhook_secret_default_is_rejected_in_production():
     # and anyone who knows it can sign a webhook.
     secrets = {k: v for k, v in _GOOD_SECRETS.items() if k != "STRIPE_WEBHOOK_SECRET"}
     with pytest.raises(ValidationError) as error:
-        Settings(_env_file=None, ENVIRONMENT="production", **secrets)
+        Settings(_env_file=None, ENVIRONMENT="production", PAYMENT_PROVIDER="stripe", **secrets)
     assert "STRIPE_WEBHOOK_SECRET" in str(error.value)
 
 

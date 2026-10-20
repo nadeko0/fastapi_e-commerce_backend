@@ -28,6 +28,8 @@ _PRODUCTION_ENV = {
     "REDIS_PASSWORD": "r" * 24,
     "SMTP_PASSWORD": "an-smtp-app-password",
     "STRIPE_WEBHOOK_SECRET": "whsec_" + "w" * 32,
+    "PAYMENT_PROVIDER": "stripe",
+    "STRIPE_SECRET_KEY": "stripe-secret-key-for-tests-not-a-real-key",
 }
 
 
