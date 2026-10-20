@@ -116,6 +116,11 @@ services:
 
   db:
     image: postgres:15-alpine
+    # max_connections: each API worker can open up to 2 x (DB_POOL_SIZE +
+    # DB_MAX_OVERFLOW) connections (a sync and an async pool), so 4 workers
+    # with the default 10 + 5 can reach 120, plus the Celery worker. The
+    # Postgres default of 100 is below that.
+    command: ["postgres", "-c", "max_connections=200"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
     env_file:

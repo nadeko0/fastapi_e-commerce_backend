@@ -1,133 +1,334 @@
-import time
-from typing import Tuple
+"""Rate limiting, all of it, in one file.
+
+What it is for: fairness and abuse. One caller must not crowd out the rest,
+walk the catalog at machine speed, or guess passwords. Protecting the server
+from load as such is a different job, done by the cap on requests in flight
+(app/core/overload.py), which needs no Redis.
+
+How it works, top to bottom:
+
+1. LIMITS. Each API operation (method + route template) has a limit written
+   the usual way, "300/minute". A handful of routes are named in
+   _ROUTE_LIMITS; every other route gets RATE_LIMIT_DEFAULT.
+2. WHO. A request with a valid access token is counted per user id, any
+   other request per client address (client_address() below, which knows
+   about reverse proxies). Auth routes are always counted per address.
+3. COUNTING. A fixed window: one Redis counter per (operation, caller) that
+   expires when its window ends. Checking and counting are one small Lua
+   script, so one atomic round trip per request, whatever the load on a key.
+4. OVER THE LIMIT: 429 with Retry-After = seconds until the window ends.
+
+Wired in once, in app/main.py, as an application-wide FastAPI dependency
+(`rate_limit`). A dependency rather than a middleware because it runs after
+routing: FastAPI has already matched the route, so its template is simply
+`request.scope["route"].path` and /products/1 and /products/2 are one
+operation with one budget. Requests that match no route never get here and
+are not counted; neither are the docs and OpenAPI pages, which FastAPI
+serves without dependencies.
+
+Known trade-offs, chosen for simplicity:
+- A fixed window lets a caller spend one window's budget at its very end
+  and the next one's right after, so up to 2 x N in a short span. Smoothing
+  that is a job for the proxy in front (nginx limit_req), not for more code
+  here.
+- If Redis cannot be reached the request is let through (fail open): a
+  limiter that cannot count must not take the shop down with it.
+
+Why this and not a library, and what real services publish:
+scripts/loadtest/results/rate-limiting-research.md, "What was implemented".
+"""
+
+import hashlib
+import ipaddress
+import logging
+import math
+import re
+from functools import lru_cache
+from typing import NamedTuple, Optional
 
 from fastapi import HTTPException, Request
+from jose import JWTError, jwt
+from redis.exceptions import RedisError
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
-from app.core.config import settings
-from app.services.redis import RedisService
+from app.core.config import RATE_LIMIT_PATTERN, settings
+from app.services.redis_async import get_async_redis
 
+logger = logging.getLogger(__name__)
+
+
+# --- 1. Limits ------------------------------------------------------------
+
+# (method, route template) -> the setting holding its limit. Templates are
+# as the routers declare them, without the /api/v1 they are mounted under.
+# A route that is not listed gets RATE_LIMIT_DEFAULT; nothing has to be
+# registered here for a new route to be limited.
+_ROUTE_LIMITS = {
+    ("GET", "/products/search"): "RATE_LIMIT_SEARCH",
+    ("POST", "/users/register"): "RATE_LIMIT_AUTH",
+    ("POST", "/users/login"): "RATE_LIMIT_AUTH",
+    ("POST", "/users/password/reset"): "RATE_LIMIT_AUTH",
+    ("GET", "/users/password/reset/{token}"): "RATE_LIMIT_AUTH",
+    ("POST", "/users/password/reset/{token}"): "RATE_LIMIT_AUTH",
+    ("GET", "/users/verify-email/{token}"): "RATE_LIMIT_AUTH",
+    ("POST", "/users/verify-email/resend"): "RATE_LIMIT_AUTH",
+    ("POST", "/orders"): "RATE_LIMIT_CHECKOUT",
+    ("POST", "/orders/{order_id}/pay"): "RATE_LIMIT_CHECKOUT",
+    ("POST", "/orders/{order_id}/checkout-session"): "RATE_LIMIT_CHECKOUT",
+}
+
+# Never limited. The webhook is authenticated by Stripe's signature and
+# arrives in bursts from a few addresses; a health probe answered 429 would
+# get the container restarted.
+_EXEMPT = frozenset({("POST", "/orders/webhooks/stripe"), ("GET", "/health")})
+
+_UNIT_SECONDS = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
+
+
+class Rate(NamedTuple):
+    count: int    # this many requests...
+    seconds: int  # ...per window of this length
+
+
+@lru_cache(maxsize=64)
+def parse_rate(text: str) -> Rate:
+    """"300/minute" -> Rate(300, 60); "10/15 minutes" -> Rate(10, 900).
+    The settings are checked against the same pattern at startup."""
+    match = re.fullmatch(RATE_LIMIT_PATTERN, text)
+    if match is None:
+        raise ValueError(f"not a rate limit: {text!r} (expected e.g. '300/minute')")
+    count, multiple, unit = match.groups()
+    return Rate(int(count), int(multiple or 1) * _UNIT_SECONDS[unit])
+
+
+# --- 2. Who is calling ----------------------------------------------------
+
+def _ip(text: str):
+    """The address in `text` as an ipaddress object; None if it is not one."""
+    try:
+        address = ipaddress.ip_address(text.strip())
+    except ValueError:
+        return None
+    # "::ffff:1.2.3.4" is how a dual-stack socket reports the IPv4 client.
+    return getattr(address, "ipv4_mapped", None) or address
+
+
+@lru_cache(maxsize=8)
+def _trusted_networks(entries: tuple) -> tuple:
+    networks = []
+    for entry in entries:
+        try:
+            # strict=False: "10.0.0.5/8" means the network it lies in.
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            logger.warning(f"TRUSTED_PROXIES entry {entry!r} is not an address or network; ignored")
+    return tuple(networks)
+
+
+def client_address(request: Request) -> str:
+    """The address of the client, for use as a counter key. Never raises.
+
+    Behind a reverse proxy the socket peer is the proxy, and the client is
+    only known from X-Forwarded-For - a header anyone can send. So it is
+    believed only when the peer is one of settings.TRUSTED_PROXIES, and it
+    is read from the right: each proxy appends the address it received the
+    request from, so the first entry from the right that is not one of our
+    proxies is the client as our outermost proxy saw it. Everything to the
+    left of that is whatever the client chose to write.
+    """
+    peer = request.client.host if request.client else "unknown"
+    client = _ip(peer)
+    if client is None:
+        return peer  # a unix socket path, or the test client's name
+    trusted = _trusted_networks(tuple(settings.TRUSTED_PROXIES))
+
+    def is_proxy(address) -> bool:
+        return any(address in network for network in trusted)
+
+    if is_proxy(client):
+        hops = [
+            hop
+            for value in request.headers.getlist("x-forwarded-for")
+            for hop in value.split(",")
+        ]
+        for hop in reversed(hops):
+            address = _ip(hop)
+            if address is None:
+                break  # garbage: nothing at or left of it can be believed
+            client = address
+            if not is_proxy(address):
+                break
+    if client.version == 6:
+        # One subscriber normally holds a whole /64 and can use any address
+        # in it, so IPv6 callers are counted per /64, not per address.
+        return str(ipaddress.ip_network((client, 64), strict=False))
+    return str(client)
+
+
+def user_id_from_token(request: Request) -> Optional[str]:
+    """The user id of a valid access token on this request, or None.
+
+    Signature, expiry and token type only - no blacklist, no database. This
+    only chooses which counter the request is charged to; whether it is
+    allowed is still decided by the route's own authentication. A token
+    that verifies was issued by this application to that user, which is all
+    a counter key needs.
+    """
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    try:
+        payload = jwt.decode(
+            token.strip(), settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+        )
+    except JWTError:  # malformed, expired, or signed with another key
+        return None
+    if payload.get("type") != "access" or payload.get("sub") is None:
+        return None
+    return str(payload["sub"])
+
+
+# --- 3. Counting ----------------------------------------------------------
+
+# Count one request against KEYS[1], whose window lasts ARGV[1] milliseconds,
+# and return {requests in this window including this one, ms until it ends}.
+# The window starts with the first request and the key expires with it, so
+# there is nothing to clean up and no clock but Redis's own. A script,
+# because INCR and PEXPIRE must not be separable: a key that got its INCR
+# but never its expiry would count, and block, forever.
+_COUNT_LUA = """
+local count = redis.call('INCR', KEYS[1])
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl < 0 then
+    redis.call('PEXPIRE', KEYS[1], ARGV[1])
+    ttl = tonumber(ARGV[1])
+end
+return {count, ttl}
+"""
+
+# redis-py's Script object: calls the script by its SHA (EVALSHA) and, when
+# the server does not know it yet (first call, Redis restarted), loads it
+# and calls again. Made on first use because that needs a client, and the
+# client belongs to the running event loop (app/services/redis_async.py);
+# every call then names the client it runs on.
+_count_script = None
+
+
+async def seconds_until_allowed(key: str, rate: Rate) -> int:
+    """Count one request against `key`. 0 if it is within `rate`, otherwise
+    the whole seconds until the window ends. 0 as well if Redis cannot be
+    asked: the limiter fails open."""
+    global _count_script
+    try:
+        redis = get_async_redis()
+        if _count_script is None:
+            _count_script = redis.register_script(_COUNT_LUA)  # sends nothing yet
+        count, ttl_ms = await _count_script(
+            keys=[key], args=[rate.seconds * 1000], client=redis
+        )
+    except RedisError as e:
+        # Connection refused, timeout, no free connection in the pool. This
+        # except must only ever wrap the Redis call: the 429 is raised by
+        # the callers, outside it. (An earlier version raised it inside an
+        # `except Exception` and so swallowed its own rejections.)
+        logger.error(f"Rate limiting error, request allowed: {e}")
+        return 0
+    if count <= rate.count:
+        return 0
+    return max(1, math.ceil(ttl_ms / 1000))
+
+
+def too_many_requests(message: str, retry_after: int) -> HTTPException:
+    return HTTPException(
+        status_code=HTTP_429_TOO_MANY_REQUESTS,
+        detail={"error": message, "retry_after": retry_after},
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+# --- 4. The per-request check ---------------------------------------------
 
 class RateLimiter:
-    def __init__(self):
-        self.redis = RedisService()
-        # Load rate limits from settings
-        self.default_rate_limits = {
-            "anonymous": settings.RATE_LIMIT_ANONYMOUS,
-            "authenticated": settings.RATE_LIMIT_AUTHENTICATED,
-            "admin": settings.RATE_LIMIT_ADMIN,
-        }
-        # Special endpoints rate limits
-        self.endpoint_limits = {
-            f"{settings.API_V1_STR}/products": settings.RATE_LIMIT_PRODUCTS,
-            f"{settings.API_V1_STR}/users/login": settings.RATE_LIMIT_LOGIN,
-            f"{settings.API_V1_STR}/users/register": settings.RATE_LIMIT_REGISTER,
-        }
+    """Holds no state. A class only so that the check has one patchable
+    name: the load-test tracer wraps RateLimiter.check_rate_limit."""
 
-    def _get_window_key(self, identifier: str) -> str:
-        """Generate Redis key for the rate limit window."""
-        return f"ratelimit:{identifier}"
-
-    def _get_client_identifier(self, request: Request) -> Tuple[str, str]:
-        """Get client identifier and type based on request."""
-        # Get client IP. X-Forwarded-For is attacker-controlled unless it was
-        # set by a proxy we trust, so only honor it when the immediate peer
-        # (the socket connection) is in TRUSTED_PROXIES - otherwise a client
-        # could spoof the header to dodge or shift its rate limit bucket.
-        peer_ip = request.client.host if request.client else "unknown"
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded and peer_ip in settings.TRUSTED_PROXIES:
-            client_ip = forwarded.split(",")[0].strip()
-        else:
-            client_ip = peer_ip
-
-        # Get user type (anonymous/authenticated/admin)
-        user = getattr(request.state, "user", None)
-        if user:
-            user_type = "admin" if getattr(user, "is_superuser", False) else "authenticated"
-        else:
-            user_type = "anonymous"
-
-        return client_ip, user_type
-
-    def _get_rate_limit(self, path: str, user_type: str) -> int:
-        """Get rate limit based on endpoint and user type."""
-        # Check for endpoint-specific limit first
-        if path in self.endpoint_limits:
-            return self.endpoint_limits[path]
-        # Fall back to user type limit
-        return self.default_rate_limits.get(user_type, self.default_rate_limits["anonymous"])
-
-    async def check_rate_limit(
-        self, request: Request, window_seconds: int = None
-    ) -> None:
-        """
-        Check if request is within rate limits.
-        Uses a sliding window algorithm with Redis.
-        """
+    async def check_rate_limit(self, request: Request) -> None:
+        """Return if the request may proceed; raise the 429 if not."""
         if not settings.RATE_LIMIT_ENABLED:
-            return None
+            return
+        route = request.scope.get("route")
+        if route is None:
+            return
+        operation = (request.method, route.path)
+        if operation in _EXEMPT:
+            return
 
-        window_seconds = window_seconds or settings.RATE_LIMIT_WINDOW_SECONDS
-        """
-        Check if request is within rate limits.
-        Uses a sliding window algorithm with Redis.
-        """
-        # Get client identifier and type
-        client_ip, user_type = self._get_client_identifier(request)
+        setting = _ROUTE_LIMITS.get(operation, "RATE_LIMIT_DEFAULT")
+        user_id = None if setting == "RATE_LIMIT_AUTH" else user_id_from_token(request)
+        caller = f"user:{user_id}" if user_id else f"ip:{client_address(request)}"
 
-        # Generate unique key for this client and endpoint
-        path = request.url.path
-        window_key = self._get_window_key(f"{client_ip}:{path}")
+        retry_after = await seconds_until_allowed(
+            f"rl:{operation[0]} {operation[1]}:{caller}",
+            parse_rate(getattr(settings, setting)),
+        )
+        if retry_after:
+            raise too_many_requests("Rate limit exceeded", retry_after)
 
-        # Get rate limit for this endpoint/user combination
-        rate_limit = self._get_rate_limit(path, user_type)
 
-        current_time = int(time.time())
-        window_start = current_time - window_seconds
+limiter = RateLimiter()
 
-        try:
-            # Clean old requests and add new request atomically using Redis pipeline
-            pipeline = self.redis._redis.pipeline()
 
-            # Remove requests older than the window
-            pipeline.zremrangebyscore(window_key, "-inf", window_start)
-            # Add current request
-            pipeline.zadd(window_key, {str(current_time): current_time})
-            # Get count of requests in window
-            pipeline.zcount(window_key, window_start, "+inf")
-            # Set key expiration
-            pipeline.expire(window_key, window_seconds)
-
-            # Execute pipeline
-            _, _, request_count, _ = pipeline.execute()
-        except Exception as e:
-            # Log the error but allow the request in case of Redis failure.
-            # This except previously also wrapped the exceeded-limit check
-            # below, so raise HTTPException(429, ...) - a subclass of
-            # Exception - was caught right here and silently swallowed:
-            # rate limiting never actually blocked a single request,
-            # regardless of how many were made. Only the Redis pipeline
-            # call itself may fail open; the limit check must run outside
-            # this try/except so its 429 actually propagates.
-            print(f"Rate limiting error: {str(e)}")
-            return None
-
-        # Check if rate limit is exceeded
-        if request_count > rate_limit:
-            retry_after = window_seconds - (current_time - window_start)
-            raise HTTPException(
-                status_code=HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "error": "Rate limit exceeded",
-                    "retry_after": retry_after,
-                    "limit": rate_limit,
-                    "window_seconds": window_seconds
-                }
-            )
-
-async def rate_limit(request: Request):
-    """FastAPI dependency for rate limiting."""
-    limiter = RateLimiter()
+async def rate_limit(request: Request) -> None:
+    """The FastAPI dependency: FastAPI(dependencies=[Depends(rate_limit)])."""
     await limiter.check_rate_limit(request)
-    return True
+
+
+# --- 5. Failed logins, per account ----------------------------------------
+#
+# RATE_LIMIT_AUTH caps what one address can try. A password-guessing run
+# spread over many addresses is held back here instead, by a counter per
+# *email*: RATE_LIMIT_LOGIN_FAILURES ("10/15 minutes") attempts that were not
+# followed by a success, after which login for that email answers 429 until
+# the window ends.
+#
+# An attempt is counted when it starts and a successful login deletes the
+# counter, so what stays counted is the failures - and a volley of guesses
+# sent at the same instant cannot all slip past a check made before any of
+# them was counted. The counter is for the email as submitted, whether or
+# not an account exists, and nothing here looks at the database, so the
+# answer cannot be used to find out which emails are registered.
+#
+# The trade-off: counting per email lets anybody lock the owner out of
+# *logging in* (sessions already open keep working) for up to the window,
+# by failing on purpose. Counting per address instead would give every
+# address of a botnet its own fresh guesses. A completed password reset
+# clears the count, so the owner has a way back in.
+
+def _login_key(email: str) -> str:
+    # Case and surrounding blanks cost a client nothing to vary, so they
+    # are folded away. A digest, so that no mailbox sits in a key name.
+    normalised = email.strip().casefold().encode("utf-8", "replace")
+    return f"rl:login-failures:{hashlib.sha256(normalised).hexdigest()[:32]}"
+
+
+async def check_login_attempt(email: str) -> None:
+    """Call before the password is looked at; raises the 429 when this
+    email has used up its failed attempts. One Redis round trip, no
+    database."""
+    if not settings.RATE_LIMIT_ENABLED:
+        return
+    retry_after = await seconds_until_allowed(
+        _login_key(email), parse_rate(settings.RATE_LIMIT_LOGIN_FAILURES)
+    )
+    if retry_after:
+        raise too_many_requests("Too many failed login attempts", retry_after)
+
+
+async def clear_login_failures(email: str) -> None:
+    """Call after a successful login or a completed password reset."""
+    if not settings.RATE_LIMIT_ENABLED:
+        return
+    try:
+        await get_async_redis().delete(_login_key(email))
+    except RedisError as e:
+        logger.error(f"Rate limiting error, failed-login count not cleared: {e}")

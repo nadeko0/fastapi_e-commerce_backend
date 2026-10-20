@@ -15,3 +15,5 @@ logs
 .agent-notes
 .claude
 brag-output
+loadtest-results
+scripts/loadtest/results

@@ -6,12 +6,14 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from fastapi import status as http_status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_active_user, get_current_admin_user
+from app.models.address import Address
 from app.models.order import Order
 from app.models.order_items import OrderItem
 from app.models.payment import Payment, WebhookEvent
@@ -58,6 +60,7 @@ router = APIRouter(prefix="/orders", tags=["orders"])
         400: {"description": "Cart is empty, profile incomplete, or a cart item is out of stock"},
         403: {"description": "Email verification required before placing orders"},
         404: {"description": "Shipping address not found"},
+        422: {"description": "Missing or malformed Idempotency-Key header"},
     },
 )
 async def create_order(
@@ -66,9 +69,24 @@ async def create_order(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
-    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    # Required, not optional. Placing an order is the one request in this API
+    # that must never be applied twice, and the client is the only party that
+    # knows whether two requests are one attempt retried or two purchases:
+    # a timeout, a double click and a second browser tab all look the same
+    # from here. While the header was optional, a request without it that was
+    # retried after its response was lost created a second order from
+    # whatever was still in the cart. Generate one key (a UUID) per checkout
+    # attempt and resend the same key on every retry of that attempt.
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=8, max_length=255,
+        description="Unique per checkout attempt; resend the same value when retrying.",
+    ),
 ):
-    """Create an order from the current user's cart, decrementing stock atomically."""
+    """Create an order from the current user's cart, decrementing stock atomically.
+
+    Requires an `Idempotency-Key` header. Repeating a request with a key
+    already used by this user returns the order created the first time.
+    """
 
     if not current_user.is_email_verified:
         raise HTTPException(
@@ -85,13 +103,12 @@ async def create_order(
     # A retried checkout request (e.g. client timeout + retry, double-click)
     # with the same key returns the order already created instead of
     # double-charging stock/placing a duplicate order.
-    if idempotency_key:
-        existing = db.query(Order).filter(
-            Order.user_id == current_user.id,
-            Order.idempotency_key == idempotency_key,
-        ).first()
-        if existing:
-            return APIResponse.success_response(OrderResponse.from_orm(existing))
+    existing = db.query(Order).filter(
+        Order.user_id == current_user.id,
+        Order.idempotency_key == idempotency_key,
+    ).first()
+    if existing:
+        return APIResponse.success_response(OrderResponse.from_orm(existing))
 
     cart = redis.get_cart(current_user.id)
     if not cart or not cart.items:
@@ -101,10 +118,14 @@ async def create_order(
         )
 
 
-    address = next(
-        (addr for addr in current_user.addresses if addr.id == shipping_address_id),
-        None
-    )
+    # Queried through this route's session, not read off
+    # current_user.addresses: current_user is a detached snapshot from the
+    # auth dependency (app/core/security.py) and cannot lazy-load a
+    # relationship. Same rows as before - any address of this user.
+    address = db.query(Address).filter(
+        Address.id == shipping_address_id,
+        Address.user_id == current_user.id,
+    ).first()
     if not address:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -132,7 +153,10 @@ async def create_order(
     total_amount = Decimal('0.00')
     for item in cart.items.values():
         product = db.query(Product).filter(Product.id == item.product_id).first()
-        if not product:
+        # is_active is re-checked here, for product and variant alike, and
+        # not only when the line is added: either can be withdrawn from
+        # sale while it sits in a cart, and used to be ordered regardless.
+        if not product or not product.is_active:
             db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -145,7 +169,7 @@ async def create_order(
                 ProductVariant.id == item.variant_id,
                 ProductVariant.product_id == item.product_id,
             ).first()
-            if not variant:
+            if not variant or not variant.is_active:
                 db.rollback()
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -215,7 +239,19 @@ async def create_order(
         raise
 
 
-    redis.delete_cart(current_user.id)
+    # Take out of the cart only what this order was built from, not the
+    # whole key: delete_cart() here also discarded anything added between
+    # the read at the top and this point, without it having been ordered.
+    # The order is already committed, so a Redis failure cannot fail the
+    # request - but the ordered lines are then still in the cart. A retry of
+    # this request carries the same Idempotency-Key and gets this order
+    # back; a deliberate new checkout would order them again. Logged with
+    # the order id so that case can be found.
+    if not redis.remove_ordered_items_atomic(current_user.id, cart):
+        logger.error(
+            "Order %s committed but its items could not be removed from user %s's cart",
+            order.id, current_user.id,
+        )
 
 
     background_tasks.add_task(
@@ -534,8 +570,17 @@ async def process_payment(
             )
         raise
 
+    # Every provider call in this module goes through run_in_threadpool.
+    # The provider is synchronous (the Stripe SDK makes blocking HTTP calls:
+    # measured 0.4 s for a create and 0.7 s for a confirm against Stripe's
+    # test mode), and these handlers run on the event loop, so a direct call
+    # stopped the whole worker for the duration of every payment - no other
+    # request was served for about a second. Each call is made with no
+    # database transaction open (the commit just above it), so no pooled
+    # connection is held while waiting on Stripe.
     try:
-        intent = provider.create_payment_intent(
+        intent = await run_in_threadpool(
+            provider.create_payment_intent,
             amount=amount_cents,
             currency=payment.currency,
             idempotency_key=provider_idempotency_key,
@@ -546,8 +591,18 @@ async def process_payment(
         payment_row.client_secret = intent.client_secret
         db.commit()
 
-        intent = provider.confirm_payment_intent(
-            intent.id, idempotency_key=provider_idempotency_key
+        # A different key from the create call above, derived from it.
+        # Stripe scopes an idempotency key to one request: reusing the
+        # create call's key on the confirm endpoint is rejected with
+        # "Keys for idempotent requests can only be used with the same
+        # parameters they were first used with". With one shared key, as
+        # this used to be, every /pay against real Stripe failed with 409 -
+        # found by an end-to-end run against Stripe's test mode
+        # (scripts/loadtest, FINDINGS.md); the in-process mock accepted it,
+        # so the test suite never saw it. The mock now rejects it too.
+        intent = await run_in_threadpool(
+            provider.confirm_payment_intent,
+            intent.id, idempotency_key=f"{provider_idempotency_key}:confirm",
         )
     except PaymentProviderTimeoutError:
         # Provider unreachable/timed out: we do not know whether Stripe
@@ -730,7 +785,8 @@ async def create_checkout_session(
         raise
 
     try:
-        session = provider.create_checkout_session(
+        session = await run_in_threadpool(
+            provider.create_checkout_session,
             amount=amount_cents,
             currency=payload.currency,
             idempotency_key=provider_idempotency_key,
@@ -831,9 +887,18 @@ async def refund_payment(
         _decimal_to_cents(refund_request.amount) if refund_request.amount is not None else None
     )
 
+    # Nothing above wrote anything, but the two reads opened a transaction
+    # and with it checked out a connection. End it before waiting on the
+    # provider (see the note in process_payment): a pooled connection must not sit
+    # idle in a transaction for the length of an external HTTP call.
+    # expire_on_commit is off, so `order` and `payment_row` stay usable.
+    payment_intent_id = payment_row.payment_intent_id
+    db.commit()
+
     try:
-        refund = provider.create_refund(
-            payment_intent_id=payment_row.payment_intent_id,
+        refund = await run_in_threadpool(
+            provider.create_refund,
+            payment_intent_id=payment_intent_id,
             amount=refund_amount_cents,
             idempotency_key=idempotency_key,
         )

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.api import deps
 from app.core.config import settings
 from app.core.security import get_current_active_user
+from app.models.user import User
 from app.schemas.common import APIResponse
 from app.schemas.legal import (
     ConsentUpdate,
@@ -244,6 +245,25 @@ def get_cookie_policy():
         last_updated=current_time
     ))
 
+def _load_user(db: Session, user_id: int) -> User:
+    """Load the authenticated user in this route's own session.
+
+    current_user (from get_current_active_user) is a detached snapshot: it
+    belongs to no session, so changing it and committing `db` persists
+    nothing. These routes used to get away with exactly that, because the
+    auth dependency resolved through the same deps.get_db as they do and
+    FastAPI's per-request dependency cache handed both the same session.
+    Auth now loads the user through its own AsyncSession, so a route that
+    changes the user has to load the row itself - the same pattern as
+    update_consent / delete_user_data in app/api/v1/users.py.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        # Authenticated a moment ago, gone now (hard-deleted in between).
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
 @router.post("/consent", response_model=APIResponse[ConsentUpdateResponse])
 async def update_user_consent(
     consent_update: ConsentUpdate,
@@ -263,7 +283,9 @@ async def update_user_consent(
     """
     gdpr_service = GDPRService(db)
     updated_consents = gdpr_service.update_user_consent(
-        user=current_user,
+        # Loaded through `db`: the service mutates this object and commits
+        # `db` (see _load_user).
+        user=_load_user(db, current_user.id),
         consent_update=consent_update,
         # request.client can be None (e.g. some ASGI transports/test
         # clients don't set it) - every other endpoint in this codebase that
@@ -299,9 +321,14 @@ async def request_personal_data(
     gdpr_service = GDPRService(db)
 
     if request_data.request_type == "export":
+        # Reads user.id and user.email only - the detached snapshot will do.
         request_id = await gdpr_service.process_data_export(current_user)
     elif request_data.request_type == "deletion":
-        request_id = await gdpr_service.process_data_deletion(current_user)
+        # Deactivates the user and commits `db`, so it needs the row loaded
+        # through `db` (see _load_user).
+        request_id = await gdpr_service.process_data_deletion(
+            _load_user(db, current_user.id)
+        )
     else:
         raise HTTPException(
             status_code=400,

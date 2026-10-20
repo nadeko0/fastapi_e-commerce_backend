@@ -64,6 +64,13 @@ ORDERS_PREFIX = "/api/v1/orders"
 WEBHOOK_URL = f"{ORDERS_PREFIX}/webhooks/stripe"
 
 
+def _with_idempotency_key(headers):
+    # POST /orders requires an Idempotency-Key; tests that are not about
+    # idempotency itself just need a fresh one per request. A key the test
+    # set itself is kept.
+    return {"Idempotency-Key": uuid.uuid4().hex, **headers}
+
+
 @pytest.fixture(autouse=True)
 def _reset_stripe_mock_state():
     # StripePaymentProvider's idempotency-key cache is a *class* attribute
@@ -175,7 +182,7 @@ def _create_verified_buyer_with_order(client, db_session, email="buyer@example.c
     order_resp = client.post(
         ORDERS_PREFIX,
         params={"shipping_address_id": address.id},
-        headers=headers,
+        headers=_with_idempotency_key(headers),
     )
     assert order_resp.status_code == 200, order_resp.text
     order = order_resp.json()["data"]
@@ -1271,3 +1278,61 @@ def test_webhook_for_unknown_payment_intent_is_acknowledged_but_not_applied(clie
     body_data = response.json()["data"]
     assert body_data["status"] == "processed"
     assert body_data["applied"] is False
+
+
+
+# -- Provider calls must not run on the event loop ------------------------------
+
+def test_payment_provider_calls_run_off_the_event_loop(client, db_session, monkeypatch):
+    """The provider is synchronous: a real Stripe call is a blocking HTTP
+    request of 0.4-0.7 s (measured against Stripe's test mode), and the
+    handlers are `async def`. Called directly, as they used to be, each
+    payment stopped the whole worker for about a second. They must run in a
+    worker thread, i.e. on a different thread from the one running the
+    handler's event loop."""
+    import asyncio
+    import threading
+
+    from app.api.v1 import orders as orders_module
+
+    threads = {}
+    real_create = StripePaymentProvider.create_payment_intent
+    real_confirm = StripePaymentProvider.confirm_payment_intent
+    real_refund = StripePaymentProvider.create_refund
+
+    def in_loop_thread():
+        try:
+            asyncio.get_running_loop()
+            return True
+        except RuntimeError:
+            return False
+
+    def spy(name, real):
+        def wrapper(self, *args, **kwargs):
+            threads[name] = (threading.current_thread().name, in_loop_thread())
+            return real(self, *args, **kwargs)
+        return wrapper
+
+    monkeypatch.setattr(StripePaymentProvider, "create_payment_intent", spy("create", real_create))
+    monkeypatch.setattr(
+        StripePaymentProvider, "confirm_payment_intent", spy("confirm", real_confirm)
+    )
+    monkeypatch.setattr(StripePaymentProvider, "create_refund", spy("refund", real_refund))
+    monkeypatch.setattr(orders_module, "send_order_status_update_email", lambda *a, **k: True)
+
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    paid = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=setup["headers"]
+    )
+    assert paid.status_code == 200, paid.text
+
+    admin_headers = _create_admin(db_session)["headers"]
+    refunded = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/refund", json={}, headers=admin_headers
+    )
+    assert refunded.status_code == 200, refunded.text
+
+    assert set(threads) == {"create", "confirm", "refund"}
+    for name, (thread_name, on_loop) in threads.items():
+        assert not on_loop, f"{name} ran on the event loop thread ({thread_name})"

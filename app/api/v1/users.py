@@ -2,14 +2,16 @@ import logging
 from datetime import datetime, timedelta
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.api.v1.cart import merge_guest_cart_on_login
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import check_login_attempt, clear_login_failures
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
     RefreshTokenError,
@@ -243,16 +245,36 @@ async def resend_verification_email(
     responses={401: {"description": "Incorrect email or password"}},
 )
 async def login(
+    request: Request,
+    response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
 ):
-    """Authenticate with email/password and receive access and refresh tokens."""
+    """Authenticate with email/password and receive access and refresh tokens.
+
+    If the request carries a guest cart cookie, that cart is merged into the
+    account's cart and the cookie is cleared. A cart that cannot be merged
+    right now never fails the login.
+
+    Answers 429 with Retry-After when too many attempts for this email have
+    failed (see "Failed logins" in app/core/rate_limit.py)."""
+
+    # Failed logins are counted per email, not per address. Here, before
+    # the first query: `db` has not checked a connection out yet, so this
+    # await holds none, and the call itself only talks to Redis. When it
+    # refuses, nothing else happens - no user lookup, no bcrypt - so a
+    # refusal is equally fast, and identical, whether or not the account
+    # exists.
+    await check_login_attempt(form_data.username)
 
     user = db.query(User).filter(User.email == form_data.username).first()
     user_id = user.id if user else None
     user_email = user.email if user else None
     hashed_password = user.hashed_password if user else None
+    # Read here with the others, off the row already loaded, because the
+    # session is closed next. Only the guest cart merge at the end uses it.
+    user_is_active = bool(user.is_active) if user else False
 
     # Release this request's DB connection back to the pool *before* the
     # CPU-bound bcrypt verification, instead of after. verify_password_async
@@ -287,10 +309,16 @@ async def login(
         form_data.password, hashed_password or DUMMY_PASSWORD_HASH
     )
     if user_id is None or not password_valid:
+        # The attempt was counted when it started (check_login_attempt), for
+        # the email as submitted, account or no account.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
+
+    # A success wipes the email's failed-attempt count. After db.close()
+    # above, so no database connection is held across this await.
+    await clear_login_failures(form_data.username)
 
     db.query(User).filter(User.id == user_id).update(
         {User.last_login: datetime.utcnow()}
@@ -301,6 +329,18 @@ async def login(
     access_token = create_access_token(user_id)
     refresh_token = issue_refresh_token(user_id)
     logger.info(f"Tokens generated for user {user_email}")
+
+    # The cart the visitor filled before logging in becomes part of the
+    # account's cart. Last, and Redis only: the password is verified, the
+    # last_login update is committed (so the session holds no connection
+    # here, as after the db.close() above) and the tokens exist, and
+    # nothing in it can raise - the login succeeds whatever becomes of the
+    # cart. Not for a deactivated account: this route still hands it tokens,
+    # as it always has, but every cart route then refuses them, so a cart
+    # merged into it would be out of the visitor's reach. The guest cart
+    # stays the visitor's.
+    if user_is_active:
+        merge_guest_cart_on_login(request, response, user_id, redis)
 
     return APIResponse.success_response(Token(
         access_token=access_token,
@@ -436,11 +476,30 @@ async def export_user_data(
         expires_at=now + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS),
         status="completed",
     )
+    # Loaded here, eagerly, through this route's own session - not read off
+    # current_user.addresses / current_user.orders. Those lazy relationships
+    # cost one query per order, per item, per product and per variant when
+    # OrderResponse serialized them: 165 queries for one export of an account
+    # with a handful of orders (measured by tracing, scripts/loadtest/
+    # FINDINGS.md). It also depended on current_user still being attached to
+    # a live session, which is the auth dependency's business, not this
+    # route's.
+    addresses = db.query(Address).filter(Address.user_id == current_user.id).all()
+    orders = (
+        db.query(Order)
+        .options(
+            joinedload(Order.shipping_address),
+            selectinload(Order.items).joinedload(OrderItem.product),
+            selectinload(Order.items).joinedload(OrderItem.variant),
+        )
+        .filter(Order.user_id == current_user.id)
+        .all()
+    )
     export = GDPRExportData(
         personal_data=current_user,
         consents=consents,
-        addresses=current_user.addresses,
-        orders=current_user.orders,
+        addresses=addresses,
+        orders=orders,
         export_metadata=export_metadata,
     )
 
@@ -961,6 +1020,11 @@ async def reset_password(
         # held by an attacker (the reason the user is resetting) stops
         # working immediately instead of remaining valid until it expires.
         invalidate_tokens_issued_before_now(user_id)
+
+        # The way out of a login refused for too many failed attempts: the
+        # new password starts with a clean record. After the commit, so no
+        # database connection is held across it.
+        await clear_login_failures(email)
 
         return APIResponse.success_response({
             "message": "Password has been reset successfully"

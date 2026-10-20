@@ -1,19 +1,20 @@
 import logging
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.v1 import admin, cart, legal, orders, products, users
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import async_engine, engine
 from app.core.logging_config import setup_logging
-from app.core.rate_limit import RateLimiter
+from app.core.overload import InFlightLimitMiddleware
+from app.core.rate_limit import rate_limit
 from app.services.redis import RedisService
+from app.services.redis_async import close_async_redis
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -22,43 +23,22 @@ logger.info("Initializing FastAPI application")
 
 logger.info("Configuring FastAPI middleware, CORS, and rate limiting")
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app):
-        super().__init__(app)
-        self.limiter = RateLimiter()
-
-    async def dispatch(self, request: Request, call_next):
-        # Starlette builds its middleware stack as ServerErrorMiddleware ->
-        # user middleware (this one included) -> ExceptionMiddleware ->
-        # router, so this middleware sits *outside* ExceptionMiddleware.
-        # An HTTPException raised here (e.g. the 429 from check_rate_limit)
-        # is therefore never converted to its intended status/body by
-        # ExceptionMiddleware - it falls through to ServerErrorMiddleware
-        # and becomes a generic, unhelpful 500. That silently defeated the
-        # login rate limiter's 429 response in production: exceeding the
-        # limit returned "500 Internal Server Error" instead of 429 with
-        # the retry_after/limit detail. Catch it here and build the
-        # response ourselves.
-        try:
-            await self.limiter.check_rate_limit(request)
-        except HTTPException as exc:
-            return JSONResponse(
-                status_code=exc.status_code,
-                content={"detail": exc.detail},
-                headers=exc.headers,
-            )
-        return await call_next(request)
 logger.info("Initializing FastAPI application with rate limiting")
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="E-commerce backend API with FastAPI",
     version=settings.VERSION,
     docs_url=f"{settings.API_V1_STR}/docs",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    # Rate limiting (app/core/rate_limit.py), declared once for every route.
+    # A dependency, not a middleware: it runs after routing, so it knows the
+    # route template it is counting for, and its 429 is an ordinary
+    # HTTPException handled like any other. (As a middleware it sat outside
+    # Starlette's ExceptionMiddleware and had to turn its own exception into
+    # a response by hand; before that was noticed, every 429 came out as a
+    # 500.)
+    dependencies=[Depends(rate_limit)],
 )
-
-logger.debug("Adding rate limiting middleware")
-app.add_middleware(RateLimitMiddleware)
 
 logger.debug("Adding security headers middleware")
 @app.middleware("http")
@@ -85,6 +65,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Added last so it is the outermost layer: a request that is going to be
+# shed should cost nothing - no rate-limit Redis call, no CORS handling.
+if settings.MAX_IN_FLIGHT_REQUESTS:
+    logger.info(f"Limiting in-flight requests to {settings.MAX_IN_FLIGHT_REQUESTS} per worker")
+    app.add_middleware(InFlightLimitMiddleware, limit=settings.MAX_IN_FLIGHT_REQUESTS)
 
 
 logger.info("Initializing service connections")
@@ -138,6 +124,15 @@ async def shutdown_event():
 
     logger.info("FastAPI shutdown event triggered")
     cleanup()
+    # Not in cleanup(): disposing the async engine has to be awaited.
+    await async_engine.dispose()
+    # The async Redis client (rate limiter, auth dependencies) belongs to
+    # this worker's event loop, which is the loop this handler runs on.
+    try:
+        await close_async_redis()
+        logger.info("Async Redis connections closed successfully")
+    except Exception as e:
+        logger.error(f"Error closing async Redis connections: {e}")
 
 @app.get("/health")
 async def health_check():

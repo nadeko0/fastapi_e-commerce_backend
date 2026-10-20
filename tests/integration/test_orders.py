@@ -1,5 +1,9 @@
 import threading
+import uuid
 from decimal import Decimal
+
+import pytest
+from redis import ConnectionError as RedisConnectionError
 
 from app.core.security import get_password_hash
 from app.models.category import Category
@@ -7,6 +11,7 @@ from app.models.enums import UserRole
 from app.models.order import Order
 from app.models.product import Product, ProductVariant
 from app.models.user import User
+from app.services.redis import RedisService
 
 USERS_PREFIX = "/api/v1/users"
 CART_PREFIX = "/api/v1/cart"
@@ -27,6 +32,13 @@ def _registration_payload(email="buyer@example.com"):
 
 def _auth_headers(token):
     return {"Authorization": f"Bearer {token}"}
+
+
+def _with_idempotency_key(headers):
+    # POST /orders requires an Idempotency-Key; tests that are not about
+    # idempotency itself just need a fresh one per request. A key the test
+    # set itself is kept.
+    return {"Idempotency-Key": uuid.uuid4().hex, **headers}
 
 
 def _make_category(db_session):
@@ -136,7 +148,7 @@ def test_create_order_requires_email_verification(client, db_session):
     response = client.post(
         ORDERS_PREFIX,
         params={"shipping_address_id": 1},
-        headers=_auth_headers(token),
+        headers=_with_idempotency_key(_auth_headers(token)),
     )
 
     assert response.status_code == 403
@@ -148,7 +160,7 @@ def test_create_order_rejects_empty_cart(client, db_session):
     response = client.post(
         ORDERS_PREFIX,
         params={"shipping_address_id": address_id},
-        headers=_auth_headers(token),
+        headers=_with_idempotency_key(_auth_headers(token)),
     )
 
     assert response.status_code == 400
@@ -168,7 +180,7 @@ def test_full_checkout_flow_decrements_stock_and_resolves_address(client, db_ses
     response = client.post(
         ORDERS_PREFIX,
         params={"shipping_address_id": address_id},
-        headers=_auth_headers(token),
+        headers=_with_idempotency_key(_auth_headers(token)),
     )
 
     assert response.status_code == 200
@@ -199,7 +211,7 @@ def test_create_order_rejects_unknown_shipping_address(client, db_session):
     response = client.post(
         ORDERS_PREFIX,
         params={"shipping_address_id": 999999},
-        headers=_auth_headers(token),
+        headers=_with_idempotency_key(_auth_headers(token)),
     )
 
     assert response.status_code == 404
@@ -241,6 +253,63 @@ def test_create_order_is_idempotent_with_same_key(client, db_session):
     assert product.stock_quantity == 8
 
 
+@pytest.mark.parametrize("bad_headers", [{}, {"Idempotency-Key": "short"}])
+def test_create_order_requires_an_idempotency_key(client, db_session, bad_headers):
+    """The header used to be optional. Without it a retried request (lost
+    response, double click, second tab) placed a second order from whatever
+    was still in the cart, and the server had no way to tell the retry from
+    a new purchase. Now a request that cannot be deduplicated is refused
+    before it touches anything."""
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=10)
+    client.post(
+        f"{CART_PREFIX}/items",
+        params={"product_id": product.id, "quantity": 2},
+        headers=_auth_headers(token),
+    )
+
+    response = client.post(
+        ORDERS_PREFIX,
+        params={"shipping_address_id": address_id},
+        headers=_auth_headers(token) | bad_headers,
+    )
+
+    assert response.status_code == 422
+    assert "Idempotency-Key" in response.text
+    # Nothing happened: no order, stock untouched, cart intact.
+    assert db_session.query(Order).count() == 0
+    db_session.refresh(product)
+    assert product.stock_quantity == 10
+    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    assert [item["quantity"] for item in cart["items"]] == [2]
+
+
+def test_two_checkouts_with_different_keys_are_two_orders(client, db_session):
+    # The other half of the contract: a new key is a new purchase.
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=10)
+    order_ids = []
+    for _ in range(2):
+        client.post(
+            f"{CART_PREFIX}/items",
+            params={"product_id": product.id, "quantity": 1},
+            headers=_auth_headers(token),
+        )
+        response = client.post(
+            ORDERS_PREFIX,
+            params={"shipping_address_id": address_id},
+            headers=_with_idempotency_key(_auth_headers(token)),
+        )
+        assert response.status_code == 200
+        order_ids.append(response.json()["data"]["id"])
+
+    assert order_ids[0] != order_ids[1]
+    db_session.refresh(product)
+    assert product.stock_quantity == 8
+
+
 def test_get_order_returns_404_for_other_users_order(client, db_session):
     token, address_id = _checkout_ready_buyer(client, db_session, email="buyer1@example.com")
     category = _make_category(db_session)
@@ -251,7 +320,7 @@ def test_get_order_returns_404_for_other_users_order(client, db_session):
         headers=_auth_headers(token),
     )
     order = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()["data"]
 
     other_token, _ = _checkout_ready_buyer(client, db_session, email="buyer2@example.com")
@@ -273,7 +342,7 @@ def test_get_order_returns_own_order(client, db_session):
         headers=_auth_headers(token),
     )
     order = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()["data"]
 
     response = client.get(f"{ORDERS_PREFIX}/{order['id']}", headers=_auth_headers(token))
@@ -292,7 +361,7 @@ def _create_order(client, db_session, email="buyer@example.com"):
         headers=_auth_headers(token),
     )
     order = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()["data"]
     return token, order
 
@@ -402,7 +471,7 @@ def test_concurrent_checkout_for_last_unit_only_one_succeeds(client, db_session)
         response = client.post(
             ORDERS_PREFIX,
             params={"shipping_address_id": address_id},
-            headers=_auth_headers(token),
+            headers=_with_idempotency_key(_auth_headers(token)),
         )
         results[i] = response.status_code
 
@@ -485,7 +554,7 @@ def test_cancel_from_new_succeeds_and_restores_stock(client, db_session):
         headers=_auth_headers(token),
     )
     order = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()["data"]
 
     db_session.refresh(product)
@@ -512,7 +581,7 @@ def test_cancel_from_confirmed_succeeds_and_restores_stock(client, db_session):
         headers=_auth_headers(token),
     )
     order = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()["data"]
 
     admin = _make_admin(db_session, email="admin-confirmed@example.com")
@@ -535,7 +604,7 @@ def test_cancel_from_processing_succeeds_and_restores_stock(client, db_session):
         headers=_auth_headers(token),
     )
     order = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()["data"]
 
     admin = _make_admin(db_session, email="admin-processing@example.com")
@@ -559,7 +628,7 @@ def test_cancel_from_sent_succeeds_and_restores_stock(client, db_session):
         headers=_auth_headers(token),
     )
     order = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()["data"]
 
     admin = _make_admin(db_session, email="admin-sent@example.com")
@@ -586,7 +655,7 @@ def test_cancel_from_delivered_is_rejected(client, db_session):
         headers=_auth_headers(token),
     )
     order = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()["data"]
 
     admin = _make_admin(db_session, email="admin-delivered@example.com")
@@ -614,7 +683,7 @@ def test_cancel_from_already_cancelled_is_rejected(client, db_session):
         headers=_auth_headers(token),
     )
     order = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()["data"]
 
     admin = _make_admin(db_session, email="admin-recancel@example.com")
@@ -650,7 +719,7 @@ def test_order_total_uses_exact_decimal_arithmetic_for_uneven_prices(client, db_
     )
 
     response = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     )
 
     assert response.status_code == 200
@@ -679,7 +748,7 @@ def test_order_total_sums_multiple_odd_priced_items_without_drift(client, db_ses
     )
 
     response = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     )
 
     assert response.status_code == 200
@@ -708,7 +777,7 @@ def test_checkout_with_variant_decrements_only_variant_stock(client, db_session)
     )
 
     response = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     )
 
     assert response.status_code == 200
@@ -741,7 +810,7 @@ def test_checkout_rejects_insufficient_variant_stock_without_partial_decrement(c
     db_session.commit()
 
     response = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     )
 
     assert response.status_code == 400
@@ -771,7 +840,7 @@ def test_checkout_with_plain_and_variant_line_decrements_each_correctly(client, 
     )
 
     response = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     )
 
     assert response.status_code == 200
@@ -800,7 +869,7 @@ def test_cancel_order_with_variant_line_restocks_variant_not_product(client, db_
         headers=_auth_headers(token),
     )
     order = client.post(
-        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_auth_headers(token)
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()["data"]
 
     db_session.refresh(variant)
@@ -849,7 +918,7 @@ def test_concurrent_checkout_for_last_variant_unit_only_one_succeeds(client, db_
         response = client.post(
             ORDERS_PREFIX,
             params={"shipping_address_id": address_id},
-            headers=_auth_headers(token),
+            headers=_with_idempotency_key(_auth_headers(token)),
         )
         results[i] = response.status_code
 
@@ -866,3 +935,163 @@ def test_concurrent_checkout_for_last_variant_unit_only_one_succeeds(client, db_
     db_session.refresh(product)
     assert variant.stock_quantity == 0
     assert product.stock_quantity == 100  # untouched throughout
+
+
+# ---------------------------------------------------------------------------
+# Cart review findings D and E (scripts/loadtest/results/cart-review.md)
+# ---------------------------------------------------------------------------
+
+def _add_to_cart(client, token, product_id, quantity, variant_id=None):
+    params = {"product_id": product_id, "quantity": quantity}
+    if variant_id is not None:
+        params["variant_id"] = variant_id
+    return client.post(f"{CART_PREFIX}/items", params=params, headers=_auth_headers(token))
+
+
+def _place_order(client, token, address_id):
+    return client.post(
+        ORDERS_PREFIX, params={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
+    )
+
+
+def test_create_order_rejects_product_deactivated_after_adding(client, db_session):
+    """A product can be switched off while it sits in someone's cart; the
+    order used to go through anyway."""
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    still_sold = _make_product(db_session, category.id, stock=10)
+    withdrawn = _make_product(db_session, category.id, stock=10)
+    _add_to_cart(client, token, still_sold.id, 2)
+    _add_to_cart(client, token, withdrawn.id, 1)
+    db_session.query(Product).filter(Product.id == withdrawn.id).update({"is_active": False})
+    db_session.commit()
+
+    response = _place_order(client, token, address_id)
+
+    assert response.status_code == 400
+    assert db_session.query(Order).count() == 0
+    # The line processed before the withdrawn one must be rolled back too.
+    db_session.refresh(still_sold)
+    db_session.refresh(withdrawn)
+    assert still_sold.stock_quantity == 10
+    assert withdrawn.stock_quantity == 10
+    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    assert cart["items_count"] == 2
+
+
+def test_create_order_rejects_variant_deactivated_after_adding(client, db_session):
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=10)
+    variant = _make_variant(db_session, product.id, stock=5)
+    _add_to_cart(client, token, product.id, 1, variant_id=variant.id)
+    db_session.query(ProductVariant).filter(ProductVariant.id == variant.id).update(
+        {"is_active": False}
+    )
+    db_session.commit()
+
+    response = _place_order(client, token, address_id)
+
+    assert response.status_code == 400
+    assert db_session.query(Order).count() == 0
+    db_session.refresh(variant)
+    assert variant.stock_quantity == 5
+
+
+def test_create_order_keeps_items_added_to_the_cart_during_checkout(client, db_session, monkeypatch):
+    """Checkout reads the cart, builds the order from that read, and then
+    cleared the whole cart - so an item added in between (a second tab, a
+    slow request) was deleted without ever having been ordered. The add is
+    injected here right after checkout's read returns."""
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    ordered = _make_product(db_session, category.id, stock=10)
+    added_late = _make_product(db_session, category.id, stock=10)
+    _add_to_cart(client, token, ordered.id, 2)
+
+    real_get_cart = RedisService.get_cart
+
+    def _get_cart_then_concurrent_add(self, user_id):
+        cart = real_get_cart(self, user_id)
+        self.add_to_cart_atomic(
+            user_id=user_id, product_id=added_late.id, quantity=3, price=Decimal("9.99"),
+            name="Widget", image="", stock_quantity=10,
+        )
+        return cart
+
+    monkeypatch.setattr(RedisService, "get_cart", _get_cart_then_concurrent_add)
+    response = _place_order(client, token, address_id)
+    monkeypatch.setattr(RedisService, "get_cart", real_get_cart)
+
+    assert response.status_code == 200
+    order_items = response.json()["data"]["items"]
+    assert [(item["product_id"], item["quantity"]) for item in order_items] == [(ordered.id, 2)]
+
+    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    assert [(item["product_id"], item["quantity"]) for item in cart["items"]] == [(added_late.id, 3)]
+
+
+def test_create_order_still_succeeds_when_the_cart_cannot_be_cleared(client, db_session, monkeypatch):
+    """The order is committed before the cart is touched, so a Redis failure
+    at that point must not turn a placed order into an error response."""
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=10)
+    _add_to_cart(client, token, product.id, 2)
+
+    def _raise(*args, **kwargs):
+        raise RedisConnectionError("connection lost")
+
+    redis = RedisService()
+    monkeypatch.setattr(redis._redis, "transaction", _raise)
+    monkeypatch.setattr(redis._redis, "delete", _raise)
+
+    response = _place_order(client, token, address_id)
+
+    assert response.status_code == 200
+    assert db_session.query(Order).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# Cart and order agree on the total
+# ---------------------------------------------------------------------------
+
+def test_order_charges_the_total_the_cart_showed_just_before(client, db_session):
+    """The cart used to total the prices recorded when each line was added
+    while the order charged the live ones, so after a price change the
+    customer was shown one total and charged another. Every price here is
+    changed after the line went into the cart."""
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    plain = _make_product(db_session, category.id, stock=10, price="9.99")
+    with_variants = _make_product(db_session, category.id, stock=10, price="20.00")
+    overridden = _make_variant(db_session, with_variants.id, sku="V-OVERRIDE", price_override="14.50")
+    inherits = _make_variant(db_session, with_variants.id, sku="V-INHERIT", price_override=None)
+    _add_to_cart(client, token, plain.id, 3)
+    _add_to_cart(client, token, with_variants.id, 2, variant_id=overridden.id)
+    _add_to_cart(client, token, with_variants.id, 1, variant_id=inherits.id)
+
+    db_session.query(Product).filter(Product.id == plain.id).update({"price": "12.49"})
+    db_session.query(Product).filter(Product.id == with_variants.id).update({"price": "21.10"})
+    db_session.query(ProductVariant).filter(ProductVariant.id == overridden.id).update(
+        {"price_override": "7.77"}
+    )
+    db_session.commit()
+
+    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    response = _place_order(client, token, address_id)
+
+    assert response.status_code == 200
+    order = response.json()["data"]
+    # 12.49 * 3 + 7.77 * 2 + 21.10 * 1; at the prices recorded on adding it
+    # would have been 9.99 * 3 + 14.50 * 2 + 20.00 = 78.97.
+    assert cart["total_amount"] == "74.11"
+    assert order["total_amount"] == cart["total_amount"]
+    assert Decimal(order["total_amount"]) == db_session.query(Order).one().total_amount
+    cart_lines = {
+        (line["product_id"], line["variant_id"]): line["unit_price"] for line in cart["items"]
+    }
+    order_lines = {
+        (line["product_id"], line["variant_id"]): line["price_at_time"] for line in order["items"]
+    }
+    assert order_lines == cart_lines
