@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -37,6 +38,8 @@ from app.schemas.product import (
     ProductVariantUpdate,
 )
 from app.services.redis import RedisService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 @router.post(
@@ -431,12 +434,44 @@ def _variant_sku_exists(db: Session, sku: str) -> bool:
     """Pre-check only - the real guarantee against a duplicate SKU is the
     unique constraint on ProductVariant.sku, since this read-then-write
     check has a race window between two concurrent requests (see the
-    IntegrityError handling in create_product_variant/update_product_variant
-    below). Factored out mainly so tests can force the race window (make
+    IntegrityError handling in _commit_variant below). Factored out mainly so tests can force the race window (make
     this return False despite a real conflicting row already existing)
     without needing genuine thread interleaving against the test suite's
     single shared SQLite connection."""
     return db.query(ProductVariant).filter(ProductVariant.sku == sku).first() is not None
+
+
+def _commit_variant(db: Session, sku: Optional[str], variant_id: Optional[int] = None) -> None:
+    """Commit a created or updated variant, telling a SKU conflict apart
+    from any other failed constraint.
+
+    Both variant routes used to answer every IntegrityError with 409 "A
+    variant with this SKU already exists", whatever constraint had actually
+    failed. The driver's message is not parsed to tell them apart (it
+    differs between Postgres and SQLite and between versions); after the
+    rollback the question is simply asked again: does another variant now
+    hold this SKU? Deliberately not _variant_sku_exists, which tests replace
+    to force the race window open. Any other violation is a 422 with a
+    generic detail; the database's own message, which names constraints and
+    carries the statement's values, is only logged."""
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        if sku is not None:
+            holder = db.query(ProductVariant.id).filter(ProductVariant.sku == sku)
+            if variant_id is not None:
+                holder = holder.filter(ProductVariant.id != variant_id)
+            if holder.first() is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A variant with this SKU already exists"
+                )
+        logger.warning("Variant write violated a database constraint", exc_info=e)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The variant violates a data constraint"
+        )
 
 
 @router.post(
@@ -446,6 +481,7 @@ def _variant_sku_exists(db: Session, sku: str) -> bool:
         403: {"description": "Admin privileges required"},
         404: {"description": "Product not found"},
         409: {"description": "SKU already in use"},
+        422: {"description": "Invalid variant data"},
     },
 )
 async def create_product_variant(
@@ -466,23 +502,13 @@ async def create_product_variant(
 
     db_variant = ProductVariant(product_id=product_id, **variant.dict())
     db.add(db_variant)
-    try:
-        db.commit()
-    except IntegrityError:
-        # The pre-check above is a plain read-then-write: two concurrent
-        # requests creating a variant with the same SKU can both pass it
-        # before either commits, so the real guarantee is the DB's unique
-        # constraint on ProductVariant.sku, not the pre-check. Without this
-        # catch, the loser's IntegrityError (a SQLAlchemyError) would still
-        # be caught by app.core.database.get_db's session_scope - so it
-        # never leaks raw SQL to the client - but would surface as a generic
-        # 500 instead of the same 409 the pre-check path already returns for
-        # the sequential case.
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A variant with this SKU already exists"
-        )
+    # The pre-check above is a plain read-then-write: two concurrent
+    # requests creating a variant with the same SKU can both pass it before
+    # either commits, so the real guarantee is the DB's unique constraint on
+    # ProductVariant.sku, not the pre-check. _commit_variant turns the
+    # loser's IntegrityError into the same 409 the pre-check path returns
+    # for the sequential case, instead of a generic 500.
+    _commit_variant(db, variant.sku)
     db.refresh(db_variant)
 
     return APIResponse.success_response(ProductVariantResponse.from_orm(db_variant))
@@ -525,6 +551,7 @@ async def list_product_variants(
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or variant not found"},
         409: {"description": "SKU already in use"},
+        422: {"description": "Invalid variant data"},
     },
 )
 async def update_product_variant(
@@ -560,17 +587,10 @@ async def update_product_variant(
         setattr(db_variant, field, value)
 
     db_variant.updated_at = datetime.utcnow()
-    try:
-        db.commit()
-    except IntegrityError:
-        # Same read-then-write race as create_product_variant above: the
-        # "sku" != db_variant.sku pre-check can be stale by the time this
-        # commits if a concurrent request claimed the same SKU in between.
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A variant with this SKU already exists"
-        )
+    # Same read-then-write race as create_product_variant above: the
+    # "sku" != db_variant.sku pre-check can be stale by the time this
+    # commits if a concurrent request claimed the same SKU in between.
+    _commit_variant(db, update_data.get("sku"), variant_id)
     db.refresh(db_variant)
 
     return APIResponse.success_response(ProductVariantResponse.from_orm(db_variant))

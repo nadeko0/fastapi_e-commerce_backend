@@ -5,6 +5,7 @@ from fastapi.routing import APIRoute
 from hypothesis import HealthCheck, given
 from hypothesis import settings as settings_hypothesis
 from hypothesis import strategies as st
+from sqlalchemy import text
 
 from app.api.v1.admin import router as admin_router
 from app.core.config import settings
@@ -715,6 +716,125 @@ def test_admin_update_variant_null_price_override_clears_it(client, db_session):
 
     assert response.status_code == 200
     assert response.json()["data"]["price_override"] is None
+
+
+def _add_variant_constraint(db_session, event):
+    """A database rule the request schemas know nothing about - what a CHECK
+    constraint added by a later migration looks like to this code. SQLite
+    reports RAISE(ABORT) from a trigger as an IntegrityError, exactly like a
+    violated CHECK; the table (and with it the trigger) is dropped after
+    every test."""
+    db_session.execute(text(
+        f"CREATE TRIGGER variant_stock_cap BEFORE {event} ON product_variants "
+        "WHEN NEW.stock_quantity > 1000 "
+        "BEGIN SELECT RAISE(ABORT, 'CHECK constraint failed: ck_variant_stock_cap'); END"
+    ))
+    db_session.commit()
+
+
+def test_admin_update_variant_other_integrity_error_is_not_reported_as_sku_conflict(
+    client, db_session
+):
+    # Regression test (X-4): every IntegrityError on commit was answered
+    # 409 "A variant with this SKU already exists", whichever constraint
+    # actually failed - here an update that changes nothing but the stock.
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    variant = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "VARIANT-X", "stock_quantity": 1},
+        headers=_auth_headers(admin_token),
+    ).json()["data"]
+    _add_variant_constraint(db_session, "UPDATE")
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
+        json={"stock_quantity": 5000},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 422, response.text
+    assert "SKU" not in response.text
+    # The database's own message (constraint names, SQL) stays server-side.
+    assert "ck_variant_stock_cap" not in response.text
+    db_session.expire_all()
+    assert db_session.get(ProductVariant, variant["id"]).stock_quantity == 1
+
+
+def test_admin_update_variant_with_a_free_sku_and_another_integrity_error_is_not_409(
+    client, db_session
+):
+    # The SKU changes too, but to one nobody holds: the failing constraint
+    # is still not the SKU's.
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    variant = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "VARIANT-Y"},
+        headers=_auth_headers(admin_token),
+    ).json()["data"]
+    _add_variant_constraint(db_session, "UPDATE")
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
+        json={"sku": "VARIANT-Y2", "stock_quantity": 5000},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 422, response.text
+    db_session.expire_all()
+    assert db_session.get(ProductVariant, variant["id"]).sku == "VARIANT-Y"
+
+
+def test_admin_create_variant_other_integrity_error_is_not_reported_as_sku_conflict(
+    client, db_session
+):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    _add_variant_constraint(db_session, "INSERT")
+
+    response = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "VARIANT-Z", "stock_quantity": 5000},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 422, response.text
+    assert "SKU" not in response.text
+    assert "ck_variant_stock_cap" not in response.text
+
+
+def test_admin_update_variant_sku_race_returns_409(client, db_session, monkeypatch):
+    # The genuine SKU conflict that only the unique constraint catches (the
+    # pre-check forced to miss it, as in the create race test above) is
+    # still a 409.
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    for sku in ("TAKEN-SKU", "OTHER-SKU"):
+        client.post(
+            f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+            json={"sku": sku},
+            headers=_auth_headers(admin_token),
+        )
+    other = db_session.query(ProductVariant).filter(ProductVariant.sku == "OTHER-SKU").one()
+    monkeypatch.setattr("app.api.v1.admin._variant_sku_exists", lambda db, sku: False)
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{other.id}",
+        json={"sku": "TAKEN-SKU"},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A variant with this SKU already exists"
 
 
 def test_admin_update_variant_returns_404_for_missing_variant(client, db_session):
