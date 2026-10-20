@@ -244,6 +244,14 @@ def test_no_user_id_from_tokens_that_are_not_valid_access_tokens():
         assert user_id_from_token(make_request(authorization=f"Bearer {token}")) is None
 
 
+@pytest.mark.parametrize("subject", ["abc", "", "01", " 42", "4.2", "٤٢", "9" * 5000])
+def test_no_user_id_from_a_signed_token_whose_subject_is_not_a_user_id(subject):
+    # Such a token authenticates nobody (get_current_user answers 401), so
+    # it must not open a per-user counter either: the address pays.
+    request = make_request(authorization=f"Bearer {_token(sub=subject)}")
+    assert user_id_from_token(request) is None
+
+
 # --- the counter -----------------------------------------------------------------
 
 

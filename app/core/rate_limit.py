@@ -52,6 +52,7 @@ from redis.exceptions import RedisError
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
 from app.core.config import RATE_LIMIT_PATTERN, settings
+from app.core.security import user_id_from_subject
 from app.services.redis_async import get_async_redis
 
 logger = logging.getLogger(__name__)
@@ -183,9 +184,13 @@ def user_id_from_token(request: Request) -> Optional[str]:
         )
     except jwt.PyJWTError:  # malformed, expired, or signed with another key
         return None
-    if payload.get("type") != "access" or payload.get("sub") is None:
+    if payload.get("type") != "access":
         return None
-    return str(payload["sub"])
+    # Only a subject that names a user (see user_id_from_subject): a token
+    # whose subject names nobody authenticates nobody, so it must not open a
+    # per-user counter either. The address pays for it.
+    user_id = user_id_from_subject(payload.get("sub"))
+    return None if user_id is None else str(user_id)
 
 
 # --- 3. Counting ----------------------------------------------------------

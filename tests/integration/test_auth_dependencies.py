@@ -14,6 +14,9 @@ import fakeredis
 import jwt
 import pytest
 from freezegun import freeze_time
+from hypothesis import HealthCheck, given
+from hypothesis import settings as hypothesis_settings
+from hypothesis import strategies as st
 from sqlalchemy import event, inspect
 from sqlalchemy.orm.exc import DetachedInstanceError
 
@@ -159,6 +162,43 @@ def test_a_token_the_jwt_library_refuses_is_a_401(client, db_session, forge):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Could not validate credentials"
+
+
+@pytest.mark.parametrize(
+    "subject",
+    ["abc", "", "1.0", "-1", "0", "01", " 1", "1 ", "١", "9" * 5000, str(2**31), str(2**63)],
+    ids=[
+        "letters", "empty", "decimal", "negative", "zero", "leading-zero", "leading-blank",
+        "trailing-blank", "arabic-indic-digit", "5000-digits", "int32-overflow", "int64-overflow",
+    ],
+)
+def test_a_signed_access_token_whose_subject_is_not_a_user_id_is_a_401(client, subject):
+    # Validly signed, unexpired, type access: everything right but the
+    # subject, which only this application ever writes (str(user.id)).
+    # int() on it raised ValueError (a 500), or accepted spellings no token
+    # of ours has, or handed the database an id its column cannot hold.
+    _register_and_login(client)  # user 1 exists: "01" and " 1" must not reach it
+    token = _sign({"sub": subject, "type": "access", "exp": int(time.time()) + 600})
+
+    response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Could not validate credentials"
+
+
+@hypothesis_settings(
+    max_examples=60,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(subject=st.text(max_size=40))
+def test_no_subject_text_turns_into_a_500(client, subject):
+    token = _sign({"sub": subject, "type": "access", "exp": int(time.time()) + 600})
+
+    response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
+
+    # Nobody is registered here, so even a well-formed id finds no user.
+    assert response.status_code == 401
 
 
 def test_logout_through_the_api_invalidates_the_token(client):

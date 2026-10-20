@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import hmac
 import os
+import re
 import time
 import uuid
 import weakref
@@ -114,6 +115,28 @@ async def get_password_hash_async(password: str) -> str:
     async with _get_bcrypt_semaphore():
         return await run_in_threadpool(get_password_hash, password)
 
+# The canonical spelling of a user id, which is all this application ever
+# writes into `sub` (str(user.id)): ASCII digits, no sign, no leading zero,
+# no blanks.
+_USER_ID_SUBJECT = re.compile(r"[1-9][0-9]{0,9}")
+# The largest id the users.id column (INTEGER, 32 bits in Postgres) holds.
+_MAX_USER_ID = 2**31 - 1
+
+def user_id_from_subject(subject: object) -> Optional[int]:
+    """The user id a verified token's `sub` claim names, or None.
+
+    Anything but the canonical spelling names nobody and is refused, not
+    interpreted. Converting it with int() raised ValueError on letters (a
+    500 rather than a 401), accepted spellings no token of ours has (" 1",
+    "01", non-ASCII digits), and passed the database ids its column cannot
+    hold. A signature only proves we issued the token; this proves it is
+    one of the tokens we issue.
+    """
+    if not isinstance(subject, str) or not _USER_ID_SUBJECT.fullmatch(subject):
+        return None
+    user_id = int(subject)
+    return user_id if user_id <= _MAX_USER_ID else None
+
 def create_access_token(subject: Union[str, int]) -> str:
     now = datetime.utcnow()
     expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -185,7 +208,7 @@ def rotate_refresh_token(token: str, db: Session) -> Tuple[str, str]:
     if payload.get("type") != "refresh":
         raise RefreshTokenError("Not a refresh token")
 
-    user_id = payload.get("sub")
+    user_id = user_id_from_subject(payload.get("sub"))
     jti = payload.get("jti")
     family = payload.get("family")
     issued_at = payload.get("iat")
@@ -204,7 +227,7 @@ def rotate_refresh_token(token: str, db: Session) -> Tuple[str, str]:
     if password_changed_at is not None and (issued_at is None or issued_at < password_changed_at):
         raise RefreshTokenError("Refresh token no longer valid")
 
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = db.query(User).filter(User.id == user_id).first()
     if user is None or not user.is_active:
         raise RefreshTokenError("User not found or inactive")
 
@@ -305,7 +328,7 @@ async def get_current_user(
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM]
         )
-        user_id: str = payload.get("sub")
+        user_id = user_id_from_subject(payload.get("sub"))
         token_type: str = payload.get("type")
         issued_at = payload.get("iat")
 
@@ -322,7 +345,7 @@ async def get_current_user(
     if password_changed_at is not None and (issued_at is None or issued_at < password_changed_at):
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.id == int(user_id)))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is not None:
         # Detach the row before handing it out, so that the object behaves
