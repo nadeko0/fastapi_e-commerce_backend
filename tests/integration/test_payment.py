@@ -896,6 +896,37 @@ def test_full_refund_marks_order_refunded(client, db_session):
     assert payments[0].amount_refunded == payments[0].amount
 
 
+@pytest.mark.parametrize("flow", ["pay", "checkout-session"])
+def test_a_fully_refunded_order_cannot_be_paid_again(client, db_session, flow):
+    # The payment guard refused only "paid": once fully refunded, the order
+    # accepted a new /pay or Checkout Session, charged the customer again
+    # and went back to paid, for goods that were refunded.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    admin = _create_admin(db_session)
+    client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=setup["headers"]
+    )
+    refund = client.post(f"{ORDERS_PREFIX}/{order['id']}/refund", json={}, headers=admin["headers"])
+    assert refund.json()["data"]["payment_status"] == "refunded"
+
+    if flow == "pay":
+        response = client.post(
+            f"{ORDERS_PREFIX}/{order['id']}/pay",
+            json=_payment_payload(order),
+            headers=setup["headers"],
+        )
+    else:
+        response = client.post(
+            f"{ORDERS_PREFIX}/{order['id']}/checkout-session", headers=setup["headers"]
+        )
+
+    assert response.status_code == 400
+    assert "refunded" in response.json()["detail"].lower()
+    assert _get_order(db_session, order["id"]).payment_status == "refunded"
+    assert len(_get_payments(db_session, order["id"])) == 1
+
+
 def test_refund_with_idempotency_key_is_not_double_applied(client, db_session):
     # Regression test: refund_payment previously accepted no Idempotency-Key
     # at all, unlike /pay and /checkout-session - a retried refund request
