@@ -1,66 +1,85 @@
 from redis.exceptions import RedisError
-from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.pool import StaticPool
 
+import app.core.database as database_module
 import app.main as main_module
+import app.services.redis_async as redis_async_module
+
+# /health checks the database through app.core.database.AsyncSessionLocal
+# and Redis through the async client (app/services/redis_async.py), the
+# two non-blocking paths the rest of the app uses. conftest points the
+# first at the test SQLite file and the second at fakeredis, so a plain
+# request is a healthy one here.
+
+
+def _forbid_blocking_checks(monkeypatch):
+    # The synchronous engine and Redis client block the event loop for the
+    # whole round trip; /health runs on that loop. Using either is a bug.
+    def _blocking(*args, **kwargs):
+        raise AssertionError("/health used a blocking client")
+
+    monkeypatch.setattr(main_module.engine, "connect", _blocking)
+    monkeypatch.setattr(main_module.redis_service._redis, "ping", _blocking)
 
 
 def test_health_check_reports_healthy_when_everything_is_up(client, monkeypatch):
-    # /health uses app.main.engine directly (not a request-scoped
-    # dependency), so the dependency_overrides that swap in the in-memory
-    # SQLite DB elsewhere don't reach it - it's still the real Postgres
-    # engine from settings.DATABASE_URI, which doesn't exist in this test
-    # environment. Point it at a throwaway working SQLite engine instead of
-    # conftest's shared one: app.main.cleanup() (run on the TestClient's
-    # own shutdown, i.e. before this test's monkeypatch reverts) calls
-    # engine.dispose() - on the shared engine that would tear down its
-    # sole StaticPool connection and, with it, the in-memory database every
-    # other test in the session depends on.
-    healthy_engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    monkeypatch.setattr(main_module, "engine", healthy_engine)
+    _forbid_blocking_checks(monkeypatch)
 
     response = client.get("/health")
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "healthy"
-    assert body["services"]["database"] == "healthy"
-    assert body["services"]["redis"] == "healthy"
+    assert response.json() == {
+        "status": "healthy",
+        "services": {"database": "healthy", "redis": "healthy"},
+    }
+
+
+def test_health_check_does_not_disclose_version_or_environment(client):
+    body = client.get("/health").json()
+
+    assert "version" not in body
+    assert "environment" not in body
 
 
 def test_health_check_reports_degraded_and_503_on_database_failure(client, monkeypatch):
-    def _broken_connect():
-        raise SQLAlchemyError("db is down")
+    _forbid_blocking_checks(monkeypatch)
 
-    monkeypatch.setattr(main_module.engine, "connect", _broken_connect)
+    class _BrokenSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+        async def execute(self, *args, **kwargs):
+            raise SQLAlchemyError("db is down")
+
+    monkeypatch.setattr(database_module, "AsyncSessionLocal", _BrokenSession)
 
     response = client.get("/health")
 
     assert response.status_code == 503
     body = response.json()
     assert body["status"] == "degraded"
-    assert body["services"]["database"] == "unhealthy"
-    # Regression test for a security fix: the response must report a
-    # generic status, never leak internal exception text (connection
-    # strings, driver errors, etc.) to the client.
+    assert body["services"] == {"database": "unhealthy", "redis": "healthy"}
+    # The response reports a generic status, never internal exception text
+    # (connection strings, driver errors, etc.).
     assert "db is down" not in str(body)
 
 
 def test_health_check_reports_degraded_and_503_on_redis_failure(client, monkeypatch):
-    def _broken_ping():
-        raise RedisError("redis is down")
+    _forbid_blocking_checks(monkeypatch)
 
-    monkeypatch.setattr(main_module.redis_service._redis, "ping", _broken_ping)
+    class _BrokenRedis:
+        async def ping(self):
+            raise RedisError("redis is down")
+
+    monkeypatch.setattr(redis_async_module, "_create_client", _BrokenRedis)
 
     response = client.get("/health")
 
     assert response.status_code == 503
     body = response.json()
     assert body["status"] == "degraded"
-    assert body["services"]["redis"] == "unhealthy"
+    assert body["services"] == {"database": "healthy", "redis": "unhealthy"}
     assert "redis is down" not in str(body)
