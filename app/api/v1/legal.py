@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.core.config import settings
-from app.core.security import get_current_active_user
+from app.core.security import get_current_active_user, verify_password_async
 from app.models.user import User
 from app.schemas.common import APIResponse
 from app.schemas.legal import (
@@ -303,7 +303,14 @@ async def update_user_consent(
         timestamp=datetime.utcnow()
     ))
 
-@router.post("/data-request", response_model=APIResponse[DataRequestResponse])
+@router.post(
+    "/data-request",
+    response_model=APIResponse[DataRequestResponse],
+    responses={
+        401: {"description": "Incorrect password (deletion)"},
+        422: {"description": "Password missing for a deletion request"},
+    },
+)
 async def request_personal_data(
     request_data: DataRequest,
     db: Session = Depends(deps.get_db),
@@ -314,7 +321,8 @@ async def request_personal_data(
 
     This endpoint allows users to:
     * Request export of their personal data
-    * Request deletion of their account and personal data
+    * Request deletion of their account and personal data - with the
+      account's current password, as on POST /users/data/delete
 
     The process is asynchronous and returns a request ID for tracking.
     """
@@ -324,6 +332,11 @@ async def request_personal_data(
         # Reads user.id and user.email only - the detached snapshot will do.
         request_id = await gdpr_service.process_data_export(current_user)
     elif request_data.request_type == "deletion":
+        # Re-authentication, same check and same answer as
+        # delete_user_data in app/api/v1/users.py. The schema has already
+        # refused a deletion request without a password (422).
+        if not await verify_password_async(request_data.password, current_user.hashed_password):
+            raise HTTPException(status_code=401, detail="Incorrect password")
         # Deactivates the user and commits `db`, so it needs the row loaded
         # through `db` (see _load_user).
         request_id = await gdpr_service.process_data_deletion(

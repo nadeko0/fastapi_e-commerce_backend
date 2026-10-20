@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 # Reused rather than redefined: app.schemas.user.ConsentHistory has the
 # identical shape (both were unified to match the one
@@ -38,12 +38,24 @@ class UserConsent(BaseModel):
 class DataRequest(BaseModel):
     request_type: str  # "export" or "deletion"
     reason: Optional[str] = None
+    # The account's current password. Required for "deletion", as on
+    # POST /users/data/delete: erasure cannot be undone after the grace
+    # period, and a bearer token alone (a stolen session) must not be
+    # enough for it. Not needed for "export".
+    password: Optional[str] = None
+
+    @model_validator(mode="after")
+    def require_password_for_deletion(self):
+        if self.request_type == "deletion" and not self.password:
+            raise ValueError("password is required for a deletion request")
+        return self
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "request_type": "export",
-                "reason": "Personal records review"
+                "request_type": "deletion",
+                "reason": "No longer using the shop",
+                "password": "your-current-password"
             }
         }
     )
