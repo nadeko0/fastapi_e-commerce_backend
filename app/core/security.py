@@ -1,10 +1,12 @@
 import asyncio
+import hashlib
+import hmac
 import os
 import time
 import uuid
 import weakref
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, Union
+from typing import NamedTuple, Optional, Tuple, Union
 
 import bcrypt
 import jwt
@@ -441,20 +443,63 @@ def validate_token(token: str) -> Optional[dict]:
         return None
     return payload
 
-def generate_password_reset_token(email: str) -> str:
+# A password reset token is single-use without any server-side state: it
+# carries a fingerprint of the password hash it was issued against, and is
+# only good while the account still has that hash. Using it changes the hash,
+# so the token is spent; any other password change spends it too, and so do
+# all the older reset links still lying in the mailbox. A Redis "used"
+# marker would do the first but not the other two, and would make resets
+# depend on Redis being up. The fingerprint is an HMAC rather than a slice
+# of the hash itself because a JWT's payload is readable by whoever holds
+# the link, and the hash is nobody's business.
+#
+# Tokens issued before this carried no fingerprint and are refused: they
+# are reset links, a new one is one click away.
+def _password_fingerprint(hashed_password: str) -> str:
+    return hmac.new(
+        settings.JWT_SECRET_KEY.encode("utf-8"),
+        hashed_password.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+class PasswordResetClaims(NamedTuple):
+    email: str
+    password_fingerprint: str
+
+    def matches(self, hashed_password: str) -> bool:
+        """Whether the token was issued against this (the current) hash."""
+        return hmac.compare_digest(
+            self.password_fingerprint, _password_fingerprint(hashed_password)
+        )
+
+
+def generate_password_reset_token(email: str, hashed_password: str) -> str:
+    """`hashed_password` is the account's current hash: the token is good
+    until it changes (see PasswordResetClaims.matches)."""
     expire = datetime.utcnow() + timedelta(hours=24)
-    to_encode = {"exp": expire, "sub": email, "type": "reset"}
+    to_encode = {
+        "exp": expire,
+        "sub": email,
+        "type": "reset",
+        "pwd": _password_fingerprint(hashed_password),
+    }
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
-def verify_password_reset_token(token: str) -> Optional[str]:
+def verify_password_reset_token(token: str) -> Optional[PasswordResetClaims]:
+    """The claims of a well-formed, unexpired reset token, or None. Whether
+    it is still good for the account is PasswordResetClaims.matches, which
+    needs the account's current hash."""
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        if payload["type"] != "reset":
-            return None
-        return payload["sub"]
     except jwt.PyJWTError:
         return None
+    email = payload.get("sub")
+    fingerprint = payload.get("pwd")
+    if payload.get("type") != "reset" or not isinstance(email, str) or not isinstance(fingerprint, str):
+        return None
+    return PasswordResetClaims(email, fingerprint)
 
 def generate_email_verification_token(email: str) -> str:
     expire = datetime.utcnow() + timedelta(hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS)

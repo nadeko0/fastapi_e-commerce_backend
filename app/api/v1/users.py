@@ -913,6 +913,12 @@ async def get_user_orders(
         OrderResponse.from_orm(order) for order in orders
     ])
 
+def _invalid_reset_token() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired reset token"
+    )
+
 @router.post("/password/reset", response_model=APIResponse[dict])
 async def request_password_reset(
     reset_request: PasswordReset,
@@ -923,7 +929,7 @@ async def request_password_reset(
 
     user = db.query(User).filter(User.email == reset_request.email).first()
     if user:
-        token = generate_password_reset_token(user.email)
+        token = generate_password_reset_token(user.email, user.hashed_password)
         if background_tasks:
             logger.info(f"Queuing password reset email for user {user.email}")
             background_tasks.add_task(
@@ -952,12 +958,10 @@ async def validate_reset_token(
 ):
     """Check whether a password reset token is still valid."""
 
-    email = verify_password_reset_token(token)
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token"
-        )
+    claims = verify_password_reset_token(token)
+    if not claims:
+        raise _invalid_reset_token()
+    email = claims.email
 
     user = db.query(User).filter(User.email == email).first()
     if not user:
@@ -965,6 +969,9 @@ async def validate_reset_token(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
+    if not claims.matches(user.hashed_password):
+        # Already used, or the password has changed since it was issued.
+        raise _invalid_reset_token()
 
     return APIResponse.success_response({
         "message": "Token is valid",
@@ -988,33 +995,46 @@ async def reset_password(
     """Reset a user's password using a valid reset token."""
 
     try:
-        email = verify_password_reset_token(token)
-        if not email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired reset token"
-            )
+        claims = verify_password_reset_token(token)
+        if not claims:
+            raise _invalid_reset_token()
+        email = claims.email
 
         user = db.query(User).filter(User.email == email).first()
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-        user_id = user.id
+        user_id = user.id if user else None
+        old_hashed_password = user.hashed_password if user else None
 
         # Same reasoning as login(): release the connection before the
         # CPU-bound bcrypt hash, not after, so neither queueing delay nor a
         # mid-await client disconnect can hold/strand it. See the long
-        # comment in login() for the full mechanism.
+        # comment in login() for the full mechanism. Before the refusals
+        # below as well: a refused request would otherwise keep its
+        # connection until dependency teardown gets a thread, and under a
+        # burst of resets that thread is queued behind every bcrypt hash.
         db.close()
+
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        # The token is single-use: it is only good while the password is
+        # the one it was issued against (see PasswordResetClaims in
+        # app/core/security.py).
+        if not claims.matches(old_hashed_password):
+            raise _invalid_reset_token()
 
         new_hashed_password = await get_password_hash_async(new_password.new_password)
 
-        db.query(User).filter(User.id == user_id).update(
-            {User.hashed_password: new_hashed_password}
-        )
+        # Only if the password is still the one the token was checked
+        # against: two requests presenting the same token both pass that
+        # check above, and only the first to get here may use it.
+        updated = db.query(User).filter(
+            User.id == user_id, User.hashed_password == old_hashed_password
+        ).update({User.hashed_password: new_hashed_password}, synchronize_session=False)
         db.commit()
+        if updated != 1:
+            raise _invalid_reset_token()
 
         # Invalidate any access token issued before this reset so a token
         # held by an attacker (the reason the user is resetting) stops

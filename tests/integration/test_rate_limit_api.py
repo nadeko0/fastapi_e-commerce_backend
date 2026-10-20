@@ -7,6 +7,7 @@ here that wants the limiter switches it on.
 """
 
 import pytest
+from conftest import TestingSessionLocal
 from fastapi.testclient import TestClient
 from freezegun import freeze_time
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -19,6 +20,7 @@ from app.core.config import settings
 from app.core.rate_limit import _EXEMPT, _ROUTE_LIMITS, parse_rate
 from app.core.security import generate_password_reset_token
 from app.main import app
+from app.models.user import User
 
 API = settings.API_V1_STR
 UNLIMITED = "1000000/minute"
@@ -47,6 +49,15 @@ def register(client, payload, email=None):
 
 def login(client, email, password):
     return client.post(f"{API}/users/login", data={"username": email, "password": password})
+
+
+def _reset_token_for(email):
+    db = TestingSessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).one()
+        return generate_password_reset_token(user.email, user.hashed_password)
+    finally:
+        db.close()
 
 
 def auth_header(client, payload, email=None):
@@ -329,7 +340,7 @@ def test_a_completed_password_reset_clears_the_count(client, limits, valid_regis
     assert login(client, payload["email"], payload["password"]).status_code == 429
 
     reset = client.post(
-        f"{API}/users/password/reset/{generate_password_reset_token(payload['email'])}",
+        f"{API}/users/password/reset/{_reset_token_for(payload['email'])}",
         json={"current_password": "unused", "new_password": "An0therStrongPass"},
     )
     assert reset.status_code == 200

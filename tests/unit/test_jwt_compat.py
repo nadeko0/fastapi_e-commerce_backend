@@ -37,10 +37,18 @@ def test_an_access_token_issued_by_python_jose_still_validates(monkeypatch):
     assert validate_token(LEGACY_ACCESS_TOKEN) == LEGACY_ACCESS_CLAIMS
 
 
-def test_a_reset_token_issued_by_python_jose_still_resolves_to_its_email(monkeypatch):
+def test_a_reset_token_issued_by_python_jose_still_decodes_but_is_no_longer_honoured(
+    monkeypatch,
+):
+    # PyJWT reads it fine. The reset flow refuses it anyway: reset tokens
+    # are now bound to the password hash they were issued against, which
+    # makes them single-use, and one without that binding could be replayed
+    # for its whole lifetime. A fresh reset email is the way forward.
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", LEGACY_SECRET)
 
-    assert verify_password_reset_token(LEGACY_RESET_TOKEN) == "legacy@example.com"
+    claims = jwt.decode(LEGACY_RESET_TOKEN, LEGACY_SECRET, algorithms=["HS256"])
+    assert claims["sub"] == "legacy@example.com"
+    assert verify_password_reset_token(LEGACY_RESET_TOKEN) is None
 
 
 def test_pyjwt_signs_the_same_claims_into_the_same_token():
