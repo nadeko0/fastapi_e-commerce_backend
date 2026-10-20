@@ -1,6 +1,6 @@
 from typing import Annotated, ClassVar, List, Optional
 
-from pydantic import AnyHttpUrl, Field, validator
+from pydantic import AnyHttpUrl, Field, model_validator, validator
 from pydantic_settings import BaseSettings, NoDecode
 
 from app import __version__
@@ -26,6 +26,22 @@ def _split_comma_separated(v: str | List[str]) -> List[str]:
 # Groups: count, multiple (optional), unit. Parsed by parse_rate in
 # app/core/rate_limit.py.
 RATE_LIMIT_PATTERN = r"^([1-9]\d*)/(?:([1-9]\d*) ?)?(second|minute|hour|day)s?$"
+
+# Secrets are checked (Settings.check_secrets) everywhere but here: on a
+# developer's machine and in the test suite the .env.example placeholders
+# are fine.
+_UNDEPLOYED_ENVIRONMENTS = frozenset({"development", "test"})
+# An HMAC key at least as long as the hash it keys (RFC 7518 3.2). 64 bytes,
+# what .env.example's `openssl rand -hex 32` produces, satisfies all three.
+_JWT_KEY_MIN_BYTES = {"HS256": 32, "HS384": 48, "HS512": 64}
+# What the values in .env.example and the built-in Stripe defaults are made
+# of. A secret containing one of these was copied, not generated.
+_PLACEHOLDER_MARKERS = ("change-me", "changeme", "placeholder")
+
+
+def _looks_like_placeholder(value: str) -> bool:
+    folded = value.casefold()
+    return any(marker in folded for marker in _PLACEHOLDER_MARKERS)
 
 
 class Settings(BaseSettings):
@@ -276,6 +292,36 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = "whsec_mock_placeholder"
     STRIPE_WEBHOOK_TOLERANCE_SECONDS: int = 300
 
+    @model_validator(mode="after")
+    def check_secrets(self) -> "Settings":
+        # Anything but development and test is a deployment, including a
+        # misspelt name: failing closed costs a restart, failing open a
+        # forgeable token. Every problem is reported at once, by setting
+        # name only: the message ends up in logs, the values must not.
+        if self.ENVIRONMENT in _UNDEPLOYED_ENVIRONMENTS:
+            return self
+        problems = []
+        for name, minimum_bytes in (
+            ("JWT_SECRET_KEY", _JWT_KEY_MIN_BYTES.get(self.JWT_ALGORITHM, 32)),
+            ("STRIPE_WEBHOOK_SECRET", 32),
+            ("POSTGRES_PASSWORD", 16),
+            ("REDIS_PASSWORD", 16),
+            # Issued by the mail provider, so no length of our choosing.
+            ("SMTP_PASSWORD", 0),
+        ):
+            value = getattr(self, name) or ""
+            if not value:
+                problems.append(f"{name} is not set")
+            elif _looks_like_placeholder(value):
+                problems.append(f"{name} is a placeholder, not a secret")
+            elif len(value.encode("utf-8")) < minimum_bytes:
+                problems.append(f"{name} is shorter than {minimum_bytes} bytes")
+        if problems:
+            raise ValueError(
+                f"ENVIRONMENT={self.ENVIRONMENT!r} needs real secrets: " + "; ".join(problems)
+            )
+        return self
+
     class Config:
         case_sensitive = True
         env_file = ".env"
@@ -290,5 +336,8 @@ class Settings(BaseSettings):
         # the exact env vars Settings expects and so never exercised this
         # path)
         extra = "ignore"
+        # A validation error otherwise ends with a repr of the whole input,
+        # secrets included, and is printed at startup into the logs.
+        hide_input_in_errors = True
 
 settings = Settings()
