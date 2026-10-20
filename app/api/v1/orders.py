@@ -599,6 +599,14 @@ def _guard_order_payable(order: Order) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Order already paid"
         )
+    # Refunded is not "unpaid again": it was paid and the money returned.
+    # Accepting a payment here charged the customer a second time and put
+    # the order back to paid for goods already refunded.
+    if order.payment_status == PaymentStatus.REFUNDED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order has been refunded"
+        )
 
     # An order already cancelled (e.g. by an admin, or by the customer)
     # must never accept a new payment attempt - the resolution for a
