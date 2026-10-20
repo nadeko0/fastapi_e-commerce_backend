@@ -5,6 +5,7 @@ from typing import List
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -62,6 +63,7 @@ from app.schemas.user import (
     UserCreate,
     UserResponse,
     UserUpdate,
+    normalize_email,
 )
 from app.services.email import (
     send_email_verification,
@@ -81,6 +83,14 @@ router = APIRouter(prefix="/users", tags=["users"])
 # validation itself (that only inspects the bearer token, not the URL), but
 # wrong for the Swagger "Authorize" button's login request and an
 # unnecessary second source of truth for the same value.
+
+
+def _user_by_email(db: Session, email: str):
+    """The account for this email, in whatever case it was typed or stored.
+    lower(email) on the column, not just the normalised input: rows stored
+    before emails were normalised keep the spelling their owner typed. The
+    comparison is what the unique index on lower(email) covers."""
+    return db.query(User).filter(func.lower(User.email) == normalize_email(email)).first()
 
 
 
@@ -189,7 +199,7 @@ async def verify_email(
             detail="Invalid or expired verification token"
         )
 
-    user = db.query(User).filter(User.email == email).first()
+    user = _user_by_email(db, email)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -275,7 +285,7 @@ async def login(
     # exists.
     await check_login_attempt(form_data.username, request)
 
-    user = db.query(User).filter(User.email == form_data.username).first()
+    user = _user_by_email(db, form_data.username)
     user_id = user.id if user else None
     user_email = user.email if user else None
     hashed_password = user.hashed_password if user else None
@@ -946,7 +956,7 @@ async def request_password_reset(
 ):
     """Request a password reset email; always succeeds to avoid leaking registered emails."""
 
-    user = db.query(User).filter(User.email == reset_request.email).first()
+    user = _user_by_email(db, reset_request.email)
     if user:
         token = generate_password_reset_token(user.email, user.hashed_password)
         if background_tasks:
@@ -982,7 +992,7 @@ async def validate_reset_token(
         raise _invalid_reset_token()
     email = claims.email
 
-    user = db.query(User).filter(User.email == email).first()
+    user = _user_by_email(db, email)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1021,7 +1031,7 @@ async def reset_password(
             raise _invalid_reset_token()
         email = claims.email
 
-        user = db.query(User).filter(User.email == email).first()
+        user = _user_by_email(db, email)
         user_id = user.id if user else None
         old_hashed_password = user.hashed_password if user else None
 
