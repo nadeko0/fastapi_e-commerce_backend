@@ -195,7 +195,11 @@ def test_concurrent_password_resets_do_not_exhaust_or_leak_the_connection_pool(
 
     from app.core.security import generate_password_reset_token
 
-    token = generate_password_reset_token("loadtest@example.com")
+    # The fixture points database_module.SessionLocal at the bounded pool.
+    seed_session = database_module.SessionLocal()
+    user = seed_session.query(User).filter(User.email == "loadtest@example.com").one()
+    token = generate_password_reset_token(user.email, user.hashed_password)
+    seed_session.close()
 
     n_requests = TOTAL_CAPACITY * 8
 
@@ -211,11 +215,13 @@ def test_concurrent_password_resets_do_not_exhaust_or_leak_the_connection_pool(
         responses = [f.result(timeout=30) for f in futures]
     burst_elapsed = time.monotonic() - started
 
-    # All requests reset the same user's password with a valid token - each
-    # individual call still must complete without a pool-timeout-driven 500,
-    # regardless of what the final password ends up being.
-    assert all(r.status_code == 200 for r in responses), [
-        (r.status_code, r.text) for r in responses if r.status_code != 200
+    # All requests present the same valid token, and a reset token is
+    # single-use: exactly one of them resets the password and the rest are
+    # told the token is spent. Each call still must complete without a
+    # pool-timeout-driven 500.
+    statuses = sorted(r.status_code for r in responses)
+    assert statuses == [200] + [400] * (n_requests - 1), [
+        (r.status_code, r.text) for r in responses if r.status_code not in (200, 400)
     ]
 
     assert engine.pool.checkedout() == 0, (

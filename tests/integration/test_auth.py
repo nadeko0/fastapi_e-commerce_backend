@@ -5,6 +5,7 @@ from datetime import timedelta
 
 import jwt
 import pytest
+from conftest import TestingSessionLocal
 from freezegun import freeze_time
 
 from app.core.config import settings
@@ -17,6 +18,19 @@ from app.core.security import (
 )
 
 API_PREFIX = "/api/v1/users"
+
+
+def _reset_token_for(email):
+    """A reset token as the reset email would carry it: issued against the
+    account's current password hash."""
+    from app.models.user import User
+
+    db = TestingSessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).one()
+        return generate_password_reset_token(user.email, user.hashed_password)
+    finally:
+        db.close()
 
 
 def _register_and_login(client, payload):
@@ -239,7 +253,7 @@ def test_me_rejects_password_reset_token_used_as_access_token(
     client, valid_registration_payload
 ):
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
-    reset_token = generate_password_reset_token(valid_registration_payload["email"])
+    reset_token = _reset_token_for(valid_registration_payload["email"])
 
     response = client.get(
         f"{API_PREFIX}/me",
@@ -278,7 +292,7 @@ def test_verify_email_twice_reports_already_verified(client, valid_registration_
 
 def test_password_reset_flow_allows_login_with_new_password(client, valid_registration_payload):
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
-    reset_token = generate_password_reset_token(valid_registration_payload["email"])
+    reset_token = _reset_token_for(valid_registration_payload["email"])
 
     validate_response = client.get(f"{API_PREFIX}/password/reset/{reset_token}")
     assert validate_response.status_code == 200
@@ -315,6 +329,71 @@ def test_password_reset_rejects_invalid_token(client):
     )
 
     assert response.status_code == 400
+
+
+def _emailed_reset_token(client, monkeypatch, email):
+    """The token the reset email would carry, taken from the real request
+    path (POST /password/reset) rather than minted by the test."""
+    sent = []
+    monkeypatch.setattr(
+        "app.api.v1.users.send_password_reset_email",
+        lambda to_email, token: sent.append(token),
+    )
+    response = client.post(f"{API_PREFIX}/password/reset", json={"email": email})
+    assert response.status_code == 200
+    assert len(sent) == 1, "no reset email was queued"
+    return sent[0]
+
+
+def _reset(client, token, new_password):
+    return client.post(
+        f"{API_PREFIX}/password/reset/{token}",
+        json={"current_password": "unused", "new_password": new_password},
+    )
+
+
+def _can_log_in(client, email, password):
+    response = client.post(
+        f"{API_PREFIX}/login", data={"username": email, "password": password}
+    )
+    return response.status_code == 200
+
+
+def test_a_used_password_reset_token_cannot_be_used_again(
+    client, monkeypatch, valid_registration_payload
+):
+    # The link lives for a day, travels in a URL (proxy logs, browser
+    # history, Referer) and used to keep working after it had done its job:
+    # whoever saw it could set the password again, as often as they liked.
+    email = valid_registration_payload["email"]
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    token = _emailed_reset_token(client, monkeypatch, email)
+
+    assert _reset(client, token, "NewStr0ngPass").status_code == 200
+
+    assert client.get(f"{API_PREFIX}/password/reset/{token}").status_code == 400
+    replay = _reset(client, token, "Hijacked123")
+    assert replay.status_code == 400
+    assert replay.json()["detail"] == "Invalid or expired reset token"
+    assert _can_log_in(client, email, "NewStr0ngPass")
+    assert not _can_log_in(client, email, "Hijacked123")
+
+
+def test_a_reset_token_issued_before_the_last_password_change_is_refused(
+    client, monkeypatch, valid_registration_payload
+):
+    # Two reset emails, the second one used: the first must be dead too, or
+    # an old link lying in a mailbox still opens the account.
+    email = valid_registration_payload["email"]
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    older = _emailed_reset_token(client, monkeypatch, email)
+    newer = _emailed_reset_token(client, monkeypatch, email)
+
+    assert _reset(client, newer, "NewStr0ngPass").status_code == 200
+
+    assert client.get(f"{API_PREFIX}/password/reset/{older}").status_code == 400
+    assert _reset(client, older, "Hijacked123").status_code == 400
+    assert _can_log_in(client, email, "NewStr0ngPass")
 
 
 # --- Adversarial scenarios ---------------------------------------------
@@ -423,7 +502,7 @@ def test_reset_password_invalidates_previously_issued_access_token(
         # later than the old token's issued-at time.
         frozen.tick(delta=timedelta(seconds=2))
 
-        reset_token = generate_password_reset_token(valid_registration_payload["email"])
+        reset_token = _reset_token_for(valid_registration_payload["email"])
         reset_response = client.post(
             f"{API_PREFIX}/password/reset/{reset_token}",
             json={"current_password": "unused", "new_password": "NewStr0ngPass"},
