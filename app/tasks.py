@@ -4,7 +4,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from celery import Celery
-from sqlalchemy import create_engine, func
+from sqlalchemy import String, cast, create_engine, func, literal
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import selectinload, sessionmaker
 
@@ -222,7 +222,13 @@ def cleanup_expired_carts() -> int:
     redis = RedisService()
     return redis.cleanup_expired_carts()
 
-def purge_expired_deletion_requests(db) -> int:
+# Accounts anonymised per transaction by purge_expired_deletion_requests.
+# Each account costs a bcrypt hash (BCRYPT_ROUNDS, ~0.25 s at 12), so a
+# batch of 100 is ~25 s: well inside task_soft_time_limit, and a run cut
+# short by it keeps every batch committed before.
+PURGE_BATCH_SIZE = 100
+
+def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> int:
     """
     Anonymizes accounts whose GDPR Article 17 erasure request has passed
     the grace period. This only targets users who explicitly requested
@@ -254,48 +260,72 @@ def purge_expired_deletion_requests(db) -> int:
     # so it does not stay fine at any real scale. selectinload issues one
     # extra query total (IN (...) over all matched account ids) instead of
     # one per account.
-    accounts = db.query(User).options(selectinload(User.addresses)).filter(
+    #
+    # Accounts already anonymised are excluded: data_deletion_requested is
+    # never reset, and without this every daily run re-scrubbed and
+    # re-hashed every account erased since the service went live, in one
+    # transaction, until a run no longer fit task_soft_time_limit and
+    # rolled back - every day, silently, with no new erasure getting
+    # through. The marker is the email this function writes, matched
+    # exactly (id included), so no column or migration is needed.
+    anonymised_email = (
+        literal("deleted-user-") + cast(User.id, String) + literal("@deleted.invalid")
+    )
+    pending = db.query(User).options(selectinload(User.addresses)).filter(
         User.is_active == False,  # noqa: E712 - `not User.is_active` evaluates in
         # Python immediately instead of building a SQL clause and silently
         # produces an always-false filter; explicit `== False` is required.
         User.data_deletion_requested,
-        User.data_deletion_date <= grace_cutoff
-    ).all()
+        User.data_deletion_date <= grace_cutoff,
+        User.email != anonymised_email,
+    ).order_by(User.id)
 
     purged_count = 0
-    for account in accounts:
-        account.email = f"deleted-user-{account.id}@deleted.invalid"
-        account.hashed_password = get_password_hash(str(uuid4()))
-        account.full_name = None
-        account.phone = None
-        account.marketing_consent = False
-        # Art. 7(1) evidence stays (type, granted, timestamp); who gave the
-        # consent - network address and browser - does not. Reassigned, not
-        # mutated in place: SQLAlchemy does not see in-place changes to a
-        # plain JSON column.
-        account.consent_history = [
-            {**entry, "ip_address": None, "user_agent": None}
-            for entry in account.consent_history or []
-        ]
-        account.data_export_requests = []
-
-        # Every address, including the ones the user deleted earlier (soft
-        # delete, is_active=False): those used to be skipped and kept their
-        # street, city and postal code. Country stays for the tax records
-        # of past orders.
-        for address in account.addresses:
-            address.street = "REDACTED"
-            address.city = "REDACTED"
-            address.state = "REDACTED"
-            address.postal_code = "REDACTED"
-            address.delivery_phone = None
-            address.delivery_instructions = None
-            address.is_active = False
-
-        purged_count += 1
-
-    db.commit()
+    last_id = 0
+    while True:
+        # Keyset pagination on id, not just "the next unscrubbed rows": a
+        # row that somehow stayed unscrubbed is not picked up again, so the
+        # loop always ends.
+        accounts = pending.filter(User.id > last_id).limit(batch_size).all()
+        if not accounts:
+            break
+        for account in accounts:
+            _anonymise_account(account)
+        purged_count += len(accounts)
+        last_id = accounts[-1].id
+        db.commit()
+        if len(accounts) < batch_size:
+            break
     return purged_count
+
+def _anonymise_account(account) -> None:
+    account.email = f"deleted-user-{account.id}@deleted.invalid"
+    account.hashed_password = get_password_hash(str(uuid4()))
+    account.full_name = None
+    account.phone = None
+    account.marketing_consent = False
+    # Art. 7(1) evidence stays (type, granted, timestamp); who gave the
+    # consent - network address and browser - does not. Reassigned, not
+    # mutated in place: SQLAlchemy does not see in-place changes to a
+    # plain JSON column.
+    account.consent_history = [
+        {**entry, "ip_address": None, "user_agent": None}
+        for entry in account.consent_history or []
+    ]
+    account.data_export_requests = []
+
+    # Every address, including the ones the user deleted earlier (soft
+    # delete, is_active=False): those used to be skipped and kept their
+    # street, city and postal code. Country stays for the tax records
+    # of past orders.
+    for address in account.addresses:
+        address.street = "REDACTED"
+        address.city = "REDACTED"
+        address.state = "REDACTED"
+        address.postal_code = "REDACTED"
+        address.delivery_phone = None
+        address.delivery_instructions = None
+        address.is_active = False
 
 @celery.task(
     name="cleanup_inactive_accounts",

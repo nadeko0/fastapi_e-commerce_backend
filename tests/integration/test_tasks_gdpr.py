@@ -178,6 +178,99 @@ def test_purge_scrubs_every_trace_of_the_person(db_session):
     assert scrubbed.data_export_requests == []
 
 
+def _expired(db_session, count):
+    return [
+        _make_deletion_requested_user(
+            db_session, f"expired{i}@example.com",
+            days_since_request=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 1,
+        )
+        for i in range(count)
+    ]
+
+
+def test_purge_does_not_reprocess_already_anonymised_accounts(db_session, monkeypatch):
+    """Regression test (F-37): nothing in the selection excluded accounts a
+    previous run had already anonymised, so every daily run re-scrubbed - and
+    re-hashed a password for - every account erased since the service went
+    live. The work grew without bound until a run no longer fit the soft
+    time limit and rolled back, every day, silently."""
+    _expired(db_session, 3)
+    assert purge_expired_deletion_requests(db_session) == 3
+
+    hashed = []
+    monkeypatch.setattr(
+        "app.tasks.get_password_hash", lambda password: hashed.append(1) or "x"
+    )
+
+    assert purge_expired_deletion_requests(db_session) == 0
+    assert hashed == []
+
+
+def test_purge_picks_up_only_new_requests_on_the_next_run(db_session):
+    _expired(db_session, 2)
+    purge_expired_deletion_requests(db_session)
+    newcomer = _make_deletion_requested_user(
+        db_session, "newcomer@example.com",
+        days_since_request=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 1,
+    )
+
+    assert purge_expired_deletion_requests(db_session) == 1
+    db_session.expire_all()
+    assert db_session.get(User, newcomer.id).email == (
+        f"deleted-user-{newcomer.id}@deleted.invalid"
+    )
+
+
+def test_purge_commits_each_batch_so_a_failure_keeps_earlier_batches(
+    db_session, monkeypatch
+):
+    """With one commit at the very end, a run interrupted part-way (the task's
+    soft time limit, a lost connection) rolled back everything it had done.
+    Batches commit as they finish: an interruption keeps the earlier ones,
+    and the next run carries on from there."""
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    accounts = _expired(db_session, 5)
+    calls = []
+
+    def hash_until_the_time_limit(password):
+        calls.append(1)
+        if len(calls) == 3:
+            raise SoftTimeLimitExceeded()
+        return "hashed"
+
+    monkeypatch.setattr("app.tasks.get_password_hash", hash_until_the_time_limit)
+
+    try:
+        purge_expired_deletion_requests(db_session, batch_size=2)
+    except SoftTimeLimitExceeded:
+        db_session.rollback()
+    else:
+        raise AssertionError("the interruption should propagate")
+
+    db_session.expire_all()
+    emails = [db_session.get(User, a.id).email for a in accounts]
+    assert emails[:2] == [f"deleted-user-{a.id}@deleted.invalid" for a in accounts[:2]]
+    assert emails[2:] == [f"expired{i}@example.com" for i in range(2, 5)]
+
+    monkeypatch.setattr("app.tasks.get_password_hash", lambda password: "hashed")
+    assert purge_expired_deletion_requests(db_session, batch_size=2) == 3
+
+
+def test_purge_processes_every_batch(db_session, monkeypatch):
+    accounts = _expired(db_session, 5)
+    commits = []
+    real_commit = db_session.commit
+    monkeypatch.setattr(db_session, "commit", lambda: commits.append(1) or real_commit())
+
+    assert purge_expired_deletion_requests(db_session, batch_size=2) == 5
+
+    assert len(commits) == 3  # 2 + 2 + 1
+    db_session.expire_all()
+    for account in accounts:
+        assert db_session.get(User, account.id).email.endswith("@deleted.invalid")
+
+
 def test_purge_ignores_active_accounts(db_session):
     # An active user has no deletion request at all - never eligible.
     active = User(
