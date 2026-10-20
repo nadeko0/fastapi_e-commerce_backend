@@ -23,6 +23,9 @@ os.environ.setdefault("EMAILS_FROM_NAME", "Test Shop")
 # what would have been sent monkeypatch app.services.email.get_email_provider
 # (or the specific send_*_email name) directly.
 os.environ.setdefault("EMAIL_PROVIDER", "logging")
+# The same for payments: the in-process mock, never api.stripe.com, even if
+# a developer's .env selects the live provider.
+os.environ.setdefault("PAYMENT_PROVIDER", "mock")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # no Redis available in this test env
 # bcrypt's default cost factor (12 rounds) is deliberately slow (~400ms/hash)
 # for brute-force resistance in production; tests register/log in dozens of

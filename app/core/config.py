@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, List, Optional
+from typing import Annotated, ClassVar, List, Literal, Optional
 
 from pydantic import AnyHttpUrl, Field, model_validator, validator
 from pydantic_settings import BaseSettings, NoDecode
@@ -27,7 +27,7 @@ def _split_comma_separated(v: str | List[str]) -> List[str]:
 # app/core/rate_limit.py.
 RATE_LIMIT_PATTERN = r"^([1-9]\d*)/(?:([1-9]\d*) ?)?(second|minute|hour|day)s?$"
 
-# Secrets are checked (Settings.check_secrets) everywhere but here: on a
+# Secrets are checked (Settings.check_deployment_settings) everywhere but here: on a
 # developer's machine and in the test suite the .env.example placeholders
 # are fine.
 _UNDEPLOYED_ENVIRONMENTS = frozenset({"development", "test"})
@@ -37,11 +37,15 @@ _JWT_KEY_MIN_BYTES = {"HS256": 32, "HS384": 48, "HS512": 64}
 # What the values in .env.example and the built-in Stripe defaults are made
 # of. A secret containing one of these was copied, not generated.
 _PLACEHOLDER_MARKERS = ("change-me", "changeme", "placeholder")
+# The repository's own mock Stripe values, whatever follows the prefix.
+_PLACEHOLDER_PREFIXES = ("sk_test_mock", "whsec_mock")
 
 
 def _looks_like_placeholder(value: str) -> bool:
     folded = value.casefold()
-    return any(marker in folded for marker in _PLACEHOLDER_MARKERS)
+    return folded.startswith(_PLACEHOLDER_PREFIXES) or any(
+        marker in folded for marker in _PLACEHOLDER_MARKERS
+    )
 
 
 class Settings(BaseSettings):
@@ -293,9 +297,18 @@ class Settings(BaseSettings):
     # don't need a real SMTP server.
     EMAIL_PROVIDER: str = "smtp"
 
-    # Payment settings (mock Stripe integration - no real Stripe account
-    # exists for this project; these are placeholder values, never real
-    # secrets, and no outbound network call is ever made with them).
+    # Which PaymentProvider app.services.payment.get_payment_provider()
+    # hands out: "mock" is the in-process StripePaymentProvider, which
+    # never moves money (it confirms with a successful test card when no
+    # card token is sent); "stripe" is LiveStripePaymentProvider, real
+    # calls to api.stripe.com with STRIPE_SECRET_KEY. Production refuses
+    # the mock (check_deployment_settings below).
+    PAYMENT_PROVIDER: Literal["mock", "stripe"] = "mock"
+    # The defaults are the repository's placeholders, published in
+    # .env.example: fine for the mock, which makes no network call and is
+    # only ever sent webhooks signed by the tests, and refused in
+    # production, where anyone who has read the repository could sign a
+    # webhook with them.
     STRIPE_SECRET_KEY: str = "sk_test_mock_placeholder"
     STRIPE_WEBHOOK_SECRET: str = "whsec_mock_placeholder"
     STRIPE_WEBHOOK_TOLERANCE_SECONDS: int = 300
@@ -308,16 +321,21 @@ class Settings(BaseSettings):
     STORE_CURRENCY: str = Field("USD", pattern=r"^[A-Z]{3}$")
 
     @model_validator(mode="after")
-    def check_secrets(self) -> "Settings":
+    def check_deployment_settings(self) -> "Settings":
         # Anything but development and test is a deployment, including a
         # misspelt name: failing closed costs a restart, failing open a
-        # forgeable token. Every problem is reported at once, by setting
-        # name only: the message ends up in logs, the values must not.
+        # forgeable token or orders "paid" without money. Every problem is
+        # reported at once, by setting name only: the message ends up in
+        # logs, the values must not.
         if self.ENVIRONMENT in _UNDEPLOYED_ENVIRONMENTS:
             return self
         problems = []
+        # The mock provider marks every order paid without taking any money.
+        if self.PAYMENT_PROVIDER != "stripe":
+            problems.append("PAYMENT_PROVIDER must be 'stripe' outside development and test")
         for name, minimum_bytes in (
             ("JWT_SECRET_KEY", _JWT_KEY_MIN_BYTES.get(self.JWT_ALGORITHM, 32)),
+            ("STRIPE_SECRET_KEY", 0),
             ("STRIPE_WEBHOOK_SECRET", 32),
             ("POSTGRES_PASSWORD", 16),
             ("REDIS_PASSWORD", 16),
@@ -333,7 +351,7 @@ class Settings(BaseSettings):
                 problems.append(f"{name} is shorter than {minimum_bytes} bytes")
         if problems:
             raise ValueError(
-                f"ENVIRONMENT={self.ENVIRONMENT!r} needs real secrets: " + "; ".join(problems)
+                f"ENVIRONMENT={self.ENVIRONMENT!r} is not deployable: " + "; ".join(problems)
             )
         return self
 

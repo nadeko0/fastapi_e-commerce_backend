@@ -4,12 +4,13 @@ LiveStripePaymentProvider - a real, network-calling Stripe integration.
 Unlike StripePaymentProvider (the deterministic, dependency-free mock used by
 the default/fast test suite - see stripe_provider.py), this class makes real
 HTTPS calls to api.stripe.com via the `stripe` PyPI SDK, authenticated with a
-real STRIPE_SECRET_KEY. It exists to be exercised by
+real STRIPE_SECRET_KEY. get_payment_provider() (app/services/payment/__init__.py)
+hands it out when PAYMENT_PROVIDER is "stripe", which production requires
+(app/core/config.py). Against the real API it is exercised by
 tests/integration/test_payment_live_stripe.py, a separate suite that only
 runs when a real (non-placeholder) STRIPE_SECRET_KEY is present in the
-environment - see that file's skipif condition. It is never wired into
-get_payment_provider() (app/services/payment/__init__.py), so it has zero
-effect on the app's normal request path or the default test suite.
+environment - see that file's skipif condition; the default test suite
+runs on the mock.
 
 Implements the exact same PaymentProvider contract (app/services/payment/base.py)
 as the mock: same method signatures, same dataclass return types
