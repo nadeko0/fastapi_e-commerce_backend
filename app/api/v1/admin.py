@@ -137,7 +137,7 @@ async def create_product(
     response_model=APIResponse[ProductResponse],
     responses={
         403: {"description": "Admin privileges required"},
-        404: {"description": "Product not found"},
+        404: {"description": "Product or category not found"},
     },
 )
 async def update_product(
@@ -156,8 +156,20 @@ async def update_product(
             detail="Product not found"
         )
 
+    update_data = product.dict(exclude_unset=True)
+    # Same check as create_product. Without it a missing category_id was
+    # written to the row: a generic 500 from the foreign key on Postgres,
+    # and on a database that does not enforce it a committed product whose
+    # category does not exist.
+    if "category_id" in update_data and not (
+        db.query(Category.id).filter(Category.id == update_data["category_id"]).first()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Category not found"
+        )
 
-    for field, value in product.dict(exclude_unset=True).items():
+    for field, value in update_data.items():
         setattr(db_product, field, value)
 
     db_product.updated_at = datetime.utcnow()

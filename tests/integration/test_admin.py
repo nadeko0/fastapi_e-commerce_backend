@@ -866,3 +866,44 @@ def test_admin_variant_endpoints_require_admin(client, db_session):
     )
 
     assert response.status_code == 403
+
+
+def test_admin_update_product_to_a_missing_category_is_404(client, db_session):
+    # Regression test: create_product checks that category_id exists, but
+    # update_product wrote any category_id straight to the row. On Postgres
+    # the foreign key turns that into a generic 500; on a database that
+    # does not enforce it (SQLite, as here) the commit succeeds and
+    # building the response fails on the missing category instead.
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}",
+        json={"category_id": 999999},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Category not found"
+    db_session.expire_all()
+    assert db_session.get(Product, product["id"]).category_id == category.id
+
+
+def test_admin_moves_product_to_another_category(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    old = _make_category(db_session, name="Old Shelf")
+    new = _make_category(db_session, name="New Shelf")
+    product = _create_product(client, admin_token, old.id)
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}",
+        json={"category_id": new.id},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["category_id"] == new.id
+    assert response.json()["data"]["category_name"] == "New Shelf"
