@@ -658,6 +658,20 @@ def test_refresh_rejects_token_with_tampered_signature(client, valid_registratio
     assert response.status_code == 401
 
 
+@pytest.mark.parametrize("subject", ["abc", "1.0", "9" * 5000])
+def test_refresh_with_a_signed_token_whose_subject_is_not_a_user_id_is_a_401(client, subject):
+    # Registered like any refresh token, so that only the subject is wrong.
+    # The user lookup did int(sub): a ValueError, a 500.
+    from app.core.security import issue_refresh_token
+
+    response = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": issue_refresh_token(subject)}
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Could not validate refresh token"
+
+
 def test_refresh_rejects_missing_body_field(client):
     response = client.post(f"{API_PREFIX}/refresh", json={})
     assert response.status_code == 422
