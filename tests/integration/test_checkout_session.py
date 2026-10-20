@@ -18,6 +18,8 @@ import uuid
 
 import pytest
 from test_payment import (
+    ORDER_AMOUNT_CENTS,
+    ORDER_CURRENCY_REPORTED,
     ORDERS_PREFIX,
     TOKEN_SUCCESS_DEFAULT,
     _create_admin,
@@ -66,9 +68,20 @@ def _checkout_webhook_body(
     payment_intent_id: str = None,
     payment_status: str = "paid",
     event_id: str = None,
+    amount_total: int = ORDER_AMOUNT_CENTS,
+    currency: str = ORDER_CURRENCY_REPORTED,
 ) -> bytes:
+    # A real checkout.session.* event always carries amount_total and
+    # currency (what the session charges, cents and lowercase ISO code).
+    # They default to what the order from _create_verified_buyer_with_order
+    # costs; a test about a mismatch passes its own.
     event_id = event_id or f"evt_{uuid.uuid4().hex[:24]}"
-    obj = {"id": session_id, "payment_status": payment_status}
+    obj = {
+        "id": session_id,
+        "payment_status": payment_status,
+        "amount_total": amount_total,
+        "currency": currency,
+    }
     if payment_intent_id is not None:
         obj["payment_intent"] = payment_intent_id
     return json.dumps(
@@ -239,6 +252,30 @@ class TestCreateCheckoutSessionEndpoint:
         response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=setup["headers"])
         assert response.status_code == 400
         assert "cancelled" in response.json()["detail"].lower()
+
+    def test_session_is_created_in_the_orders_currency(self, client, db_session):
+        setup = _create_verified_buyer_with_order(client, db_session)
+        order = setup["order"]
+
+        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=setup["headers"])
+
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["currency"] == "USD"
+        assert [p.currency for p in _get_payments(db_session, order["id"])] == ["USD"]
+
+    def test_rejects_a_currency_other_than_the_orders(self, client, db_session):
+        # The session used to be created in whatever currency the request
+        # body named, for the order's amount: 19.99 JPY for a 19.99 USD order.
+        setup = _create_verified_buyer_with_order(client, db_session)
+        order = setup["order"]
+
+        response = client.post(
+            CHECKOUT_SESSION_URL(order["id"]), json={"currency": "JPY"}, headers=setup["headers"]
+        )
+
+        assert response.status_code == 400
+        assert "currency" in response.json()["detail"].lower()
+        assert _get_payments(db_session, order["id"]) == []
 
     def test_unknown_order_returns_404(self, client, db_session):
         setup = _create_verified_buyer_with_order(client, db_session)
@@ -461,6 +498,41 @@ class TestCheckoutSessionWebhook:
         assert db_order.payment_status == "pending"
 
         payments = _get_payments(db_session, order["id"])
+        assert payments[0].requires_manual_review is True
+
+    @pytest.mark.parametrize(
+        "reported",
+        [
+            {"amount_total": ORDER_AMOUNT_CENTS + 100},
+            {"currency": "eur"},
+            {"amount_total": None, "currency": None},
+        ],
+        ids=["amount-differs", "currency-differs", "amount-and-currency-missing"],
+    )
+    def test_completed_event_that_does_not_match_the_order_is_flagged_not_applied(
+        self, client, db_session, reported
+    ):
+        # Same rule as payment_intent.succeeded in test_payment.py: a session
+        # that charged something other than the order's amount in the
+        # order's currency does not mark the order paid.
+        setup = _create_verified_buyer_with_order(client, db_session)
+        order = setup["order"]
+        session = self._create_session(client, setup["headers"], order)
+
+        body = _checkout_webhook_body(
+            "checkout.session.completed",
+            session["checkout_session_id"],
+            payment_intent_id=f"pi_{uuid.uuid4().hex[:24]}",
+            **reported,
+        )
+        response = _post_webhook(client, body, _sign(body))
+
+        assert response.status_code == 200
+        assert response.json()["data"]["applied"] is False
+        assert response.json()["data"]["requires_manual_review"] is True
+        assert _get_order(db_session, order["id"]).payment_status == "pending"
+        payments = _get_payments(db_session, order["id"])
+        assert payments[0].status == "succeeded"
         assert payments[0].requires_manual_review is True
 
     def test_event_for_unknown_session_is_acknowledged_but_not_applied(self, client, db_session):

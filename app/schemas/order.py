@@ -113,6 +113,7 @@ class OrderInDB(OrderBase):
     status: OrderStatus
     payment_status: PaymentStatus
     total_amount: Decimal
+    currency: str
     created_at: datetime
     updated_at: datetime
     items: List[OrderItemInDB]
@@ -144,7 +145,12 @@ class PaymentCreate(BaseModel):
     order_id: int
     payment_method: str = Field(..., pattern="^(stripe|paypal)$")
     amount: Decimal
-    currency: str = Field(..., pattern="^[A-Z]{3}$")
+    # Optional: the order is always charged in its own currency
+    # (Order.currency). A client may still send the code it expects to pay
+    # in; one that differs is rejected with 400, the same as an amount that
+    # differs from the order total, rather than ignored, so a client that
+    # believes it is paying in another currency finds out before any charge.
+    currency: Optional[str] = Field(None, pattern="^[A-Z]{3}$")
     # Stripe PaymentMethod token to confirm the intent with (e.g.
     # "pm_card_visa"). Optional and defaults to a successful mock card in
     # the provider - a real integration would require this (the client's
@@ -177,8 +183,10 @@ class CheckoutSessionCreate(BaseModel):
     Unlike PaymentCreate, the amount is never client-supplied: it is always
     derived from the order's own total_amount server-side, since the entire
     point of this flow is that the client never handles payment details.
+    The currency is the order's too; as in PaymentCreate, one sent that
+    differs from it is rejected (400).
     """
-    currency: str = Field("USD", pattern="^[A-Z]{3}$")
+    currency: Optional[str] = Field(None, pattern="^[A-Z]{3}$")
     # Where Stripe sends the customer after the hosted page. This backend
     # has no real frontend (see live_stripe_provider.py's confirm_payment_intent
     # return_url note for the same situation) - omit to use a placeholder.
