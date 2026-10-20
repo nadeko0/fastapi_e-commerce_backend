@@ -273,7 +273,7 @@ async def login(
     user_email = user.email if user else None
     hashed_password = user.hashed_password if user else None
     # Read here with the others, off the row already loaded, because the
-    # session is closed next. Only the guest cart merge at the end uses it.
+    # session is closed next.
     user_is_active = bool(user.is_active) if user else False
 
     # Release this request's DB connection back to the pool *before* the
@@ -308,7 +308,11 @@ async def login(
     password_valid = await verify_password_async(
         form_data.password, hashed_password or DUMMY_PASSWORD_HASH
     )
-    if user_id is None or not password_valid:
+    # A deactivated account (erasure requested, or switched off by an admin)
+    # gets no tokens. Refused exactly like a wrong password - same status,
+    # same wording, and only after bcrypt has run - so that knowing the
+    # password does not reveal that the account exists but is switched off.
+    if user_id is None or not password_valid or not user_is_active:
         # The attempt was counted when it started (check_login_attempt), for
         # the email as submitted, account or no account.
         raise HTTPException(
@@ -335,12 +339,8 @@ async def login(
     # last_login update is committed (so the session holds no connection
     # here, as after the db.close() above) and the tokens exist, and
     # nothing in it can raise - the login succeeds whatever becomes of the
-    # cart. Not for a deactivated account: this route still hands it tokens,
-    # as it always has, but every cart route then refuses them, so a cart
-    # merged into it would be out of the visitor's reach. The guest cart
-    # stays the visitor's.
-    if user_is_active:
-        merge_guest_cart_on_login(request, response, user_id, redis)
+    # cart. Only an active account gets this far (see the refusal above).
+    merge_guest_cart_on_login(request, response, user_id, redis)
 
     return APIResponse.success_response(Token(
         access_token=access_token,

@@ -181,6 +181,46 @@ def test_login_runs_bcrypt_even_for_nonexistent_email(client, monkeypatch):
     assert len(calls) == 1, "verify_password_async must run even when the account doesn't exist"
 
 
+def test_login_refuses_a_deactivated_account_like_a_wrong_password(
+    client, monkeypatch, valid_registration_payload, db_session
+):
+    # A deactivated account (erasure requested, or switched off by an
+    # admin) must not get tokens, and the refusal must not tell a caller
+    # with the right password that the account exists but is switched off.
+    from app.models.user import User as UserModel
+
+    email = valid_registration_payload["email"]
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    user = db_session.query(UserModel).filter(UserModel.email == email).one()
+    user.is_active = False
+    db_session.commit()
+
+    calls = []
+    import app.core.security as security_module
+    original = security_module.verify_password_async
+
+    async def spy(*args, **kwargs):
+        calls.append(args)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr("app.api.v1.users.verify_password_async", spy)
+
+    right_password = client.post(
+        f"{API_PREFIX}/login",
+        data={"username": email, "password": valid_registration_payload["password"]},
+    )
+    wrong_password = client.post(
+        f"{API_PREFIX}/login", data={"username": email, "password": "wrong-Pass1"}
+    )
+
+    assert right_password.status_code == 401
+    assert right_password.json() == wrong_password.json() == {
+        "detail": "Incorrect email or password"
+    }
+    # bcrypt ran both times: the answer takes as long as any other refusal.
+    assert len(calls) == 2
+
+
 def test_me_rejects_expired_access_token(client, valid_registration_payload):
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
 

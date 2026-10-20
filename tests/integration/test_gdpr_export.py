@@ -88,7 +88,12 @@ def test_data_delete_deactivates_account(client, valid_registration_payload):
     assert response.status_code == 200
     assert "deletion_date" in response.json()["data"]
 
-    # Deactivated account can no longer authenticate.
+    # Deactivated account can no longer authenticate: the token it held is
+    # refused, and logging in again is refused like a wrong password.
+    me_response = client.get(
+        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {access_token}"}
+    )
+    assert me_response.status_code == 400
     login_response = client.post(
         f"{API_PREFIX}/login",
         data={
@@ -96,11 +101,8 @@ def test_data_delete_deactivates_account(client, valid_registration_payload):
             "password": valid_registration_payload["password"],
         },
     )
-    me_response = client.get(
-        f"{API_PREFIX}/me",
-        headers={"Authorization": f"Bearer {login_response.json()['data']['access_token']}"},
-    )
-    assert me_response.status_code == 400
+    assert login_response.status_code == 401
+    assert login_response.json()["detail"] == "Incorrect email or password"
 
 
 

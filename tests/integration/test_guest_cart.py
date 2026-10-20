@@ -777,9 +777,9 @@ def test_failed_login_leaves_the_guest_cart_and_its_cookie_alone(browser, db_ses
 
 
 def test_login_to_a_deactivated_account_does_not_take_the_guest_cart(browser, db_session, fake_redis):
-    """login still issues tokens to a deactivated account (unchanged), but
-    no cart route accepts them: a cart merged into that account would be
-    lost to the visitor."""
+    """login refuses a deactivated account like a wrong password, so the
+    guest cart stays the visitor's: a cart merged into that account would
+    be lost to them."""
     (product,) = _products(db_session, 1)
     visitor = browser()
     _register(visitor)
@@ -790,7 +790,7 @@ def test_login_to_a_deactivated_account_does_not_take_the_guest_cart(browser, db
 
     response = _login(visitor)
 
-    assert response.status_code == 200
+    assert response.status_code == 401
     assert _set_cookie(response) is None
     assert visitor.cookies.get(COOKIE) == guest_id
     assert _quantities(_cart(visitor)) == {(product.id, None): 2}
