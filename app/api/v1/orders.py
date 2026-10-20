@@ -457,6 +457,39 @@ def _apply_payment_success(
     )
 
 
+# Order.payment_status values a failed attempt may move the order to FAILED
+# from. Never from PAID or REFUNDED: an order has several attempts (a
+# declined card then a retry, an abandoned Checkout Session then /pay), and
+# a failure reported for one of them - late, out of order, or for an
+# attempt the customer gave up on - says nothing about the money another
+# attempt already took. Setting FAILED there made a paid order payable
+# again (a second charge) and refused its refund.
+_PAYMENT_STATUSES_A_FAILURE_MAY_REPLACE = {PaymentStatus.PENDING, PaymentStatus.FAILED}
+
+
+def _apply_payment_failure(db: Session, order: Order, payment_row: Payment) -> None:
+    """
+    The one place an attempt's failure is applied: by /pay on a decline,
+    and by the webhook for payment_intent.payment_failed,
+    checkout.session.expired and checkout.session.async_payment_failed.
+    Nothing changes for an attempt that already succeeded (its failure
+    event arrived after its success: Stripe delivery is not ordered).
+    Otherwise the attempt is marked failed, and the order too unless it
+    has been paid.
+    """
+    if payment_row.status == "succeeded":
+        return
+    # Re-read: sessions are expire_on_commit=False (app/core/database.py),
+    # so `order` still holds what was read before the provider call, and
+    # another attempt may have paid it since.
+    db.refresh(order)
+    payment_row.status = "failed"
+    if order.payment_status in _PAYMENT_STATUSES_A_FAILURE_MAY_REPLACE:
+        order.payment_status = PaymentStatus.FAILED
+    order.updated_at = datetime.utcnow()
+    db.commit()
+
+
 def _guard_order_payable(order: Order) -> None:
     """
     Shared by /pay and /checkout-session: an order that is already paid or
@@ -693,11 +726,10 @@ async def process_payment(
         # The provider *did* respond - with a decline. This is a terminal
         # outcome for this attempt (not a transport failure), so the order
         # is marked failed (not left pending) and the customer can retry
-        # with a new attempt/new Idempotency-Key.
-        payment_row.status = "failed"
-        order.payment_status = PaymentStatus.FAILED
-        order.updated_at = datetime.utcnow()
-        db.commit()
+        # with a new attempt/new Idempotency-Key. Through the shared helper:
+        # the order may have been paid by another attempt (a Checkout
+        # Session completing) since the guard above read it.
+        _apply_payment_failure(db, order, payment_row)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=e.message,
@@ -1127,11 +1159,7 @@ async def stripe_webhook(
             db, order, payment_row, background_tasks, order.user.email
         )
     elif event.type == "payment_intent.payment_failed":
-        if payment_row.status != "succeeded":
-            payment_row.status = "failed"
-            order.payment_status = PaymentStatus.FAILED
-            order.updated_at = datetime.utcnow()
-            db.commit()
+        _apply_payment_failure(db, order, payment_row)
     elif event.type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
         # Backfill the real PaymentIntent id now that Stripe has attached
         # one - Session.payment_intent is a string id on the webhook
@@ -1179,15 +1207,9 @@ async def stripe_webhook(
         )
     elif event.type in ("checkout.session.expired", "checkout.session.async_payment_failed"):
         # Mirrors payment_intent.payment_failed's handling: a terminal
-        # failure/expiry for this attempt, applied only if this attempt
-        # hasn't already succeeded (defends against an expired/failed event
-        # arriving after a completed one due to Stripe's at-least-once,
-        # not-strictly-ordered delivery).
-        if payment_row.status != "succeeded":
-            payment_row.status = "failed"
-            order.payment_status = PaymentStatus.FAILED
-            order.updated_at = datetime.utcnow()
-            db.commit()
+        # failure/expiry for this attempt. See _apply_payment_failure for
+        # why it never touches an attempt that succeeded or a paid order.
+        _apply_payment_failure(db, order, payment_row)
 
     return APIResponse.success_response({"status": "processed", "applied": True})
 
