@@ -13,7 +13,6 @@ os.environ.setdefault("REDIS_HOST", "localhost")
 # must fail here exactly as in CI (which has no Redis), not quietly use a
 # Redis that happens to run on the developer's machine.
 os.environ.setdefault("REDIS_PORT", "1")
-os.environ.setdefault("DATA_ENCRYPTION_KEY", "test-encryption-key")
 os.environ.setdefault("SMTP_HOST", "localhost")
 os.environ.setdefault("SMTP_USER", "test@example.com")
 os.environ.setdefault("SMTP_PASSWORD", "test")

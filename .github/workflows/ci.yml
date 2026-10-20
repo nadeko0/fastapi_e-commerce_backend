@@ -50,7 +50,6 @@ jobs:
           POSTGRES_PASSWORD: ci
           POSTGRES_DB: ci
           REDIS_HOST: localhost
-          DATA_ENCRYPTION_KEY: ci-test-encryption-key
           SMTP_HOST: localhost
           SMTP_USER: ci@example.com
           SMTP_PASSWORD: ci
