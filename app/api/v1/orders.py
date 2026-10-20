@@ -32,8 +32,14 @@ from app.schemas.order import (
     RefundResponse,
 )
 from app.services.email import (
+    send_order_cancellation_email,
     send_order_confirmation_email,
     send_order_status_update_email,
+)
+from app.services.orders import (
+    cancel_order_and_restock,
+    is_unpaid_and_new,
+    is_valid_status_transition,
 )
 from app.services.payment import (
     PaymentProvider,
@@ -318,11 +324,15 @@ async def update_order_status(
 
     # See get_order above: OrderResponse.from_orm(order) below serializes
     # shipping_address and items->product, so eager-load both here too.
+    # Locked (FOR UPDATE OF orders only: the joined address is on the
+    # nullable side of an outer join, which Postgres cannot lock) so that
+    # two cancellations, or this and the unpaid-order expiry, cannot both
+    # read the old status and both return the stock.
     order = db.query(Order).options(
         joinedload(Order.shipping_address),
         selectinload(Order.items).joinedload(OrderItem.product),
         selectinload(Order.items).joinedload(OrderItem.variant),
-    ).filter(Order.id == order_id).first()
+    ).filter(Order.id == order_id).with_for_update(of=Order).first()
     if not order:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -338,28 +348,13 @@ async def update_order_status(
 
 
     old_status = order.status
-    order.status = status
-    order.updated_at = datetime.utcnow()
-
-    # Cancelling an order must release the stock that create_order reserved
-    # for it (the atomic UPDATE...WHERE decrement at checkout time) - without
-    # this, every cancelled order permanently leaks its quantity out of
-    # stock_quantity, understating real availability forever. Only applies
-    # when transitioning INTO cancelled (not a no-op re-cancel, which
-    # _is_valid_status_transition already rejects since CANCELLED has no
-    # outgoing transitions).
     if status == OrderStatus.CANCELLED:
-        for item in order.items:
-            if item.variant_id is not None:
-                db.query(ProductVariant).filter(ProductVariant.id == item.variant_id).update(
-                    {ProductVariant.stock_quantity: ProductVariant.stock_quantity + item.quantity},
-                    synchronize_session=False,
-                )
-            else:
-                db.query(Product).filter(Product.id == item.product_id).update(
-                    {Product.stock_quantity: Product.stock_quantity + item.quantity},
-                    synchronize_session=False,
-                )
+        # Releases the stock create_order took (the one restock path, shared
+        # with the customer's own cancel and the unpaid-order expiry).
+        cancel_order_and_restock(db, order)
+    else:
+        order.status = status
+        order.updated_at = datetime.utcnow()
 
     db.commit()
 
@@ -372,6 +367,62 @@ async def update_order_status(
         )
 
     return APIResponse.success_response(OrderResponse.from_orm(order))
+
+
+@router.post(
+    "/{order_id}/cancel",
+    response_model=APIResponse[OrderResponse],
+    responses={
+        400: {"description": "Order is paid, or no longer new"},
+        404: {"description": "Order not found"},
+    },
+)
+async def cancel_own_order(
+    order_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Cancel one of the current user's own orders that has not been paid,
+    returning its items to stock.
+
+    Stock is taken when an order is placed, not when it is paid, and only
+    an admin could cancel: an order its customer abandoned kept its items
+    out of sale until someone noticed. A paid order is not cancelled here;
+    that goes through support, with a refund. Unpaid orders are also
+    cancelled automatically UNPAID_ORDER_EXPIRE_MINUTES after they were
+    placed (cancel_expired_unpaid_orders in app/tasks.py)."""
+    # Locked like update_order_status's read, for the same reason; another
+    # user's order is a 404, not a 403, as in get_order.
+    order = db.query(Order).options(
+        joinedload(Order.shipping_address),
+        selectinload(Order.items).joinedload(OrderItem.product),
+        selectinload(Order.items).joinedload(OrderItem.variant),
+    ).filter(
+        Order.id == order_id,
+        Order.user_id == current_user.id,
+    ).with_for_update(of=Order).first()
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
+    if not is_unpaid_and_new(order):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only a new, unpaid order can be cancelled; contact support for a paid one"
+        )
+
+    cancel_order_and_restock(db, order)
+    db.commit()
+
+    background_tasks.add_task(
+        send_order_cancellation_email, current_user.email, OrderResponse.from_orm(order)
+    )
+
+    return APIResponse.success_response(OrderResponse.from_orm(order))
+
 
 def _decimal_to_cents(amount: Decimal) -> int:
     """Stripe (and every real payment processor) represents amounts as
@@ -440,15 +491,24 @@ def _apply_payment_success(
     "same event/attempt processed twice must not re-email or re-transition
     the order".
 
-    Returns False when the success is not applied because the order was
-    already paid (or refunded) by another attempt: two charges for one
-    order. The attempt is then recorded as succeeded and flagged for
-    manual review (a refund), and no second confirmation email goes out.
+    Returns False when the success is not applied, and the attempt is
+    recorded as succeeded and flagged for manual review (a refund) instead:
+    - the order was cancelled after the attempt started (by an admin, by
+      its customer, or because it stayed unpaid too long and its stock was
+      released). A genuine race, not a bug; marking a cancelled order paid
+      would ship or refund it out of sequence and hide a real
+      reconciliation problem. Its status and payment_status stay as they
+      are.
+    - the order was already paid (or refunded) by another attempt: two
+      charges for one order. No second confirmation email goes out.
     """
     _lock_order_and_reload(db, order, payment_row)
     if payment_row.status == "succeeded":
         db.commit()
         return True
+    if order.status == OrderStatus.CANCELLED:
+        _flag_payment_for_manual_review(db, payment_row, "order is cancelled")
+        return False
     if order.payment_status in (PaymentStatus.PAID, PaymentStatus.REFUNDED):
         _flag_payment_for_manual_review(
             db, payment_row, "order was already paid by another attempt"
@@ -1186,22 +1246,13 @@ async def stripe_webhook(
     db.refresh(payment_row)
 
     if event.type == "payment_intent.succeeded":
-        if order.status == OrderStatus.CANCELLED:
-            # Conflict: the order was cancelled after the payment attempt
-            # was created, and Stripe is now reporting it as paid (a
-            # genuine race, not a bug). We must NOT silently mark a
-            # cancelled order as paid - that would ship/refund it out of
-            # sequence and hide a real reconciliation problem. Record the
-            # true provider state on the Payment row, flag it for manual
-            # review, and leave the order's status/payment_status exactly
-            # as they are.
-            return APIResponse.success_response(
-                _flag_payment_for_manual_review(db, payment_row, "order is cancelled")
-            )
+        # A success for a cancelled order, or for one another attempt
+        # already paid, is flagged rather than applied inside
+        # _apply_payment_success (the same rule for /pay's own outcome).
         if not _reported_charge_matches_order(object_data, "amount_received", order):
             # Stripe charged something other than what the order costs (or
             # in another currency): marking the order paid would ship it
-            # for the wrong money. Same handling as the cancelled case.
+            # for the wrong money. Recorded and flagged for manual review.
             return APIResponse.success_response(
                 _flag_payment_for_manual_review(
                     db, payment_row, "charged amount or currency differs from the order"
@@ -1245,10 +1296,6 @@ async def stripe_webhook(
             return APIResponse.success_response({"status": "processed", "applied": False})
 
         # Same conflict handling as payment_intent.succeeded above.
-        if order.status == OrderStatus.CANCELLED:
-            return APIResponse.success_response(
-                _flag_payment_for_manual_review(db, payment_row, "order is cancelled")
-            )
         if not _reported_charge_matches_order(object_data, "amount_total", order):
             return APIResponse.success_response(
                 _flag_payment_for_manual_review(
@@ -1269,13 +1316,6 @@ async def stripe_webhook(
     return APIResponse.success_response({"status": "processed", "applied": True})
 
 
-def _is_valid_status_transition(old_status: OrderStatus, new_status: OrderStatus) -> bool:
-    valid_transitions = {
-        OrderStatus.NEW: {OrderStatus.CONFIRMED, OrderStatus.CANCELLED},
-        OrderStatus.CONFIRMED: {OrderStatus.PROCESSING, OrderStatus.CANCELLED},
-        OrderStatus.PROCESSING: {OrderStatus.SENT, OrderStatus.CANCELLED},
-        OrderStatus.SENT: {OrderStatus.DELIVERED, OrderStatus.CANCELLED},
-        OrderStatus.DELIVERED: set(),
-        OrderStatus.CANCELLED: set(),
-    }
-    return new_status in valid_transitions.get(old_status, set())
+# The transition table lives in app/services/orders.py, shared with the
+# Celery worker; kept under this name for the call sites in this module.
+_is_valid_status_transition = is_valid_status_transition
