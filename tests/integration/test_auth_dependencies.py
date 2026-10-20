@@ -119,13 +119,14 @@ def test_token_blacklisted_through_the_sync_service_is_rejected(client):
 def test_token_blacklisted_through_the_async_client_is_seen_by_the_sync_service(client):
     # The other direction: one keyspace, whichever client writes.
     token = _register_and_login(client)
+    jti = jwt.decode(token, options={"verify_signature": False})["jti"]
 
     async def _blacklist():
-        await redis_async_module.get_async_redis().set(f"blacklist:{token}", "1", ex=3600)
+        await redis_async_module.get_async_redis().set(f"blacklist:jti:{jti}", "1", ex=3600)
 
     asyncio.run(_blacklist())
 
-    assert security.redis_service.is_blacklisted(token) is True
+    assert security.redis_service.is_blacklisted(f"jti:{jti}") is True
     assert client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token)).status_code == 401
 
 

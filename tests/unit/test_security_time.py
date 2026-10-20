@@ -11,6 +11,8 @@ bottom is for.
 import inspect
 import time
 
+import jwt
+
 from app.core import security
 from app.core.security import (
     create_access_token,
@@ -36,8 +38,8 @@ def test_logout_blacklists_the_token_for_its_remaining_lifetime(fake_redis):
 
     logout(token)
 
-    key = next(k for k in fake_redis.scan_iter("*") if token in k)
-    ttl = fake_redis.ttl(key)
+    jti = jwt.decode(token, options={"verify_signature": False})["jti"]
+    ttl = fake_redis.ttl(f"blacklist:jti:{jti}")
     expected = security.settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     # Within a minute of the token's full lifetime: not 1 s (the clamp the
     # old code hit west of UTC) and not hours longer (east of it).

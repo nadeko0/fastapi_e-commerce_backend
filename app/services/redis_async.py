@@ -108,13 +108,14 @@ async def close_async_redis() -> None:
         await client.aclose()
 
 
-async def is_token_blacklisted(token: str) -> bool:
-    """Async counterpart of RedisService.is_blacklisted, with the same
-    failure mode: if Redis cannot be asked, the token is treated as
-    blacklisted. Rejecting a valid token for the length of an outage is the
-    safer mistake than accepting a logged-out one."""
+async def is_token_blacklisted(token_id: str) -> bool:
+    """Async counterpart of RedisService.is_blacklisted (same `token_id`,
+    from app.core.security._blacklist_id), with the same failure mode: if
+    Redis cannot be asked, the token is treated as blacklisted. Rejecting a
+    valid token for the length of an outage is the safer mistake than
+    accepting a logged-out one."""
     try:
-        return bool(await get_async_redis().exists(f"{BLACKLIST_KEY_PREFIX}{token}"))
+        return bool(await get_async_redis().exists(f"{BLACKLIST_KEY_PREFIX}{token_id}"))
     except RedisError as e:
         logger.error(f"Redis operation failed: is_token_blacklisted: {str(e)}")
         return True
