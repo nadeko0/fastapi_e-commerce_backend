@@ -18,6 +18,17 @@ class ConsentType(str, Enum):
 
 
 
+def normalize_email(email: str) -> str:
+    """The one spelling of an email this application stores and compares:
+    without surrounding blanks, in lower case. Case was significant before,
+    so "Case@Example.com" and "case@example.com" became two accounts for
+    one mailbox. Strictly the local part of an address may be case-
+    sensitive (RFC 5321), but no mail provider in use treats it so, and
+    two accounts for one mailbox are the worse problem. Lookups compare
+    lower(email) as well, so rows stored before this keep working."""
+    return email.strip().lower()
+
+
 class ConsentHistory(BaseModel):
     type: ConsentType
     granted: bool
@@ -45,6 +56,10 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8, pattern=r"^[A-Za-z\d@$!%*#?&]{8,}$")
+
+    @validator('email', pre=True)
+    def normalise_email(cls, v):
+        return normalize_email(v) if isinstance(v, str) else v
 
     @validator('password')
     def validate_password_strength(cls, v):
@@ -139,6 +154,10 @@ class TokenPayload(BaseModel):
 
 class PasswordReset(BaseModel):
     email: EmailStr
+
+    @validator('email', pre=True)
+    def normalise_email(cls, v):
+        return normalize_email(v) if isinstance(v, str) else v
 
 class PasswordUpdate(BaseModel):
     current_password: str

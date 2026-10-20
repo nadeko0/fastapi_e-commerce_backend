@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, Column, DateTime, Index, Integer, String
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    func,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.config import settings
@@ -52,6 +62,12 @@ class User(Base):
         Index('idx_user_role', 'role'),
         Index('idx_user_gdpr', 'gdpr_consent', 'privacy_policy_accepted', 'data_deletion_requested'),
         Index('idx_user_activity', 'last_login', 'last_activity_date', 'is_active'),
+        # One account per mailbox, whatever the case: ix_users_email above
+        # is case-sensitive, and "Case@x.com" next to "case@x.com" were two
+        # accounts. Created by migration 3f6c2a9d1b7e, which first refuses
+        # to run while such duplicates exist. Also what the lookups by email
+        # (lower(email) = ...) in app/api/v1/users.py use.
+        Index('uq_users_email_lower', func.lower(email), unique=True),
     )
 
     def __repr__(self):
