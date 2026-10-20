@@ -243,8 +243,38 @@ def test_requests_are_let_through_when_redis_is_down(
 
     for _ in range(3):
         assert client.get(f"{API}/categories").status_code == 200
-        assert login(client, payload["email"], "wrong-password").status_code == 401
-        assert login(client, payload["email"], payload["password"]).status_code == 200
+        # An auth route other than login: its per-address limit fails open too.
+        reset = client.post(f"{API}/users/password/reset", json={"email": payload["email"]})
+        assert reset.status_code == 200
+
+
+def test_login_is_refused_while_its_failure_count_cannot_be_kept(
+    client, limits, monkeypatch, valid_registration_payload
+):
+    # The one exception to failing open: with nothing counting, a password
+    # guesser would get unlimited attempts for exactly as long as Redis is
+    # down (or made to look down). Login answers 503 instead, before any
+    # password is looked at, wrong one or right one.
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_LOGIN_FAILURES="3/15 minutes")
+
+    def unreachable():
+        raise RedisConnectionError("Redis is down")
+
+    monkeypatch.setattr(rate_limit, "get_async_redis", unreachable)
+
+    async def must_not_run(*args, **kwargs):
+        raise AssertionError("bcrypt was run while the attempt could not be counted")
+
+    monkeypatch.setattr("app.api.v1.users.verify_password_async", must_not_run)
+
+    for password in ["wrong-password"] * 5 + [payload["password"]]:
+        refused = login(client, payload["email"], password)
+        assert refused.status_code == 503
+        assert refused.headers["Retry-After"] == "30"
+        assert refused.json() == {
+            "detail": {"error": "Login is temporarily unavailable", "retry_after": 30}
+        }
 
 
 # --- failed logins, per account ----------------------------------------------------

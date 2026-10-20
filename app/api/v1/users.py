@@ -242,7 +242,11 @@ async def resend_verification_email(
 @router.post(
     "/login",
     response_model=APIResponse[Token],
-    responses={401: {"description": "Incorrect email or password"}},
+    responses={
+        401: {"description": "Incorrect email or password"},
+        429: {"description": "Too many failed login attempts"},
+        503: {"description": "Failed attempts cannot be counted right now, retry later"},
+    },
 )
 async def login(
     request: Request,
@@ -258,7 +262,8 @@ async def login(
     right now never fails the login.
 
     Answers 429 with Retry-After when too many attempts for this email have
-    failed (see "Failed logins" in app/core/rate_limit.py)."""
+    failed (see "Failed logins" in app/core/rate_limit.py), and 503 with
+    Retry-After while those attempts cannot be counted (Redis down)."""
 
     # Failed logins are counted per email, not per address. Here, before
     # the first query: `db` has not checked a connection out yet, so this

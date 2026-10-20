@@ -8,6 +8,7 @@ import time
 
 import jwt
 import pytest
+from fastapi import HTTPException
 from freezegun import freeze_time
 from hypothesis import given
 from hypothesis import settings as hypothesis_settings
@@ -352,6 +353,45 @@ def test_fails_open_when_the_redis_call_itself_fails(monkeypatch):
 
     monkeypatch.setattr(rate_limit, "_count_script", BrokenScript())
     assert hit("k", Rate(1, 60), times=3) == [0, 0, 0]
+
+
+def _attempts(email, times):
+    """`times` login attempts for `email`: the status of each refusal, or
+    None for an attempt let through."""
+
+    async def run():
+        answers = []
+        for _ in range(times):
+            try:
+                await rate_limit.check_login_attempt(email)
+                answers.append(None)
+            except HTTPException as refusal:
+                answers.append(refusal.status_code)
+        return answers
+
+    return asyncio.run(run())
+
+
+def test_the_login_attempt_count_fails_closed_when_redis_cannot_be_reached(monkeypatch, caplog):
+    monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
+
+    def unreachable():
+        raise RedisConnectionError("Redis is down")
+
+    monkeypatch.setattr(rate_limit, "get_async_redis", unreachable)
+    with caplog.at_level("ERROR", logger="app.core.rate_limit"):
+        assert _attempts("victim@example.com", 50) == [503] * 50
+    assert "login refused" in caplog.text
+
+
+def test_the_login_attempt_count_fails_closed_when_the_redis_call_itself_fails(monkeypatch):
+    class BrokenScript:
+        async def __call__(self, **kwargs):
+            raise RedisConnectionError("connection reset")
+
+    monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
+    monkeypatch.setattr(rate_limit, "_count_script", BrokenScript())
+    assert _attempts("victim@example.com", 3) == [503] * 3
 
 
 # --- the per-request check, outside a route ----------------------------------------
