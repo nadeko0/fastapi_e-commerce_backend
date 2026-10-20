@@ -884,10 +884,13 @@ async def create_checkout_session(
 
     amount_cents = _decimal_to_cents(order.total_amount)
     provider_idempotency_key = idempotency_key or f"auto-{uuid.uuid4().hex}"
+    # A client's own URLs are already known to be on the frontend's origin
+    # (CheckoutSessionCreate); omitted ones are the frontend's checkout
+    # pages. {CHECKOUT_SESSION_ID} is filled in by Stripe.
     success_url = payload.success_url or (
-        "https://example.com/checkout/success?session_id={CHECKOUT_SESSION_ID}"
+        f"{settings.FRONTEND_URL}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}"
     )
-    cancel_url = payload.cancel_url or "https://example.com/checkout/cancel"
+    cancel_url = payload.cancel_url or f"{settings.FRONTEND_URL}/checkout/cancel"
 
     payment_row = Payment(
         order_id=order.id,

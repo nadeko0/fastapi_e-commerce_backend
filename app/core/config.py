@@ -1,4 +1,5 @@
 from typing import Annotated, ClassVar, List, Literal, Optional
+from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, Field, model_validator, validator
 from pydantic_settings import BaseSettings, NoDecode
@@ -319,6 +320,20 @@ class Settings(BaseSettings):
     # multiplying by 100 (_decimal_to_cents in app/api/v1/orders.py), so a
     # currency without a minor unit (JPY, KRW) is not supported here yet.
     STORE_CURRENCY: str = Field("USD", pattern=r"^[A-Z]{3}$")
+    # Where the storefront is served: scheme, host and port, no trailing
+    # slash. A Checkout Session sends the customer back here after Stripe's
+    # hosted page; success_url/cancel_url from a client are accepted only
+    # on this origin, and built on it when omitted (app/schemas/order.py,
+    # create_checkout_session). The default is a local frontend; production
+    # requires https (check_payment_settings_for_production).
+    FRONTEND_URL: str = "http://localhost:3000"
+
+    @validator("FRONTEND_URL")
+    def validate_frontend_url(cls, v: str) -> str:
+        parts = urlsplit(v)
+        if parts.scheme not in ("http", "https") or not parts.hostname or "@" in parts.netloc:
+            raise ValueError("FRONTEND_URL must be an http(s) URL with a host")
+        return v.rstrip("/")
 
     @model_validator(mode="after")
     def check_deployment_settings(self) -> "Settings":
@@ -349,6 +364,9 @@ class Settings(BaseSettings):
                 problems.append(f"{name} is a placeholder, not a secret")
             elif len(value.encode("utf-8")) < minimum_bytes:
                 problems.append(f"{name} is shorter than {minimum_bytes} bytes")
+        # Paying customers are sent back here from Stripe Checkout.
+        if not self.FRONTEND_URL.startswith("https://"):
+            problems.append("FRONTEND_URL must be an https:// URL")
         if problems:
             raise ValueError(
                 f"ENVIRONMENT={self.ENVIRONMENT!r} is not deployable: " + "; ".join(problems)
