@@ -1,6 +1,9 @@
 import os
 
-os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key")
+# At least as long as the hash: 32 bytes for HS256, 64 for the HS512 token a
+# negative test signs with it (RFC 7518 3.2). PyJWT warns on shorter keys and
+# pyproject.toml turns that warning into an error.
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test")
 os.environ.setdefault("POSTGRES_SERVER", "localhost")
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")

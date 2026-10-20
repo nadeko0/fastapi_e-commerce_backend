@@ -38,6 +38,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+filterwarnings = ["error::jwt.warnings.InsecureKeyLengthWarning"]
 
 [tool.coverage.run]
 source = ["app"]

@@ -232,7 +232,7 @@ def test_no_user_id_from_tokens_that_are_not_valid_access_tokens():
     expired = _token(exp=int(time.time()) - 5)
     foreign = jwt.encode(
         {"sub": "42", "type": "access", "exp": int(time.time()) + 600},
-        "somebody-else's-key",
+        "somebody-else's-key-of-32-bytes!",
         algorithm=settings.JWT_ALGORITHM,
     )
     no_subject = jwt.encode(
