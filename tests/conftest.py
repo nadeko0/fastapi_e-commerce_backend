@@ -9,6 +9,10 @@ os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
 os.environ.setdefault("POSTGRES_DB", "test")
 os.environ.setdefault("REDIS_HOST", "localhost")
+# Nothing listens on port 1. Tests use a fake Redis; one that slips past it
+# must fail here exactly as in CI (which has no Redis), not quietly use a
+# Redis that happens to run on the developer's machine.
+os.environ.setdefault("REDIS_PORT", "1")
 os.environ.setdefault("DATA_ENCRYPTION_KEY", "test-encryption-key")
 os.environ.setdefault("SMTP_HOST", "localhost")
 os.environ.setdefault("SMTP_USER", "test@example.com")

@@ -350,18 +350,21 @@ def test_retry_after_timeout_with_new_key_succeeds(client, db_session, monkeypat
     def _boom(self):
         raise PaymentProviderTimeoutError("simulated network timeout")
 
-    monkeypatch.setattr(
-        "app.services.payment.stripe_provider.StripePaymentProvider._simulate_network_call",
-        _boom,
-    )
-    failed_response = client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/pay",
-        json=_payment_payload(order),
-        headers={**setup["headers"], "Idempotency-Key": "attempt-1"},
-    )
+    # A context, not monkeypatch.undo(): undo() reverts every patch of this
+    # test, including the fixtures' fake Redis, so the retry then talked to a
+    # real Redis on localhost - present on a developer machine, absent in CI,
+    # where the auth blacklist check failed closed and the retry got a 401.
+    with monkeypatch.context() as m:
+        m.setattr(
+            "app.services.payment.stripe_provider.StripePaymentProvider._simulate_network_call",
+            _boom,
+        )
+        failed_response = client.post(
+            f"{ORDERS_PREFIX}/{order['id']}/pay",
+            json=_payment_payload(order),
+            headers={**setup["headers"], "Idempotency-Key": "attempt-1"},
+        )
     assert failed_response.status_code == 503
-
-    monkeypatch.undo()
 
     retry_response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
