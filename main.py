@@ -15,6 +15,8 @@ if __name__ == "__main__":
         # Windows' ProactorEventLoop, which is what uvicorn picks there for a
         # single in-process worker. Linux/macOS already get a selector loop.
         loop="asyncio:SelectorEventLoop" if sys.platform == "win32" else "auto",
-        proxy_headers=bool(settings.TRUSTED_PROXIES),
-        forwarded_allow_ips=settings.TRUSTED_PROXIES or None,
+        # X-Forwarded-For is the application's business, by TRUSTED_PROXIES
+        # (app/core/forwarded.py). uvicorn's own handling would rewrite the
+        # client address first, by a list of its own.
+        proxy_headers=False,
     )

@@ -12,6 +12,7 @@ from app.api.v1 import admin, cart, legal, orders, products, users
 from app.core import database
 from app.core.config import settings
 from app.core.database import async_engine, engine
+from app.core.forwarded import ForwardedClientMiddleware
 from app.core.logging_config import setup_logging
 from app.core.overload import InFlightLimitMiddleware
 from app.core.rate_limit import rate_limit
@@ -74,6 +75,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# X-Forwarded-For -> request.client, by TRUSTED_PROXIES and nothing else,
+# however the server was started (app/core/forwarded.py).
+app.add_middleware(ForwardedClientMiddleware)
 
 # Added last so it is the outermost layer: a request that is going to be
 # shed should cost nothing - no rate-limit Redis call, no CORS handling.
