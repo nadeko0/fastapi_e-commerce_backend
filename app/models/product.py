@@ -4,6 +4,7 @@ from sqlalchemy import (
     ARRAY,
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -61,6 +62,12 @@ class Product(Base):
         "ProductVariant", back_populates="product", cascade="all, delete-orphan"
     )
     __table_args__ = (
+        # Money and stock invariants, enforced by the database as well as
+        # by the schemas: a bug or a hand-written UPDATE cannot store them.
+        # Same names and conditions as migration 76d14f9f12e5, which adds
+        # them to an existing database.
+        CheckConstraint("price >= 0", name="ck_product_price_non_negative"),
+        CheckConstraint("stock_quantity >= 0", name="ck_product_stock_non_negative"),
         Index('idx_product_name_description', 'name', 'description'),
         Index('idx_product_price', 'price'),
         Index('idx_product_category', 'category_id'),
@@ -104,6 +111,12 @@ class ProductVariant(Base):
     product = relationship("Product", back_populates="variants")
 
     __table_args__ = (
+        # See Product.__table_args__.
+        CheckConstraint("stock_quantity >= 0", name="ck_product_variant_stock_non_negative"),
+        CheckConstraint(
+            "price_override IS NULL OR price_override >= 0",
+            name="ck_product_variant_price_override_non_negative",
+        ),
         Index("idx_product_variant_product", "product_id"),
         Index("idx_product_variant_active", "is_active"),
     )

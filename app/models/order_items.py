@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Integer, Numeric
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
@@ -25,6 +25,12 @@ class OrderItem(Base):
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
     variant = relationship("ProductVariant")
+
+    __table_args__ = (
+        # See Product.__table_args__.
+        CheckConstraint("quantity > 0", name="ck_order_item_quantity_positive"),
+        CheckConstraint("price_at_time >= 0", name="ck_order_item_price_non_negative"),
+    )
 
     # OrderItemResponse (app/schemas/order.py) requires product_name/
     # product_image as flat fields - these read-only properties (not
