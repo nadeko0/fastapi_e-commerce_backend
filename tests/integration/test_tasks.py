@@ -340,6 +340,41 @@ def test_rate_limits_are_actually_applied_to_the_tasks():
     assert tasks.cleanup_inactive_accounts.rate_limit == "10/m"
 
 
+def test_tasks_close_their_database_session(db_session, tasks_db, monkeypatch):
+    """Regression test. Tasks used to take a session with next(get_db()) and
+    never close it, leaving the connection idle in an open transaction after
+    every run (seen on a real worker against Postgres: 6 such connections
+    after 14 task runs, reaped only by the server's 30 s timeout)."""
+    closed = []
+    real_factory = tasks.SessionLocal
+
+    def tracking_factory():
+        session = real_factory()
+        original_close = session.close
+
+        def close():
+            closed.append(session)
+            original_close()
+
+        session.close = close
+        return session
+
+    monkeypatch.setattr("app.tasks.SessionLocal", tracking_factory)
+    monkeypatch.setattr("app.tasks.send_order_confirmation_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.tasks.send_order_status_update_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.tasks.send_low_stock_alert_email", lambda *a, **k: True)
+
+    tasks.send_order_confirmation(999_999)
+    tasks.send_order_status_update(999_999)
+    tasks.cleanup_inactive_accounts()
+    tasks.update_product_stats()
+    tasks.check_low_stock()
+
+    assert len(closed) == 5, "each task that opens a session must close it"
+    for session in closed:
+        assert not session.in_transaction()
+
+
 def test_check_low_stock_sends_nothing_when_all_products_well_stocked(
     db_session, tasks_db, monkeypatch
 ):

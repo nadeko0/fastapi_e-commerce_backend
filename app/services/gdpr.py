@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 from fastapi import HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -83,9 +84,15 @@ class GDPRService:
         request_id = f"export_{user.id}_{datetime.utcnow().timestamp()}"
 
         try:
-            # Send initial confirmation email
+            # Send initial confirmation email. In a worker thread, like every
+            # send below: these functions are synchronous SMTP (connect,
+            # STARTTLS, login, send - about 0.8 s against a real server), and
+            # this method runs on the event loop. Called inline, as they were,
+            # each one stopped the whole worker for that long; this was the
+            # only route still sending mail from inside a handler (found by
+            # tracing an end-to-end run, scripts/loadtest/FINDINGS.md).
             from app.services.email import send_gdpr_request_received
-            send_gdpr_request_received(user.email, "export", request_id)
+            await run_in_threadpool(send_gdpr_request_received, user.email, "export", request_id)
 
             # In production, the export payload would be assembled here and
             # stored in a secure location with a signed, expiring download
@@ -97,7 +104,7 @@ class GDPRService:
                 request_date=datetime.utcnow(),
                 expires_at=datetime.utcnow() + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS)
             )
-            send_gdpr_export_email(user.email, export_data)
+            await run_in_threadpool(send_gdpr_export_email, user.email, export_data)
 
             return request_id
 
@@ -117,7 +124,9 @@ class GDPRService:
         try:
             # Send initial confirmation email
             from app.services.email import send_gdpr_request_received
-            send_gdpr_request_received(user.email, "deletion", request_id)
+            await run_in_threadpool(
+                send_gdpr_request_received, user.email, "deletion", request_id
+            )
 
             # Mark user for deletion and deactivate immediately, matching
             # POST /users/data/delete. The scheduled cleanup_inactive_accounts
@@ -131,7 +140,7 @@ class GDPRService:
 
             # Send deletion confirmation email
             from app.services.email import send_gdpr_deletion_confirmation
-            send_gdpr_deletion_confirmation(user.email, request_id)
+            await run_in_threadpool(send_gdpr_deletion_confirmation, user.email, request_id)
 
             return request_id
 
