@@ -6,12 +6,12 @@ What a client sees over HTTP is in tests/integration/test_rate_limit_api.py.
 import asyncio
 import time
 
+import jwt
 import pytest
 from freezegun import freeze_time
 from hypothesis import given
 from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
-from jose import jwt
 from pydantic import ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from starlette.requests import Request

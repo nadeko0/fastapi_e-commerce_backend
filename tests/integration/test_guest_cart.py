@@ -14,9 +14,9 @@ import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
-from jose import jwt
 from redis import ConnectionError as RedisConnectionError
 
 from app.core.config import Settings, settings

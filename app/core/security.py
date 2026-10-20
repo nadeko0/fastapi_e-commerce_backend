@@ -7,10 +7,10 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple, Union
 
 import bcrypt
+import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -170,7 +170,7 @@ def rotate_refresh_token(token: str, db: Session) -> Tuple[str, str]:
     """
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-    except JWTError:
+    except jwt.PyJWTError:
         raise RefreshTokenError("Could not validate refresh token")
 
     if payload.get("type") != "refresh":
@@ -217,7 +217,7 @@ def revoke_refresh_token(token: str) -> None:
             algorithms=[settings.JWT_ALGORITHM],
             options={"verify_exp": False},
         )
-    except JWTError:
+    except jwt.PyJWTError:
         return
     family = payload.get("family")
     if family:
@@ -236,7 +236,7 @@ def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
         # lifetime negative, clamped to 1 s below - a logged-out token was
         # blacklisted for one second and then worked again.
         expires_in = max(int(payload["exp"] - time.time()), 1)
-    except JWTError:
+    except jwt.PyJWTError:
         expires_in = 1
     blacklist_token(access_token, expires_in)
     if refresh_token:
@@ -307,7 +307,7 @@ async def get_current_user(
         if user_id is None or token_type != "access":
             raise credentials_exception
 
-    except JWTError:
+    except jwt.PyJWTError:
         raise credentials_exception
 
     password_changed_at = await get_password_changed_at(user_id)
@@ -403,7 +403,7 @@ def validate_token(token: str) -> Optional[dict]:
             algorithms=[settings.JWT_ALGORITHM]
         )
         return payload
-    except JWTError:
+    except jwt.PyJWTError:
         return None
 
 def generate_password_reset_token(email: str) -> str:
@@ -418,7 +418,7 @@ def verify_password_reset_token(token: str) -> Optional[str]:
         if payload["type"] != "reset":
             return None
         return payload["sub"]
-    except JWTError:
+    except jwt.PyJWTError:
         return None
 
 def generate_email_verification_token(email: str) -> str:
@@ -433,5 +433,5 @@ def verify_email_token(token: str) -> Optional[str]:
         if payload["type"] != "verify_email":
             return None
         return payload["sub"]
-    except JWTError:
+    except jwt.PyJWTError:
         return None
