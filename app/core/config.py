@@ -225,6 +225,14 @@ class Settings(BaseSettings):
     # period, login for that email answers 429 until the period is over. A
     # successful login or a completed password reset clears the count.
     RATE_LIMIT_LOGIN_FAILURES: str = Field("10/15 minutes", pattern=RATE_LIMIT_PATTERN)
+    # New guest carts per client address. Not a limit on requests: adding
+    # to a cart that already exists is not counted, only the add that has
+    # to open a new one (app/api/v1/cart.py). Each new cart is a Redis key
+    # that lives for REDIS_GUEST_CART_TTL_DAYS, so without this a client
+    # that never sends the cookie back leaves one behind per request. A
+    # visitor needs one; the margin is for many visitors behind one address
+    # (an office, a carrier's NAT).
+    RATE_LIMIT_GUEST_CART: str = Field("100/hour", pattern=RATE_LIMIT_PATTERN)
 
     # Essential GDPR Settings
     USER_DATA_RETENTION_DAYS: int = 365

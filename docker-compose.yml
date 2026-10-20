@@ -144,7 +144,27 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    # One Redis holds the Celery broker queues, the token blacklist and
+    # password-change watermarks, the rate-limit counters and every cart.
+    # maxmemory: without it, growth (guest carts above all: anyone can make
+    # one) goes on until the kernel kills the container, and everything in
+    # it goes at once. noeviction: when full, Redis refuses writes and drops
+    # nothing. Every evicting policy would drop something that must stay:
+    # allkeys-* the Celery queues (no TTL), volatile-* the blacklist entries
+    # and watermarks (TTL), which would make revoked tokens valid again.
+    # A refused write is answered as Redis being down (a cart change is a
+    # 503, nothing changed). Separating the broker into a logical database
+    # would not help: maxmemory is per instance. Size REDIS_MAXMEMORY below
+    # the container's memory; RATE_LIMIT_GUEST_CART bounds how fast guest
+    # carts can fill it.
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - noeviction
     ports:
       - "${DOCKER_REDIS_PORT:-6379}:6379"
     volumes:
