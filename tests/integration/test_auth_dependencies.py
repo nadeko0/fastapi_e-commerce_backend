@@ -7,9 +7,11 @@ of the object they return: a detached snapshot of the user row.
 """
 
 import asyncio
+import time
 import uuid
 
 import fakeredis
+import jwt
 import pytest
 from freezegun import freeze_time
 from sqlalchemy import event, inspect
@@ -125,6 +127,37 @@ def test_token_blacklisted_through_the_async_client_is_seen_by_the_sync_service(
 
     assert security.redis_service.is_blacklisted(token) is True
     assert client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token)).status_code == 401
+
+
+def _sign(claims, key=None, algorithm=None):
+    return jwt.encode(
+        claims,
+        security.settings.JWT_SECRET_KEY if key is None else key,
+        algorithm=algorithm or security.settings.JWT_ALGORITHM,
+    )
+
+
+@pytest.mark.parametrize(
+    "forge",
+    [
+        lambda claims: _sign({**claims, "exp": int(time.time()) - 5}),
+        lambda claims: _sign(claims, key="somebody-else's-key-of-32-bytes!"),
+        lambda claims: jwt.encode(claims, None, algorithm="none"),
+        lambda claims: _sign(claims, algorithm="HS512"),
+        lambda claims: "not.a.token",
+    ],
+    ids=["expired", "wrong-key", "alg-none", "other-alg", "garbage"],
+)
+def test_a_token_the_jwt_library_refuses_is_a_401(client, db_session, forge):
+    # A real user, so that the token is the only thing wrong. Each case is a
+    # different PyJWTError subclass, and every one must end as a 401.
+    client.post(f"{USERS_PREFIX}/register", json=_registration_payload())
+    claims = {"sub": str(_user_id(db_session)), "type": "access", "exp": int(time.time()) + 600}
+
+    response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(forge(claims)))
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Could not validate credentials"
 
 
 def test_logout_through_the_api_invalidates_the_token(client):

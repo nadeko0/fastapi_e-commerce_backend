@@ -10,7 +10,7 @@ dependencies = [
     "alembic",
     "pydantic",
     "pydantic-settings",
-    "python-jose",
+    "pyjwt",
     "bcrypt",
     "cryptography",
     "python-multipart",

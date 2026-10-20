@@ -46,8 +46,8 @@ import re
 from functools import lru_cache
 from typing import NamedTuple, Optional
 
+import jwt
 from fastapi import HTTPException, Request
-from jose import JWTError, jwt
 from redis.exceptions import RedisError
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
@@ -181,7 +181,7 @@ def user_id_from_token(request: Request) -> Optional[str]:
         payload = jwt.decode(
             token.strip(), settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
         )
-    except JWTError:  # malformed, expired, or signed with another key
+    except jwt.PyJWTError:  # malformed, expired, or signed with another key
         return None
     if payload.get("type") != "access" or payload.get("sub") is None:
         return None
