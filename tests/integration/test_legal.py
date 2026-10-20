@@ -147,7 +147,7 @@ def test_data_request_deletion_returns_processing_status(client, monkeypatch):
 
     response = client.post(
         f"{LEGAL_PREFIX}/data-request",
-        json={"request_type": "deletion"},
+        json={"request_type": "deletion", "password": _valid_registration_payload()["password"]},
         headers=_auth_headers(token),
     )
 
@@ -155,6 +155,69 @@ def test_data_request_deletion_returns_processing_status(client, monkeypatch):
     body = response.json()
     _assert_envelope(body)
     assert body["data"]["request_id"].startswith("deletion_")
+
+
+def _quiet_gdpr_mail(monkeypatch):
+    for name in (
+        "send_gdpr_request_received",
+        "send_gdpr_deletion_confirmation",
+        "send_gdpr_export_email",
+    ):
+        monkeypatch.setattr(f"app.services.email.{name}", lambda *a, **k: True)
+
+
+def test_data_request_deletion_without_the_password_changes_nothing(
+    client, db_session, monkeypatch
+):
+    # Erasure is irreversible once the grace period is over. A bearer token
+    # alone (15 minutes of a stolen session) must not be enough for it:
+    # /users/data/delete asks for the password, and so must this route.
+    _quiet_gdpr_mail(monkeypatch)
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/data-request",
+        json={"request_type": "deletion"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 422
+    stored = _stored_user(db_session)
+    assert stored.is_active is True
+    assert stored.data_deletion_requested is False
+
+
+def test_data_request_deletion_with_a_wrong_password_changes_nothing(
+    client, db_session, monkeypatch
+):
+    _quiet_gdpr_mail(monkeypatch)
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/data-request",
+        json={"request_type": "deletion", "password": "Wr0ngPassword"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Incorrect password"
+    stored = _stored_user(db_session)
+    assert stored.is_active is True
+    assert stored.data_deletion_requested is False
+
+
+def test_data_request_export_needs_no_password(client, monkeypatch):
+    # Reading one's own data is not destructive; the bearer token is enough.
+    _quiet_gdpr_mail(monkeypatch)
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/data-request",
+        json={"request_type": "export"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
 
 
 def test_data_request_rejects_invalid_request_type(client):
@@ -331,7 +394,7 @@ def test_data_request_deletion_actually_deactivates_the_account(client, db_sessi
 
     response = client.post(
         f"{LEGAL_PREFIX}/data-request",
-        json={"request_type": "deletion"},
+        json={"request_type": "deletion", "password": _valid_registration_payload()["password"]},
         headers=_auth_headers(token),
     )
     assert response.status_code == 200
