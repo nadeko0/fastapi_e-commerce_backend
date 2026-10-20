@@ -7,6 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_async_db
+from app.core.rate_limit import (
+    client_address,
+    parse_rate,
+    seconds_until_allowed,
+    too_many_requests,
+)
 from app.core.security import get_optional_active_user
 from app.models.product import Product, ProductVariant
 from app.models.user import User
@@ -302,6 +308,27 @@ def _cart_or_503(cart: Optional[Cart]) -> Cart:
         )
     return cart
 
+async def _allow_new_guest_cart(request: Request) -> None:
+    """Count one new guest cart against the client's address; raise the 429
+    once RATE_LIMIT_GUEST_CART is used up.
+
+    Called only where an add is about to open a cart, never for one that
+    exists: every guest cart is a Redis key for REDIS_GUEST_CART_TTL_DAYS,
+    and a client that drops the cookie gets a new one with each add, which
+    the per-request limit (RATE_LIMIT_DEFAULT) alone let one address do
+    hundreds of times a minute. Same counter mechanism and the same notion
+    of the client's address as the per-request limits
+    (app/core/rate_limit.py), on a key of its own.
+    """
+    if not settings.RATE_LIMIT_ENABLED:
+        return
+    retry_after = await seconds_until_allowed(
+        f"rl:guest-cart-new:ip:{client_address(request)}",
+        parse_rate(settings.RATE_LIMIT_GUEST_CART),
+    )
+    if retry_after:
+        raise too_many_requests("Too many new guest carts from this address", retry_after)
+
 def _cart_full(error: CartFullError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -355,10 +382,12 @@ async def get_user_cart(
     responses={
         400: {"description": "Not enough stock available, or the cart already holds the maximum number of different items"},
         404: {"description": "Product not found or inactive, or variant_id doesn't belong to product_id / isn't active"},
+        429: {"description": "This address has opened too many guest carts (RATE_LIMIT_GUEST_CART)"},
         503: {"description": "Cart store unavailable, nothing was changed"},
     },
 )
 async def add_to_cart(
+    request: Request,
     response: Response,
     product_id: int,
     # ge=1: 0 or a negative quantity was accepted, and could take a line to
@@ -419,6 +448,7 @@ async def add_to_cart(
             if owner.is_guest:
                 # This guest's first line: the identifier is made here, by
                 # the server, in the request that stores the cart under it.
+                await _allow_new_guest_cart(request)
                 owner = CartOwner.guest(new_guest_cart_id())
             cart = redis.add_to_cart_atomic(owner, **line)
     except InsufficientStockError:
