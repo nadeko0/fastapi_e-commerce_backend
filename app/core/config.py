@@ -226,10 +226,32 @@ class Settings(BaseSettings):
     RATE_LIMIT_AUTH: str = Field("20/minute", pattern=RATE_LIMIT_PATTERN)
     # Creating an order, paying, opening a checkout session. Per user.
     RATE_LIMIT_CHECKOUT: str = Field("10/minute", pattern=RATE_LIMIT_PATTERN)
-    # Failed logins per email (not per address): after this many in the
-    # period, login for that email answers 429 until the period is over. A
-    # successful login or a completed password reset clears the count.
-    RATE_LIMIT_LOGIN_FAILURES: str = Field("10/15 minutes", pattern=RATE_LIMIT_PATTERN)
+    # Failed logins, two counts (see "Failed logins" in app/core/rate_limit.py).
+    # A successful login or a completed password reset clears them.
+    # The hard lock: failed logins for one email from one client address.
+    # After this many in the period, that address cannot log in to that
+    # email until the period is over; the owner, elsewhere, still can.
+    RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS: str = Field(
+        "10/15 minutes", pattern=RATE_LIMIT_PATTERN
+    )
+    # The backstop against guessing spread over many addresses: failed
+    # logins for one email from anywhere. Far looser than the hard lock, so
+    # that locking an owner out takes many addresses, not one.
+    RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL: str = Field("100/hour", pattern=RATE_LIMIT_PATTERN)
+    # Renamed: it was the per-email count, which let one address lock any
+    # account. Refused rather than silently ignored, so that a deployment
+    # still setting it learns that its value no longer applies.
+    RATE_LIMIT_LOGIN_FAILURES: Optional[str] = None
+
+    @validator("RATE_LIMIT_LOGIN_FAILURES")
+    def reject_renamed_login_failures(cls, v: Optional[str]) -> None:
+        if v is not None:
+            raise ValueError(
+                "RATE_LIMIT_LOGIN_FAILURES was split into "
+                "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS and "
+                "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL; set those instead"
+            )
+        return None
     # New guest carts per client address. Not a limit on requests: adding
     # to a cart that already exists is not counted, only the add that has
     # to open a new one (app/api/v1/cart.py). Each new cart is a Redis key

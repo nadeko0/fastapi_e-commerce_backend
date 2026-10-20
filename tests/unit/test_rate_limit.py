@@ -33,7 +33,8 @@ RATE_SETTINGS = (
     "RATE_LIMIT_SEARCH",
     "RATE_LIMIT_AUTH",
     "RATE_LIMIT_CHECKOUT",
-    "RATE_LIMIT_LOGIN_FAILURES",
+    "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS",
+    "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL",
 )
 
 
@@ -88,6 +89,13 @@ def test_a_malformed_limit_stops_the_application_at_startup(name):
     # must be noticed when the process starts, not never.
     with pytest.raises(ValidationError):
         type(settings)(**{name: "lots"})
+
+
+def test_the_old_single_login_failure_setting_is_refused_not_ignored():
+    # It was split in two. A deployment still setting it would otherwise
+    # run with defaults it never chose, and nobody would notice.
+    with pytest.raises(ValidationError, match="RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS"):
+        type(settings)(RATE_LIMIT_LOGIN_FAILURES="10/15 minutes")
 
 
 # --- client address -----------------------------------------------------------
@@ -363,7 +371,7 @@ def _attempts(email, times):
         answers = []
         for _ in range(times):
             try:
-                await rate_limit.check_login_attempt(email)
+                await rate_limit.check_login_attempt(email, make_request())
                 answers.append(None)
             except HTTPException as refusal:
                 answers.append(refusal.status_code)

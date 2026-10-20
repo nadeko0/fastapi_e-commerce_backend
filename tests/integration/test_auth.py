@@ -449,8 +449,9 @@ def test_login_brute_force_is_blocked_after_rate_limit_exceeded(
     client, monkeypatch, valid_registration_payload
 ):
     # A scripted brute force against one account, with the default
-    # settings. What stops it is the failed-login count of that email
-    # (RATE_LIMIT_LOGIN_FAILURES, 10 in 15 minutes), which is lower than
+    # settings. What stops it is the failed-login count of that email at
+    # that address (RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS, 10 in
+    # 15 minutes), which is lower than
     # what the address may try on the login route (RATE_LIMIT_AUTH,
     # 20/minute). Details of both: tests/unit/test_rate_limit.py and
     # tests/integration/test_rate_limit_api.py.
