@@ -1,10 +1,11 @@
 import logging
 from contextlib import contextmanager
-from typing import Generator
+from typing import AsyncGenerator, Generator
 
 from fastapi import HTTPException, status
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
@@ -53,8 +54,7 @@ def _build_connect_args(database_uri: str) -> dict:
 
 _connect_args = _build_connect_args(settings.DATABASE_URI)
 
-engine = create_engine(
-    settings.DATABASE_URI,
+_engine_kwargs = dict(
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_timeout=settings.DB_POOL_TIMEOUT,
@@ -66,11 +66,48 @@ engine = create_engine(
     logging_name=None
 )
 
+engine = create_engine(settings.DATABASE_URI, **_engine_kwargs)
+
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=engine,
     expire_on_commit=False
+)
+
+# The async engine, for routes that have been moved off the sync Session.
+#
+# Every route used to be `async def` calling the sync Session above inline,
+# which runs each query on the event loop thread. Under load that does worse
+# than serialize requests: a request keeps its pooled connection until
+# get_db's teardown, the event loop is what dispatches that teardown, and so
+# once every connection belongs to a finished-but-not-yet-torn-down request
+# the next handler blocks the loop waiting for a connection that only the
+# loop could have returned. The server stops answering entirely until
+# pool_timeout fires. Measured and stack-dumped under locust - see README,
+# "Dependency refresh and load test". With an AsyncSession, waiting for a
+# connection (and for the query) yields to the loop instead of blocking it.
+#
+# Routes are being moved over one router at a time, so both engines exist
+# for now, each with its own pool: a worker can hold up to
+# 2 * (DB_POOL_SIZE + DB_MAX_OVERFLOW) Postgres connections until the sync
+# engine is only used by Celery (app/tasks.py), Alembic, and scripts.
+#
+# psycopg 3 is the driver for both: `postgresql+psycopg://` selects its sync
+# or async mode depending on which create_*engine() is given the URL, so
+# there is no second driver and no second DATABASE_URI. A DATABASE_URI that
+# names a sync-only driver (e.g. postgresql+psycopg2://) fails right here,
+# at import, rather than on the first request to an async route.
+async_engine = create_async_engine(settings.DATABASE_URI, **_engine_kwargs)
+
+AsyncSessionLocal = async_sessionmaker(
+    bind=async_engine,
+    autoflush=False,
+    # Same as SessionLocal: objects stay readable after commit. Under asyncio
+    # this is not optional - touching an expired attribute would trigger a
+    # lazy load, which cannot run outside an awaited call and raises
+    # MissingGreenlet instead.
+    expire_on_commit=False,
 )
 
 @contextmanager
@@ -101,6 +138,26 @@ def get_db() -> Generator[Session, None, None]:
             yield session
         except SQLAlchemyError as e:
             logger.error("Database error in get_db", exc_info=e)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="A database error occurred"
+            )
+
+
+async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+    # Async counterpart of get_db: commit on success, roll back and answer
+    # with a generic 500 on a database error (never the raw SQLAlchemy
+    # message - see session_scope above for why). `async with` closes the
+    # session in this same task, including when the request is cancelled, so
+    # the "cancelled before teardown ran" leak described at the top of this
+    # module has no equivalent here.
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except SQLAlchemyError as e:
+            await session.rollback()
+            logger.error("Database error in get_async_db", exc_info=e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="A database error occurred"

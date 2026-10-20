@@ -24,26 +24,74 @@ os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # no Redis available in th
 # factor here instead - this is the single biggest lever on suite runtime.
 os.environ.setdefault("BCRYPT_ROUNDS", "4")
 
+import atexit
+import shutil
+import tempfile
+
 import fakeredis
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
+import app.core.database as database_module
 import app.models  # noqa: F401 registers all tables on Base
+import app.services.redis_async as redis_async_module
 from app.api.deps import get_db as deps_get_db
 from app.core.database import get_db as database_get_db
 from app.main import app
 from app.models.base import Base
 from app.services.redis import RedisService
 
+# A SQLite *file*, not :memory:. Routes are split between the sync Session
+# and AsyncSession (see app/core/database.py), which in tests means two
+# drivers (pysqlite and aiosqlite) that must see the same data - and an
+# in-memory SQLite database belongs to the one connection that created it.
+# A temp file is the one thing both can open.
+_db_dir = tempfile.mkdtemp(prefix="ecommerce-tests-")
+_db_url_path = os.path.join(_db_dir, "test.db").replace("\\", "/")
+
 engine = create_engine(
-    "sqlite:///:memory:",
+    f"sqlite:///{_db_url_path}",
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
+
+
+@event.listens_for(engine, "connect")
+def _sqlite_pragmas(dbapi_connection, _record):
+    cursor = dbapi_connection.cursor()
+    # WAL: a test's own db_session usually still has a read transaction open
+    # when it calls an endpoint, and in SQLite's default journal mode that
+    # open reader would block a write coming from the other driver. WAL lets
+    # readers and a writer coexist. It is a property of the file, so the
+    # aiosqlite connections get it too.
+    cursor.execute("PRAGMA journal_mode=WAL")
+    # Throwaway database: skip fsync, the suite recreates every table per test.
+    cursor.execute("PRAGMA synchronous=OFF")
+    cursor.close()
+
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# NullPool: TestClient runs each request on its own event loop, and an
+# aiosqlite connection cannot outlive the loop that opened it.
+async_engine = create_async_engine(f"sqlite+aiosqlite:///{_db_url_path}", poolclass=NullPool)
+
+# Swapped at the factory, not via dependency_overrides: the real
+# get_async_db (commit on success, rollback + generic 500 on a database
+# error) is then what every test exercises, just against SQLite.
+database_module.AsyncSessionLocal = async_sessionmaker(
+    bind=async_engine, autoflush=False, expire_on_commit=False
+)
+
+
+@atexit.register
+def _remove_test_database():
+    engine.dispose()
+    shutil.rmtree(_db_dir, ignore_errors=True)
 
 
 def _override_get_db():
@@ -84,10 +132,26 @@ def fake_redis(monkeypatch):
     module-level redis_service) already points at. A fresh FakeRedis per
     test keeps state (cart contents, blacklist entries, caches) from
     leaking between tests.
+
+    The async client (app/services/redis_async.py: rate limiter and auth
+    dependencies) is faked as well, on the *same* FakeServer, so both see
+    one keyspace: a token blacklisted through the sync service is rejected
+    by the async auth dependency, exactly as with one real Redis. Only the
+    client factory is replaced - the real per-event-loop registry in
+    get_async_redis()/close_async_redis() is what every test exercises -
+    and the registry starts empty for each test, so no client (or its
+    FakeServer) is carried over from the previous one.
     """
-    fake = fakeredis.FakeRedis(decode_responses=True)
+    server = fakeredis.FakeServer()
+    fake = fakeredis.FakeRedis(server=server, decode_responses=True)
     monkeypatch.setattr("app.services.redis.Redis", lambda *a, **k: fake)
     RedisService()
+    monkeypatch.setattr(
+        redis_async_module,
+        "_create_client",
+        lambda: fakeredis.FakeAsyncRedis(server=server, decode_responses=True),
+    )
+    monkeypatch.setattr(redis_async_module, "_clients", {})
     yield fake
 
 

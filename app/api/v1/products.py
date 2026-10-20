@@ -1,10 +1,11 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import Select, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
-from app.core.database import get_db
+from app.core.database import get_async_db
 from app.models.category import Category
 from app.models.product import Product
 from app.schemas.category import (
@@ -24,6 +25,24 @@ from app.services.redis import RedisService
 
 router = APIRouter(tags=["catalog"])
 
+# This router runs on AsyncSession (app.core.database.get_async_db): every
+# query below is awaited, so the event loop keeps serving other requests
+# while Postgres works. Two rules follow from that and are easy to break:
+#   - No lazy loading. Anything a response needs from a relationship must be
+#     loaded by the query itself (joinedload(Product.category) below);
+#     touching an unloaded relationship raises MissingGreenlet under asyncio
+#     instead of quietly running one more query.
+#   - RedisService is still the synchronous client, so its calls here do
+#     block the loop for one local round trip. That is the next thing to
+#     move, not an oversight.
+
+
+async def _count(db: AsyncSession, stmt: Select) -> int:
+    # Same SQL the legacy Query.count() produced: SELECT count(*) FROM (<stmt>).
+    # order_by(None) because ordering a subquery that is only counted is
+    # wasted work for Postgres.
+    return await db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+
 
 def _to_product_response(product: Product) -> ProductResponse:
     # ProductResponse requires category_name, which is not a Product
@@ -39,20 +58,18 @@ def _to_product_response(product: Product) -> ProductResponse:
 async def list_categories(
     pagination: PaginationParams = Depends(),
     parent_id: Optional[int] = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """List categories, optionally filtered by parent, with pagination."""
 
-    query = db.query(Category)
+    stmt = select(Category)
     if parent_id is not None:
-        query = query.filter(Category.parent_id == parent_id)
+        stmt = stmt.where(Category.parent_id == parent_id)
 
-    total = query.count()
-    categories = (
-        query.offset((pagination.page - 1) * pagination.size)
-        .limit(pagination.size)
-        .all()
-    )
+    total = await _count(db, stmt)
+    categories = (await db.scalars(
+        stmt.offset((pagination.page - 1) * pagination.size).limit(pagination.size)
+    )).all()
 
     return APIResponse.success_response(CategoryListResponse(
         items=[CategoryResponse.from_orm(cat) for cat in categories],
@@ -64,7 +81,7 @@ async def list_categories(
 
 @router.get("/categories/tree", response_model=APIResponse[CategoryTreeResponse])
 async def get_category_tree(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     redis: RedisService = Depends(),
 ):
     """Retrieve the full category tree, nested from root categories down."""
@@ -74,7 +91,7 @@ async def get_category_tree(
         return APIResponse.success_response(cached_tree)
 
 
-    categories = db.query(Category).all()
+    categories = (await db.scalars(select(Category))).all()
 
     if not categories:
 
@@ -118,11 +135,11 @@ async def get_category_tree(
 )
 async def get_category(
     category_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Retrieve a single category by ID."""
 
-    category = db.query(Category).filter(Category.id == category_id).first()
+    category = (await db.scalars(select(Category).where(Category.id == category_id))).first()
     if not category:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -133,24 +150,24 @@ async def get_category(
 @router.get("/products", response_model=APIResponse[ProductListResponse])
 async def list_products(
     filter_params: ProductFilter = Depends(),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     redis: RedisService = Depends(),
 ):
     """List products with optional filtering, sorting, and pagination."""
 
-    query = db.query(Product).options(joinedload(Product.category)).filter(
+    stmt = select(Product).options(joinedload(Product.category)).where(
         Product.is_active
     )
 
 
     if filter_params.category_id:
-        query = query.filter(Product.category_id == filter_params.category_id)
+        stmt = stmt.where(Product.category_id == filter_params.category_id)
     if filter_params.min_price is not None:
-        query = query.filter(Product.price >= filter_params.min_price)
+        stmt = stmt.where(Product.price >= filter_params.min_price)
     if filter_params.max_price is not None:
-        query = query.filter(Product.price <= filter_params.max_price)
+        stmt = stmt.where(Product.price <= filter_params.max_price)
     if filter_params.in_stock:
-        query = query.filter(Product.stock_quantity > 0)
+        stmt = stmt.where(Product.stock_quantity > 0)
     if filter_params.characteristics:
         for key, value in filter_params.characteristics.items():
             # Stored characteristics are structured ProductCharacteristic
@@ -165,9 +182,9 @@ async def list_products(
             # Python-side indexing Comparator used to build this
             # expression) - using .astext here raised AttributeError on
             # every request that passed a characteristics filter.
-            query = query.filter(Product.characteristics[key]["value"].as_string() == str(value))
+            stmt = stmt.where(Product.characteristics[key]["value"].as_string() == str(value))
     if filter_params.search_query:
-        query = query.filter(
+        stmt = stmt.where(
             or_(
                 Product.name.ilike(f"%{filter_params.search_query}%"),
                 Product.description.ilike(f"%{filter_params.search_query}%")
@@ -188,14 +205,12 @@ async def list_products(
         # the same reason.
         field, order = filter_params.sort_by.rsplit('_', 1)
         column = getattr(Product, field)
-        query = query.order_by(column.desc() if order == 'desc' else column.asc())
+        stmt = stmt.order_by(column.desc() if order == 'desc' else column.asc())
 
-    total = query.count()
-    products = (
-        query.offset((filter_params.page - 1) * filter_params.size)
-        .limit(filter_params.size)
-        .all()
-    )
+    total = await _count(db, stmt)
+    products = (await db.scalars(
+        stmt.offset((filter_params.page - 1) * filter_params.size).limit(filter_params.size)
+    )).all()
 
     return APIResponse.success_response(ProductListResponse(
         items=[_to_product_response(p) for p in products],
@@ -212,11 +227,11 @@ async def list_products(
 @router.get("/products/search", response_model=APIResponse[ProductListResponse])
 async def search_products(
     search: ProductSearch = Depends(),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Search products by name/description, optionally scoped to a category."""
 
-    query = db.query(Product).options(joinedload(Product.category)).filter(
+    stmt = select(Product).options(joinedload(Product.category)).where(
         Product.is_active,
         or_(
             Product.name.ilike(f"%{search.query}%"),
@@ -225,14 +240,12 @@ async def search_products(
     )
 
     if search.category_id:
-        query = query.filter(Product.category_id == search.category_id)
+        stmt = stmt.where(Product.category_id == search.category_id)
 
-    total = query.count()
-    products = (
-        query.offset((search.page - 1) * search.size)
-        .limit(search.size)
-        .all()
-    )
+    total = await _count(db, stmt)
+    products = (await db.scalars(
+        stmt.offset((search.page - 1) * search.size).limit(search.size)
+    )).all()
 
     return APIResponse.success_response(ProductListResponse(
         items=[_to_product_response(p) for p in products],
@@ -249,7 +262,7 @@ async def search_products(
 )
 async def get_product(
     product_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     redis: RedisService = Depends(),
 ):
     """Retrieve a single product by ID."""
@@ -258,10 +271,12 @@ async def get_product(
     if cached_product:
         return APIResponse.success_response(cached_product)
 
-    product = db.query(Product).options(joinedload(Product.category)).filter(
-        Product.id == product_id,
-        Product.is_active,
-    ).first()
+    product = (await db.scalars(
+        select(Product).options(joinedload(Product.category)).where(
+            Product.id == product_id,
+            Product.is_active,
+        )
+    )).first()
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

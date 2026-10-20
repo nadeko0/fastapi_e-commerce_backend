@@ -85,24 +85,22 @@ def test_update_profile_returns_404_when_user_deleted_after_token_issued(
     # HTTPException (it IS an Exception), rewriting it to a 500 with a
     # generic body. This is reachable when the user row disappears (e.g. a
     # concurrent GDPR deletion) *between* get_current_active_user resolving
-    # current_user (its own DB session, from app.api.deps.get_db) and this
-    # route's own re-query of the same user (a separate session, from
-    # app.core.database.get_db). Both dependency resolution and the route
-    # body each do exactly one `Query(User)...first()` call for this
-    # request; simulate the race deterministically by making the second
-    # such call - the route's - return None as if the row were gone by then.
+    # current_user (its own AsyncSession, a select() through
+    # app.core.database.get_async_db) and this route's own re-query of the
+    # same user (a separate sync session, from app.core.database.get_db).
+    # The auth dependency no longer goes through Query.first(), so the
+    # route's re-query is the only such call in this request; simulate the
+    # race deterministically by making it return None as if the row were
+    # gone by then.
     access_token = _register_and_login(client, valid_registration_payload)
 
     import sqlalchemy.orm
 
-    original_first = sqlalchemy.orm.Query.first
     call_count = {"n": 0}
 
     def patched_first(self):
         call_count["n"] += 1
-        if call_count["n"] == 2:
-            return None
-        return original_first(self)
+        return None
 
     monkeypatch.setattr(sqlalchemy.orm.Query, "first", patched_first)
 
@@ -114,6 +112,8 @@ def test_update_profile_returns_404_when_user_deleted_after_token_issued(
 
     assert response.status_code == 404
     assert response.json()["detail"] == "User not found"
+    # Exactly the route's one lookup - authentication itself succeeded.
+    assert call_count["n"] == 1
 
 
 def test_update_profile_returns_500_on_genuine_db_error(
@@ -126,7 +126,15 @@ def test_update_profile_returns_500_on_genuine_db_error(
 
     from sqlalchemy.orm import Session
 
+    original_commit = Session.commit
+
     def _boom(self, *args, **kwargs):
+        # Only the route's own (sync) session fails. An AsyncSession wraps a
+        # plain Session too, so patching Session.commit also reaches the one
+        # the auth dependency reads the user through - and this test is
+        # about the update failing, not authentication.
+        if self.bind.dialect.is_async:
+            return original_commit(self, *args, **kwargs)
         raise RuntimeError("simulated database failure")
 
     monkeypatch.setattr(Session, "commit", _boom)

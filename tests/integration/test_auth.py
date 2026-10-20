@@ -25,6 +25,7 @@ def _register_and_login(client, payload):
     return login_response.json()["data"]["access_token"]
 
 
+
 def _tamper_signature(token: str) -> str:
     # Change the FIRST character of the signature, not the last. A JWT
     # signature is 32 bytes in 43 base64url characters, so the final character
@@ -33,7 +34,6 @@ def _tamper_signature(token: str) -> str:
     # test that fails now and then for no visible reason.
     head, signature = token.rsplit(".", 1)
     return f"{head}.{'A' if signature[0] != 'A' else 'B'}{signature[1:]}"
-
 
 def test_register_returns_created_user(client, valid_registration_payload):
     response = client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
@@ -326,41 +326,42 @@ def test_password_reset_rejects_invalid_token(client):
 def test_login_brute_force_is_blocked_after_rate_limit_exceeded(
     client, monkeypatch, valid_registration_payload
 ):
-    # RATE_LIMIT_LOGIN is not monkeypatched here: the RateLimitMiddleware
-    # instance is built once (lazily, on the app's first request) and
-    # caches settings.RATE_LIMIT_LOGIN in self.endpoint_limits at that
-    # point, so patching the setting later in this test would not affect
-    # the already-built middleware. Only RATE_LIMIT_ENABLED is read fresh
-    # on every request, so that's the one safe to toggle here.
+    # A scripted brute force against one account, with the default
+    # settings. What stops it is the failed-login count of that email
+    # (RATE_LIMIT_LOGIN_FAILURES, 10 in 15 minutes), which is lower than
+    # what the address may try on the login route (RATE_LIMIT_AUTH,
+    # 20/minute). Details of both: tests/unit/test_rate_limit.py and
+    # tests/integration/test_rate_limit_api.py.
     monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
 
-    # The sliding window buckets requests by whole-second timestamp, so
-    # requests issued within the same wall-clock second collapse onto one
-    # bucket entry instead of counting separately - advance the clock a
-    # full second between attempts, as the rate limiter's own unit tests do.
-    with freeze_time("2026-01-01 00:00:00") as frozen:
-        for _ in range(settings.RATE_LIMIT_LOGIN):
-            response = client.post(
-                f"{API_PREFIX}/login",
-                data={
-                    "username": valid_registration_payload["email"],
-                    "password": "wrong-password",
-                },
-            )
-            assert response.status_code == 401
-            frozen.tick(delta=1)
-
-        blocked_response = client.post(
+    def attempt(password="wrong-password"):
+        return client.post(
             f"{API_PREFIX}/login",
-            data={
-                "username": valid_registration_payload["email"],
-                "password": "wrong-password",
-            },
+            data={"username": valid_registration_payload["email"], "password": password},
         )
 
-    assert blocked_response.status_code == 429
-    assert blocked_response.json()["detail"]["error"] == "Rate limit exceeded"
+    # The clock is frozen and only advanced on purpose: every attempt of
+    # the burst lands in the same instant, which is what a scripted brute
+    # force looks like. (The first limiter stored one entry per whole
+    # second, so a burst like this counted as a single request.)
+    with freeze_time("2026-01-01 00:00:00") as clock:
+        for _ in range(10):
+            assert attempt().status_code == 401
+
+        blocked_response = attempt()
+        assert blocked_response.status_code == 429
+        detail = blocked_response.json()["detail"]
+        assert detail["error"] == "Too many failed login attempts"
+        assert detail["retry_after"] == 15 * 60
+        assert blocked_response.headers["Retry-After"] == "900"
+
+        # The right password does not get through during the block either.
+        assert attempt(valid_registration_payload["password"]).status_code == 429
+
+        # When the window is over the account can be logged into again.
+        clock.tick(delta=15 * 60 + 1)
+        assert attempt(valid_registration_payload["password"]).status_code == 200
 
 
 def test_access_token_is_replayable_until_blacklisted_or_expired(

@@ -1,0 +1,336 @@
+"""The rate limiter as a client meets it: which requests share a counter,
+who is exempt, what a 429 looks like, and the failed-login count. The pieces
+are tested one by one in tests/unit/test_rate_limit.py.
+
+The suite runs with RATE_LIMIT_ENABLED=false (tests/conftest.py); every test
+here that wants the limiter switches it on.
+"""
+
+import pytest
+from fastapi.testclient import TestClient
+from freezegun import freeze_time
+from redis.exceptions import ConnectionError as RedisConnectionError
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+
+import app.core.rate_limit as rate_limit
+import app.main as main_module
+from app.core.config import settings
+from app.core.rate_limit import _EXEMPT, _ROUTE_LIMITS, parse_rate
+from app.core.security import generate_password_reset_token
+from app.main import app
+
+API = settings.API_V1_STR
+UNLIMITED = "1000000/minute"
+
+
+@pytest.fixture
+def limits(monkeypatch):
+    """Switch the limiter on with every limit out of the way; a test then
+    lowers the one it is about: limits(RATE_LIMIT_SEARCH="2/minute")."""
+    monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
+    for name in ("DEFAULT", "SEARCH", "AUTH", "CHECKOUT", "LOGIN_FAILURES"):
+        monkeypatch.setattr(settings, f"RATE_LIMIT_{name}", UNLIMITED)
+
+    def lower(**values):
+        for name, value in values.items():
+            monkeypatch.setattr(settings, name, value)
+
+    return lower
+
+
+def register(client, payload, email=None):
+    payload = {**payload, "email": email or payload["email"]}
+    assert client.post(f"{API}/users/register", json=payload).status_code == 200
+    return payload
+
+
+def login(client, email, password):
+    return client.post(f"{API}/users/login", data={"username": email, "password": password})
+
+
+def auth_header(client, payload, email=None):
+    payload = register(client, payload, email)
+    token = login(client, payload["email"], payload["password"]).json()["data"]["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+# --- the table ------------------------------------------------------------------
+
+
+def test_every_route_named_in_the_limiter_exists():
+    # A renamed route would silently drop to the default limit (or lose
+    # its exemption) if its entry here were left behind.
+    paths = app.openapi()["paths"]
+    for method, template in list(_ROUTE_LIMITS) + list(_EXEMPT):
+        full_path = template if template == "/health" else f"{API}{template}"
+        assert method.lower() in paths.get(full_path, {}), (method, template)
+    for setting in set(_ROUTE_LIMITS.values()):
+        assert parse_rate(getattr(settings, setting))
+
+
+# --- what shares a counter --------------------------------------------------------
+
+
+def test_limit_answers_429_with_retry_after_and_recovers(client, limits):
+    limits(RATE_LIMIT_DEFAULT="2/minute")
+    with freeze_time("2026-01-01 00:00:00") as clock:
+        assert client.get(f"{API}/categories").status_code == 200
+        assert client.get(f"{API}/categories").status_code == 200
+        clock.tick(10)
+
+        blocked = client.get(f"{API}/categories")
+        assert blocked.status_code == 429
+        assert blocked.headers["Retry-After"] == "50"
+        assert blocked.json() == {"detail": {"error": "Rate limit exceeded", "retry_after": 50}}
+
+        clock.tick(51)
+        assert client.get(f"{API}/categories").status_code == 200
+
+
+def test_urls_of_one_route_share_a_counter(client, limits):
+    # Keyed by the route template: walking product ids buys nothing.
+    limits(RATE_LIMIT_DEFAULT="3/minute")
+    for product_id in (1, 2, 3):
+        assert client.get(f"{API}/products/{product_id}").status_code == 404
+    assert client.get(f"{API}/products/4").status_code == 429
+    # Another operation has its own counter.
+    assert client.get(f"{API}/categories").status_code == 200
+
+
+def test_search_has_its_own_limit(client, limits):
+    limits(RATE_LIMIT_SEARCH="1/minute")
+    assert client.get(f"{API}/products/search", params={"query": "shoe"}).status_code != 429
+    assert client.get(f"{API}/products/search", params={"query": "boot"}).status_code == 429
+    assert client.get(f"{API}/products").status_code == 200
+
+
+def test_logged_in_callers_are_counted_per_user_and_others_per_address(
+    client, limits, valid_registration_payload
+):
+    alice = auth_header(client, valid_registration_payload)
+    bob = auth_header(client, valid_registration_payload, email="bob@example.com")
+    limits(RATE_LIMIT_DEFAULT="2/minute")
+
+    assert client.get(f"{API}/users/me", headers=alice).status_code == 200
+    assert client.get(f"{API}/users/me", headers=alice).status_code == 200
+    assert client.get(f"{API}/users/me", headers=alice).status_code == 429
+    # Same address, another user: another counter.
+    assert client.get(f"{API}/users/me", headers=bob).status_code == 200
+    # No token (or a bad one): the address pays, not some user.
+    assert client.get(f"{API}/users/me").status_code == 401
+    assert client.get(f"{API}/users/me", headers={"Authorization": "Bearer junk"}).status_code == 401
+    assert client.get(f"{API}/users/me").status_code == 429
+    # A user is the same user from another address.
+    elsewhere = TestClient(app, client=("198.51.100.9", 50000))
+    assert elsewhere.get(f"{API}/users/me", headers=alice).status_code == 429
+    assert elsewhere.get(f"{API}/users/me").status_code == 401
+
+
+def test_checkout_is_limited_per_user(client, limits, valid_registration_payload):
+    alice = auth_header(client, valid_registration_payload)
+    bob = auth_header(client, valid_registration_payload, email="bob@example.com")
+    limits(RATE_LIMIT_CHECKOUT="1/minute")
+
+    # No Idempotency-Key, so the route itself answers 422: it was reached.
+    assert client.post(f"{API}/orders", json={}, headers=alice).status_code == 422
+    assert client.post(f"{API}/orders", json={}, headers=alice).status_code == 429
+    assert client.post(f"{API}/orders", json={}, headers=bob).status_code == 422
+
+
+def test_auth_routes_are_limited_per_address_whoever_is_named(client, limits):
+    limits(RATE_LIMIT_AUTH="2/minute")
+    assert login(client, "a@example.com", "wrong-password").status_code == 401
+    assert login(client, "b@example.com", "wrong-password").status_code == 401
+    blocked = login(client, "c@example.com", "wrong-password")
+    assert blocked.status_code == 429
+    assert blocked.json()["detail"]["error"] == "Rate limit exceeded"
+    # Another address is not affected.
+    elsewhere = TestClient(app, client=("198.51.100.9", 50000))
+    assert login(elsewhere, "c@example.com", "wrong-password").status_code == 401
+
+
+def test_auth_routes_stay_per_address_for_logged_in_callers(
+    client, limits, valid_registration_payload
+):
+    # The one auth route that takes a token. Were it counted per user,
+    # freshly registered accounts would each bring their own budget.
+    alice = auth_header(client, valid_registration_payload)
+    bob = auth_header(client, valid_registration_payload, email="bob@example.com")
+    limits(RATE_LIMIT_AUTH="1/minute")
+
+    assert client.post(f"{API}/users/verify-email/resend", headers=alice).status_code == 200
+    assert client.post(f"{API}/users/verify-email/resend", headers=bob).status_code == 429
+
+
+def test_clients_behind_a_trusted_proxy_are_told_apart(limits, monkeypatch):
+    limits(RATE_LIMIT_DEFAULT="1/minute")
+    monkeypatch.setattr(settings, "TRUSTED_PROXIES", ["10.0.0.0/8"])
+    proxy = TestClient(app, client=("10.0.0.5", 50000))
+
+    def get(forwarded_for):
+        return proxy.get(f"{API}/categories", headers={"X-Forwarded-For": forwarded_for})
+
+    assert get("198.51.100.1").status_code == 200
+    assert get("198.51.100.2").status_code == 200
+    assert get("198.51.100.1").status_code == 429
+    # A made-up leftmost entry does not buy a fresh counter.
+    assert get("6.6.6.6, 198.51.100.1").status_code == 429
+
+
+def test_forwarded_header_buys_nothing_without_a_trusted_proxy(limits):
+    limits(RATE_LIMIT_DEFAULT="1/minute")
+    direct = TestClient(app, client=("203.0.113.7", 50000))
+    assert direct.get(f"{API}/categories", headers={"X-Forwarded-For": "1.1.1.1"}).status_code == 200
+    assert direct.get(f"{API}/categories", headers={"X-Forwarded-For": "2.2.2.2"}).status_code == 429
+
+
+# --- exemptions, kill switch, Redis outage -----------------------------------------
+
+
+def test_health_webhook_and_docs_are_never_limited(client, limits, monkeypatch, fake_redis):
+    limits(RATE_LIMIT_DEFAULT="1/minute")
+    # /health talks to app.main.engine directly: see tests/integration/test_health.py.
+    monkeypatch.setattr(
+        main_module,
+        "engine",
+        create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        ),
+    )
+    for _ in range(3):
+        assert client.get("/health").status_code == 200
+        assert client.post(f"{API}/orders/webhooks/stripe", content=b"{}").status_code == 400
+        assert client.get(f"{API}/openapi.json").status_code == 200
+        assert client.get(f"{API}/docs").status_code == 200
+    # Not only "not rejected": not counted at all, so no Redis round trip.
+    assert fake_redis.keys("rl:*") == []
+
+
+def test_kill_switch_turns_everything_off(client, limits, monkeypatch, fake_redis, valid_registration_payload):
+    limits(RATE_LIMIT_DEFAULT="1/minute", RATE_LIMIT_AUTH="1/minute", RATE_LIMIT_LOGIN_FAILURES="1/minute")
+    monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", False)
+
+    for _ in range(3):
+        assert client.get(f"{API}/categories").status_code == 200
+        assert login(client, valid_registration_payload["email"], "wrong-password").status_code == 401
+    assert fake_redis.keys("rl:*") == []
+
+
+def test_requests_are_let_through_when_redis_is_down(
+    client, limits, monkeypatch, valid_registration_payload
+):
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_DEFAULT="1/minute", RATE_LIMIT_AUTH="1/minute", RATE_LIMIT_LOGIN_FAILURES="1/minute")
+
+    def unreachable():
+        raise RedisConnectionError("Redis is down")
+
+    monkeypatch.setattr(rate_limit, "get_async_redis", unreachable)
+
+    for _ in range(3):
+        assert client.get(f"{API}/categories").status_code == 200
+        assert login(client, payload["email"], "wrong-password").status_code == 401
+        assert login(client, payload["email"], payload["password"]).status_code == 200
+
+
+# --- failed logins, per account ----------------------------------------------------
+
+
+def test_failed_logins_are_counted_per_email_across_addresses(
+    client, limits, valid_registration_payload
+):
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_LOGIN_FAILURES="3/15 minutes")
+    elsewhere = TestClient(app, client=("198.51.100.9", 50000))
+
+    with freeze_time("2026-01-01 00:00:00") as clock:
+        assert login(client, payload["email"], "wrong-1").status_code == 401
+        assert login(elsewhere, payload["email"], "wrong-2").status_code == 401
+        assert login(client, payload["email"], "wrong-3").status_code == 401
+        clock.tick(60)
+
+        for caller in (client, elsewhere):
+            blocked = login(caller, payload["email"], "wrong-4")
+            assert blocked.status_code == 429
+            assert blocked.headers["Retry-After"] == "840"
+            assert blocked.json() == {
+                "detail": {"error": "Too many failed login attempts", "retry_after": 840}
+            }
+        # The right password is refused as well until the window is over...
+        assert login(client, payload["email"], payload["password"]).status_code == 429
+        # ...and another account is not affected, from the same address.
+        assert login(client, "someone.else@example.com", "wrong").status_code == 401
+
+        clock.tick(14 * 60 + 1)
+        assert login(client, payload["email"], payload["password"]).status_code == 200
+
+
+def test_a_successful_login_clears_the_count(client, limits, valid_registration_payload):
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_LOGIN_FAILURES="3/15 minutes")
+
+    for _ in range(3):  # more rounds than the limit: each success starts over
+        assert login(client, payload["email"], "wrong").status_code == 401
+        assert login(client, payload["email"], "wrong").status_code == 401
+        assert login(client, payload["email"], payload["password"]).status_code == 200
+
+
+def test_spelling_variants_of_an_email_share_the_count(client, limits, valid_registration_payload):
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_LOGIN_FAILURES="3/15 minutes")
+
+    for spelling in (payload["email"].upper(), f"  {payload['email']} ", payload["email"].title()):
+        assert login(client, spelling, "wrong").status_code == 401
+    assert login(client, payload["email"], payload["password"]).status_code == 429
+
+
+def test_refusal_looks_the_same_for_an_email_without_an_account(
+    client, limits, valid_registration_payload
+):
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_LOGIN_FAILURES="3/15 minutes")
+
+    def transcript(email):
+        answers = []
+        for _ in range(5):
+            response = login(client, email, "wrong-password")
+            answers.append(
+                (response.status_code, response.json(), response.headers.get("Retry-After"))
+            )
+        return answers
+
+    with freeze_time("2026-01-01 00:00:00"):
+        known = transcript(payload["email"])
+        unknown = transcript("nobody.here@example.com")
+    assert known == unknown
+    assert [status for status, _, _ in known] == [401, 401, 401, 429, 429]
+
+
+def test_a_refused_attempt_is_not_judged_at_all(client, limits, monkeypatch, valid_registration_payload):
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_LOGIN_FAILURES="1/15 minutes")
+    assert login(client, payload["email"], "wrong").status_code == 401
+
+    async def must_not_run(*args, **kwargs):
+        raise AssertionError("bcrypt was run for a refused attempt")
+
+    monkeypatch.setattr("app.api.v1.users.verify_password_async", must_not_run)
+    assert login(client, payload["email"], payload["password"]).status_code == 429
+
+
+def test_a_completed_password_reset_clears_the_count(client, limits, valid_registration_payload):
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_LOGIN_FAILURES="2/15 minutes")
+    assert login(client, payload["email"], "wrong").status_code == 401
+    assert login(client, payload["email"], "wrong").status_code == 401
+    assert login(client, payload["email"], payload["password"]).status_code == 429
+
+    reset = client.post(
+        f"{API}/users/password/reset/{generate_password_reset_token(payload['email'])}",
+        json={"current_password": "unused", "new_password": "An0therStrongPass"},
+    )
+    assert reset.status_code == 200
+    assert login(client, payload["email"], "An0therStrongPass").status_code == 200

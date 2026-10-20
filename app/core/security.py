@@ -1,21 +1,25 @@
 import asyncio
 import os
+import time
 import uuid
 import weakref
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, Union
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
 from app.core.config import settings
+from app.core.database import get_async_db
 from app.models.user import User, UserRole
 from app.services.redis import RedisService
+from app.services.redis_async import get_password_changed_at, is_token_blacklisted
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
 redis_service = RedisService()
@@ -87,7 +91,9 @@ def _get_bcrypt_semaphore() -> asyncio.Semaphore:
     loop = asyncio.get_running_loop()
     semaphore = _bcrypt_semaphores.get(loop)
     if semaphore is None:
-        semaphore = asyncio.Semaphore((os.cpu_count() or 1) * 4)
+        semaphore = asyncio.Semaphore(
+            settings.BCRYPT_MAX_CONCURRENCY or (os.cpu_count() or 1) * 4
+        )
         _bcrypt_semaphores[loop] = semaphore
     return semaphore
 
@@ -223,7 +229,13 @@ def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
     refresh token's whole family."""
     try:
         payload = jwt.decode(access_token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        expires_in = max(int(payload["exp"] - datetime.utcnow().timestamp()), 1)
+        # time.time(), not datetime.utcnow().timestamp(): .timestamp() on a
+        # naive datetime reads it as *local* time, so on any host whose
+        # timezone is not UTC the result is off by the UTC offset, while the
+        # token's `exp` is true UTC. West of UTC that made the remaining
+        # lifetime negative, clamped to 1 s below - a logged-out token was
+        # blacklisted for one second and then worked again.
+        expires_in = max(int(payload["exp"] - time.time()), 1)
     except JWTError:
         expires_in = 1
     blacklist_token(access_token, expires_in)
@@ -242,10 +254,33 @@ def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
 def invalidate_tokens_issued_before_now(user_id: Union[str, int]) -> bool:
     key = f"pwd_changed:{user_id}"
     ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
-    return redis_service.setex(key, ttl_seconds, int(datetime.utcnow().timestamp()))
+    # time.time() for the same reason as in logout() above. With
+    # utcnow().timestamp() the watermark was shifted by the host's UTC
+    # offset: on a machine at UTC+2 it lay two hours in the past, so every
+    # token issued in the two hours before a password reset stayed valid -
+    # exactly the tokens this exists to kill. Invisible where TZ is UTC
+    # (most containers), which is why it went unnoticed.
+    return redis_service.setex(key, ttl_seconds, int(time.time()))
 
+# The three dependencies below run on the event loop for every authenticated
+# request, so nothing in them may block: the Redis lookups go through the
+# async client (app/services/redis_async.py) and the user is loaded through
+# an AsyncSession. They used to call the sync RedisService and a sync
+# Session inline, which stopped the worker for the length of each round trip
+# and held a pooled sync connection for the whole request on top of the
+# route's own.
+#
+# What callers get back is a detached snapshot of the user row:
+# - Every column is loaded and readable (id, email, role, flags, ...).
+# - Relationships (current_user.addresses, current_user.orders) are NOT
+#   loaded and cannot be: there is no session to load them through, and
+#   touching one raises DetachedInstanceError. Query what you need through
+#   the route's own session, filtered by current_user.id.
+# - Changing an attribute changes this object only. To update the user, load
+#   the row in the route's own session (see update_consent in
+#   app/api/v1/users.py) and change that one.
 async def get_current_user(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     token: str = Depends(oauth2_scheme)
 ) -> User:
 
@@ -256,7 +291,7 @@ async def get_current_user(
     )
 
 
-    if redis_service.is_blacklisted(token):
+    if await is_token_blacklisted(token):
         raise credentials_exception
 
     try:
@@ -275,11 +310,25 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    password_changed_at = redis_service.get(f"pwd_changed:{user_id}")
+    password_changed_at = await get_password_changed_at(user_id)
     if password_changed_at is not None and (issued_at is None or issued_at < password_changed_at):
         raise credentials_exception
 
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalar_one_or_none()
+    if user is not None:
+        # Detach the row before handing it out, so that the object behaves
+        # the same in every route: a later change to it is never flushed by
+        # this session's commit, whether or not the route shares the session.
+        db.expunge(user)
+    # End the read transaction now. The session itself lives until the
+    # request's dependencies are torn down, and without this it would keep
+    # its pooled connection checked out, idle in a transaction, for the
+    # whole request - the second-connection-per-request cost this dependency
+    # used to have on the sync pool. commit rather than rollback: a route on
+    # get_async_db shares this session, and nothing of its own may be thrown
+    # away here.
+    await db.commit()
     if user is None:
         raise credentials_exception
 
@@ -304,6 +353,41 @@ async def get_current_admin_user(
             detail="The user doesn't have enough privileges"
         )
     return current_user
+
+# Declares the bearer scheme on a route that also serves callers without a
+# token, so that the OpenAPI document (and the "Authorize" button of the
+# docs) still attaches a token to it. It decides nothing: with
+# auto_error=False it never rejects a request, and its result is not used.
+_optional_oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_V1_STR}/users/login", auto_error=False
+)
+
+async def get_optional_active_user(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db),
+    _declared: Optional[str] = Depends(_optional_oauth2_scheme),
+) -> Optional[User]:
+    """For a route that serves both logged-in and anonymous callers (the
+    cart): the active user when the request carries an Authorization
+    header, None when it carries none.
+
+    The header alone decides which it is. Once it is present, the request
+    is authenticated by the very dependencies above, called in the same
+    order with the same arguments, so every way they reject a caller
+    applies unchanged: a missing, malformed, expired, blacklisted or
+    superseded token is a 401 and an inactive user a 400. It is never
+    quietly treated as "nobody": a client whose token has just expired must
+    be told so, not be shown some other, empty cart as if its own had
+    vanished.
+
+    The user returned is the same detached snapshot get_current_user
+    documents.
+    """
+    if "authorization" not in request.headers:
+        return None
+    token = await oauth2_scheme(request)
+    current_user = await get_current_user(db=db, token=token)
+    return await get_current_active_user(current_user=current_user)
 
 def blacklist_token(token: str, expires_in: int) -> bool:
     return redis_service.add_to_blacklist(token, expires_in)

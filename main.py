@@ -1,3 +1,5 @@
+import sys
+
 import uvicorn
 
 from app.core.config import settings
@@ -9,6 +11,10 @@ if __name__ == "__main__":
         port=settings.PORT,
         reload=settings.DEBUG,
         workers=settings.WORKERS,
+        # psycopg's async mode (app.core.database.async_engine) cannot run on
+        # Windows' ProactorEventLoop, which is what uvicorn picks there for a
+        # single in-process worker. Linux/macOS already get a selector loop.
+        loop="asyncio:SelectorEventLoop" if sys.platform == "win32" else "auto",
         proxy_headers=bool(settings.TRUSTED_PROXIES),
         forwarded_allow_ips=settings.TRUSTED_PROXIES or None,
     )

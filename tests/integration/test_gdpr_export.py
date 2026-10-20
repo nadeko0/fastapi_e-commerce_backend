@@ -1,3 +1,5 @@
+import uuid
+
 API_PREFIX = "/api/v1/users"
 
 
@@ -99,3 +101,86 @@ def test_data_delete_deactivates_account(client, valid_registration_payload):
         headers={"Authorization": f"Bearer {login_response.json()['data']['access_token']}"},
     )
     assert me_response.status_code == 400
+
+
+
+def test_data_export_query_count_does_not_grow_with_the_number_of_orders(
+    client, db_session, valid_registration_payload
+):
+    """Regression test: the export read current_user.orders lazily and let
+    OrderResponse walk items, products, variants and addresses one query at
+    a time - 165 queries for one export, measured. Loaded eagerly it is a
+    fixed number of queries however many orders the account has."""
+    from decimal import Decimal
+
+    from conftest import engine
+    from sqlalchemy import event
+
+    from app.models.address import Address
+    from app.models.category import Category
+    from app.models.order import Order
+    from app.models.order_items import OrderItem
+    from app.models.product import Product
+    from app.models.user import User
+
+    access_token = _register_and_login(client, valid_registration_payload)
+    user = db_session.query(User).filter(User.email == valid_registration_payload["email"]).one()
+
+    category = Category(name="Electronics", parent_id=None, level=0, path=[])
+    db_session.add(category)
+    db_session.commit()
+    address = Address(
+        user_id=user.id, street="123 Main Street", city="Springfield", state="Illinois",
+        postal_code="62701", country="US", is_default=True,
+    )
+    db_session.add(address)
+    db_session.commit()
+
+    def add_orders(count):
+        for n in range(count):
+            product = Product(
+                name=f"Widget {uuid.uuid4().hex[:6]}", description="A fine widget, long enough",
+                price=Decimal("9.99"), stock_quantity=10, images=[], characteristics={},
+                category_id=category.id,
+            )
+            db_session.add(product)
+            db_session.commit()
+            order = Order(
+                user_id=user.id, status="new", payment_status="pending",
+                shipping_address_id=address.id, total_amount=Decimal("19.98"),
+            )
+            db_session.add(order)
+            db_session.commit()
+            db_session.add(OrderItem(
+                order_id=order.id, product_id=product.id, quantity=2, price_at_time=product.price,
+            ))
+            db_session.commit()
+
+    def export_query_count():
+        statements = []
+
+        def record(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            response = client.get(
+                f"{API_PREFIX}/data/export", headers={"Authorization": f"Bearer {access_token}"}
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        assert response.status_code == 200, response.text
+        return len(statements), response.json()["data"]
+
+    add_orders(2)
+    with_two, data = export_query_count()
+    assert len(data["orders"]) == 2
+
+    add_orders(6)
+    with_eight, data = export_query_count()
+    assert len(data["orders"]) == 8
+    assert [len(order["items"]) for order in data["orders"]] == [1] * 8
+
+    assert with_eight == with_two, (
+        f"{with_two} queries for 2 orders but {with_eight} for 8: something is loaded per order"
+    )
