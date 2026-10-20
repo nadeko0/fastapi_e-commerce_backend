@@ -17,7 +17,6 @@ _BASE_ENV = {
     "POSTGRES_PASSWORD": "x",
     "POSTGRES_DB": "x",
     "REDIS_HOST": "x",
-    "DATA_ENCRYPTION_KEY": "x",
     "SMTP_HOST": "x",
     "SMTP_USER": "x@x.com",
     "SMTP_PASSWORD": "x",
@@ -98,3 +97,37 @@ def test_unknown_env_vars_from_shared_env_file_do_not_crash_settings():
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+def _run_with_env(env, code):
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_settings_start_without_data_encryption_key():
+    # DATA_ENCRYPTION_KEY was required at startup but nothing was ever
+    # encrypted with it: a mandatory secret that suggested field-level
+    # encryption the application does not do. It is gone; a deployment
+    # must start without it.
+    env = {**os.environ, **_BASE_ENV}
+    env.pop("DATA_ENCRYPTION_KEY", None)
+    result = _run_with_env(env, "from app.core.config import settings; print(settings.PROJECT_NAME)")
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_leftover_data_encryption_key_is_ignored():
+    # An existing .env still carrying the line must not stop the app either,
+    # and the value must not come back as a setting.
+    env = {**os.environ, **_BASE_ENV, "DATA_ENCRYPTION_KEY": "left-over-from-an-old-env-file"}
+    result = _run_with_env(
+        env,
+        "from app.core.config import settings; print(hasattr(settings, 'DATA_ENCRYPTION_KEY'))",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "False"

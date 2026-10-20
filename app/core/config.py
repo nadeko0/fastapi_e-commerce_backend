@@ -213,7 +213,11 @@ class Settings(BaseSettings):
     # Essential GDPR Settings
     USER_DATA_RETENTION_DAYS: int = 365
     CONSENT_REQUIRED: bool = True
-    DATA_ENCRYPTION_KEY: str
+    # There is no DATA_ENCRYPTION_KEY: the application encrypts no field
+    # itself (personal data is protected by the database volume's disk
+    # encryption and TLS to the database). One used to be required at
+    # startup and was never used, which suggested otherwise. A leftover
+    # line in an old .env is ignored like any unknown variable.
     GDPR_EXPORT_EXPIRY_HOURS: int = 24
     INACTIVE_ACCOUNT_DELETE_DAYS: int = 730  # 2 years
     # Grace period between a user requesting erasure (Art. 17) and the
