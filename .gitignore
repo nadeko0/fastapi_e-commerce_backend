@@ -71,3 +71,9 @@ dump.rdb
 
 # Agent working notes (not for repo)
 .agent-notes/
+
+# Load-test output (scripts/loadtest/run_matrix.py --out)
+loadtest-results/
+
+# Local helper scripts (seed data, smoke tests, load tests) - not published
+scripts/
