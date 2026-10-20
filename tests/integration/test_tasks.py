@@ -1,5 +1,9 @@
 from decimal import Decimal
 
+import pytest
+from sqlalchemy import event
+from sqlalchemy.exc import OperationalError
+
 from app import tasks
 from app.core.security import get_password_hash
 from app.models.category import Category
@@ -199,6 +203,79 @@ def test_send_order_confirmation_and_status_update_tasks_configure_autoretry():
 
     assert tasks.send_order_confirmation.autoretry_for == (OperationalError,)
     assert tasks.send_order_status_update.autoretry_for == (OperationalError,)
+
+
+def _first_session_fails_on_statement(monkeypatch, fail_at):
+    """The first session the task opens raises OperationalError (a dropped
+    connection, a statement timeout) on its fail_at-th ORM statement, lazy
+    loads included; every later session - the retry's - works."""
+    real_factory = tasks.SessionLocal
+    sessions = []
+
+    def factory():
+        session = real_factory()
+        if not sessions:
+            executed = []
+
+            @event.listens_for(session, "do_orm_execute")
+            def _fail(orm_execute_state):
+                executed.append(1)
+                if len(executed) == fail_at:
+                    raise OperationalError("SELECT ...", {}, Exception("connection lost"))
+
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr("app.tasks.SessionLocal", factory)
+
+
+@pytest.mark.parametrize("fail_at", [1, 2, 3])
+def test_send_order_confirmation_retry_after_a_db_error_still_sends_once(
+    db_session, tasks_db, monkeypatch, fail_at
+):
+    """Regression test: the "already sent" marker was claimed before the
+    order was even read. A transient OperationalError on that read - the
+    very error autoretry_for is there for - triggered the retry, the retry
+    found the marker and returned, and the customer never got the email.
+    Whichever statement fails, the retry must send it, exactly once."""
+    sent = []
+    monkeypatch.setattr(
+        "app.tasks.send_order_confirmation_email",
+        lambda to_email, order: sent.append(
+            (to_email, order.id, [i.product_name for i in order.items])
+        ),
+    )
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product)
+    _first_session_fails_on_statement(monkeypatch, fail_at)
+
+    result = tasks.send_order_confirmation.apply(args=(order.id,))
+
+    assert result.successful(), result.traceback
+    assert sent == [(user.email, order.id, ["Widget"])]
+
+
+@pytest.mark.parametrize("fail_at", [1, 2, 3])
+def test_send_order_status_update_retry_after_a_db_error_still_sends_once(
+    db_session, tasks_db, monkeypatch, fail_at
+):
+    # Same, for the status email: the marker was claimed before
+    # order.user (a lazy load) was read for the recipient's address.
+    sent = []
+    monkeypatch.setattr(
+        "app.tasks.send_order_status_update_email",
+        lambda to_email, order: sent.append((to_email, order.id)),
+    )
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product)
+    _first_session_fails_on_statement(monkeypatch, fail_at)
+
+    result = tasks.send_order_status_update.apply(args=(order.id,))
+
+    assert result.successful(), result.traceback
+    assert sent == [(user.email, order.id)]
 
 
 def test_no_periodic_task_sweeps_the_cart_keyspace():

@@ -6,7 +6,7 @@ from uuid import uuid4
 from celery import Celery
 from sqlalchemy import String, cast, create_engine, func, literal
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import selectinload, sessionmaker
+from sqlalchemy.orm import joinedload, selectinload, sessionmaker
 
 from app.core.config import settings
 from app.core.database import _build_connect_args
@@ -175,14 +175,30 @@ def send_order_confirmation(order_id: int) -> None:
     # mark_once claims the marker atomically in Redis before sending, so a
     # redelivered/retried task sees its own prior success and skips the
     # resend instead of sending it again.
-    if not RedisService().mark_once(
-        f"email_sent:order_confirmation:{order_id}", EMAIL_SENT_MARKER_TTL_SECONDS
-    ):
-        return
+    #
+    # The marker is claimed only after every read the email needs: the
+    # order, its user and its items' products are loaded up front instead
+    # of lazily inside the send. It used to be claimed before the order was
+    # even queried, so a transient OperationalError on any of those reads -
+    # the very error autoretry_for retries - left the marker set, the retry
+    # skipped the send, and the customer never got the email.
     with task_session() as db:
-        order = db.query(Order).filter(Order.id == order_id).first()
-        if order:
-            send_order_confirmation_email(order.user.email, order)
+        order = (
+            db.query(Order)
+            .options(
+                joinedload(Order.user),
+                selectinload(Order.items).joinedload(OrderItem.product),
+            )
+            .filter(Order.id == order_id)
+            .first()
+        )
+        if not order:
+            return
+        if not RedisService().mark_once(
+            f"email_sent:order_confirmation:{order_id}", EMAIL_SENT_MARKER_TTL_SECONDS
+        ):
+            return
+        send_order_confirmation_email(order.user.email, order)
 
 @celery.task(
     name="send_order_status_update",
@@ -193,7 +209,15 @@ def send_order_confirmation(order_id: int) -> None:
 )
 def send_order_status_update(order_id: int) -> None:
     with task_session() as db:
-        order = db.query(Order).filter(Order.id == order_id).first()
+        # joinedload(Order.user): the recipient's address must be read before
+        # the marker below is claimed, not lazily after it (see
+        # send_order_confirmation above for what a failed read did then).
+        order = (
+            db.query(Order)
+            .options(joinedload(Order.user))
+            .filter(Order.id == order_id)
+            .first()
+        )
         if not order:
             return
         # Keyed by status (not just order_id): unlike the one-shot confirmation
