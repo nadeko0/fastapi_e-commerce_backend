@@ -32,7 +32,9 @@ Known trade-offs, chosen for simplicity:
   that is a job for the proxy in front (nginx limit_req), not for more code
   here.
 - If Redis cannot be reached the request is let through (fail open): a
-  limiter that cannot count must not take the shop down with it.
+  limiter that cannot count must not take the shop down with it. The one
+  exception is the failed-login count (section 5), which fails closed:
+  login answers 503 until it can count again.
 
 Why this and not a library, and what real services publish:
 scripts/loadtest/results/rate-limiting-research.md, "What was implemented".
@@ -49,7 +51,7 @@ from typing import NamedTuple, Optional
 import jwt
 from fastapi import HTTPException, Request
 from redis.exceptions import RedisError
-from starlette.status import HTTP_429_TOO_MANY_REQUESTS
+from starlette.status import HTTP_429_TOO_MANY_REQUESTS, HTTP_503_SERVICE_UNAVAILABLE
 
 from app.core.config import RATE_LIMIT_PATTERN, settings
 from app.core.security import user_id_from_subject
@@ -219,18 +221,26 @@ return {count, ttl}
 _count_script = None
 
 
-async def seconds_until_allowed(key: str, rate: Rate) -> int:
+async def _count(key: str, rate: Rate) -> int:
     """Count one request against `key`. 0 if it is within `rate`, otherwise
-    the whole seconds until the window ends. 0 as well if Redis cannot be
-    asked: the limiter fails open."""
+    the whole seconds until the window ends. Raises RedisError when Redis
+    cannot be asked; what that means is the caller's decision."""
     global _count_script
+    redis = get_async_redis()
+    if _count_script is None:
+        _count_script = redis.register_script(_COUNT_LUA)  # sends nothing yet
+    count, ttl_ms = await _count_script(
+        keys=[key], args=[rate.seconds * 1000], client=redis
+    )
+    if count <= rate.count:
+        return 0
+    return max(1, math.ceil(ttl_ms / 1000))
+
+
+async def seconds_until_allowed(key: str, rate: Rate) -> int:
+    """_count, failing open: 0 as well if Redis cannot be asked."""
     try:
-        redis = get_async_redis()
-        if _count_script is None:
-            _count_script = redis.register_script(_COUNT_LUA)  # sends nothing yet
-        count, ttl_ms = await _count_script(
-            keys=[key], args=[rate.seconds * 1000], client=redis
-        )
+        return await _count(key, rate)
     except RedisError as e:
         # Connection refused, timeout, no free connection in the pool. This
         # except must only ever wrap the Redis call: the 429 is raised by
@@ -238,9 +248,6 @@ async def seconds_until_allowed(key: str, rate: Rate) -> int:
         # `except Exception` and so swallowed its own rejections.)
         logger.error(f"Rate limiting error, request allowed: {e}")
         return 0
-    if count <= rate.count:
-        return 0
-    return max(1, math.ceil(ttl_ms / 1000))
 
 
 def too_many_requests(message: str, retry_after: int) -> HTTPException:
@@ -316,15 +323,41 @@ def _login_key(email: str) -> str:
     return f"rl:login-failures:{hashlib.sha256(normalised).hexdigest()[:32]}"
 
 
+# How long a client is told to wait when the count cannot be kept. A Redis
+# outage is rarely over in a second (the 1 of the in-flight cap's 503 in
+# app/core/overload.py), and a client retrying every second would only add
+# to the load of a recovering service.
+LOGIN_UNAVAILABLE_RETRY_AFTER = 30
+
+
 async def check_login_attempt(email: str) -> None:
     """Call before the password is looked at; raises the 429 when this
     email has used up its failed attempts. One Redis round trip, no
-    database."""
+    database.
+
+    Unlike every other limit here this one fails closed: if Redis cannot be
+    asked, the attempt is refused with a 503. Failing open would give a
+    password guesser unlimited attempts for exactly as long as Redis is
+    down - or can be made to look down, by loading it. 503 and not 429:
+    the client did nothing wrong and nothing is counted against it; the
+    service cannot decide right now, and Retry-After says when to ask
+    again. Sessions already open are not affected."""
     if not settings.RATE_LIMIT_ENABLED:
         return
-    retry_after = await seconds_until_allowed(
-        _login_key(email), parse_rate(settings.RATE_LIMIT_LOGIN_FAILURES)
-    )
+    try:
+        retry_after = await _count(
+            _login_key(email), parse_rate(settings.RATE_LIMIT_LOGIN_FAILURES)
+        )
+    except RedisError as e:
+        logger.error(f"Rate limiting error, login refused: {e}")
+        raise HTTPException(
+            status_code=HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "Login is temporarily unavailable",
+                "retry_after": LOGIN_UNAVAILABLE_RETRY_AFTER,
+            },
+            headers={"Retry-After": str(LOGIN_UNAVAILABLE_RETRY_AFTER)},
+        )
     if retry_after:
         raise too_many_requests("Too many failed login attempts", retry_after)
 
