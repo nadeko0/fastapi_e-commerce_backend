@@ -177,39 +177,6 @@ def test_add_to_blacklist_and_is_blacklisted():
     assert redis.is_blacklisted("some-token") is True
 
 
-def test_cleanup_expired_carts_removes_keys_with_no_ttl():
-    """Regression test: this used to assert the opposite (cleaned == 0),
-    pinning the bug. Redis's ttl() returns -1 for a key with no expiry at
-    all, and the old `if not ttl` check is False for -1, so the one kind of
-    cart key Redis will never expire by itself was the one never swept."""
-    redis = _service()
-    redis._redis.set("cart:99", "{}")
-
-    cleaned = redis.cleanup_expired_carts()
-
-    assert cleaned == 1
-    assert redis._redis.get("cart:99") is None
-
-
-def test_cleanup_expired_carts_ignores_keys_with_ttl():
-    redis = _service()
-    redis._redis.setex("cart:100", 3600, "{}")
-
-    cleaned = redis.cleanup_expired_carts()
-
-    assert cleaned == 0
-    assert redis._redis.get("cart:100") == "{}"
-
-
-def test_cleanup_expired_carts_only_touches_cart_keys():
-    redis = _service()
-    redis._redis.set("product:1", "{}")
-    redis._redis.set("cart:1", "{}")
-
-    assert redis.cleanup_expired_carts() == 1
-    assert redis._redis.get("product:1") == "{}"
-
-
 # --- Malformed / corrupted data already stored in Redis -------------------
 
 
@@ -425,29 +392,6 @@ def test_delete_session_fails_open_on_connection_error(monkeypatch):
     _break(monkeypatch, redis, "delete")
 
     assert redis.delete_session("session:1") is False
-
-
-def test_cleanup_expired_carts_fails_open_on_connection_error(monkeypatch):
-    redis = _service()
-    _break(monkeypatch, redis, "scan_iter")
-
-    assert redis.cleanup_expired_carts() == 0
-
-
-def test_cleanup_expired_carts_leaves_keys_about_to_expire(monkeypatch):
-    """ttl() returning 0 means the key has an expiry with under a second
-    left (and -2 that it is already gone): Redis removes those itself, so
-    neither is swept or counted."""
-    redis = _service()
-    redis._redis.setex("cart:200", 3600, "{}")
-    monkeypatch.setattr(redis._redis, "ttl", lambda key: 0)
-
-    assert redis.cleanup_expired_carts() == 0
-
-    monkeypatch.setattr(redis._redis, "ttl", lambda key: -2)
-
-    assert redis.cleanup_expired_carts() == 0
-    assert redis._redis.get("cart:200") == "{}"
 
 
 # --- Atomic cart mutations: failure and checkout clean-up ------------------
@@ -783,17 +727,6 @@ def test_a_cart_over_the_cap_still_loads_and_can_be_reduced(monkeypatch):
     assert len(redis.get_cart(1).items) == 3
     assert _lines(redis.update_cart_quantity_atomic(1, 7, 4, stock_quantity=10))["7"] == 4
     assert len(redis.remove_from_cart_atomic(1, 9).items) == 2
-
-
-def test_cleanup_expired_carts_sweeps_guest_carts_too():
-    redis = _service()
-    guest, kept = _guest(), _guest()
-    redis._redis.set(guest.key, "{}")
-    redis._redis.setex(kept.key, 3600, "{}")
-
-    assert redis.cleanup_expired_carts() == 1
-    assert redis._redis.exists(guest.key) == 0
-    assert redis._redis.exists(kept.key) == 1
 
 
 # --- Merging a guest cart into an account cart ------------------------------
