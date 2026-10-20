@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import status as http_status
+from pydantic import Field
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -216,6 +217,27 @@ async def delete_product(
         "message": "Product deleted successfully"
     })
 
+# The columns the admin order list can be sorted by. sort_by used to accept
+# any attribute of the Order class (hasattr): relationships such as "user"
+# or "items" and SQLAlchemy internals such as "metadata" passed the check
+# and then failed in ORDER BY with a 500. Same approach as
+# ProductFilter.sort_by: a closed list, enforced by the query schema.
+ORDER_SORT_COLUMNS = {
+    "id": Order.id,
+    "created_at": Order.created_at,
+    "updated_at": Order.updated_at,
+    "total_amount": Order.total_amount,
+    "status": Order.status,
+    "payment_status": Order.payment_status,
+}
+
+
+class AdminOrderListParams(PaginationParams):
+    sort_by: Optional[str] = Field(
+        None, pattern=f"^({'|'.join(ORDER_SORT_COLUMNS)})_(asc|desc)$"
+    )
+
+
 @router.get(
     "/orders",
     response_model=APIResponse[OrderListResponse],
@@ -233,7 +255,7 @@ async def list_orders(
     payment_status: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    pagination: PaginationParams = Depends(),
+    pagination: AdminOrderListParams = Depends(),
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
@@ -274,34 +296,13 @@ async def list_orders(
     if end_date:
         query = query.filter(Order.created_at <= end_date)
 
-    # Apply sorting
+    # Apply sorting. AdminOrderListParams' pattern has already answered 422
+    # for anything but a whitelisted field_asc/field_desc, so both lookups
+    # below always succeed.
     if pagination.sort_by:
-        try:
-
-            *field_parts, order = pagination.sort_by.rsplit('_', 1)
-            field = '_'.join(field_parts)
-
-
-            if not hasattr(Order, field):
-                raise HTTPException(
-                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"Invalid sort field: {field}"
-                )
-
-
-            if order not in ('asc', 'desc'):
-                raise HTTPException(
-                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Sort order must be either 'asc' or 'desc'"
-                )
-
-            column = getattr(Order, field)
-            query = query.order_by(desc(column) if order == 'desc' else column)
-        except ValueError:
-            raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="sort_by must be in format: field_asc or field_desc"
-            )
+        field, order = pagination.sort_by.rsplit('_', 1)
+        column = ORDER_SORT_COLUMNS[field]
+        query = query.order_by(desc(column) if order == 'desc' else column)
     else:
         query = query.order_by(Order.created_at.desc())
 

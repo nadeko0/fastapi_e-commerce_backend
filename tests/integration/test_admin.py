@@ -2,6 +2,9 @@ import re
 
 import pytest
 from fastapi.routing import APIRoute
+from hypothesis import HealthCheck, given
+from hypothesis import settings as settings_hypothesis
+from hypothesis import strategies as st
 
 from app.api.v1.admin import router as admin_router
 from app.core.config import settings
@@ -413,6 +416,74 @@ def test_admin_lists_orders_returns_empty_when_none_exist(client, db_session):
     assert data["items"] == []
     assert data["total"] == 0
     assert data["has_more"] is False
+
+
+ORDER_SORT_FIELDS = ("id", "created_at", "updated_at", "total_amount", "status", "payment_status")
+
+
+# Regression test (F-25): sort_by used to accept any attribute of the Order
+# class (hasattr), relationships and SQLAlchemy internals included. "user"
+# and "items" are relationships and "metadata" is the declarative MetaData,
+# none of which can be sorted on (a 500); idempotency_key is a real column
+# but nobody should sort the admin list by an internal dedup key.
+@pytest.mark.parametrize(
+    "sort_by",
+    ["user_asc", "items_desc", "metadata_asc", "shipping_address_desc",
+     "idempotency_key_asc", "user_id_desc", "created_at", "created_at_sideways"],
+)
+def test_admin_list_orders_rejects_sort_fields_outside_the_whitelist(
+    client, db_session, sort_by
+):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+
+    response = client.get(
+        f"{ADMIN_PREFIX}/orders",
+        params={"sort_by": sort_by},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 422, response.text
+
+
+@pytest.mark.parametrize("field", ORDER_SORT_FIELDS)
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+def test_admin_list_orders_accepts_every_whitelisted_sort_field(
+    client, db_session, field, direction
+):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+
+    response = client.get(
+        f"{ADMIN_PREFIX}/orders",
+        params={"sort_by": f"{field}_{direction}"},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 200, response.text
+
+
+@settings_hypothesis(
+    max_examples=40,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(sort_by=st.text(min_size=1, max_size=40))
+def test_admin_list_orders_sort_by_is_whitelisted_or_422(client, db_session, sort_by):
+    """Whatever the client sends, sort_by is either one of the whitelisted
+    field_direction values (200) or rejected (422) - never a 500."""
+    if not db_session.query(User).filter(User.email == "admin@example.com").first():
+        _make_admin(db_session)
+    admin_token = _login_as(client, "admin@example.com", "AdminPass1")
+
+    response = client.get(
+        f"{ADMIN_PREFIX}/orders",
+        params={"sort_by": sort_by},
+        headers=_auth_headers(admin_token),
+    )
+
+    allowed = {f"{f}_{d}" for f in ORDER_SORT_FIELDS for d in ("asc", "desc")}
+    assert response.status_code == (200 if sort_by in allowed else 422), sort_by
 
 
 def test_admin_stats_requires_admin(client, db_session):
