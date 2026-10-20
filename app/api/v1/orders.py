@@ -431,7 +431,7 @@ def _apply_payment_success(
     payment_row: Payment,
     background_tasks: BackgroundTasks,
     notify_email: str,
-) -> None:
+) -> bool:
     """
     Shared by the synchronous /pay endpoint (immediate success) and the
     webhook handler (success reported asynchronously, e.g. after
@@ -439,9 +439,21 @@ def _apply_payment_success(
     row is already marked succeeded, this is a no-op - regression test for
     "same event/attempt processed twice must not re-email or re-transition
     the order".
+
+    Returns False when the success is not applied because the order was
+    already paid (or refunded) by another attempt: two charges for one
+    order. The attempt is then recorded as succeeded and flagged for
+    manual review (a refund), and no second confirmation email goes out.
     """
+    _lock_order_and_reload(db, order, payment_row)
     if payment_row.status == "succeeded":
-        return
+        db.commit()
+        return True
+    if order.payment_status in (PaymentStatus.PAID, PaymentStatus.REFUNDED):
+        _flag_payment_for_manual_review(
+            db, payment_row, "order was already paid by another attempt"
+        )
+        return False
 
     payment_row.status = "succeeded"
     order.payment_status = PaymentStatus.PAID
@@ -455,6 +467,28 @@ def _apply_payment_success(
         notify_email,
         OrderResponse.from_orm(order)
     )
+    return True
+
+
+def _lock_order_and_reload(db: Session, order: Order, payment_row: Payment) -> None:
+    """
+    Every change to an order's payment state is a read-decide-write: is it
+    already paid, did this attempt already succeed. Without a lock two
+    requests (a webhook and /pay's own success, a failure and a success)
+    can both read the old state and both write. SELECT ... FOR UPDATE on
+    the order row makes the second wait for the first to commit and then
+    read what it wrote; the attempt is re-read under that lock too. Both
+    are re-read in any case: sessions are expire_on_commit=False
+    (app/core/database.py), so /pay's copies predate the provider call.
+    The lock lasts until the caller's commit. On SQLite (the test suite)
+    FOR UPDATE is not emitted at all; there the re-read is what remains.
+    Flushed first, so a change the caller already made (the webhook's
+    backfilled payment_intent_id) is kept rather than discarded by the
+    re-read.
+    """
+    db.flush()
+    db.refresh(order, with_for_update=True)
+    db.refresh(payment_row)
 
 
 # Order.payment_status values a failed attempt may move the order to FAILED
@@ -477,12 +511,12 @@ def _apply_payment_failure(db: Session, order: Order, payment_row: Payment) -> N
     Otherwise the attempt is marked failed, and the order too unless it
     has been paid.
     """
+    # Locked and re-read first: another attempt may have paid the order
+    # since `order` was read (see _lock_order_and_reload).
+    _lock_order_and_reload(db, order, payment_row)
     if payment_row.status == "succeeded":
+        db.commit()
         return
-    # Re-read: sessions are expire_on_commit=False (app/core/database.py),
-    # so `order` still holds what was read before the provider call, and
-    # another attempt may have paid it since.
-    db.refresh(order)
     payment_row.status = "failed"
     if order.payment_status in _PAYMENT_STATUSES_A_FAILURE_MAY_REPLACE:
         order.payment_status = PaymentStatus.FAILED
@@ -563,7 +597,11 @@ def _flag_payment_for_manual_review(db: Session, payment_row: Payment, reason: s
         "Payment %s for order %s needs manual review: %s",
         payment_row.id, payment_row.order_id, reason,
     )
-    return {"status": "processed", "applied": False, "requires_manual_review": True}
+    return _MANUAL_REVIEW_RESPONSE
+
+
+# The webhook's answer for an event recorded but not applied to the order.
+_MANUAL_REVIEW_RESPONSE = {"status": "processed", "applied": False, "requires_manual_review": True}
 
 
 @router.post(
@@ -588,10 +626,16 @@ async def process_payment(
 ):
     """Charge an order's total via the payment provider, creating a PaymentIntent."""
 
+    # Locked (SELECT ... FOR UPDATE) until the commit that records this
+    # attempt below, so two attempts check the guards and record themselves
+    # one after the other, never both against the same unpaid state. The
+    # lock is not held across the provider call (no transaction stays open
+    # while Stripe is waited on); what can still happen after it is handled
+    # where the outcome is applied (_lock_order_and_reload).
     order = db.query(Order).filter(
         Order.id == order_id,
         Order.user_id == current_user.id
-    ).first()
+    ).with_for_update().first()
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -808,10 +852,11 @@ async def create_checkout_session(
     """
     payload = payload or CheckoutSessionCreate()
 
+    # Locked like /pay's read of the order, for the same reason.
     order = db.query(Order).filter(
         Order.id == order_id,
         Order.user_id == current_user.id
-    ).first()
+    ).with_for_update().first()
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1130,7 +1175,12 @@ async def stripe_webhook(
         # retrying, but there is nothing to apply.
         return APIResponse.success_response({"status": "processed", "applied": False})
 
-    order = db.query(Order).filter(Order.id == payment_row.order_id).first()
+    # Locked for the rest of this event's handling (every branch ends in a
+    # commit), and the attempt re-read under the lock: a concurrent /pay or
+    # another event for the same order waits instead of deciding on the
+    # same state. See _lock_order_and_reload.
+    order = db.query(Order).filter(Order.id == payment_row.order_id).with_for_update().first()
+    db.refresh(payment_row)
 
     if event.type == "payment_intent.succeeded":
         if order.status == OrderStatus.CANCELLED:
@@ -1155,9 +1205,10 @@ async def stripe_webhook(
                 )
             )
 
-        _apply_payment_success(
+        if not _apply_payment_success(
             db, order, payment_row, background_tasks, order.user.email
-        )
+        ):
+            return APIResponse.success_response(_MANUAL_REVIEW_RESPONSE)
     elif event.type == "payment_intent.payment_failed":
         _apply_payment_failure(db, order, payment_row)
     elif event.type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
@@ -1202,9 +1253,10 @@ async def stripe_webhook(
                 )
             )
 
-        _apply_payment_success(
+        if not _apply_payment_success(
             db, order, payment_row, background_tasks, order.user.email
-        )
+        ):
+            return APIResponse.success_response(_MANUAL_REVIEW_RESPONSE)
     elif event.type in ("checkout.session.expired", "checkout.session.async_payment_failed"):
         # Mirrors payment_intent.payment_failed's handling: a terminal
         # failure/expiry for this attempt. See _apply_payment_failure for
