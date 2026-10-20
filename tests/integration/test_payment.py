@@ -742,6 +742,82 @@ def test_webhook_success_for_cancelled_order_is_flagged_not_applied(client, db_s
     assert payments[0].requires_manual_review is True
 
 
+# -- Late failure events never un-pay an order --------------------------------
+
+def _paid_order_with_an_abandoned_attempt(client, db_session):
+    """An order paid by a second /pay attempt while the first, left waiting
+    for 3D Secure, is still open at Stripe. Returns (setup, first intent id)."""
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    abandoned_intent_id = _pay_requiring_action(client, setup)
+
+    paid = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order),
+        headers=setup["headers"],
+    )
+    assert paid.status_code == 200, paid.text
+    assert _get_order(db_session, order["id"]).payment_status == "paid"
+    return setup, abandoned_intent_id
+
+
+def test_late_payment_failed_for_another_attempt_does_not_unpay_the_order(client, db_session):
+    # payment_intent.payment_failed checked only that *this attempt* had not
+    # succeeded, then set the whole order to failed: a failure reported for
+    # an abandoned attempt turned a paid order into a failed one, which
+    # reopened it for payment (a second charge) and blocked its refund.
+    setup, abandoned_intent_id = _paid_order_with_an_abandoned_attempt(client, db_session)
+    order = setup["order"]
+
+    body = _webhook_body("payment_intent.payment_failed", abandoned_intent_id)
+    response = _post_webhook(client, body, _sign(body))
+
+    assert response.status_code == 200
+    db_order = _get_order(db_session, order["id"])
+    assert db_order.payment_status == "paid"
+    assert db_order.status == "confirmed"
+    # The abandoned attempt itself did fail, and is recorded as such.
+    statuses = {p.payment_intent_id: p.status for p in _get_payments(db_session, order["id"])}
+    assert statuses[abandoned_intent_id] == "failed"
+    # Still paid, so still not payable again and still refundable.
+    again = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order),
+        headers=setup["headers"],
+    )
+    assert again.status_code == 400
+
+
+def test_late_payment_failed_does_not_turn_a_refunded_order_into_failed(client, db_session):
+    setup, abandoned_intent_id = _paid_order_with_an_abandoned_attempt(client, db_session)
+    order = setup["order"]
+    admin = _create_admin(db_session)
+    refund = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/refund", json={}, headers=admin["headers"]
+    )
+    assert refund.status_code == 200, refund.text
+    assert _get_order(db_session, order["id"]).payment_status == "refunded"
+
+    body = _webhook_body("payment_intent.payment_failed", abandoned_intent_id)
+    _post_webhook(client, body, _sign(body))
+
+    assert _get_order(db_session, order["id"]).payment_status == "refunded"
+
+
+def test_payment_failed_for_the_only_attempt_still_marks_the_order_failed(client, db_session):
+    # The rule above must not swallow a genuine failure: an unpaid order
+    # whose attempt fails is failed (and can be paid again).
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    intent_id = _pay_requiring_action(client, setup)
+
+    body = _webhook_body("payment_intent.payment_failed", intent_id)
+    _post_webhook(client, body, _sign(body))
+
+    assert _get_order(db_session, order["id"]).payment_status == "failed"
+    assert _get_payments(db_session, order["id"])[0].status == "failed"
+
+
 def test_cannot_start_a_payment_on_an_already_cancelled_order(client, db_session):
     setup = _create_verified_buyer_with_order(client, db_session)
     order = setup["order"]

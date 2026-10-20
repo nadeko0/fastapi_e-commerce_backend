@@ -464,6 +464,38 @@ class TestCheckoutSessionWebhook:
         db_order = _get_order(db_session, order["id"])
         assert db_order.payment_status == "failed"
 
+    @pytest.mark.parametrize(
+        "event_type", ["checkout.session.expired", "checkout.session.async_payment_failed"]
+    )
+    def test_stale_session_failure_does_not_unpay_an_order_paid_another_way(
+        self, client, db_session, event_type
+    ):
+        # A Checkout Session was opened, then the order was paid through
+        # /pay instead. When the abandoned session expired, Stripe's
+        # checkout.session.expired set the whole order to failed: paid
+        # money, an order that looked unpaid, open for a second payment.
+        setup = _create_verified_buyer_with_order(client, db_session)
+        order = setup["order"]
+        session = self._create_session(client, setup["headers"], order)
+        paid = client.post(
+            f"{ORDERS_PREFIX}/{order['id']}/pay",
+            json=_payment_payload(order, token=TOKEN_SUCCESS_DEFAULT),
+            headers=setup["headers"],
+        )
+        assert paid.status_code == 200, paid.text
+
+        body = _checkout_webhook_body(
+            event_type, session["checkout_session_id"], payment_status="unpaid"
+        )
+        response = _post_webhook(client, body, _sign(body))
+
+        assert response.status_code == 200
+        db_order = _get_order(db_session, order["id"])
+        assert db_order.payment_status == "paid"
+        assert db_order.status == "confirmed"
+        by_session = {p.checkout_session_id: p.status for p in _get_payments(db_session, order["id"])}
+        assert by_session[session["checkout_session_id"]] == "failed"
+
     def test_completed_for_cancelled_order_is_flagged_not_applied(self, client, db_session):
         # Mirrors test_webhook_success_for_cancelled_order_is_flagged_not_applied
         # in test_payment.py for the PaymentIntent flow: the order was
