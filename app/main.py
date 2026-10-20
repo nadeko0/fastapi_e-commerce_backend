@@ -23,13 +23,20 @@ logger.info("Initializing FastAPI application")
 
 logger.info("Configuring FastAPI middleware, CORS, and rate limiting")
 
+# The interactive docs and the OpenAPI schema describe every route, the
+# admin ones included, to anyone who asks. Useful while building against
+# the API, not something a production shop needs to publish: there all
+# three answer 404 (with openapi_url None, FastAPI serves no docs at all).
+_docs_published = settings.ENVIRONMENT != "production"
+
 logger.info("Initializing FastAPI application with rate limiting")
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="E-commerce backend API with FastAPI",
     version=settings.VERSION,
-    docs_url=f"{settings.API_V1_STR}/docs",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    docs_url=f"{settings.API_V1_STR}/docs" if _docs_published else None,
+    redoc_url="/redoc" if _docs_published else None,
+    openapi_url=f"{settings.API_V1_STR}/openapi.json" if _docs_published else None,
     # Rate limiting (app/core/rate_limit.py), declared once for every route.
     # A dependency, not a middleware: it runs after routing, so it knows the
     # route template it is counting for, and its 429 is an ordinary
