@@ -12,6 +12,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from app.core.config import settings
 from app.models.base import Base
 from app.models.enums import OrderStatus, PaymentStatus, create_string_enum
 
@@ -24,6 +25,11 @@ class Order(Base):
     payment_status = Column(create_string_enum(PaymentStatus, "payment_status"), nullable=False, server_default="pending")
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     total_amount = Column(Numeric(10, 2), nullable=False)
+    # ISO 4217 code total_amount is in, fixed when the order is placed
+    # (settings.STORE_CURRENCY at that moment). Every payment attempt for
+    # the order is made, and every provider report of one checked, in this
+    # currency; a client never chooses it.
+    currency = Column(String(3), nullable=False, default=lambda: settings.STORE_CURRENCY)
     shipping_address_id = Column(Integer, ForeignKey("addresses.id"), nullable=False)
     # Client-supplied key (Idempotency-Key header) for safe checkout retries.
     # Unique per user: the same key from two different users is not a clash.

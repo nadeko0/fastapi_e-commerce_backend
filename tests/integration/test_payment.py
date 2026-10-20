@@ -224,16 +224,39 @@ def _sign(body: bytes, secret: str = None, timestamp: int = None) -> str:
     )
 
 
-def _webhook_body(event_type: str, payment_intent_id: str, event_id: str = None) -> bytes:
+def _webhook_body(
+    event_type: str,
+    payment_intent_id: str,
+    event_id: str = None,
+    amount: int = None,
+    currency: str = None,
+) -> bytes:
+    # amount/currency are what Stripe reports it actually charged (cents,
+    # lowercase ISO code, as on a real PaymentIntent). A success event is
+    # applied only when they match the order, so every test that expects a
+    # payment_intent.succeeded to mark the order paid passes them; a test
+    # about something that happens before that check can leave them out.
     event_id = event_id or f"evt_{uuid.uuid4().hex[:24]}"
+    obj = {"id": payment_intent_id}
+    if amount is not None:
+        obj["amount"] = amount
+        obj["amount_received"] = amount
+    if currency is not None:
+        obj["currency"] = currency
     return json.dumps(
         {
             "id": event_id,
             "type": event_type,
             "created": int(time.time()),
-            "data": {"object": {"id": payment_intent_id}},
+            "data": {"object": obj},
         }
     ).encode()
+
+
+# What the order created by _create_verified_buyer_with_order costs, as a
+# real succeeded PaymentIntent would report it: one 19.99 Widget.
+ORDER_AMOUNT_CENTS = 1999
+ORDER_CURRENCY_REPORTED = "usd"
 
 
 def _post_webhook(client, body: bytes, signature: str):
@@ -288,6 +311,116 @@ def test_payment_amount_stored_as_integer_cents_not_decimal_dollars(client, db_s
     assert len(payments) == 1
     assert payments[0].amount == 1999
     assert isinstance(payments[0].amount, int)
+
+
+# -- Currency: the order's, never the client's ---------------------------------
+
+def test_order_is_priced_in_the_store_currency(client, db_session):
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+
+    assert order["currency"] == "USD"
+    assert _get_order(db_session, order["id"]).currency == "USD"
+
+
+def test_pay_in_a_currency_other_than_the_orders_is_rejected(client, db_session):
+    # The amount was compared with the order total, the currency was taken
+    # from the request as-is: a 19.99 USD order paid as 19.99 JPY (about
+    # 0.13 USD) came back 200 and the order was marked paid.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+
+    response = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order, currency="JPY"),
+        headers=setup["headers"],
+    )
+
+    assert response.status_code == 400
+    assert "currency" in response.json()["detail"].lower()
+    assert _get_order(db_session, order["id"]).payment_status == "pending"
+    # Rejected before anything reached the provider: no attempt recorded.
+    assert _get_payments(db_session, order["id"]) == []
+
+
+def test_pay_without_a_currency_charges_the_orders_currency(client, db_session):
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    payload = _payment_payload(order)
+    del payload["currency"]
+
+    response = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=payload, headers=setup["headers"]
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["currency"] == "USD"
+    payments = _get_payments(db_session, order["id"])
+    assert [p.currency for p in payments] == ["USD"]
+
+
+def _pay_requiring_action(client, setup):
+    # A payment left waiting for 3D Secure: its outcome arrives by webhook.
+    order = setup["order"]
+    response = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
+        headers=setup["headers"],
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["data"]["transaction_id"]
+
+
+@pytest.mark.parametrize(
+    "reported",
+    [
+        {"amount": ORDER_AMOUNT_CENTS - 1, "currency": ORDER_CURRENCY_REPORTED},
+        {"amount": ORDER_AMOUNT_CENTS, "currency": "jpy"},
+        {"amount": None, "currency": None},
+    ],
+    ids=["amount-differs", "currency-differs", "amount-and-currency-missing"],
+)
+def test_webhook_success_that_does_not_match_the_order_is_flagged_not_applied(
+    client, db_session, reported
+):
+    # The webhook marked the order paid on any payment_intent.succeeded for
+    # a known intent, whatever amount and currency Stripe said it charged.
+    # A mismatch means the money taken is not what the order costs: the
+    # attempt is recorded as succeeded (Stripe did charge) and flagged for
+    # a person to reconcile, and the order stays unpaid. A success event
+    # with no amount at all is treated the same way, not as a match.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    intent_id = _pay_requiring_action(client, setup)
+
+    body = _webhook_body("payment_intent.succeeded", intent_id, **reported)
+    response = _post_webhook(client, body, _sign(body))
+
+    assert response.status_code == 200
+    assert response.json()["data"]["applied"] is False
+    assert response.json()["data"]["requires_manual_review"] is True
+    db_order = _get_order(db_session, order["id"])
+    assert db_order.payment_status == "pending"
+    assert db_order.status == "new"
+    payments = _get_payments(db_session, order["id"])
+    assert payments[0].status == "succeeded"
+    assert payments[0].requires_manual_review is True
+
+
+def test_webhook_success_reported_in_upper_case_currency_is_applied(client, db_session):
+    # Stripe reports currencies in lower case and the order stores upper
+    # case: the comparison must not depend on that.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    intent_id = _pay_requiring_action(client, setup)
+
+    body = _webhook_body(
+        "payment_intent.succeeded", intent_id, amount=ORDER_AMOUNT_CENTS, currency="USD"
+    )
+    response = _post_webhook(client, body, _sign(body))
+
+    assert response.json()["data"]["applied"] is True
+    assert _get_order(db_session, order["id"]).payment_status == "paid"
 
 
 # -- Declined payment ---------------------------------------------------------
@@ -511,7 +644,10 @@ def test_webhook_success_finalizes_a_requires_action_payment(client, db_session)
     )
     intent_id = pay_response.json()["data"]["transaction_id"]
 
-    body = _webhook_body("payment_intent.succeeded", intent_id)
+    body = _webhook_body(
+        "payment_intent.succeeded", intent_id,
+        amount=ORDER_AMOUNT_CENTS, currency=ORDER_CURRENCY_REPORTED,
+    )
     response = _post_webhook(client, body, _sign(body))
 
     assert response.status_code == 200
@@ -543,7 +679,10 @@ def test_duplicate_webhook_delivery_does_not_double_apply(client, db_session, mo
     intent_id = pay_response.json()["data"]["transaction_id"]
 
     event_id = f"evt_{uuid.uuid4().hex[:24]}"
-    body = _webhook_body("payment_intent.succeeded", intent_id, event_id=event_id)
+    body = _webhook_body(
+        "payment_intent.succeeded", intent_id, event_id=event_id,
+        amount=ORDER_AMOUNT_CENTS, currency=ORDER_CURRENCY_REPORTED,
+    )
     signature = _sign(body)
 
     first = _post_webhook(client, body, signature)
@@ -585,7 +724,10 @@ def test_webhook_success_for_cancelled_order_is_flagged_not_applied(client, db_s
     )
     assert cancel_response.status_code == 200
 
-    body = _webhook_body("payment_intent.succeeded", intent_id)
+    body = _webhook_body(
+        "payment_intent.succeeded", intent_id,
+        amount=ORDER_AMOUNT_CENTS, currency=ORDER_CURRENCY_REPORTED,
+    )
     response = _post_webhook(client, body, _sign(body))
 
     assert response.status_code == 200
@@ -1098,18 +1240,24 @@ def test_provider_create_refund_rejects_non_integer_amount():
 def test_pay_with_currency_code_that_matches_regex_but_is_not_real_iso_returns_400(
     client, db_session
 ):
-    # API-level companion to the fuzz tests above: PaymentCreate's own
-    # `^[A-Z]{3}$` pattern lets "ZZZ" through the schema layer, so this
-    # proves the provider layer's own ISO-code check is what actually stops
-    # it, and that process_payment surfaces that as a clean 400 (not a
-    # 500/uncaught exception) with the attempt's own Payment row marked
-    # failed rather than left dangling as "processing".
+    # API-level companion to the fuzz tests above: the provider layer's own
+    # ISO-code check is what stops a code that only looks like one, and
+    # process_payment surfaces that as a clean 400 (not a 500/uncaught
+    # exception) with the attempt's own Payment row marked failed rather
+    # than left dangling as "processing". A client can no longer choose
+    # the currency, so the bad code is put on the order itself (as a
+    # misconfigured store currency would).
     setup = _create_verified_buyer_with_order(client, db_session)
     order = setup["order"]
+    db_order = _get_order(db_session, order["id"])
+    db_order.currency = "ZZZ"
+    db_session.commit()
 
+    payload = _payment_payload(order)
+    del payload["currency"]
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
-        json=_payment_payload(order, currency="ZZZ"),
+        json=payload,
         headers=setup["headers"],
     )
 
@@ -1167,7 +1315,10 @@ def test_concurrent_identical_webhook_deliveries_do_not_double_apply(client, db_
     intent_id = pay_response.json()["data"]["transaction_id"]
 
     event_id = f"evt_{uuid.uuid4().hex[:24]}"
-    body = _webhook_body("payment_intent.succeeded", intent_id, event_id=event_id)
+    body = _webhook_body(
+        "payment_intent.succeeded", intent_id, event_id=event_id,
+        amount=ORDER_AMOUNT_CENTS, currency=ORDER_CURRENCY_REPORTED,
+    )
     signature = _sign(body)
 
     barrier = threading.Barrier(2)

@@ -299,6 +299,13 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: str = "sk_test_mock_placeholder"
     STRIPE_WEBHOOK_SECRET: str = "whsec_mock_placeholder"
     STRIPE_WEBHOOK_TOLERANCE_SECONDS: int = 300
+    # The one currency the store prices and charges in. Product prices carry
+    # no currency of their own; each order records this value when it is
+    # placed (Order.currency) and is only ever charged in it, whatever a
+    # payment request says. Amounts are converted to the smallest unit by
+    # multiplying by 100 (_decimal_to_cents in app/api/v1/orders.py), so a
+    # currency without a minor unit (JPY, KRW) is not supported here yet.
+    STORE_CURRENCY: str = Field("USD", pattern=r"^[A-Z]{3}$")
 
     @model_validator(mode="after")
     def check_secrets(self) -> "Settings":

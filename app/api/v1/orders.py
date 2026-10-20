@@ -139,7 +139,8 @@ async def create_order(
         payment_status=PaymentStatus.PENDING,
         shipping_address_id=shipping_address_id,
         idempotency_key=idempotency_key,
-        total_amount=Decimal('0.00')
+        total_amount=Decimal('0.00'),
+        currency=settings.STORE_CURRENCY,
     )
     db.add(order)
     # Flush (not commit) to populate order.id from the DB's autoincrement
@@ -481,6 +482,57 @@ def _guard_order_payable(order: Order) -> None:
         )
 
 
+def _guard_currency_matches_order(requested_currency: Optional[str], order: Order) -> None:
+    """
+    Shared by /pay and /checkout-session: the order is charged in its own
+    currency only. The currency used to be taken from the request as-is
+    while only the amount was compared, so a 100.00 USD order could be paid
+    as 100.00 JPY. A client may omit it; one it sends must be the order's.
+    """
+    if requested_currency is not None and requested_currency != order.currency:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment currency does not match order currency"
+        )
+
+
+def _reported_charge_matches_order(object_data: dict, amount_field: str, order: Order) -> bool:
+    """
+    Whether a provider success event charged exactly what the order costs,
+    in the order's currency. `amount_field` names where the event carries
+    the charged amount (amount_received on a PaymentIntent, amount_total
+    on a Checkout Session); Stripe reports currencies in lower case. A
+    missing amount or currency is a mismatch, not a pass.
+    """
+    reported_amount = object_data.get(amount_field)
+    reported_currency = object_data.get("currency")
+    return (
+        isinstance(reported_amount, int)
+        and not isinstance(reported_amount, bool)
+        and reported_amount == _decimal_to_cents(order.total_amount)
+        and isinstance(reported_currency, str)
+        and reported_currency.upper() == order.currency
+    )
+
+
+def _flag_payment_for_manual_review(db: Session, payment_row: Payment, reason: str) -> dict:
+    """
+    A provider reports a payment succeeded, but applying it to the order
+    would be wrong (the order was cancelled meanwhile, or the charge is not
+    what the order costs). The Payment row records the provider's true
+    state and is flagged for a person to reconcile; the order's status and
+    payment_status are left exactly as they are.
+    """
+    payment_row.status = "succeeded"
+    payment_row.requires_manual_review = True
+    db.commit()
+    logger.warning(
+        "Payment %s for order %s needs manual review: %s",
+        payment_row.id, payment_row.order_id, reason,
+    )
+    return {"status": "processed", "applied": False, "requires_manual_review": True}
+
+
 @router.post(
     "/{order_id}/pay",
     response_model=APIResponse[PaymentResponse],
@@ -540,6 +592,7 @@ async def process_payment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Payment amount does not match order total"
         )
+    _guard_currency_matches_order(payment.currency, order)
 
     amount_cents = _decimal_to_cents(payment.amount)
     provider_idempotency_key = idempotency_key or f"auto-{uuid.uuid4().hex}"
@@ -550,7 +603,7 @@ async def process_payment(
         payment_intent_id=f"pending-{uuid.uuid4().hex[:24]}",
         idempotency_key=idempotency_key,
         amount=amount_cents,
-        currency=payment.currency,
+        currency=order.currency,
         status="processing",
     )
     db.add(payment_row)
@@ -582,7 +635,7 @@ async def process_payment(
         intent = await run_in_threadpool(
             provider.create_payment_intent,
             amount=amount_cents,
-            currency=payment.currency,
+            currency=order.currency,
             idempotency_key=provider_idempotency_key,
             payment_method=payment.payment_method_token,
             metadata={"order_id": str(order.id)},
@@ -663,7 +716,7 @@ async def process_payment(
             order_id=order.id,
             payment_method=payment.payment_method,
             amount=payment.amount,
-            currency=payment.currency,
+            currency=order.currency,
             payment_method_token=payment.payment_method_token,
             id=payment_row.id,
             status=PaymentStatus.REQUIRES_ACTION,
@@ -681,7 +734,7 @@ async def process_payment(
         order_id=order.id,
         payment_method=payment.payment_method,
         amount=payment.amount,
-        currency=payment.currency,
+        currency=order.currency,
         payment_method_token=payment.payment_method_token,
         id=payment_row.id,
         status=PaymentStatus.PAID,
@@ -750,6 +803,7 @@ async def create_checkout_session(
             )
 
     _guard_order_payable(order)
+    _guard_currency_matches_order(payload.currency, order)
 
     amount_cents = _decimal_to_cents(order.total_amount)
     provider_idempotency_key = idempotency_key or f"auto-{uuid.uuid4().hex}"
@@ -764,7 +818,7 @@ async def create_checkout_session(
         payment_intent_id=f"pending-{uuid.uuid4().hex[:24]}",
         idempotency_key=idempotency_key,
         amount=amount_cents,
-        currency=payload.currency,
+        currency=order.currency,
         status="processing",
     )
     db.add(payment_row)
@@ -788,7 +842,7 @@ async def create_checkout_session(
         session = await run_in_threadpool(
             provider.create_checkout_session,
             amount=amount_cents,
-            currency=payload.currency,
+            currency=order.currency,
             idempotency_key=provider_idempotency_key,
             success_url=success_url,
             cancel_url=cancel_url,
@@ -1056,11 +1110,17 @@ async def stripe_webhook(
             # true provider state on the Payment row, flag it for manual
             # review, and leave the order's status/payment_status exactly
             # as they are.
-            payment_row.status = "succeeded"
-            payment_row.requires_manual_review = True
-            db.commit()
             return APIResponse.success_response(
-                {"status": "processed", "applied": False, "requires_manual_review": True}
+                _flag_payment_for_manual_review(db, payment_row, "order is cancelled")
+            )
+        if not _reported_charge_matches_order(object_data, "amount_received", order):
+            # Stripe charged something other than what the order costs (or
+            # in another currency): marking the order paid would ship it
+            # for the wrong money. Same handling as the cancelled case.
+            return APIResponse.success_response(
+                _flag_payment_for_manual_review(
+                    db, payment_row, "charged amount or currency differs from the order"
+                )
             )
 
         _apply_payment_success(
@@ -1102,13 +1162,16 @@ async def stripe_webhook(
             db.commit()
             return APIResponse.success_response({"status": "processed", "applied": False})
 
+        # Same conflict handling as payment_intent.succeeded above.
         if order.status == OrderStatus.CANCELLED:
-            # Same conflict-handling as payment_intent.succeeded above.
-            payment_row.status = "succeeded"
-            payment_row.requires_manual_review = True
-            db.commit()
             return APIResponse.success_response(
-                {"status": "processed", "applied": False, "requires_manual_review": True}
+                _flag_payment_for_manual_review(db, payment_row, "order is cancelled")
+            )
+        if not _reported_charge_matches_order(object_data, "amount_total", order):
+            return APIResponse.success_response(
+                _flag_payment_for_manual_review(
+                    db, payment_row, "charged amount or currency differs from the order"
+                )
             )
 
         _apply_payment_success(
