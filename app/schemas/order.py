@@ -2,8 +2,11 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from typing import List, Optional
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
+
+from app.core.config import settings
 
 
 class OrderStatus(str, Enum):
@@ -176,6 +179,21 @@ class PaymentResponse(PaymentCreate):
 
     model_config = ConfigDict(from_attributes=True)
 
+def _url_origin(url: str) -> Optional[tuple]:
+    """(scheme, host, port) of an http(s) URL, the port filled in from the
+    scheme when absent; None for anything else, including a URL carrying
+    userinfo or a port that is not a number."""
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    if scheme not in ('http', 'https') or not parts.hostname or '@' in parts.netloc:
+        return None
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    return scheme, parts.hostname.lower(), port or (443 if scheme == 'https' else 80)
+
+
 class CheckoutSessionCreate(BaseModel):
     """
     Optional overrides for creating a Stripe Checkout Session for an order
@@ -187,30 +205,32 @@ class CheckoutSessionCreate(BaseModel):
     differs from it is rejected (400).
     """
     currency: Optional[str] = Field(None, pattern="^[A-Z]{3}$")
-    # Where Stripe sends the customer after the hosted page. This backend
-    # has no real frontend (see live_stripe_provider.py's confirm_payment_intent
-    # return_url note for the same situation) - omit to use a placeholder.
+    # Where Stripe sends the customer after the hosted page. Omit to use the
+    # frontend's /checkout/success and /checkout/cancel (built on
+    # settings.FRONTEND_URL in create_checkout_session).
     success_url: Optional[str] = None
     cancel_url: Optional[str] = None
 
-    # These are client-controlled redirect targets with no frontend-origin
-    # allowlist available yet (no FRONTEND_URL setting exists), so this is
-    # deliberately minimal defense-in-depth rather than a full fix: reject
-    # anything that isn't a plain http(s) URL up front (400, not a
-    # provider-side error) so a caller can't hand out an authenticated,
-    # Stripe-hosted payment link that redirects to a javascript:/data:/other
-    # non-http(s) URI after a real payment completes. It does NOT restrict
-    # the URL to this site's own origin - open-redirect-style reuse of an
-    # arbitrary http(s) URL is still possible and is a known, unresolved gap
-    # (see .agent-notes/part_a_self_inventory.md) pending a real frontend
-    # origin to allowlist against.
+    # Client-controlled redirect targets, followed by the customer's browser
+    # from a Stripe-hosted page they trust, right after paying. Any http(s)
+    # URL used to be accepted, which made that page an open redirect to an
+    # address of the API caller's choosing. Only the frontend's own origin
+    # (scheme, host, port of settings.FRONTEND_URL) is accepted now, 422
+    # otherwise. Whitespace, control characters, backslashes and userinfo
+    # ("user@host") are refused outright rather than parsed: browsers and
+    # urllib disagree on where the host of such a URL is
+    # ("http://evil.example\@shop" is evil.example to a browser).
     @validator('success_url', 'cancel_url')
-    def validate_redirect_scheme(cls, v):
+    def validate_redirect_on_frontend(cls, v):
         if v is None:
             return v
-        scheme = v.split(':', 1)[0].lower() if ':' in v else ''
-        if scheme not in ('http', 'https'):
+        if any(c.isspace() or c == '\\' or ord(c) < 0x20 for c in v):
+            raise ValueError('must be a plain URL on the frontend origin')
+        origin = _url_origin(v)
+        if origin is None:
             raise ValueError('must be an http:// or https:// URL')
+        if origin != _url_origin(settings.FRONTEND_URL):
+            raise ValueError(f'must be on the frontend origin {settings.FRONTEND_URL}')
         return v
 
 class CheckoutSessionResponse(BaseModel):

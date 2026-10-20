@@ -34,6 +34,7 @@ def _production(**overrides):
         "PAYMENT_PROVIDER": "stripe",
         "STRIPE_SECRET_KEY": REAL_LOOKING_SECRET_KEY,
         "STRIPE_WEBHOOK_SECRET": REAL_LOOKING_WEBHOOK_SECRET,
+        "FRONTEND_URL": "https://shop.example",
         # The other secrets a deployment needs (Settings.check_deployment_settings),
         # so that only the value under test can be what is refused.
         "JWT_SECRET_KEY": "k" * 64,
@@ -94,3 +95,23 @@ def test_development_may_use_the_mock_with_placeholders():
     configured = _settings(ENVIRONMENT="development", PAYMENT_PROVIDER="mock")
     assert configured.PAYMENT_PROVIDER == "mock"
     assert configured.STRIPE_WEBHOOK_SECRET == "whsec_mock_placeholder"
+
+
+# -- FRONTEND_URL: where a Checkout Session sends the customer back ----------
+
+def test_production_refuses_a_frontend_url_over_plain_http():
+    with pytest.raises(ValidationError, match="FRONTEND_URL"):
+        _production(FRONTEND_URL="http://shop.example")
+
+
+@pytest.mark.parametrize(
+    "bad", ["shop.example", "ftp://shop.example", "https://", "https://user@shop.example"]
+)
+def test_frontend_url_must_be_an_http_url_with_a_host(bad):
+    with pytest.raises(ValidationError, match="FRONTEND_URL"):
+        _settings(FRONTEND_URL=bad)
+
+
+def test_frontend_url_trailing_slash_is_dropped():
+    # URLs are built as f"{FRONTEND_URL}/checkout/...": no double slash.
+    assert _settings(FRONTEND_URL="https://shop.example/").FRONTEND_URL == "https://shop.example"

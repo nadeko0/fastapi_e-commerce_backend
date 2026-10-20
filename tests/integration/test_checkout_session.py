@@ -31,6 +31,7 @@ from test_payment import (
     _sign,
 )
 
+from app.core.config import settings
 from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
@@ -322,8 +323,8 @@ class TestCreateCheckoutSessionEndpoint:
         order = setup["order"]
 
         payload = {
-            "success_url": "https://example.com/success",
-            "cancel_url": "https://example.com/cancel",
+            "success_url": f"{settings.FRONTEND_URL}/success",
+            "cancel_url": f"{settings.FRONTEND_URL}/cancel",
         }
         payload[field] = bad_url
 
@@ -332,6 +333,75 @@ class TestCreateCheckoutSessionEndpoint:
         )
 
         assert response.status_code == 422
+
+    @pytest.mark.parametrize("field", ["success_url", "cancel_url"])
+    @pytest.mark.parametrize(
+        "foreign_url",
+        [
+            "https://evil.example/phish",
+            # Look like the frontend but are not on its origin.
+            "https://localhost:3000.evil.example/",
+            "https://localhost:3000@evil.example/",
+            "http://evil.example\\@localhost:3000/",
+            "https://localhost:3000/",  # other scheme
+            "http://localhost:3001/",  # other port
+            "http://localhost/",  # default port, not 3000
+            " http://localhost:3000/",
+        ],
+    )
+    def test_rejects_redirect_urls_off_the_frontend_origin(
+        self, client, db_session, field, foreign_url
+    ):
+        # Any http(s) URL used to be accepted: a Stripe-hosted payment page,
+        # trusted by the customer, sent them on to an address of the API
+        # caller's choosing once they had paid (an open redirect). Only the
+        # configured frontend's origin is accepted now (FRONTEND_URL,
+        # http://localhost:3000 in the suite).
+        setup = _create_verified_buyer_with_order(client, db_session)
+        order = setup["order"]
+
+        response = client.post(
+            CHECKOUT_SESSION_URL(order["id"]), json={field: foreign_url}, headers=setup["headers"]
+        )
+
+        assert response.status_code == 422, response.text
+        assert _get_payments(db_session, order["id"]) == []
+
+    def test_frontend_urls_reach_the_provider_and_defaults_are_built_on_it(
+        self, client, db_session, monkeypatch
+    ):
+        calls = []
+        real_create = StripePaymentProvider.create_checkout_session
+
+        def _spy(self, **kwargs):
+            calls.append(kwargs)
+            return real_create(self, **kwargs)
+
+        monkeypatch.setattr(StripePaymentProvider, "create_checkout_session", _spy)
+        setup = _create_verified_buyer_with_order(client, db_session)
+        order = setup["order"]
+        frontend = settings.FRONTEND_URL
+        assert frontend == "http://localhost:3000"
+
+        own = client.post(
+            CHECKOUT_SESSION_URL(order["id"]),
+            json={"success_url": f"{frontend}/thanks?order=1", "cancel_url": f"{frontend}/cart"},
+            headers={**setup["headers"], "Idempotency-Key": "own-urls"},
+        )
+        defaults = client.post(
+            CHECKOUT_SESSION_URL(order["id"]),
+            headers={**setup["headers"], "Idempotency-Key": "default-urls"},
+        )
+
+        assert own.status_code == 200, own.text
+        assert defaults.status_code == 200, defaults.text
+        assert (calls[0]["success_url"], calls[0]["cancel_url"]) == (
+            f"{frontend}/thanks?order=1", f"{frontend}/cart"
+        )
+        assert calls[1]["success_url"] == (
+            f"{frontend}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}"
+        )
+        assert calls[1]["cancel_url"] == f"{frontend}/checkout/cancel"
 
 
 # -- Webhook: checkout.session.* ----------------------------------------------
