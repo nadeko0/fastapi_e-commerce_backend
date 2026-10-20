@@ -528,17 +528,19 @@ class RedisService:
             return False
 
 
-    def add_to_blacklist(self, token: str, expires_in: int) -> bool:
+    # token_id: what app.core.security._blacklist_id derives from a verified
+    # access token, not the raw token string.
+    def add_to_blacklist(self, token_id: str, expires_in: int) -> bool:
         try:
-            key = f"blacklist:{token}"
+            key = f"blacklist:{token_id}"
             return self._redis.setex(key, expires_in, "1")
         except RedisError as e:
             self._handle_redis_error(f"add_to_blacklist: {str(e)}")
             return False
 
-    def is_blacklisted(self, token: str) -> bool:
+    def is_blacklisted(self, token_id: str) -> bool:
         try:
-            return bool(self._redis.exists(f"blacklist:{token}"))
+            return bool(self._redis.exists(f"blacklist:{token_id}"))
         except RedisError as e:
             self._handle_redis_error(f"is_blacklisted: {str(e)}")
             return True  # Safer to assume token is blacklisted on error

@@ -3,14 +3,17 @@ import threading
 import time
 from datetime import timedelta
 
+import jwt
 import pytest
 from freezegun import freeze_time
 
 from app.core.config import settings
 from app.core.security import (
     blacklist_token,
+    create_access_token,
     generate_email_verification_token,
     generate_password_reset_token,
+    validate_token,
 )
 
 API_PREFIX = "/api/v1/users"
@@ -623,6 +626,91 @@ def test_logout_blacklists_the_access_token_too(client, valid_registration_paylo
         headers={"Authorization": f"Bearer {tokens['access_token']}"},
     )
     assert me_response.status_code == 401
+
+
+def _pad_signature(token: str) -> str:
+    # PyJWT accepts the signature segment with its base64url padding: a
+    # different string for the very same token. (It rejects every other
+    # re-spelling, e.g. a changed spare bit in the last character.)
+    return f"{token}="
+
+
+def test_logout_revokes_the_access_token_with_padded_signature_too(
+    client, valid_registration_payload
+):
+    # A blacklist keyed by the raw token string missed this: after logout a
+    # stolen token kept working with "=" appended.
+    access_token = _register_and_login(client, valid_registration_payload)
+    variant = _pad_signature(access_token)
+    # The variant really is accepted as the same token, or this test proves nothing.
+    assert client.get(
+        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {variant}"}
+    ).status_code == 200
+
+    logout_response = client.post(
+        f"{API_PREFIX}/logout", headers={"Authorization": f"Bearer {access_token}"}
+    )
+    assert logout_response.status_code == 200
+
+    plain_after = client.get(
+        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {access_token}"}
+    )
+    padded_after = client.get(
+        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {variant}"}
+    )
+    assert (plain_after.status_code, padded_after.status_code) == (401, 401)
+
+
+def test_logout_revokes_an_access_token_without_jti_in_every_spelling(
+    client, valid_registration_payload
+):
+    # Access tokens issued before tokens carried a jti are still valid for
+    # up to ACCESS_TOKEN_EXPIRE_MINUTES after a deploy, and logout must
+    # revoke those, in every spelling, too.
+    access_token = _register_and_login(client, valid_registration_payload)
+    user_id = client.get(
+        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {access_token}"}
+    ).json()["data"]["id"]
+    now = int(time.time())
+    legacy = jwt.encode(
+        {
+            "exp": now + 600,
+            "iat": now,
+            "sub": str(user_id),
+            "type": "access",
+        },
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    assert client.get(
+        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {legacy}"}
+    ).status_code == 200
+
+    # Logging out with one spelling revokes the others as well.
+    logout_response = client.post(
+        f"{API_PREFIX}/logout",
+        headers={"Authorization": f"Bearer {_pad_signature(legacy)}"},
+    )
+    assert logout_response.status_code == 200
+
+    plain_after = client.get(
+        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {legacy}"}
+    )
+    padded_after = client.get(
+        f"{API_PREFIX}/me",
+        headers={"Authorization": f"Bearer {_pad_signature(legacy)}"},
+    )
+    assert (plain_after.status_code, padded_after.status_code) == (401, 401)
+
+
+def test_validate_token_rejects_a_blacklisted_token_in_every_spelling():
+    token = create_access_token(7)
+    assert validate_token(_pad_signature(token)) is not None
+
+    blacklist_token(token, expires_in=600)
+
+    assert validate_token(token) is None
+    assert validate_token(_pad_signature(token)) is None
 
 
 def test_refresh_rejects_token_for_deactivated_user(

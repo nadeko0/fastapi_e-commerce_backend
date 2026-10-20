@@ -115,7 +115,14 @@ async def get_password_hash_async(password: str) -> str:
 def create_access_token(subject: Union[str, int]) -> str:
     now = datetime.utcnow()
     expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode = {"exp": expire, "iat": now, "sub": str(subject), "type": "access"}
+    # jti: identifies this token on the logout blacklist (see _blacklist_id).
+    to_encode = {
+        "exp": expire,
+        "iat": now,
+        "sub": str(subject),
+        "type": "access",
+        "jti": str(uuid.uuid4()),
+    }
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
@@ -290,10 +297,6 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-
-    if await is_token_blacklisted(token):
-        raise credentials_exception
-
     try:
         payload = jwt.decode(
             token,
@@ -308,6 +311,9 @@ async def get_current_user(
             raise credentials_exception
 
     except jwt.PyJWTError:
+        raise credentials_exception
+
+    if await is_token_blacklisted(_blacklist_id(token, payload)):
         raise credentials_exception
 
     password_changed_at = await get_password_changed_at(user_id)
@@ -389,22 +395,51 @@ async def get_optional_active_user(
     current_user = await get_current_user(db=db, token=token)
     return await get_current_active_user(current_user=current_user)
 
+def _blacklist_id(token: str, payload: dict) -> str:
+    """What the logout blacklist knows a verified access token by.
+
+    Not the token string: one token has more than one spelling (PyJWT also
+    accepts the signature segment with its base64url "=" padding), and a
+    blacklist of strings let a logged-out token back in with "=" appended.
+    The jti is the same in every spelling.
+
+    Access tokens issued before they carried a jti stay valid for
+    ACCESS_TOKEN_EXPIRE_MINUTES after the deploy. They are known by the
+    token with that padding stripped: the one spelling PyJWT produces, and
+    the key a logout before the deploy already wrote, so those entries
+    still hold. This branch can go once no such token can be unexpired.
+    """
+    jti = payload.get("jti")
+    if jti:
+        return f"jti:{jti}"
+    return token.rstrip("=")
+
 def blacklist_token(token: str, expires_in: int) -> bool:
-    return redis_service.add_to_blacklist(token, expires_in)
+    """Revoke an access token for `expires_in` seconds. A token that does
+    not verify is not stored: nothing would accept it anyway."""
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"verify_exp": False},
+        )
+    except jwt.PyJWTError:
+        return False
+    return redis_service.add_to_blacklist(_blacklist_id(token, payload), expires_in)
 
 def validate_token(token: str) -> Optional[dict]:
     try:
-        if redis_service.is_blacklisted(token):
-            return None
-
         payload = jwt.decode(
             token,
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM]
         )
-        return payload
     except jwt.PyJWTError:
         return None
+    if redis_service.is_blacklisted(_blacklist_id(token, payload)):
+        return None
+    return payload
 
 def generate_password_reset_token(email: str) -> str:
     expire = datetime.utcnow() + timedelta(hours=24)
