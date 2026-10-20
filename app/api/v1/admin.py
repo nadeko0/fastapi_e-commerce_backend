@@ -489,10 +489,16 @@ async def create_product_variant(
 @router.get(
     "/products/{product_id}/variants",
     response_model=APIResponse[ProductVariantListResponse],
-    responses={404: {"description": "Product not found"}},
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Product not found"},
+    },
 )
 async def list_product_variants(
     product_id: int,
+    # Every route on this router needs it: this one used to answer anyone,
+    # inactive variants, SKUs and exact stock levels included.
+    current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     """List all variants belonging to a product."""

@@ -1,5 +1,10 @@
-import pytest
+import re
 
+import pytest
+from fastapi.routing import APIRoute
+
+from app.api.v1.admin import router as admin_router
+from app.core.config import settings
 from app.core.security import get_password_hash
 from app.models.category import Category
 from app.models.enums import UserRole
@@ -115,6 +120,73 @@ def test_admin_endpoint_requires_authentication(client):
     response = client.post(f"{ADMIN_PREFIX}/categories", json={"name": "No Auth"})
 
     assert response.status_code == 401
+
+
+def test_admin_variant_listing_requires_authentication(client, db_session):
+    # Regression test (F-12): list_product_variants was the one route under
+    # /admin without get_current_admin_user, so anyone could read every
+    # variant of a product - inactive ones included - with SKUs and exact
+    # stock levels.
+    category = _make_category(db_session)
+    product = Product(
+        name="Widget", description="A fine widget for all your widget needs",
+        price="9.99", stock_quantity=3, category_id=category.id, images=[],
+    )
+    db_session.add(product)
+    db_session.commit()
+    db_session.add(ProductVariant(product_id=product.id, sku="HIDDEN-SKU", is_active=False))
+    db_session.commit()
+
+    response = client.get(f"{ADMIN_PREFIX}/products/{product.id}/variants")
+
+    assert response.status_code == 401
+    assert "HIDDEN-SKU" not in response.text
+
+
+def _admin_routes():
+    """Every (method, path) the admin router serves, read from the router
+    itself rather than listed by hand: a route added later is audited by the
+    test below without anyone remembering to add it there."""
+    return sorted(
+        (method, route.path)
+        for route in admin_router.routes
+        if isinstance(route, APIRoute)
+        for method in route.methods
+    )
+
+
+def _concrete_path(path):
+    # Path parameters are only parsed after the auth dependencies have run,
+    # so any value works; 1 keeps the URL well-formed.
+    return re.sub(r"\{[^}]+\}", "1", path)
+
+
+@pytest.mark.parametrize(("method", "path"), _admin_routes())
+def test_every_admin_route_rejects_anonymous_callers(client, method, path):
+    response = client.request(method, f"{settings.API_V1_STR}{_concrete_path(path)}")
+
+    assert response.status_code == 401, f"{method} {path} answered {response.status_code}"
+
+
+@pytest.mark.parametrize(("method", "path"), _admin_routes())
+def test_every_admin_route_rejects_non_admin_users(client, method, path):
+    user_token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.request(
+        method,
+        f"{settings.API_V1_STR}{_concrete_path(path)}",
+        headers=_auth_headers(user_token),
+    )
+
+    assert response.status_code == 403, f"{method} {path} answered {response.status_code}"
+
+
+def test_admin_route_audit_sees_every_route():
+    # Guards the two tests above against auditing nothing (e.g. if the
+    # router were wrapped and stopped exposing APIRoute objects).
+    routes = _admin_routes()
+    assert ("GET", "/admin/products/{product_id}/variants") in routes
+    assert ("POST", "/admin/categories") in routes
 
 
 # --- Admin category CRUD --------------------------------------------------
@@ -492,7 +564,10 @@ def test_admin_lists_product_variants(client, db_session):
         headers=_auth_headers(admin_token),
     )
 
-    response = client.get(f"{ADMIN_PREFIX}/products/{product['id']}/variants")
+    response = client.get(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        headers=_auth_headers(admin_token),
+    )
 
     assert response.status_code == 200
     body = response.json()["data"]
