@@ -161,13 +161,22 @@ class LiveStripePaymentProvider(PaymentProvider):
             "api_key": self._api_key,
             # This codebase only ever deals in card payments (see
             # PaymentProvider's card-shaped exception hierarchy: CardError,
-            # decline_code, etc). Pinning payment_method_types=["card"]
+            # decline_code, etc). allowed_payment_method_types=["card"]
             # avoids Stripe's default "automatic_payment_methods" behavior,
             # which pulls in whatever redirect-based methods are enabled on
             # the connected Dashboard account and then requires a
             # `return_url` at confirm time - irrelevant/unwanted for a
             # server-only, no-redirect integration like this one.
-            "payment_method_types": ["card"],
+            #
+            # This used to be payment_method_types=["card"]. API version
+            # 2026-09-30.endive (pinned by stripe-python 16) removed that as
+            # a writable parameter: passing it now returns a 400
+            # `payment_method_types_no_longer_supported`. Stripe's documented
+            # replacement for "only accept this list of types" is
+            # allowed_payment_method_types (mutually exclusive with
+            # automatic_payment_methods), see
+            # https://docs.stripe.com/changelog/endive/2026-09-30/removes-the-payment-method-types-parameter-from-payment-intents-and-setup-intents
+            "allowed_payment_method_types": ["card"],
         }
         if payment_method is not None:
             params["payment_method"] = payment_method
@@ -197,8 +206,8 @@ class LiveStripePaymentProvider(PaymentProvider):
         # Stripe requires `return_url` at confirm time for any PaymentIntent
         # that could produce a redirect-based next_action - and 3DS
         # authentication (pm_card_authenticationRequired) is exactly that,
-        # even though payment_method_types=["card"] was pinned at creation.
-        # Pinning payment_method_types only exempts you from Dashboard-driven
+        # even though allowed_payment_method_types=["card"] was set at creation.
+        # Restricting the types only exempts you from Dashboard-driven
         # *alternative* redirect payment methods (iDEAL etc.), not from a
         # card's own 3DS challenge/return flow. Confirmed via a real Stripe
         # account notice after this suite's 3DS test ran without one.

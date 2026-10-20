@@ -6,7 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi",
     "uvicorn",
-    "sqlalchemy",
+    "sqlalchemy[asyncio]",
     "alembic",
     "pydantic",
     "pydantic-settings",
@@ -31,6 +31,8 @@ dev = [
     "freezegun",
     "fakeredis",
     "hypothesis",
+    "aiosqlite",
+    "lupa",
 ]
 
 [tool.pytest.ini_options]
@@ -39,6 +41,11 @@ pythonpath = ["."]
 
 [tool.coverage.run]
 source = ["app"]
+# Without this, coverage.py loses track of a coroutine after it awaits a
+# SQLAlchemy asyncio call (which switches greenlets) and reports the rest
+# of the function as never run: routes on AsyncSession showed 65% while
+# their tests exercised every line.
+concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 fail_under = 85
