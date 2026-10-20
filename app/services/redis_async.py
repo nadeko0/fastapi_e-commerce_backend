@@ -121,21 +121,31 @@ async def is_token_blacklisted(token_id: str) -> bool:
         return True
 
 
-async def get_password_changed_at(user_id: Union[str, int]) -> Optional[Any]:
-    """The "password changed at" watermark for a user (a Unix timestamp), or
-    None if there is none. Async counterpart of
-    RedisService.get(f"pwd_changed:{user_id}"), including what that does on
-    failure: a Redis error or an unreadable value yields None."""
+async def is_token_superseded(user_id: Union[str, int], issued_at: Optional[Any]) -> bool:
+    """Whether a token of this user issued at `issued_at` (its `iat`) predates
+    the user's "password changed at" watermark, written by
+    invalidate_tokens_issued_before_now in app/core/security.py.
+
+    Fails closed, like is_token_blacklisted: both ask whether a token has
+    been revoked, and when Redis cannot be asked - or the watermark cannot
+    be read - the token is treated as revoked. This used to read the
+    watermark the way RedisService.get does, as None on any error, so a
+    token issued before a password reset was accepted again whenever the
+    read failed. A token without an `iat` predates every watermark."""
     try:
         data = await get_async_redis().get(f"{PASSWORD_CHANGED_KEY_PREFIX}{user_id}")
     except RedisError as e:
-        logger.error(f"Redis operation failed: get_password_changed_at: {str(e)}")
-        return None
+        logger.error(f"Redis operation failed: is_token_superseded: {str(e)}")
+        return True
     if not data:
-        return None
+        return False
     try:
         # Stored by RedisService.setex, which JSON-encodes every value.
-        return json.loads(data)
+        changed_at = json.loads(data)
     except (json.JSONDecodeError, TypeError) as e:
-        logger.warning(f"Deserialization error: {str(e)}")
-        return None
+        logger.error(f"Unreadable password-change watermark, token refused: {str(e)}")
+        return True
+    if isinstance(changed_at, bool) or not isinstance(changed_at, (int, float)):
+        logger.error("Unreadable password-change watermark, token refused: not a timestamp")
+        return True
+    return not isinstance(issued_at, (int, float)) or issued_at < changed_at

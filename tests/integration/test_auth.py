@@ -7,6 +7,7 @@ import jwt
 import pytest
 from conftest import TestingSessionLocal
 from freezegun import freeze_time
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.core.config import settings
 from app.core.security import (
@@ -845,6 +846,110 @@ def test_validate_token_rejects_a_blacklisted_token_in_every_spelling():
 
     assert validate_token(token) is None
     assert validate_token(_pad_signature(token)) is None
+
+
+# --- Revocation when Redis fails: closed, every time ---------------------
+#
+# Logout, a password reset and the checks that honour them all live in
+# Redis. When it cannot be asked, the answer must be "revoked" (reading) or
+# an error the client sees (writing) - never a silent success that leaves
+# the old tokens working.
+
+
+def _redis_command_fails(monkeypatch, fake_redis, *commands):
+    """Make these commands of the shared fake Redis raise, for the sync
+    client and the async one alike."""
+    import fakeredis
+
+    import app.services.redis_async as redis_async_module
+
+    def broken(*args, **kwargs):
+        raise RedisConnectionError("Redis is down")
+
+    for command in commands:
+        monkeypatch.setattr(fake_redis, command, broken)
+
+    async def broken_async(*args, **kwargs):
+        raise RedisConnectionError("Redis is down")
+
+    class _AsyncCommandsFail(fakeredis.FakeAsyncRedis):
+        pass
+
+    for command in commands:
+        setattr(_AsyncCommandsFail, command, broken_async)
+    server = fakeredis.FakeServer()
+    monkeypatch.setattr(
+        redis_async_module,
+        "_create_client",
+        lambda: _AsyncCommandsFail(server=server, decode_responses=True),
+    )
+    monkeypatch.setattr(redis_async_module, "_clients", {})
+
+
+def test_refresh_is_refused_when_the_password_change_watermark_cannot_be_read(
+    client, monkeypatch, fake_redis, valid_registration_payload
+):
+    tokens = _login_tokens(client, valid_registration_payload)
+    _redis_command_fails(monkeypatch, fake_redis, "get")
+
+    response = client.post(
+        f"{API_PREFIX}/refresh", json={"refresh_token": tokens["refresh_token"]}
+    )
+
+    assert response.status_code == 401
+
+
+def test_password_reset_that_cannot_revoke_old_tokens_changes_nothing(
+    client, monkeypatch, fake_redis, valid_registration_payload
+):
+    # "Password has been reset successfully" while every token issued before
+    # it kept working was the worst of both: the user believed the account
+    # was safe again. Now the reset is refused before the password changes,
+    # and the very same link works once Redis is back.
+    email = valid_registration_payload["email"]
+    old_access = _login_tokens(client, valid_registration_payload)["access_token"]
+    token = _reset_token_for(email)
+    with monkeypatch.context() as outage:
+        _redis_command_fails(outage, fake_redis, "setex")
+        response = _reset(client, token, "NewStr0ngPass")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Password reset is temporarily unavailable, please retry"
+    assert _can_log_in(client, email, valid_registration_payload["password"])
+    assert client.get(
+        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {old_access}"}
+    ).status_code == 200
+    # Nothing was used up: the link still resets the password afterwards.
+    assert _reset(client, token, "NewStr0ngPass").status_code == 200
+
+
+def test_logout_that_cannot_blacklist_the_token_says_so(
+    client, monkeypatch, fake_redis, valid_registration_payload
+):
+    tokens = _login_tokens(client, valid_registration_payload)
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    with monkeypatch.context() as outage:
+        _redis_command_fails(outage, fake_redis, "setex")
+        response = client.post(
+            f"{API_PREFIX}/logout", json={"refresh_token": tokens["refresh_token"]}, headers=headers
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Logout is temporarily unavailable, please retry"
+
+
+def test_logout_that_cannot_revoke_the_refresh_token_says_so(
+    client, monkeypatch, fake_redis, valid_registration_payload
+):
+    tokens = _login_tokens(client, valid_registration_payload)
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    with monkeypatch.context() as outage:
+        _redis_command_fails(outage, fake_redis, "smembers")
+        response = client.post(
+            f"{API_PREFIX}/logout", json={"refresh_token": tokens["refresh_token"]}, headers=headers
+        )
+
+    assert response.status_code == 503
 
 
 def test_refresh_rejects_token_for_deactivated_user(
