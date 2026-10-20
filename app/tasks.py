@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from urllib.parse import quote
 from uuid import uuid4
@@ -123,7 +124,17 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-def get_db():
+@contextmanager
+def task_session():
+    # Every task must run its queries inside `with task_session() as db:`.
+    # This replaced `db = next(get_db())` on a plain generator, which never
+    # closed anything: the generator was discarded right after next(), and
+    # the session's first query then opened a transaction that nothing ever
+    # ended. Each task run left a connection "idle in transaction" until
+    # Postgres killed it 30 s later (idle_in_transaction_session_timeout -
+    # the defense described above was masking this, not preventing it).
+    # Measured with a real worker: 14 task runs left 6 such connections, all
+    # gone only after the 30 s timeout; with the context manager, none.
     db = SessionLocal()
     try:
         yield db
@@ -169,10 +180,10 @@ def send_order_confirmation(order_id: int) -> None:
         f"email_sent:order_confirmation:{order_id}", EMAIL_SENT_MARKER_TTL_SECONDS
     ):
         return
-    db = next(get_db())
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if order:
-        send_order_confirmation_email(order.user.email, order)
+    with task_session() as db:
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if order:
+            send_order_confirmation_email(order.user.email, order)
 
 @celery.task(
     name="send_order_status_update",
@@ -182,26 +193,26 @@ def send_order_confirmation(order_id: int) -> None:
     autoretry_for=(OperationalError,),
 )
 def send_order_status_update(order_id: int) -> None:
-    db = next(get_db())
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if not order:
-        return
-    # Keyed by status (not just order_id): unlike the one-shot confirmation
-    # email above, this task legitimately fires again every time the order's
-    # status changes - only a redelivery/retry of the *same* status update
-    # should be deduped. order.status is a plain str here (Order.status is a
-    # bare String column, not a SQLAlchemy Enum type - see
-    # app/models/enums.py's create_string_enum) rather than an OrderStatus
-    # member, unlike OrderResponse.status (a Pydantic model, which does
-    # coerce it to the enum) - handle both shapes rather than assuming
-    # `.value` is always present.
-    status_value = order.status.value if hasattr(order.status, "value") else order.status
-    if not RedisService().mark_once(
-        f"email_sent:order_status_update:{order_id}:{status_value}",
-        EMAIL_SENT_MARKER_TTL_SECONDS,
-    ):
-        return
-    send_order_status_update_email(order.user.email, order)
+    with task_session() as db:
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            return
+        # Keyed by status (not just order_id): unlike the one-shot confirmation
+        # email above, this task legitimately fires again every time the order's
+        # status changes - only a redelivery/retry of the *same* status update
+        # should be deduped. order.status is a plain str here (Order.status is a
+        # bare String column, not a SQLAlchemy Enum type - see
+        # app/models/enums.py's create_string_enum) rather than an OrderStatus
+        # member, unlike OrderResponse.status (a Pydantic model, which does
+        # coerce it to the enum) - handle both shapes rather than assuming
+        # `.value` is always present.
+        status_value = order.status.value if hasattr(order.status, "value") else order.status
+        if not RedisService().mark_once(
+            f"email_sent:order_status_update:{order_id}:{status_value}",
+            EMAIL_SENT_MARKER_TTL_SECONDS,
+        ):
+            return
+        send_order_status_update_email(order.user.email, order)
 
 @celery.task(
     name="cleanup_expired_carts",
@@ -280,36 +291,36 @@ def purge_expired_deletion_requests(db) -> int:
     queue="cleanup",
 )
 def cleanup_inactive_accounts() -> int:
-    db = next(get_db())
-    return purge_expired_deletion_requests(db)
+    with task_session() as db:
+        return purge_expired_deletion_requests(db)
 
 @celery.task(
     name="update_product_stats",
     queue="stats",
 )
 def update_product_stats() -> None:
-    db = next(get_db())
     redis = RedisService()
 
-    popular_products = (
-        db.query(
-            Product.id,
-            Product.name,
-            func.sum(OrderItem.quantity).label('total_quantity'),
-            func.sum(OrderItem.quantity * OrderItem.price_at_time).label('total_revenue')
+    with task_session() as db:
+        popular_products = (
+            db.query(
+                Product.id,
+                Product.name,
+                func.sum(OrderItem.quantity).label('total_quantity'),
+                func.sum(OrderItem.quantity * OrderItem.price_at_time).label('total_revenue')
+            )
+            .join(OrderItem)
+            .join(Order)
+            .filter(
+                Order.created_at >= datetime.utcnow() - timedelta(days=30),
+                Order.status != OrderStatus.CANCELLED,
+                Order.payment_status == PaymentStatus.PAID
+            )
+            .group_by(Product.id)
+            .order_by(func.sum(OrderItem.quantity).desc())
+            .limit(20)
+            .all()
         )
-        .join(OrderItem)
-        .join(Order)
-        .filter(
-            Order.created_at >= datetime.utcnow() - timedelta(days=30),
-            Order.status != OrderStatus.CANCELLED,
-            Order.payment_status == PaymentStatus.PAID
-        )
-        .group_by(Product.id)
-        .order_by(func.sum(OrderItem.quantity).desc())
-        .limit(20)
-        .all()
-    )
 
     stats = {
         "popular_products": [
@@ -335,22 +346,21 @@ def update_product_stats() -> None:
     queue="stats",
 )
 def check_low_stock(threshold: int = 5) -> None:
-    db = next(get_db())
-
-    low_stock_products = (
-        db.query(Product)
-        .filter(
-            Product.is_active,
-            Product.stock_quantity <= threshold,
+    with task_session() as db:
+        low_stock_products = (
+            db.query(Product)
+            .filter(
+                Product.is_active,
+                Product.stock_quantity <= threshold,
+            )
+            .all()
         )
-        .all()
-    )
 
-    if low_stock_products:
-        send_low_stock_alert_email(
-            settings.ADMIN_EMAIL,
-            low_stock_products
-        )
+        if low_stock_products:
+            send_low_stock_alert_email(
+                settings.ADMIN_EMAIL,
+                low_stock_products
+            )
 
 # 'task' is the registered task name (see the note on task_routes above).
 # With the "app.tasks." prefix these entries used to carry, beat published

@@ -64,6 +64,21 @@ def test_send_order_status_update_email(monkeypatch):
     assert "confirmed" in calls[0][2]
 
 
+def test_send_order_confirmation_email_accepts_plain_string_status(monkeypatch):
+    """Regression test, same bug as the status-update email below but in the
+    confirmation email: a real Order's .status is a plain str, and the
+    send_order_confirmation Celery task passes exactly that. Every
+    confirmation sent through Celery failed with AttributeError."""
+    calls = _no_real_smtp(monkeypatch)
+    order = _order()
+    order.status = "new"  # plain str, as a real Order.status is
+
+    result = email_module.send_order_confirmation_email("buyer@example.com", order)
+
+    assert result is True
+    assert "Order Status: new" in calls[0][2]
+
+
 def test_send_order_status_update_email_accepts_plain_string_status(monkeypatch):
     """Regression test: send_order_status_update_email is type-hinted to
     accept a raw SQLAlchemy Order, but Order.status is a bare String column

@@ -20,11 +20,25 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
     # session is already closed and lazy-loading order.items[i].product
     # would raise DetachedInstanceError. OrderItemResponse carries a
     # denormalized product_name instead of a live product relationship.
+    # product_name originates from Product.name (admin-entered, no character
+    # validation beyond length) and is rendered into an HTML email a customer
+    # opens. Escape it so a name containing markup cannot inject HTML/JS into
+    # the message - same reasoning as full_name in send_welcome_email. quantity
+    # and price_at_time are server-side numerics, not escaped.
     items_html = "".join([
-        f"<tr><td>{item.product_name}</td><td>{item.quantity}</td><td>${item.price_at_time}</td></tr>"
+        f"<tr><td>{html.escape(item.product_name)}</td><td>{item.quantity}</td><td>${item.price_at_time}</td></tr>"
         for item in order.items
     ])
 
+    # Same str-or-enum handling as send_order_status_update_email below, and
+    # for the same reason: app/tasks.py's send_order_confirmation Celery task
+    # passes a freshly-queried Order, whose .status is a plain str. Fixed
+    # there first and missed here, so every order confirmation sent through
+    # Celery raised AttributeError - found by running a real worker against
+    # real orders (scripts/loadtest/traced_celery.py), which the unit test
+    # could not catch because its fake order always carried an enum-like
+    # status.
+    status_value = order.status.value if hasattr(order.status, "value") else order.status
     html_content = f"""
     <html>
         <body>
@@ -42,7 +56,7 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
             </table>
 
             <p>Total Amount: ${order.total_amount}</p>
-            <p>Order Status: {order.status.value}</p>
+            <p>Order Status: {status_value}</p>
 
             <p>Order Date: {order.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
 
@@ -113,8 +127,11 @@ def send_order_cancellation_email(to_email: str, order: Order) -> bool:
     )
 
 def send_low_stock_alert_email(to_email: str, products: List[Product]) -> bool:
+    # product.name is admin-entered and unvalidated for markup; escape it
+    # before rendering into the HTML alert email (defense in depth, mirrors
+    # the order-confirmation and welcome emails).
     products_html = "".join([
-        f"<tr><td>{product.name}</td><td>{product.stock_quantity}</td></tr>"
+        f"<tr><td>{html.escape(product.name)}</td><td>{product.stock_quantity}</td></tr>"
         for product in products
     ])
 
