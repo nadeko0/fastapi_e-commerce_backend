@@ -549,10 +549,12 @@ def test_create_order_rejects_another_users_shipping_address(client, db_session)
     assert response.json()["detail"] == "Shipping address not found"
 
 
-def test_create_order_still_accepts_a_deactivated_address_of_the_user(client, db_session):
-    # Pins that moving the lookup into a query did not change which rows
-    # qualify: current_user.addresses held every address of the user,
-    # deactivated ("deleted") ones included.
+def test_create_order_rejects_a_deactivated_address_of_the_user(client, db_session):
+    # Moving the lookup into a query first kept the old set of rows
+    # (current_user.addresses held every address of the user, deactivated
+    # "deleted" ones included). A deleted address is now refused like a
+    # missing one; see test_create_order_rejects_a_deleted_shipping_address
+    # in test_orders.py.
     token, address_id = _checkout_ready_buyer(client, db_session, "buyer@example.com")
     db_session.query(Address).filter(Address.id == address_id).update({Address.is_active: False})
     db_session.commit()
@@ -560,4 +562,5 @@ def test_create_order_still_accepts_a_deactivated_address_of_the_user(client, db
 
     response = _place_order(client, token, address_id)
 
-    assert response.status_code == 200
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Shipping address not found"

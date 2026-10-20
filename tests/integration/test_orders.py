@@ -217,6 +217,37 @@ def test_create_order_rejects_unknown_shipping_address(client, db_session):
     assert response.status_code == 404
 
 
+def test_create_order_rejects_a_deleted_shipping_address(client, db_session):
+    # Deleting an address only deactivates it (is_active=False, kept for the
+    # orders already shipped there), and create_order looked it up by id and
+    # owner alone: an order could still be placed to an address the
+    # customer had removed. It is now "not found", like a missing one.
+    token, address_id = _checkout_ready_buyer(client, db_session)
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=10)
+    client.post(
+        f"{CART_PREFIX}/items",
+        params={"product_id": product.id, "quantity": 1},
+        headers=_auth_headers(token),
+    )
+    deleted = client.delete(
+        f"{USERS_PREFIX}/addresses/{address_id}", headers=_auth_headers(token)
+    )
+    assert deleted.status_code == 200, deleted.text
+
+    response = client.post(
+        ORDERS_PREFIX,
+        params={"shipping_address_id": address_id},
+        headers=_with_idempotency_key(_auth_headers(token)),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Shipping address not found"
+    db_session.refresh(product)
+    assert product.stock_quantity == 10
+    assert db_session.query(Order).count() == 0
+
+
 def test_create_order_is_idempotent_with_same_key(client, db_session):
     token, address_id = _checkout_ready_buyer(client, db_session)
     category = _make_category(db_session)

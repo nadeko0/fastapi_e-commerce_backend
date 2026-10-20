@@ -127,10 +127,13 @@ async def create_order(
     # Queried through this route's session, not read off
     # current_user.addresses: current_user is a detached snapshot from the
     # auth dependency (app/core/security.py) and cannot lazy-load a
-    # relationship. Same rows as before - any address of this user.
+    # relationship. Only an active address: deleting one only deactivates
+    # it (kept for the orders already shipped there), and a deleted
+    # address used to be accepted here like any other.
     address = db.query(Address).filter(
         Address.id == shipping_address_id,
         Address.user_id == current_user.id,
+        Address.is_active,
     ).first()
     if not address:
         raise HTTPException(
