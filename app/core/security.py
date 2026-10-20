@@ -22,7 +22,7 @@ from app.core.config import settings
 from app.core.database import get_async_db
 from app.models.user import User, UserRole
 from app.services.redis import RedisService
-from app.services.redis_async import get_password_changed_at, is_token_blacklisted
+from app.services.redis_async import is_token_blacklisted, is_token_superseded
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
 redis_service = RedisService()
@@ -187,7 +187,7 @@ def issue_refresh_token(user_id: Union[str, int], family: Optional[str] = None) 
     return token
 
 
-def rotate_refresh_token(token: str, db: Session) -> Tuple[str, str]:
+async def rotate_refresh_token(token: str, db: Session) -> Tuple[str, str]:
     """Validate a refresh token and, if valid and unused, rotate it: returns
     a (new_access_token, new_refresh_token) pair. Deliberately does NOT
     require a valid access token - a refresh token's whole purpose is to
@@ -223,8 +223,11 @@ def rotate_refresh_token(token: str, db: Session) -> Tuple[str, str]:
         redis_service.revoke_refresh_family(family)
         raise RefreshTokenError("Refresh token already used or invalid")
 
-    password_changed_at = redis_service.get(f"pwd_changed:{user_id}")
-    if password_changed_at is not None and (issued_at is None or issued_at < password_changed_at):
+    # The same check, and the same fail-closed answer, as get_current_user.
+    # It used to read the watermark through RedisService.get, which answers
+    # None on a Redis error: a refresh token issued before a password reset
+    # was redeemed again whenever that read failed.
+    if await is_token_superseded(user_id, issued_at):
         raise RefreshTokenError("Refresh token no longer valid")
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -237,11 +240,12 @@ def rotate_refresh_token(token: str, db: Session) -> Tuple[str, str]:
     return new_access_token, new_refresh_token
 
 
-def revoke_refresh_token(token: str) -> None:
-    """Best-effort revocation of a refresh token's entire family, used on
-    logout so a refresh cannot succeed after sign-out. Silently no-ops on a
-    malformed/garbage/expired token - logout should not fail just because
-    the client sent a bad refresh token alongside a valid access token."""
+def revoke_refresh_token(token: str) -> bool:
+    """Revoke a refresh token's entire family, used on logout so a refresh
+    cannot succeed after sign-out. A malformed/garbage/expired token is a
+    no-op (True: there is nothing to revoke) - logout should not fail just
+    because the client sent a bad refresh token alongside a valid access
+    token. False only when Redis could not be told."""
     try:
         payload = jwt.decode(
             token,
@@ -250,15 +254,24 @@ def revoke_refresh_token(token: str) -> None:
             options={"verify_exp": False},
         )
     except jwt.PyJWTError:
-        return
+        return True
     family = payload.get("family")
     if family:
-        redis_service.revoke_refresh_family(family)
+        return redis_service.revoke_refresh_family(family)
+    return True
+
+
+class RevocationUnavailable(Exception):
+    """Raised when tokens should have been revoked and Redis, where
+    revocation lives, could not be told. The caller must not report
+    success: a logout or a password reset that leaves the old tokens
+    working is worse than one the user knows to retry."""
 
 
 def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
     """Blacklist the current access token and, if provided, revoke the
-    refresh token's whole family."""
+    refresh token's whole family. Raises RevocationUnavailable if either
+    could not be recorded."""
     try:
         payload = jwt.decode(access_token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         # time.time(), not datetime.utcnow().timestamp(): .timestamp() on a
@@ -270,9 +283,12 @@ def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
         expires_in = max(int(payload["exp"] - time.time()), 1)
     except jwt.PyJWTError:
         expires_in = 1
-    blacklist_token(access_token, expires_in)
-    if refresh_token:
-        revoke_refresh_token(refresh_token)
+    # The access token was authenticated by the route a moment ago, so it
+    # verifies: False here means Redis was not told.
+    if not blacklist_token(access_token, expires_in):
+        raise RevocationUnavailable("access token not blacklisted")
+    if refresh_token and not revoke_refresh_token(refresh_token):
+        raise RevocationUnavailable("refresh token family not revoked")
 
 # Token fixation mitigation: a token issued before a password reset must not
 # remain usable afterward, otherwise a user resetting their password because
@@ -283,6 +299,8 @@ def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
 # a per-user "password changed at" watermark in Redis and reject any access
 # token whose `iat` predates it. TTL matches the longest-lived token
 # (refresh) so the watermark outlives every token that could still exist.
+# Returns False when Redis could not be told; the caller must then not
+# report the password change as done (see reset_password).
 def invalidate_tokens_issued_before_now(user_id: Union[str, int]) -> bool:
     key = f"pwd_changed:{user_id}"
     ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
@@ -341,8 +359,7 @@ async def get_current_user(
     if await is_token_blacklisted(_blacklist_id(token, payload)):
         raise credentials_exception
 
-    password_changed_at = await get_password_changed_at(user_id)
-    if password_changed_at is not None and (issued_at is None or issued_at < password_changed_at):
+    if await is_token_superseded(user_id, issued_at):
         raise credentials_exception
 
     result = await db.execute(select(User).where(User.id == user_id))

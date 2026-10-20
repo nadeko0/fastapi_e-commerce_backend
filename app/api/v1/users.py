@@ -15,6 +15,7 @@ from app.core.rate_limit import check_login_attempt, clear_login_failures
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
     RefreshTokenError,
+    RevocationUnavailable,
     create_access_token,
     generate_email_verification_token,
     generate_password_reset_token,
@@ -371,7 +372,9 @@ async def refresh_access_token(
     re-login.
     """
     try:
-        new_access_token, new_refresh_token = rotate_refresh_token(refresh_in.refresh_token, db)
+        new_access_token, new_refresh_token = await rotate_refresh_token(
+            refresh_in.refresh_token, db
+        )
     except RefreshTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -388,6 +391,7 @@ async def refresh_access_token(
 @router.post(
     "/logout",
     response_model=APIResponse[dict],
+    responses={503: {"description": "Tokens could not be revoked, retry the request"}},
 )
 async def logout(
     logout_in: LogoutRequest = LogoutRequest(),
@@ -396,8 +400,17 @@ async def logout(
 ):
     """Log out the current user: blacklist the access token in use and,
     if a refresh token is supplied, revoke its whole token family so it
-    (and any refresh token rotated from it) can no longer be redeemed."""
-    logout_tokens(token, logout_in.refresh_token)
+    (and any refresh token rotated from it) can no longer be redeemed.
+
+    503 when that could not be recorded (Redis unavailable): the client
+    must not be told it is logged out while its tokens still work."""
+    try:
+        logout_tokens(token, logout_in.refresh_token)
+    except RevocationUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Logout is temporarily unavailable, please retry"
+        )
     return APIResponse.success_response({"message": "Logged out successfully"})
 
 @router.post(
@@ -991,6 +1004,7 @@ async def validate_reset_token(
         400: {"description": "Invalid or expired reset token"},
         404: {"description": "User not found"},
         422: {"description": "Invalid password format"},
+        503: {"description": "Old tokens could not be revoked, nothing changed; retry"},
     },
 )
 async def reset_password(
@@ -1033,6 +1047,22 @@ async def reset_password(
 
         new_hashed_password = await get_password_hash_async(new_password.new_password)
 
+        # Invalidate any token issued before this reset so a token held by
+        # an attacker (the reason the user is resetting) stops working
+        # immediately instead of remaining valid until it expires. Before
+        # the password changes, and refused if it cannot be recorded: this
+        # used to run afterwards with its result ignored, so a Redis outage
+        # answered "reset successfully" while every old token kept working.
+        # Now nothing has changed when it fails, and the same link can be
+        # used again once Redis is back. After the bcrypt hash rather than
+        # before it, so that a login with the old password during the hash
+        # does not mint a token newer than the watermark.
+        if not invalidate_tokens_issued_before_now(user_id):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Password reset is temporarily unavailable, please retry"
+            )
+
         # Only if the password is still the one the token was checked
         # against: two requests presenting the same token both pass that
         # check above, and only the first to get here may use it.
@@ -1042,11 +1072,6 @@ async def reset_password(
         db.commit()
         if updated != 1:
             raise _invalid_reset_token()
-
-        # Invalidate any access token issued before this reset so a token
-        # held by an attacker (the reason the user is resetting) stops
-        # working immediately instead of remaining valid until it expires.
-        invalidate_tokens_issued_before_now(user_id)
 
         # The way out of a login refused for too many failed attempts: the
         # new password starts with a clean record - the email's own count

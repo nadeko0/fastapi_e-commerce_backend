@@ -151,9 +151,21 @@ def test_key_written_through_the_async_client_is_seen_by_the_sync_service():
 def test_password_changed_watermark_written_by_the_sync_service_is_read_back():
     RedisService().setex(f"{redis_async.PASSWORD_CHANGED_KEY_PREFIX}42", 60, 1767268800)
 
-    assert asyncio.run(redis_async.get_password_changed_at(42)) == 1767268800
-    assert asyncio.run(redis_async.get_password_changed_at("42")) == 1767268800
-    assert asyncio.run(redis_async.get_password_changed_at(43)) is None
+    superseded = redis_async.is_token_superseded
+    assert asyncio.run(superseded(42, 1767268799)) is True
+    assert asyncio.run(superseded("42", 1767268799)) is True
+    # Issued in the same second as the change, or later: still good.
+    assert asyncio.run(superseded(42, 1767268800)) is False
+    assert asyncio.run(superseded(42, 1767268801)) is False
+    # Another user has no watermark.
+    assert asyncio.run(superseded(43, 1)) is False
+
+
+def test_a_token_without_issued_at_predates_every_watermark():
+    RedisService().setex(f"{redis_async.PASSWORD_CHANGED_KEY_PREFIX}42", 60, 1767268800)
+
+    assert asyncio.run(redis_async.is_token_superseded(42, None)) is True
+    assert asyncio.run(redis_async.is_token_superseded(43, None)) is False
 
 
 # --- Failure modes (same as the sync methods they replace) -----------------
@@ -165,16 +177,19 @@ def test_is_token_blacklisted_fails_closed_when_redis_is_unreachable(monkeypatch
     assert asyncio.run(redis_async.is_token_blacklisted("tok")) is True
 
 
-def test_get_password_changed_at_returns_none_when_redis_is_unreachable(monkeypatch):
+def test_is_token_superseded_fails_closed_when_redis_is_unreachable(monkeypatch):
+    # Same question as the blacklist (has this token been revoked?), same
+    # answer when it cannot be asked. It used to be "no".
     monkeypatch.setattr(redis_async, "_create_client", _unreachable_client_factory())
 
-    assert asyncio.run(redis_async.get_password_changed_at(42)) is None
+    assert asyncio.run(redis_async.is_token_superseded(42, 1767268800)) is True
 
 
-def test_get_password_changed_at_returns_none_for_an_unreadable_value(fake_redis):
-    fake_redis.set(f"{redis_async.PASSWORD_CHANGED_KEY_PREFIX}42", "not json")
+@pytest.mark.parametrize("stored", ["not json", '"a string"', "true", "[1]", "null"])
+def test_is_token_superseded_fails_closed_for_an_unreadable_value(fake_redis, stored):
+    fake_redis.set(f"{redis_async.PASSWORD_CHANGED_KEY_PREFIX}42", stored)
 
-    assert asyncio.run(redis_async.get_password_changed_at(42)) is None
+    assert asyncio.run(redis_async.is_token_superseded(42, 1767268800)) is True
 
 
 # --- Application shutdown ---------------------------------------------------

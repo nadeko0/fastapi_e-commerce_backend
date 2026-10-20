@@ -17,6 +17,7 @@ from freezegun import freeze_time
 from hypothesis import HealthCheck, given
 from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import event, inspect
 from sqlalchemy.orm.exc import DetachedInstanceError
 
@@ -267,6 +268,35 @@ def test_token_is_rejected_while_redis_is_unreachable(client, monkeypatch):
     assert response.status_code == 401
 
 
+class _WatermarkReadsFail(fakeredis.FakeAsyncRedis):
+    """A Redis that answers EXISTS (the blacklist) but not GET (the
+    password-change watermark)."""
+
+    async def get(self, *args, **kwargs):
+        raise RedisConnectionError("GET failed")
+
+
+def test_token_is_rejected_when_the_password_change_watermark_cannot_be_read(
+    client, monkeypatch
+):
+    # The blacklist already failed closed; the watermark did not, so a token
+    # issued before a password reset was accepted whenever its read failed.
+    # Both are the same question - has this token been revoked? - and get
+    # the same answer when it cannot be asked.
+    token = _register_and_login(client)
+    server = fakeredis.FakeServer()
+    monkeypatch.setattr(
+        redis_async_module,
+        "_create_client",
+        lambda: _WatermarkReadsFail(server=server, decode_responses=True),
+    )
+    monkeypatch.setattr(redis_async_module, "_clients", {})
+
+    response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
+
+    assert response.status_code == 401
+
+
 def test_token_for_a_user_that_no_longer_exists_is_rejected(client, db_session):
     token = _register_and_login(client)
     db_session.query(User).filter(User.email == "auth.user@example.com").delete()
@@ -368,7 +398,7 @@ def test_a_request_without_authorization_authenticates_nobody(client, monkeypatc
         raise AssertionError("token checked on a request that carries none")
 
     monkeypatch.setattr(security, "is_token_blacklisted", _forbidden)
-    monkeypatch.setattr(security, "get_password_changed_at", _forbidden)
+    monkeypatch.setattr(security, "is_token_superseded", _forbidden)
     async_engine = database_module.AsyncSessionLocal.kw["bind"].sync_engine
     event.listen(async_engine, "before_cursor_execute", _record)
     try:
