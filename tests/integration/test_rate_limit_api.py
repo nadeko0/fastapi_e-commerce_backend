@@ -31,7 +31,10 @@ def limits(monkeypatch):
     """Switch the limiter on with every limit out of the way; a test then
     lowers the one it is about: limits(RATE_LIMIT_SEARCH="2/minute")."""
     monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
-    for name in ("DEFAULT", "SEARCH", "AUTH", "CHECKOUT", "LOGIN_FAILURES"):
+    for name in (
+        "DEFAULT", "SEARCH", "AUTH", "CHECKOUT",
+        "LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS", "LOGIN_FAILURES_PER_EMAIL",
+    ):
         monkeypatch.setattr(settings, f"RATE_LIMIT_{name}", UNLIMITED)
 
     def lower(**values):
@@ -221,7 +224,12 @@ def test_health_webhook_and_docs_are_never_limited(client, limits, monkeypatch, 
 
 
 def test_kill_switch_turns_everything_off(client, limits, monkeypatch, fake_redis, valid_registration_payload):
-    limits(RATE_LIMIT_DEFAULT="1/minute", RATE_LIMIT_AUTH="1/minute", RATE_LIMIT_LOGIN_FAILURES="1/minute")
+    limits(
+        RATE_LIMIT_DEFAULT="1/minute",
+        RATE_LIMIT_AUTH="1/minute",
+        RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="1/minute",
+        RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL="1/minute",
+    )
     monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", False)
 
     for _ in range(3):
@@ -234,7 +242,12 @@ def test_requests_are_let_through_when_redis_is_down(
     client, limits, monkeypatch, valid_registration_payload
 ):
     payload = register(client, valid_registration_payload)
-    limits(RATE_LIMIT_DEFAULT="1/minute", RATE_LIMIT_AUTH="1/minute", RATE_LIMIT_LOGIN_FAILURES="1/minute")
+    limits(
+        RATE_LIMIT_DEFAULT="1/minute",
+        RATE_LIMIT_AUTH="1/minute",
+        RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="1/minute",
+        RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL="1/minute",
+    )
 
     def unreachable():
         raise RedisConnectionError("Redis is down")
@@ -256,7 +269,7 @@ def test_login_is_refused_while_its_failure_count_cannot_be_kept(
     # down (or made to look down). Login answers 503 instead, before any
     # password is looked at, wrong one or right one.
     payload = register(client, valid_registration_payload)
-    limits(RATE_LIMIT_LOGIN_FAILURES="3/15 minutes")
+    limits(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="3/15 minutes")
 
     def unreachable():
         raise RedisConnectionError("Redis is down")
@@ -280,11 +293,36 @@ def test_login_is_refused_while_its_failure_count_cannot_be_kept(
 # --- failed logins, per account ----------------------------------------------------
 
 
-def test_failed_logins_are_counted_per_email_across_addresses(
+def test_failing_on_purpose_from_one_address_does_not_lock_the_owner_out(
+    client, monkeypatch, valid_registration_payload
+):
+    # With the default settings: anybody who knows an email could fail 10
+    # logins for it every 15 minutes, from one address and well inside
+    # RATE_LIMIT_AUTH, and keep its owner out for as long as they liked.
+    # The hard lock is per (email, address) now: it stops the guesser, not
+    # the owner.
+    monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
+    payload = register(client, valid_registration_payload)
+    attacker = TestClient(app, client=("203.0.113.66", 50000))
+    owner = TestClient(app, client=("198.51.100.9", 50000))
+
+    with freeze_time("2026-01-01 00:00:00") as clock:
+        statuses = []
+        for _ in range(12):
+            statuses.append(login(attacker, payload["email"], "wrong-password").status_code)
+            clock.tick(6)  # 10 a minute: inside RATE_LIMIT_AUTH (20/minute)
+        assert statuses == [401] * 10 + [429] * 2
+
+        assert login(owner, payload["email"], payload["password"]).status_code == 200
+
+
+def test_the_backstop_counts_failures_per_email_across_addresses(
     client, limits, valid_registration_payload
 ):
+    # Guessing spread over many addresses: each address stays under its
+    # own lock, the email's count across all of them does not.
     payload = register(client, valid_registration_payload)
-    limits(RATE_LIMIT_LOGIN_FAILURES="3/15 minutes")
+    limits(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL="3/15 minutes")
     elsewhere = TestClient(app, client=("198.51.100.9", 50000))
 
     with freeze_time("2026-01-01 00:00:00") as clock:
@@ -311,7 +349,7 @@ def test_failed_logins_are_counted_per_email_across_addresses(
 
 def test_a_successful_login_clears_the_count(client, limits, valid_registration_payload):
     payload = register(client, valid_registration_payload)
-    limits(RATE_LIMIT_LOGIN_FAILURES="3/15 minutes")
+    limits(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="3/15 minutes")
 
     for _ in range(3):  # more rounds than the limit: each success starts over
         assert login(client, payload["email"], "wrong").status_code == 401
@@ -321,7 +359,7 @@ def test_a_successful_login_clears_the_count(client, limits, valid_registration_
 
 def test_spelling_variants_of_an_email_share_the_count(client, limits, valid_registration_payload):
     payload = register(client, valid_registration_payload)
-    limits(RATE_LIMIT_LOGIN_FAILURES="3/15 minutes")
+    limits(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="3/15 minutes")
 
     for spelling in (payload["email"].upper(), f"  {payload['email']} ", payload["email"].title()):
         assert login(client, spelling, "wrong").status_code == 401
@@ -332,7 +370,7 @@ def test_refusal_looks_the_same_for_an_email_without_an_account(
     client, limits, valid_registration_payload
 ):
     payload = register(client, valid_registration_payload)
-    limits(RATE_LIMIT_LOGIN_FAILURES="3/15 minutes")
+    limits(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="3/15 minutes")
 
     def transcript(email):
         answers = []
@@ -352,7 +390,7 @@ def test_refusal_looks_the_same_for_an_email_without_an_account(
 
 def test_a_refused_attempt_is_not_judged_at_all(client, limits, monkeypatch, valid_registration_payload):
     payload = register(client, valid_registration_payload)
-    limits(RATE_LIMIT_LOGIN_FAILURES="1/15 minutes")
+    limits(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="1/15 minutes")
     assert login(client, payload["email"], "wrong").status_code == 401
 
     async def must_not_run(*args, **kwargs):
@@ -364,7 +402,7 @@ def test_a_refused_attempt_is_not_judged_at_all(client, limits, monkeypatch, val
 
 def test_a_completed_password_reset_clears_the_count(client, limits, valid_registration_payload):
     payload = register(client, valid_registration_payload)
-    limits(RATE_LIMIT_LOGIN_FAILURES="2/15 minutes")
+    limits(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="2/15 minutes")
     assert login(client, payload["email"], "wrong").status_code == 401
     assert login(client, payload["email"], "wrong").status_code == 401
     assert login(client, payload["email"], payload["password"]).status_code == 429
@@ -375,3 +413,65 @@ def test_a_completed_password_reset_clears_the_count(client, limits, valid_regis
     )
     assert reset.status_code == 200
     assert login(client, payload["email"], "An0therStrongPass").status_code == 200
+
+
+def test_attempts_refused_by_the_address_lock_do_not_count_against_the_email(
+    client, limits, fake_redis, valid_registration_payload
+):
+    # Otherwise one address hammering on after its own lock would run the
+    # email's count up and lock the owner out everywhere after all.
+    payload = register(client, valid_registration_payload)
+    limits(
+        RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="2/15 minutes",
+        RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL="5/15 minutes",
+    )
+    attacker = TestClient(app, client=("203.0.113.66", 50000))
+    owner = TestClient(app, client=("198.51.100.9", 50000))
+
+    statuses = [login(attacker, payload["email"], "wrong").status_code for _ in range(20)]
+
+    assert statuses == [401, 401] + [429] * 18
+    (email_key,) = [key for key in fake_redis.keys("rl:login-failures:*") if key.count(":") == 2]
+    assert fake_redis.get(email_key) == "2"
+    assert login(owner, payload["email"], payload["password"]).status_code == 200
+
+
+def test_a_successful_login_clears_only_its_own_address(
+    client, limits, valid_registration_payload
+):
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="2/15 minutes")
+    attacker = TestClient(app, client=("203.0.113.66", 50000))
+    owner = TestClient(app, client=("198.51.100.9", 50000))
+
+    for _ in range(2):
+        assert login(attacker, payload["email"], "wrong").status_code == 401
+    assert login(owner, payload["email"], payload["password"]).status_code == 200
+
+    # The owner's success says nothing about the other address's guesses.
+    assert login(attacker, payload["email"], payload["password"]).status_code == 429
+
+
+def test_a_completed_password_reset_clears_the_backstop_but_not_other_addresses(
+    client, limits, valid_registration_payload
+):
+    payload = register(client, valid_registration_payload)
+    limits(
+        RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="2/15 minutes",
+        RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL="3/15 minutes",
+    )
+    attackers = [TestClient(app, client=(f"203.0.113.{n}", 50000)) for n in (1, 2)]
+    for attacker in attackers:
+        for _ in range(2):
+            login(attacker, payload["email"], "wrong")
+    # The backstop is used up: the owner is refused too.
+    assert login(client, payload["email"], payload["password"]).status_code == 429
+
+    reset = client.post(
+        f"{API}/users/password/reset/{_reset_token_for(payload['email'])}",
+        json={"current_password": "unused", "new_password": "An0therStrongPass"},
+    )
+    assert reset.status_code == 200
+
+    assert login(client, payload["email"], "An0therStrongPass").status_code == 200
+    assert login(attackers[0], payload["email"], "An0therStrongPass").status_code == 429

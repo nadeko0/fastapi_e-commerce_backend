@@ -46,7 +46,7 @@ import logging
 import math
 import re
 from functools import lru_cache
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Tuple
 
 import jwt
 from fastapi import HTTPException, Request
@@ -297,30 +297,45 @@ async def rate_limit(request: Request) -> None:
 
 # --- 5. Failed logins, per account ----------------------------------------
 #
-# RATE_LIMIT_AUTH caps what one address can try. A password-guessing run
-# spread over many addresses is held back here instead, by a counter per
-# *email*: RATE_LIMIT_LOGIN_FAILURES ("10/15 minutes") attempts that were not
-# followed by a success, after which login for that email answers 429 until
-# the window ends.
+# RATE_LIMIT_AUTH caps what one address can try on the auth routes, whatever
+# emails it names. Login attempts that were not followed by a success are
+# also counted per account, twice:
+#
+# - per (email, client address): RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_
+#   ADDRESS ("10/15 minutes"). The hard lock. It stops a guesser at its own
+#   address and nobody else: the owner, logging in from anywhere else, is
+#   not affected by it.
+# - per email, from anywhere: RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL
+#   ("100/hour"). The backstop against guessing spread over many addresses,
+#   which the first count would give fresh guesses at every address.
+#
+# Either one used up, login for that email answers 429 until its window
+# ends. The per-email count used to be the only one, at 10 per 15 minutes:
+# anybody who knew an email could keep its owner out for as long as they
+# liked, from one address, by failing on purpose (a completed password
+# reset cleared it, and ten more requests set it again). Now one address
+# can hold an account's login closed for nobody but itself, and closing it
+# for the owner takes failures from many addresses, well past what one
+# address may send. That is the trade-off left: an attacker with enough
+# addresses can still lock an account; sessions already open keep working.
 #
 # An attempt is counted when it starts and a successful login deletes the
-# counter, so what stays counted is the failures - and a volley of guesses
+# counts, so what stays counted is the failures - and a volley of guesses
 # sent at the same instant cannot all slip past a check made before any of
-# them was counted. The counter is for the email as submitted, whether or
-# not an account exists, and nothing here looks at the database, so the
-# answer cannot be used to find out which emails are registered.
-#
-# The trade-off: counting per email lets anybody lock the owner out of
-# *logging in* (sessions already open keep working) for up to the window,
-# by failing on purpose. Counting per address instead would give every
-# address of a botnet its own fresh guesses. A completed password reset
-# clears the count, so the owner has a way back in.
+# them was counted. An attempt refused by the per-address count is not
+# counted against the email: otherwise one address hammering away after
+# its own lock would run the email's count up and lock everybody out after
+# all. The counts are for the email as submitted, whether or not an
+# account exists, and nothing here looks at the database, so the answer
+# cannot be used to find out which emails are registered.
 
-def _login_key(email: str) -> str:
+def _login_keys(email: str, request: Request) -> Tuple[str, str]:
+    """(per email and address, per email) counter keys."""
     # Case and surrounding blanks cost a client nothing to vary, so they
     # are folded away. A digest, so that no mailbox sits in a key name.
     normalised = email.strip().casefold().encode("utf-8", "replace")
-    return f"rl:login-failures:{hashlib.sha256(normalised).hexdigest()[:32]}"
+    email_key = f"rl:login-failures:{hashlib.sha256(normalised).hexdigest()[:32]}"
+    return f"{email_key}:{client_address(request)}", email_key
 
 
 # How long a client is told to wait when the count cannot be kept. A Redis
@@ -330,10 +345,10 @@ def _login_key(email: str) -> str:
 LOGIN_UNAVAILABLE_RETRY_AFTER = 30
 
 
-async def check_login_attempt(email: str) -> None:
+async def check_login_attempt(email: str, request: Request) -> None:
     """Call before the password is looked at; raises the 429 when this
-    email has used up its failed attempts. One Redis round trip, no
-    database.
+    email has used up its failed attempts, from this address or from
+    everywhere. At most two Redis round trips, no database.
 
     Unlike every other limit here this one fails closed: if Redis cannot be
     asked, the attempt is refused with a 503. Failing open would give a
@@ -344,10 +359,15 @@ async def check_login_attempt(email: str) -> None:
     again. Sessions already open are not affected."""
     if not settings.RATE_LIMIT_ENABLED:
         return
+    pair_key, email_key = _login_keys(email, request)
     try:
         retry_after = await _count(
-            _login_key(email), parse_rate(settings.RATE_LIMIT_LOGIN_FAILURES)
+            pair_key, parse_rate(settings.RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS)
         )
+        if not retry_after:
+            retry_after = await _count(
+                email_key, parse_rate(settings.RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL)
+            )
     except RedisError as e:
         logger.error(f"Rate limiting error, login refused: {e}")
         raise HTTPException(
@@ -362,11 +382,13 @@ async def check_login_attempt(email: str) -> None:
         raise too_many_requests("Too many failed login attempts", retry_after)
 
 
-async def clear_login_failures(email: str) -> None:
-    """Call after a successful login or a completed password reset."""
+async def clear_login_failures(email: str, request: Request) -> None:
+    """Call after a successful login or a completed password reset: clears
+    the email's count and its count at this address. Counts other addresses
+    ran up for the email stay: they are somebody else's failures."""
     if not settings.RATE_LIMIT_ENABLED:
         return
     try:
-        await get_async_redis().delete(_login_key(email))
+        await get_async_redis().delete(*_login_keys(email, request))
     except RedisError as e:
         logger.error(f"Rate limiting error, failed-login count not cleared: {e}")

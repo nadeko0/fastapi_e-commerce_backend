@@ -11,7 +11,8 @@ from app.core.rate_limit import parse_rate
 
 _RATE_SETTINGS = [
     "RATE_LIMIT_DEFAULT", "RATE_LIMIT_SEARCH", "RATE_LIMIT_AUTH",
-    "RATE_LIMIT_CHECKOUT", "RATE_LIMIT_LOGIN_FAILURES", "RATE_LIMIT_GUEST_CART",
+    "RATE_LIMIT_CHECKOUT", "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS",
+    "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL", "RATE_LIMIT_GUEST_CART",
 ]
 
 
@@ -41,8 +42,13 @@ def test_every_limit_refuses_anything_else_at_startup(name, value):
         _settings(**{name: value})
 
 
+# Not limits: the switch, and the old login setting that is only declared so
+# that setting it fails startup (see its validator in app/core/config.py).
+_NOT_LIMITS = {"RATE_LIMIT_ENABLED", "RATE_LIMIT_LOGIN_FAILURES"}
+
+
 def test_every_limit_setting_is_covered_here():
-    assert sorted(n for n in Settings.model_fields if n.startswith("RATE_LIMIT_") and n != "RATE_LIMIT_ENABLED") == sorted(_RATE_SETTINGS)
+    assert sorted(n for n in Settings.model_fields if n.startswith("RATE_LIMIT_") and n not in _NOT_LIMITS) == sorted(_RATE_SETTINGS)
 
 
 @pytest.mark.parametrize(

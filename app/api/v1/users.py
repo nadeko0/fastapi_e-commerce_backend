@@ -262,16 +262,17 @@ async def login(
     right now never fails the login.
 
     Answers 429 with Retry-After when too many attempts for this email have
-    failed (see "Failed logins" in app/core/rate_limit.py), and 503 with
-    Retry-After while those attempts cannot be counted (Redis down)."""
+    failed, from this address or from everywhere (see "Failed logins" in
+    app/core/rate_limit.py), and 503 with Retry-After while those attempts
+    cannot be counted (Redis down)."""
 
-    # Failed logins are counted per email, not per address. Here, before
-    # the first query: `db` has not checked a connection out yet, so this
-    # await holds none, and the call itself only talks to Redis. When it
-    # refuses, nothing else happens - no user lookup, no bcrypt - so a
+    # Failed logins are counted per email and address, and per email. Here,
+    # before the first query: `db` has not checked a connection out yet, so
+    # this await holds none, and the call itself only talks to Redis. When
+    # it refuses, nothing else happens - no user lookup, no bcrypt - so a
     # refusal is equally fast, and identical, whether or not the account
     # exists.
-    await check_login_attempt(form_data.username)
+    await check_login_attempt(form_data.username, request)
 
     user = db.query(User).filter(User.email == form_data.username).first()
     user_id = user.id if user else None
@@ -327,7 +328,7 @@ async def login(
 
     # A success wipes the email's failed-attempt count. After db.close()
     # above, so no database connection is held across this await.
-    await clear_login_failures(form_data.username)
+    await clear_login_failures(form_data.username, request)
 
     db.query(User).filter(User.id == user_id).update(
         {User.last_login: datetime.utcnow()}
@@ -995,6 +996,7 @@ async def validate_reset_token(
 async def reset_password(
     token: str,
     new_password: PasswordUpdate,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """Reset a user's password using a valid reset token."""
@@ -1047,9 +1049,11 @@ async def reset_password(
         invalidate_tokens_issued_before_now(user_id)
 
         # The way out of a login refused for too many failed attempts: the
-        # new password starts with a clean record. After the commit, so no
-        # database connection is held across it.
-        await clear_login_failures(email)
+        # new password starts with a clean record - the email's own count
+        # and its count at this address (other addresses' counts are their
+        # failures, and lock only them). After the commit, so no database
+        # connection is held across it.
+        await clear_login_failures(email, request)
 
         return APIResponse.success_response({
             "message": "Password has been reset successfully"
