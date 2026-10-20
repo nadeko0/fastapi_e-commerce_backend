@@ -20,8 +20,6 @@ from redis import ConnectionPool, Redis, RedisError
 
 from app.core.config import settings
 from app.schemas.cart import (
-    CART_KEY_PREFIX,
-    GUEST_CART_KEY_PREFIX,
     CartOwner,
     CartOwnerRef,
     as_cart_owner,
@@ -718,26 +716,6 @@ class RedisService:
         except RedisError as e:
             self._handle_redis_error(f"delete_session: {str(e)}")
             return False
-
-    def cleanup_expired_carts(self) -> int:
-        try:
-            cleaned = 0
-            # Account carts and guest carts: two namespaces, and "cart:*"
-            # does not match "guest_cart:...".
-            patterns = (f"{CART_KEY_PREFIX}*", f"{GUEST_CART_KEY_PREFIX}*")
-            for key in (key for pattern in patterns for key in self._redis.scan_iter(pattern)):
-                # TTL returns -1 for a key that exists but has no expiry,
-                # -2 for a missing key, otherwise the seconds left. This was
-                # `if not ttl`, true only for 0 (under a second left, Redis
-                # is about to remove it anyway) and never for -1 - the one
-                # case Redis will not clean up by itself.
-                if self._redis.ttl(key) == -1:
-                    self._redis.delete(key)
-                    cleaned += 1
-            return cleaned
-        except RedisError as e:
-            self._handle_redis_error(f"cleanup_expired_carts: {str(e)}")
-            return 0
 
     def delete(self, key: str) -> bool:
         try:

@@ -201,14 +201,19 @@ def test_send_order_confirmation_and_status_update_tasks_configure_autoretry():
     assert tasks.send_order_status_update.autoretry_for == (OperationalError,)
 
 
-def test_cleanup_expired_carts_delegates_to_redis_service(monkeypatch):
-    calls = []
-    monkeypatch.setattr(RedisService, "cleanup_expired_carts", lambda self: calls.append(1) or 3)
-
-    result = tasks.cleanup_expired_carts()
-
-    assert result == 3
-    assert calls == [1]
+def test_no_periodic_task_sweeps_the_cart_keyspace():
+    """Regression test (F-41): cleanup_expired_carts ran hourly, sent one TTL
+    request per cart and guest-cart key and deleted only keys without an
+    expiry. Every cart write is a SETEX (update_cart, the atomic cart
+    mutations, merge_guest_cart, remove_ordered_items_atomic - their TTLs
+    are asserted in tests/unit/test_redis_service.py and the cart API
+    tests), so it could never find anything, while its cost grew with the
+    number of guest carts. Redis expires the keys itself."""
+    assert "cleanup_expired_carts" not in _registered_task_names()
+    assert not hasattr(RedisService, "cleanup_expired_carts")
+    for entry in tasks.celery.conf.beat_schedule.values():
+        assert entry["task"] != "cleanup_expired_carts"
+    assert "cleanup_expired_carts" not in tasks.celery.conf.task_annotations
 
 
 def test_update_product_stats_caches_popular_products(db_session, tasks_db, fake_redis):
@@ -281,9 +286,6 @@ def test_build_redis_broker_url_escapes_special_characters_in_password():
 def test_beat_schedule_registers_all_periodic_tasks():
     schedule = tasks.celery.conf.beat_schedule
 
-    assert schedule["cleanup-expired-carts"]["task"] == "cleanup_expired_carts"
-    assert schedule["cleanup-expired-carts"]["schedule"] == tasks.timedelta(hours=1)
-
     assert schedule["cleanup-inactive-accounts"]["task"] == "cleanup_inactive_accounts"
     assert schedule["cleanup-inactive-accounts"]["schedule"] == tasks.timedelta(days=1)
 
@@ -336,7 +338,6 @@ def test_rate_limits_are_actually_applied_to_the_tasks():
 
     assert tasks.send_order_confirmation.rate_limit == "100/m"
     assert tasks.send_order_status_update.rate_limit == "100/m"
-    assert tasks.cleanup_expired_carts.rate_limit == "10/m"
     assert tasks.cleanup_inactive_accounts.rate_limit == "10/m"
 
 

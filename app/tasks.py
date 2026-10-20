@@ -93,7 +93,6 @@ celery.conf.update(
     task_annotations={
         'send_order_confirmation': {'rate_limit': '100/m'},
         'send_order_status_update': {'rate_limit': '100/m'},
-        'cleanup_expired_carts': {'rate_limit': '10/m'},
         'cleanup_inactive_accounts': {'rate_limit': '10/m'},
     },
     broker_transport_options={
@@ -213,14 +212,6 @@ def send_order_status_update(order_id: int) -> None:
         ):
             return
         send_order_status_update_email(order.user.email, order)
-
-@celery.task(
-    name="cleanup_expired_carts",
-    queue="cleanup",
-)
-def cleanup_expired_carts() -> int:
-    redis = RedisService()
-    return redis.cleanup_expired_carts()
 
 # Accounts anonymised per transaction by purge_expired_deletion_requests.
 # Each account costs a bcrypt hash (BCRYPT_ROUNDS, ~0.25 s at 12), so a
@@ -407,11 +398,11 @@ def check_low_stock(threshold: int = 5) -> None:
 # With the "app.tasks." prefix these entries used to carry, beat published
 # messages for four tasks no worker has: the worker logs "Received
 # unregistered task" and drops them, so none of the periodic jobs ever ran.
+#
+# No cart sweep: every cart write is a SETEX, so Redis expires cart and
+# guest-cart keys itself. The hourly cleanup_expired_carts task sent one TTL
+# request per key looking for keys without an expiry, which nothing creates.
 celery.conf.beat_schedule = {
-    'cleanup-expired-carts': {
-        'task': 'cleanup_expired_carts',
-        'schedule': timedelta(hours=1),
-    },
     'cleanup-inactive-accounts': {
         'task': 'cleanup_inactive_accounts',
         'schedule': timedelta(days=1),
