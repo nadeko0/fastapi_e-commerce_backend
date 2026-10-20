@@ -98,7 +98,8 @@ class ProductFilter(BaseModel):
     max_price: Optional[Decimal] = Field(None, ge=0)
     in_stock: Optional[bool] = None
     characteristics: Optional[Dict[str, Any]] = None
-    search_query: Optional[str] = None
+    # Bounded like ProductSearch.query: a search term, not a document.
+    search_query: Optional[str] = Field(None, max_length=100)
     sort_by: Optional[str] = Field(None, pattern="^(name|price|created_at)_(asc|desc)$")
     page: int = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
@@ -112,7 +113,7 @@ class ProductFilter(BaseModel):
 
 class ProductSearch(BaseModel):
     """Schema for product search"""
-    query: str = Field(..., min_length=3)
+    query: str = Field(..., min_length=3, max_length=100)
     category_id: Optional[int] = None
     page: int = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)

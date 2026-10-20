@@ -54,6 +54,21 @@ def _to_product_response(product: Product) -> ProductResponse:
     return ProductResponse(**product.__dict__, category_name=product.category.name)
 
 
+def _matches_text(text: str):
+    """Products whose name or description contains `text`, ignoring case.
+
+    The visitor's text is matched as text: autoescape escapes %, _ and the
+    escape character itself, and the ESCAPE clause it adds also stops
+    Postgres treating a backslash as one. An f"%{text}%" pattern, as here
+    before, made "%" match every product and "_" any character. The length
+    is capped by the schemas (ProductFilter.search_query, ProductSearch.query).
+    """
+    return or_(
+        Product.name.icontains(text, autoescape=True),
+        Product.description.icontains(text, autoescape=True),
+    )
+
+
 @router.get("/categories", response_model=APIResponse[CategoryListResponse])
 async def list_categories(
     pagination: PaginationParams = Depends(),
@@ -184,12 +199,7 @@ async def list_products(
             # every request that passed a characteristics filter.
             stmt = stmt.where(Product.characteristics[key]["value"].as_string() == str(value))
     if filter_params.search_query:
-        stmt = stmt.where(
-            or_(
-                Product.name.ilike(f"%{filter_params.search_query}%"),
-                Product.description.ilike(f"%{filter_params.search_query}%")
-            )
-        )
+        stmt = stmt.where(_matches_text(filter_params.search_query))
 
 
     if filter_params.sort_by:
@@ -233,10 +243,7 @@ async def search_products(
 
     stmt = select(Product).options(joinedload(Product.category)).where(
         Product.is_active,
-        or_(
-            Product.name.ilike(f"%{search.query}%"),
-            Product.description.ilike(f"%{search.query}%")
-        )
+        _matches_text(search.query),
     )
 
     if search.category_id:
