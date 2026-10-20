@@ -1,6 +1,9 @@
+import pytest
+
 from app.core.security import get_password_hash
 from app.models.category import Category
 from app.models.enums import UserRole
+from app.models.product import Product, ProductVariant
 from app.models.user import User
 
 USERS_PREFIX = "/api/v1/users"
@@ -242,6 +245,31 @@ def test_admin_updates_product(client, db_session):
 
     assert response.status_code == 200
     assert response.json()["data"]["stock_quantity"] == 42
+
+
+# Every ProductUpdate field maps to a NOT NULL column. An explicit JSON null
+# used to reach setattr() and end as a 500 (IntegrityError) - or, for the
+# JSON columns (SQLite test DB), commit a JSON 'null' and then 500 while
+# building the response.
+@pytest.mark.parametrize(
+    "field",
+    ["name", "description", "price", "stock_quantity", "category_id", "images", "characteristics"],
+)
+def test_admin_update_product_rejects_explicit_null(client, db_session, field):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    created = _create_product(client, admin_token, category.id)
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{created['id']}",
+        json={field: None},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 422
+    db_session.expire_all()
+    assert getattr(db_session.get(Product, created["id"]), field) is not None
 
 
 def test_admin_update_nonexistent_product_returns_404(client, db_session):
@@ -493,6 +521,54 @@ def test_admin_updates_product_variant(client, db_session):
     body = response.json()["data"]
     assert body["stock_quantity"] == 20
     assert body["price_override"] == "15.50"
+
+
+# price_override is the one nullable variant column (NULL = inherit the
+# parent product's price), so null must keep clearing it. The other fields
+# are NOT NULL: null used to surface as a misleading 409 "SKU already
+# exists" (the IntegrityError handler) or, for attributes, a 500.
+@pytest.mark.parametrize("field", ["sku", "attributes", "stock_quantity", "is_active"])
+def test_admin_update_variant_rejects_explicit_null(client, db_session, field):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    variant = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "VARIANT-N", "attributes": {"size": "M"}},
+        headers=_auth_headers(admin_token),
+    ).json()["data"]
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
+        json={field: None},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 422
+    db_session.expire_all()
+    assert getattr(db_session.get(ProductVariant, variant["id"]), field) is not None
+
+
+def test_admin_update_variant_null_price_override_clears_it(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    variant = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "VARIANT-P", "price_override": "15.50"},
+        headers=_auth_headers(admin_token),
+    ).json()["data"]
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
+        json={"price_override": None},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["price_override"] is None
 
 
 def test_admin_update_variant_returns_404_for_missing_variant(client, db_session):

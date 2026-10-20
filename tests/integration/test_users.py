@@ -1,3 +1,5 @@
+import pytest
+
 API_PREFIX = "/api/v1/users"
 
 
@@ -161,6 +163,35 @@ def test_update_profile_rejects_empty_body(client, valid_registration_payload):
     assert response.status_code == 400
 
 
+def test_update_profile_rejects_null_marketing_consent(client, valid_registration_payload):
+    # users.marketing_consent is NOT NULL; null used to end as a 500
+    # "Failed to update profile" from the IntegrityError.
+    access_token = _register_and_login(client, valid_registration_payload)
+
+    response = client.put(
+        f"{API_PREFIX}/me",
+        json={"marketing_consent": None},
+        headers=_auth_headers(access_token),
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("field", ["full_name", "phone"])
+def test_update_profile_null_clears_nullable_field(client, valid_registration_payload, field):
+    valid_registration_payload["phone"] = "+123456789"
+    access_token = _register_and_login(client, valid_registration_payload)
+
+    response = client.put(
+        f"{API_PREFIX}/me",
+        json={field: None},
+        headers=_auth_headers(access_token),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"][field] is None
+
+
 # --- Address CRUD ------------------------------------------------------------
 
 
@@ -206,6 +237,51 @@ def test_update_address_changes_city(client, valid_registration_payload):
 
     assert response.status_code == 200
     assert response.json()["data"]["city"] == "New City"
+
+
+# These address columns are NOT NULL; null used to end as a 500 from the
+# IntegrityError on commit.
+@pytest.mark.parametrize(
+    "field",
+    ["street", "city", "state", "postal_code", "country", "address_type", "is_default"],
+)
+def test_update_address_rejects_explicit_null(client, valid_registration_payload, field):
+    access_token = _register_and_login(client, valid_registration_payload)
+    created = client.post(
+        f"{API_PREFIX}/addresses", json=_valid_address(), headers=_auth_headers(access_token)
+    ).json()["data"]
+
+    response = client.put(
+        f"{API_PREFIX}/addresses/{created['id']}",
+        json={field: None},
+        headers=_auth_headers(access_token),
+    )
+
+    assert response.status_code == 422
+    listing = client.get(f"{API_PREFIX}/addresses", headers=_auth_headers(access_token))
+    assert listing.json()["data"]["items"][0][field] == created[field]
+
+
+@pytest.mark.parametrize("field", ["delivery_instructions", "delivery_phone"])
+def test_update_address_null_clears_nullable_field(client, valid_registration_payload, field):
+    access_token = _register_and_login(client, valid_registration_payload)
+    address = {
+        **_valid_address(),
+        "delivery_instructions": "Leave at the door",
+        "delivery_phone": "+123456789",
+    }
+    created = client.post(
+        f"{API_PREFIX}/addresses", json=address, headers=_auth_headers(access_token)
+    ).json()["data"]
+
+    response = client.put(
+        f"{API_PREFIX}/addresses/{created['id']}",
+        json={field: None},
+        headers=_auth_headers(access_token),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"][field] is None
 
 
 def test_update_nonexistent_address_returns_404(client, valid_registration_payload):
