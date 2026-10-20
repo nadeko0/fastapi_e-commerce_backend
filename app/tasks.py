@@ -269,10 +269,21 @@ def purge_expired_deletion_requests(db) -> int:
         account.full_name = None
         account.phone = None
         account.marketing_consent = False
+        # Art. 7(1) evidence stays (type, granted, timestamp); who gave the
+        # consent - network address and browser - does not. Reassigned, not
+        # mutated in place: SQLAlchemy does not see in-place changes to a
+        # plain JSON column.
+        account.consent_history = [
+            {**entry, "ip_address": None, "user_agent": None}
+            for entry in account.consent_history or []
+        ]
+        account.data_export_requests = []
 
+        # Every address, including the ones the user deleted earlier (soft
+        # delete, is_active=False): those used to be skipped and kept their
+        # street, city and postal code. Country stays for the tax records
+        # of past orders.
         for address in account.addresses:
-            if not address.is_active:
-                continue
             address.street = "REDACTED"
             address.city = "REDACTED"
             address.state = "REDACTED"
