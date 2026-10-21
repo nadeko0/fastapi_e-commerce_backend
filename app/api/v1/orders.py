@@ -18,7 +18,7 @@ from app.models.address import Address
 from app.models.order import Order
 from app.models.order_items import OrderItem
 from app.models.payment import Payment, WebhookEvent
-from app.models.payment_ledger import PaymentRefund
+from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, PaymentRefund
 from app.models.product import Product, ProductVariant
 from app.models.user import User
 from app.schemas.common import APIResponse
@@ -352,6 +352,13 @@ async def update_order_status(
             detail="Order not found"
         )
 
+    # An order whose payment is disputed is on hold: it is not moved on
+    # (fulfilled) until the dispute closes. Cancelling it stays possible.
+    if status != OrderStatus.CANCELLED and _has_open_dispute(db, order.id):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Order is on hold: a payment for it is disputed",
+        )
 
     if not _is_valid_status_transition(order.status, status):
         raise HTTPException(
@@ -1275,6 +1282,14 @@ async def refund_payment(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="No successful payment found for this order"
         )
+    # Stripe: refunding a disputed charge returns the money twice - the
+    # disputed amount has already been taken from the balance, and a lost
+    # dispute is not offset by the refund.
+    if _has_open_dispute(db, order.id, payment_row.id):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="This payment is disputed; it cannot be refunded while the dispute is open",
+        )
 
     refund_amount_cents = (
         _decimal_to_cents(refund_request.amount) if refund_request.amount is not None else None
@@ -1398,6 +1413,13 @@ def _settle_refunds(db: Session, order: Order, payment_row: Payment) -> None:
     ):
         return
     db.flush()
+    # A lost dispute returned the whole disputed charge to the customer
+    # through their bank: nothing of it is left to refund.
+    if db.query(PaymentDispute.id).filter(
+        PaymentDispute.payment_id == payment_row.id, PaymentDispute.status == "lost",
+    ).first():
+        order.payment_status = PaymentStatus.REFUNDED
+        return
     not_completed = db.query(func.coalesce(func.sum(PaymentRefund.amount), 0)).filter(
         PaymentRefund.payment_id == payment_row.id,
         PaymentRefund.status.notin_(("succeeded",) + _REFUND_STATUSES_NOT_RETURNED),
@@ -1406,6 +1428,87 @@ def _settle_refunds(db: Session, order: Order, payment_row: Payment) -> None:
     order.payment_status = (
         PaymentStatus.REFUNDED if returned >= payment_row.amount else PaymentStatus.PAID
     )
+
+
+def _has_open_dispute(db: Session, order_id: int, payment_id: Optional[int] = None) -> bool:
+    """Whether a charge of the order (or the given one) is disputed and the
+    dispute has not closed."""
+    query = db.query(PaymentDispute.id).join(Payment).filter(
+        Payment.order_id == order_id,
+        PaymentDispute.status.notin_(DISPUTE_CLOSED_STATUSES),
+    )
+    if payment_id is not None:
+        query = query.filter(PaymentDispute.payment_id == payment_id)
+    return query.first() is not None
+
+
+# charge.dispute.*: a chargeback or inquiry (Dispute object: id, amount,
+# currency, payment_intent, status, reason). Only the status matters here;
+# the funds_* events report the balance moving and carry it as well.
+_DISPUTE_EVENT_TYPES = (
+    "charge.dispute.created",
+    "charge.dispute.updated",
+    "charge.dispute.closed",
+    "charge.dispute.funds_withdrawn",
+    "charge.dispute.funds_reinstated",
+)
+
+
+def _apply_dispute_event(db: Session, object_data: dict) -> dict:
+    """
+    Record a dispute of one of our charges (PaymentDispute, by dispute id)
+    under the order's lock. While it is open the order is on hold (see
+    _has_open_dispute: no fulfilment, no refund); its status and
+    payment_status are not changed silently, it is flagged for review.
+    Once closed it is final - a late, out-of-order event for it is
+    acknowledged and ignored - and a lost one refunds the order
+    (_settle_refunds). Following WooCommerce's Stripe gateway, mapped onto
+    this order model, which has no "on hold" status of its own.
+    """
+    dispute_id = object_data.get("id")
+    status = object_data.get("status")
+    payment_intent_id = _object_id(object_data.get("payment_intent"))
+    payment_row = (
+        db.query(Payment).filter(Payment.payment_intent_id == payment_intent_id).first()
+        if payment_intent_id
+        else None
+    )
+    if payment_row is None or not isinstance(dispute_id, str) or not isinstance(status, str):
+        db.commit()
+        return {"status": "processed", "applied": False}
+
+    order = db.query(Order).filter(Order.id == payment_row.order_id).with_for_update().first()
+    db.refresh(payment_row)
+    dispute = db.query(PaymentDispute).filter(PaymentDispute.dispute_id == dispute_id).first()
+    if dispute is not None and dispute.status in DISPUTE_CLOSED_STATUSES:
+        db.commit()
+        return {"status": "processed", "applied": False}
+    if dispute is None:
+        amount = object_data.get("amount")
+        reason = object_data.get("reason")
+        dispute = PaymentDispute(
+            payment_id=payment_row.id,
+            dispute_id=dispute_id,
+            amount=amount if isinstance(amount, int) and not isinstance(amount, bool) else 0,
+            currency=payment_row.currency,
+            reason=reason if isinstance(reason, str) else None,
+        )
+        db.add(dispute)
+    dispute.status = status
+    is_closed = status in DISPUTE_CLOSED_STATUSES
+    if is_closed:
+        dispute.closed_at = datetime.utcnow()
+    logger.warning(
+        "Dispute %s of payment %s (order %s) is %s%s",
+        dispute_id, payment_row.id, order.id, status,
+        "" if is_closed else ": order on hold, needs review",
+    )
+    _settle_refunds(db, order, payment_row)
+    order.updated_at = datetime.utcnow()
+    db.commit()
+    if is_closed:
+        return {"status": "processed", "applied": True}
+    return {"status": "processed", "applied": True, "requires_manual_review": True}
 
 
 def _object_id(value) -> Optional[str]:
@@ -1576,6 +1679,8 @@ async def stripe_webhook(
     object_data = event.data.get("object", {}) if isinstance(event.data, dict) else {}
     if event.type in _REFUND_EVENT_TYPES:
         return APIResponse.success_response(_apply_refund_event(db, event.type, object_data))
+    if event.type in _DISPUTE_EVENT_TYPES:
+        return APIResponse.success_response(_apply_dispute_event(db, object_data))
     is_checkout_session_event = event.type.startswith("checkout.session.")
 
     if is_checkout_session_event:
