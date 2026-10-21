@@ -56,6 +56,10 @@ jobs:
           EMAILS_FROM_EMAIL: ci@example.com
           EMAILS_FROM_NAME: CI
         run: uv run pytest tests/ -q --cov=app --cov-report=term-missing --cov-report=xml
+      - name: Payment layer coverage gate (100% lines and branches)
+        run: >-
+          uv run coverage report --fail-under=100
+          --include="app/api/v1/orders.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py"
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
@@ -63,9 +67,63 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
+  test-timezones:
+    # Payment and order code compares and stores timestamps; run just those
+    # tests under zones that differ from UTC by the extremes (+14, -11), a
+    # 45-minute offset and a half-hour offset with DST. No coverage here: the
+    # full suite in the test job already measures it.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tz:
+          - UTC
+          - Pacific/Kiritimati
+          - Pacific/Pago_Pago
+          - Asia/Kathmandu
+          - America/St_Johns
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Set up Python
+        run: uv python install
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Payment and order tests under TZ=${{ matrix.tz }}
+        env:
+          TZ: ${{ matrix.tz }}
+        env:
+          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
+          POSTGRES_SERVER: localhost
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+          REDIS_HOST: localhost
+          SMTP_HOST: localhost
+          SMTP_USER: ci@example.com
+          SMTP_PASSWORD: ci
+          EMAILS_FROM_EMAIL: ci@example.com
+          EMAILS_FROM_NAME: CI
+        run: >-
+          uv run pytest -q -p no:cacheprovider
+          tests/integration/test_payment*.py
+          tests/integration/test_order*.py
+          tests/integration/test_checkout_session*.py
+          tests/integration/test_refund*.py
+          tests/integration/test_disputes.py
+          tests/integration/test_webhook*.py
+          tests/integration/test_tasks*.py
+          tests/unit/test_payment*.py
+          tests/unit/test_order*.py
+          tests/unit/test_money*.py
+          tests/unit/test_webhook*.py
+
   docker-build:
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, test-timezones]
     steps:
       - uses: actions/checkout@v4
       - name: Build image (no push)
