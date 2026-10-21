@@ -36,7 +36,7 @@ class PaymentProvider(ABC):
         payment_intent_id: str,
         *,
         idempotency_key: Optional[str] = None,
-        return_url: Optional[str] = None,
+        return_url: str,
     ) -> PaymentIntent:
         """Mirrors stripe.PaymentIntent.confirm(id, ...).
 
@@ -44,6 +44,8 @@ class PaymentProvider(ABC):
         produce a redirect-based next_action (e.g. 3D Secure), even for a
         plain card payment method - see
         https://docs.stripe.com/payments/3d-secure/authentication-flow.
+        It is where the customer lands after authenticating, so the caller
+        must always give it: no provider has a fallback of its own.
         """
         raise NotImplementedError
 
