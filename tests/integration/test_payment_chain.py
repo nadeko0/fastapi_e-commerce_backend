@@ -276,7 +276,9 @@ def test_3ds_payment_completed_by_webhook(shop, outbox, provider_calls, currency
     body = pending.json()["data"]
     assert (pending.status_code, body["status"], body["requires_action"]) == (
         200, "requires_action", True)
-    assert body["next_action"]["type"] == "use_stripe_sdk"
+    # With a return_url (which /pay always sends), Stripe answers a
+    # redirect, and the mock does the same (tests/unit/test_mock_test_cards.py).
+    assert body["next_action"]["type"] == "redirect_to_url"
     assert order_state(shop, order["id"]) == ("new", "pending")
     assert payment_rows(shop, order["id"]) == [("requires_action", 3225, 0, currency, False)]
     assert _emails(outbox) == []
