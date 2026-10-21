@@ -39,6 +39,7 @@ from app.services.payment.exceptions import (
     PaymentProviderTimeoutError,
 )
 from app.services.payment.stripe_provider import StripePaymentProvider
+from app.services.payment.types import PaymentIntentStatus
 from app.services.redis import RedisService
 
 
@@ -223,6 +224,64 @@ def test_pay_whose_provider_key_is_refused_as_reused_answers_409(shop, outbox, m
     assert "Idempotency key" in response.json()["detail"]
     assert order_state(shop, order["id"]) == ("new", "pending")
     assert [p[1:] for p in payment_rows(shop, order["id"])] == [(1999, 0, "USD", False)]
+    assert outbox.take() == []
+
+
+def _confirm_reports(monkeypatch, status):
+    real_confirm = StripePaymentProvider.confirm_payment_intent
+
+    def _confirm(self, payment_intent_id, **kwargs):
+        intent = real_confirm(self, payment_intent_id, **kwargs)
+        intent.status = status
+        return intent
+
+    monkeypatch.setattr(StripePaymentProvider, "confirm_payment_intent", _confirm)
+
+
+def test_pay_whose_intent_is_still_processing_is_not_marked_paid(shop, outbox, monkeypatch):
+    # The live provider reports any PaymentIntent status it does not model
+    # (requires_capture, ...) and Stripe's own "processing" as PROCESSING.
+    # /pay treated everything that was not requires_action as a success:
+    # the order was marked paid, confirmed and emailed before any money
+    # was taken. The outcome of a processing intent arrives by webhook.
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    outbox.take()
+    _confirm_reports(monkeypatch, PaymentIntentStatus.PROCESSING)
+
+    response = shop.pay(buyer, order["id"])
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["status"] == "pending"
+    assert order_state(shop, order["id"]) == ("new", "pending")
+    assert payment_rows(shop, order["id"]) == [("processing", 1999, 0, "USD", False)]
+    assert outbox.take() == []
+    # The webhook then settles it.
+    payment = shop.payments(order["id"])[0]
+    assert shop.intent_event("payment_intent.succeeded", payment).status_code == 200
+    assert order_state(shop, order["id"]) == ("confirmed", "paid")
+
+
+@pytest.mark.parametrize("status", [
+    PaymentIntentStatus.REQUIRES_PAYMENT_METHOD,
+    PaymentIntentStatus.CANCELED,
+    PaymentIntentStatus.REQUIRES_CONFIRMATION,
+])
+def test_pay_whose_intent_ends_unpaid_without_an_error_fails_the_attempt(
+    shop, outbox, monkeypatch, status
+):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    outbox.take()
+    _confirm_reports(monkeypatch, status)
+
+    response = shop.pay(buyer, order["id"])
+
+    assert response.status_code == 402, response.text
+    assert order_state(shop, order["id"]) == ("new", "failed")
+    assert payment_rows(shop, order["id"]) == [("failed", 1999, 0, "USD", False)]
     assert outbox.take() == []
 
 
