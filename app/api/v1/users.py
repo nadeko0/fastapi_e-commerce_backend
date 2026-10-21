@@ -424,6 +424,8 @@ async def logout(
     """Log out the current user: blacklist the access token in use and,
     if a refresh token is supplied, revoke its whole token family so it
     (and any refresh token rotated from it) can no longer be redeemed.
+    Without a refresh token, every refresh token family of the user is
+    revoked: the user is signed out on every device.
 
     503 when that could not be recorded (Redis unavailable): the client
     must not be told it is logged out while its tokens still work."""

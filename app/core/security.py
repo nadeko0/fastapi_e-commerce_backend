@@ -269,9 +269,13 @@ class RevocationUnavailable(Exception):
 
 
 def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
-    """Blacklist the current access token and, if provided, revoke the
-    refresh token's whole family. Raises RevocationUnavailable if either
-    could not be recorded."""
+    """Blacklist the current access token, and revoke the refresh token's
+    whole family - or, without a refresh token, every family of the user
+    ("sign out everywhere"): without one there is no telling which session
+    is ending, and leaving them all valid let a refresh token go on minting
+    access tokens for REFRESH_TOKEN_EXPIRE_DAYS after "logout". Raises
+    RevocationUnavailable if any of it could not be recorded."""
+    payload = {}
     try:
         payload = jwt.decode(access_token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         # time.time(), not datetime.utcnow().timestamp(): .timestamp() on a
@@ -287,8 +291,13 @@ def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
     # verifies: False here means Redis was not told.
     if not blacklist_token(access_token, expires_in):
         raise RevocationUnavailable("access token not blacklisted")
-    if refresh_token and not revoke_refresh_token(refresh_token):
-        raise RevocationUnavailable("refresh token family not revoked")
+    if refresh_token:
+        if not revoke_refresh_token(refresh_token):
+            raise RevocationUnavailable("refresh token family not revoked")
+        return
+    user_id = user_id_from_subject(payload.get("sub"))
+    if user_id is not None and not redis_service.revoke_user_refresh_families(user_id):
+        raise RevocationUnavailable("refresh token families not revoked")
 
 # Token fixation mitigation: a token issued before a password reset must not
 # remain usable afterward, otherwise a user resetting their password because
