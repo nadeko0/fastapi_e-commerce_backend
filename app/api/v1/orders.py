@@ -1308,7 +1308,11 @@ async def refund_payment(
         id=refund.id,
         order_id=order.id,
         amount=_cents_to_decimal(refund.amount),
-        currency=refund.currency,
+        # The charge's own code, as on the order and the payment: Stripe
+        # reports currencies in lower case and the live provider passes
+        # Refund.currency through as sent, so this answered "usd" for a
+        # USD order.
+        currency=payment_row.currency,
         status=refund.status.value,
         payment_status=order.payment_status,
     ))
