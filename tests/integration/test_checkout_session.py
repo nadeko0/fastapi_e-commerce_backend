@@ -29,6 +29,7 @@ from test_payment import (
     _payment_payload,
     _post_webhook,
     _sign,
+    _with_idempotency_key,
 )
 
 from app.core.config import settings
@@ -205,7 +206,7 @@ class TestCreateCheckoutSessionEndpoint:
         setup = _create_verified_buyer_with_order(client, db_session)
         order = setup["order"]
 
-        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=setup["headers"])
+        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"]))
 
         assert response.status_code == 200, response.text
         body = response.json()["data"]
@@ -230,11 +231,11 @@ class TestCreateCheckoutSessionEndpoint:
         pay_response = client.post(
             f"{ORDERS_PREFIX}/{order['id']}/pay",
             json=_payment_payload(order, token=TOKEN_SUCCESS_DEFAULT),
-            headers=setup["headers"],
+            headers=_with_idempotency_key(setup["headers"]),
         )
         assert pay_response.json()["data"]["status"] == "paid"
 
-        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=setup["headers"])
+        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"]))
         assert response.status_code == 400
         assert "already paid" in response.json()["detail"].lower()
 
@@ -250,7 +251,7 @@ class TestCreateCheckoutSessionEndpoint:
         )
         assert cancel_response.status_code == 200
 
-        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=setup["headers"])
+        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"]))
         assert response.status_code == 400
         assert "cancelled" in response.json()["detail"].lower()
 
@@ -258,7 +259,7 @@ class TestCreateCheckoutSessionEndpoint:
         setup = _create_verified_buyer_with_order(client, db_session)
         order = setup["order"]
 
-        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=setup["headers"])
+        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"]))
 
         assert response.status_code == 200, response.text
         assert response.json()["data"]["currency"] == "USD"
@@ -271,7 +272,7 @@ class TestCreateCheckoutSessionEndpoint:
         order = setup["order"]
 
         response = client.post(
-            CHECKOUT_SESSION_URL(order["id"]), json={"currency": "JPY"}, headers=setup["headers"]
+            CHECKOUT_SESSION_URL(order["id"]), json={"currency": "JPY"}, headers=_with_idempotency_key(setup["headers"])
         )
 
         assert response.status_code == 400
@@ -280,7 +281,7 @@ class TestCreateCheckoutSessionEndpoint:
 
     def test_unknown_order_returns_404(self, client, db_session):
         setup = _create_verified_buyer_with_order(client, db_session)
-        response = client.post(CHECKOUT_SESSION_URL(999999), headers=setup["headers"])
+        response = client.post(CHECKOUT_SESSION_URL(999999), headers=_with_idempotency_key(setup["headers"]))
         assert response.status_code == 404
 
     def test_idempotency_key_retry_returns_original_session(self, client, db_session):
@@ -329,7 +330,7 @@ class TestCreateCheckoutSessionEndpoint:
         payload[field] = bad_url
 
         response = client.post(
-            CHECKOUT_SESSION_URL(order["id"]), json=payload, headers=setup["headers"]
+            CHECKOUT_SESSION_URL(order["id"]), json=payload, headers=_with_idempotency_key(setup["headers"])
         )
 
         assert response.status_code == 422
@@ -361,7 +362,7 @@ class TestCreateCheckoutSessionEndpoint:
         order = setup["order"]
 
         response = client.post(
-            CHECKOUT_SESSION_URL(order["id"]), json={field: foreign_url}, headers=setup["headers"]
+            CHECKOUT_SESSION_URL(order["id"]), json={field: foreign_url}, headers=_with_idempotency_key(setup["headers"])
         )
 
         assert response.status_code == 422, response.text
@@ -409,7 +410,7 @@ class TestCreateCheckoutSessionEndpoint:
 
 class TestCheckoutSessionWebhook:
     def _create_session(self, client, headers, order):
-        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=headers)
+        response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(headers))
         assert response.status_code == 200, response.text
         return response.json()["data"]
 
@@ -550,7 +551,7 @@ class TestCheckoutSessionWebhook:
         paid = client.post(
             f"{ORDERS_PREFIX}/{order['id']}/pay",
             json=_payment_payload(order, token=TOKEN_SUCCESS_DEFAULT),
-            headers=setup["headers"],
+            headers=_with_idempotency_key(setup["headers"]),
         )
         assert paid.status_code == 200, paid.text
 

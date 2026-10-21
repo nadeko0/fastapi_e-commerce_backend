@@ -427,7 +427,7 @@ async def cancel_own_order(
     return APIResponse.success_response(OrderResponse.from_orm(order))
 
 
-def _provider_idempotency_key(kind: str, order: Order, client_key: Optional[str]) -> str:
+def _provider_idempotency_key(kind: str, order: Order, client_key: str) -> str:
     """
     The idempotency key sent to the payment provider for one request about
     `order`. A client's Idempotency-Key is unique only per order in our own
@@ -436,10 +436,7 @@ def _provider_idempotency_key(kind: str, order: Order, client_key: Optional[str]
     same amount got the first order's PaymentIntent back, whose confirm
     then reported "succeeded" - the second order marked paid without being
     charged. So the key is namespaced by the kind of request and the order.
-    Without a client key every request gets a fresh one (no replay).
     """
-    if client_key is None:
-        return f"{kind}-auto-{uuid.uuid4().hex}"
     return f"{kind}-order-{order.id}:{client_key}"
 
 
@@ -699,6 +696,7 @@ _MANUAL_REVIEW_RESPONSE = {"status": "processed", "applied": False, "requires_ma
         402: {"description": "Card declined by the payment provider"},
         404: {"description": "Order not found"},
         409: {"description": "Idempotency key already used with different payment parameters"},
+        422: {"description": "Missing or malformed Idempotency-Key header"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
 )
@@ -709,9 +707,23 @@ async def process_payment(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_payment_provider),
-    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    # Required, as on POST /orders and for the same reason. While it was
+    # optional, two requests without it that arrived together (a double
+    # click, a second tab, a retry after a lost response) both passed the
+    # unpaid guard below and both charged the card: the order lock is not
+    # held across the provider call, so the second success could only be
+    # flagged for manual review, after the customer was charged twice. With
+    # a key, the second request of one attempt is the first one's replay.
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=8, max_length=255,
+        description="Unique per payment attempt; resend the same value when retrying.",
+    ),
 ):
-    """Charge an order's total via the payment provider, creating a PaymentIntent."""
+    """Charge an order's total via the payment provider, creating a PaymentIntent.
+
+    Requires an `Idempotency-Key` header. Repeating a request with a key
+    already used for this order returns the first attempt's outcome.
+    """
 
     # Locked (SELECT ... FOR UPDATE) until the commit that records this
     # attempt below, so two attempts check the guards and record themselves
@@ -739,15 +751,14 @@ async def process_payment(
     # Checked *before* the "already paid" guard below: a successful retry
     # of the same key on an order that is now paid is exactly the case this
     # guard exists for, and must not be rejected as a duplicate payment.
-    if idempotency_key:
-        existing_payment = db.query(Payment).filter(
-            Payment.order_id == order.id,
-            Payment.idempotency_key == idempotency_key,
-        ).first()
-        if existing_payment:
-            return APIResponse.success_response(
-                _payment_row_to_response(existing_payment, order)
-            )
+    existing_payment = db.query(Payment).filter(
+        Payment.order_id == order.id,
+        Payment.idempotency_key == idempotency_key,
+    ).first()
+    if existing_payment:
+        return APIResponse.success_response(
+            _payment_row_to_response(existing_payment, order)
+        )
 
     _guard_order_payable(order)
 
@@ -914,6 +925,7 @@ async def process_payment(
         400: {"description": "Order already paid or cancelled"},
         404: {"description": "Order not found"},
         409: {"description": "Idempotency key already used with different checkout session parameters"},
+        422: {"description": "Missing or malformed Idempotency-Key header"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
 )
@@ -924,7 +936,12 @@ async def create_checkout_session(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_payment_provider),
-    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    # Required like /pay's: two sessions created for one order without a
+    # key can both be completed, and both charge the customer.
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=8, max_length=255,
+        description="Unique per payment attempt; resend the same value when retrying.",
+    ),
 ):
     """
     Create a Stripe Checkout Session (the fully-hosted-redirect flow) for an
@@ -956,15 +973,14 @@ async def create_checkout_session(
     # one. Checked before the paid/cancelled guard below for the same
     # reason as /pay - a successful retry against an order that is now
     # paid must not be rejected as a fresh duplicate attempt.
-    if idempotency_key:
-        existing_payment = db.query(Payment).filter(
-            Payment.order_id == order.id,
-            Payment.idempotency_key == idempotency_key,
-        ).first()
-        if existing_payment and existing_payment.checkout_session_id:
-            return APIResponse.success_response(
-                _checkout_session_row_to_response(existing_payment, order)
-            )
+    existing_payment = db.query(Payment).filter(
+        Payment.order_id == order.id,
+        Payment.idempotency_key == idempotency_key,
+    ).first()
+    if existing_payment and existing_payment.checkout_session_id:
+        return APIResponse.success_response(
+            _checkout_session_row_to_response(existing_payment, order)
+        )
 
     _guard_order_payable(order)
     _guard_currency_matches_order(payload.currency, order)
@@ -1056,6 +1072,7 @@ async def create_checkout_session(
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
         409: {"description": "Idempotency key already used with different refund parameters"},
+        422: {"description": "Missing or malformed Idempotency-Key header"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
 )
@@ -1066,7 +1083,12 @@ async def refund_payment(
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_payment_provider),
     redis: RedisService = Depends(),
-    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    # Required like /pay's: without a key, a retried or double-clicked
+    # partial refund was a second refund, the money returned twice.
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=8, max_length=255,
+        description="Unique per refund; resend the same value when retrying.",
+    ),
 ):
     """Issue a full or partial refund for a paid order (admin only).
 
@@ -1121,13 +1143,8 @@ async def refund_payment(
             provider.create_refund,
             payment_intent_id=payment_intent_id,
             amount=refund_amount_cents,
-            # Namespaced like /pay's (see _provider_idempotency_key), but
-            # still None without a client key: then no replay protection
-            # is asked of the provider at all, as before.
-            idempotency_key=(
-                _provider_idempotency_key("refund", order, idempotency_key)
-                if idempotency_key else None
-            ),
+            # Namespaced like /pay's (see _provider_idempotency_key).
+            idempotency_key=_provider_idempotency_key("refund", order, idempotency_key),
         )
     except PaymentProviderTimeoutError:
         raise HTTPException(

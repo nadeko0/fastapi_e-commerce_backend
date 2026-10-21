@@ -39,9 +39,9 @@ def _quiet(monkeypatch):
 
 
 def _pay(client, setup, key=None):
-    headers = dict(setup["headers"])
-    if key:
-        headers["Idempotency-Key"] = key
+    # /pay requires an Idempotency-Key: without one given, a fresh key, so
+    # each call is a new payment attempt.
+    headers = {**setup["headers"], "Idempotency-Key": key or uuid.uuid4().hex}
     return client.post(
         f"{ORDERS_PREFIX}/{setup['order']['id']}/pay",
         json=_payment_payload(setup["order"]),
@@ -51,8 +51,7 @@ def _pay(client, setup, key=None):
 
 def _refund(client, order_id, headers, amount=None, key=None):
     body = {} if amount is None else {"amount": amount}
-    if key:
-        headers = {**headers, "Idempotency-Key": key}
+    headers = {**headers, "Idempotency-Key": key or uuid.uuid4().hex}
     return client.post(f"{ORDERS_PREFIX}/{order_id}/refund", json=body, headers=headers)
 
 
@@ -177,9 +176,9 @@ def test_replaying_a_successful_pay_returns_the_same_attempt_and_charges_once(
 
 def test_a_new_key_for_a_paid_order_is_refused_not_charged(client, db_session):
     setup = _create_verified_buyer_with_order(client, db_session)
-    assert _pay(client, setup, key="key-1").status_code == 200
+    assert _pay(client, setup, key="attempt-1").status_code == 200
 
-    second = _pay(client, setup, key="key-2")
+    second = _pay(client, setup, key="attempt-2")
 
     assert second.status_code == 400
     assert second.json()["detail"] == "Order already paid"
@@ -197,7 +196,7 @@ def test_replaying_a_checkout_session_after_the_order_was_paid_returns_it(client
     assert _pay(client, setup).status_code == 200
 
     replay = client.post(url, headers=headers)
-    fresh = client.post(url, headers=setup["headers"])
+    fresh = client.post(url, headers={**setup["headers"], "Idempotency-Key": "another-key"})
 
     assert replay.status_code == 200
     assert replay.json()["data"]["checkout_session_id"] == first.json()["data"]["checkout_session_id"]
@@ -277,11 +276,12 @@ def test_a_customer_cannot_act_on_another_customers_order(client, db_session, ac
     attacker = _create_verified_buyer_with_order(client, db_session, email="attacker@example.com")
     url = f"{ORDERS_PREFIX}/{victim['order']['id']}/{action}"
 
+    # With a valid Idempotency-Key, so the request reaches the ownership check.
+    headers = {**attacker["headers"], "Idempotency-Key": uuid.uuid4().hex}
     if action == "pay":
-        response = client.post(url, json=_payment_payload(victim["order"]),
-                               headers=attacker["headers"])
+        response = client.post(url, json=_payment_payload(victim["order"]), headers=headers)
     else:
-        response = client.post(url, headers=attacker["headers"])
+        response = client.post(url, headers=headers)
 
     # 404, not 403: the order's existence is not revealed either.
     assert response.status_code == 404

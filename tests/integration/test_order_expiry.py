@@ -97,7 +97,7 @@ def _pay(client, token, order):
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json={"order_id": order["id"], "payment_method": "stripe",
               "amount": order["total_amount"], "payment_method_token": TOKEN_SUCCESS_DEFAULT},
-        headers=_auth_headers(token),
+        headers=_with_idempotency_key(_auth_headers(token)),
     )
 
 
