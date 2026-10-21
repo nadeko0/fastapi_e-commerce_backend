@@ -12,7 +12,7 @@ failure (see tests/test_payment.py's timeout test).
 
 Deterministic mock outcomes are selected by a small set of sentinel
 `payment_method` tokens, deliberately named after Stripe's own published
-test card tokens (pm_card_visa, pm_card_chargeDeclined,
+test card tokens (pm_card_visa, pm_card_visa_chargeDeclined,
 pm_card_authenticationRequired) so the mock reads like real Stripe test-mode
 usage: https://docs.stripe.com/testing
 """
@@ -40,8 +40,12 @@ from app.services.payment.types import (
 )
 
 # Sentinel payment_method tokens that pick a deterministic mock outcome,
-# named after Stripe's real test-mode tokens for familiarity.
-TOKEN_DECLINE = "pm_card_chargeDeclined"
+# named after Stripe's real test-mode tokens for familiarity. Stripe's
+# generic decline card is pm_card_visa_chargeDeclined; the mock used to know
+# only pm_card_chargeDeclined, which is not a Stripe test card, and charged
+# Stripe's own decline card successfully. The old token still declines.
+TOKEN_DECLINE = "pm_card_visa_chargeDeclined"
+_LEGACY_TOKEN_DECLINE = "pm_card_chargeDeclined"
 TOKEN_REQUIRES_ACTION = "pm_card_authenticationRequired"
 TOKEN_SUCCESS_DEFAULT = "pm_card_visa"
 
@@ -236,7 +240,7 @@ class StripePaymentProvider(PaymentProvider):
             return intent
 
         token = intent.payment_method or TOKEN_SUCCESS_DEFAULT
-        if token == TOKEN_DECLINE:
+        if token in (TOKEN_DECLINE, _LEGACY_TOKEN_DECLINE):
             intent.status = PaymentIntentStatus.REQUIRES_PAYMENT_METHOD
             intent.last_payment_error = {
                 "code": "card_declined",
