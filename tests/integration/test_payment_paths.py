@@ -20,6 +20,7 @@ from conftest import TestingSessionLocal
 from payment_support import (
     CART,
     PAY_3DS,
+    PAY_DECLINED,
     Outbox,
     Shop,
     cents,
@@ -326,6 +327,76 @@ def test_checkout_session_the_provider_rejects_fails_the_attempt_with_400(shop, 
     # The order itself is untouched and can be paid another way.
     assert order_state(shop, order["id"]) == ("new", "pending")
     assert shop.pay(buyer, order["id"]).status_code == 200
+
+
+def test_checkout_session_retried_with_the_key_of_a_failed_attempt_answers_409_not_500(
+    shop, monkeypatch
+):
+    # The first request timed out at the provider: its attempt is recorded
+    # as failed, with no session. A retry with the same key found that row
+    # without a session, went on to insert a second row with the same key
+    # and hit the unique index - answering 500.
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    with monkeypatch.context() as patched:
+        _provider_raises(patched, "create_checkout_session", PaymentProviderTimeoutError())
+        assert shop.checkout_session(buyer, order["id"], key=key).status_code == 503
+    created = _provider_calls(monkeypatch, "create_checkout_session")
+
+    response = shop.checkout_session(buyer, order["id"], key=key)
+
+    assert response.status_code == 409, response.text
+    assert "new Idempotency-Key" in response.json()["detail"]
+    assert created == []
+    assert payment_rows(shop, order["id"]) == [("failed", 1999, 0, "USD", False)]
+    # A new key goes through.
+    assert shop.checkout_session(buyer, order["id"]).status_code == 200
+
+
+def test_checkout_session_with_the_key_of_a_declined_pay_attempt_answers_409_not_500(shop):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    assert shop.pay(buyer, order["id"], token=PAY_DECLINED, key=key).status_code == 402
+
+    response = shop.checkout_session(buyer, order["id"], key=key)
+
+    assert response.status_code == 409, response.text
+    assert [p.status for p in shop.payments(order["id"])] == ["failed"]
+    assert order_state(shop, order["id"]) == ("new", "failed")
+
+
+def test_checkout_session_racing_a_twin_still_creating_its_session_answers_409(
+    shop, monkeypatch
+):
+    # The twin has recorded its attempt but is still waiting on the
+    # provider, so there is no session to replay yet.
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    real_guard = orders_module._guard_currency_matches_order
+
+    def _twin_records_its_attempt_first(requested_currency, order_row):
+        _insert_from_another_session(Payment(
+            order_id=order_row.id, provider="stripe", payment_intent_id="pending-twin",
+            idempotency_key=key, amount=1999, currency="USD", status="processing",
+        ))
+        return real_guard(requested_currency, order_row)
+
+    monkeypatch.setattr(
+        orders_module, "_guard_currency_matches_order", _twin_records_its_attempt_first
+    )
+    created = _provider_calls(monkeypatch, "create_checkout_session")
+
+    response = shop.checkout_session(buyer, order["id"], key=key)
+
+    assert response.status_code == 409, response.text
+    assert created == []
+    assert len(shop.payments(order["id"])) == 1
 
 
 # -- POST /orders/{id}/refund ----------------------------------------------------
