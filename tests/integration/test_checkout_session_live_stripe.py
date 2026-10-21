@@ -103,7 +103,7 @@ class TestCreateCheckoutSession:
         assert session.payment_intent is None
         assert session.payment_status == "unpaid"
         assert session.amount_total == 1099
-        assert session.currency == "usd"
+        assert session.currency == "USD"
 
     def test_missing_success_or_cancel_url_is_rejected_by_stripe(self, provider):
         # success_url/cancel_url are mandatory params for

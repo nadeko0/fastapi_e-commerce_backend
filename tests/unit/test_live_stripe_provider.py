@@ -320,6 +320,20 @@ def test_session_mapping_fills_gaps_and_flattens_the_intent(provider, sdk):
     assert session.metadata == {} and session.url is None
 
 
+def test_currencies_come_back_in_upper_case_like_the_orders(provider, sdk):
+    # Stripe answers in lower case ("usd"); orders, and every amount the API
+    # returns, carry upper-case ISO codes ("USD"). RefundResponse.currency is
+    # the refund's own: it said "usd" in production and "USD" on the mock.
+    sdk(stripe.PaymentIntent, "retrieve", result=_intent(currency="usd"))
+    sdk(stripe.checkout.Session, "retrieve", result=_session(currency="eur"))
+    sdk(stripe.Refund, "create", result=_SdkObject(
+        id="re_1", payment_intent="pi_123", amount=5, currency="pln", status="succeeded"))
+
+    assert provider.retrieve_payment_intent("pi_123").currency == "USD"
+    assert provider.retrieve_checkout_session("cs_123").currency == "EUR"
+    assert provider.create_refund(payment_intent_id="pi_123").currency == "PLN"
+
+
 @pytest.mark.parametrize(
     "raised,expected",
     [

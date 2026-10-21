@@ -164,6 +164,10 @@ class StripePaymentProvider(PaymentProvider):
         # idempotency key or return a cached response.
         _require_valid_amount(amount)
         _require_valid_currency(currency)
+        # Reported in upper case whatever case it was sent in, like every
+        # currency in this API (orders, and the live provider, which
+        # upper-cases Stripe's lower-case answers).
+        currency = currency.upper()
 
         self._simulate_network_call()
 
@@ -286,6 +290,7 @@ class StripePaymentProvider(PaymentProvider):
                 param="success_url" if not success_url else "cancel_url",
                 code="parameter_missing",
             )
+        currency = currency.upper()  # as in create_payment_intent
 
         self._simulate_network_call()
 
