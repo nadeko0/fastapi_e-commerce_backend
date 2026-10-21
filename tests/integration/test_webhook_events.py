@@ -126,3 +126,29 @@ def test_a_cancel_reported_after_the_attempt_succeeded_changes_nothing(shop, out
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
     assert outbox.take() == []
+
+
+# -- Event types with no handling of their own ------------------------------------
+
+@pytest.mark.parametrize("event_type", [
+    "payment_intent.created", "payment_intent.processing",
+    "payment_intent.requires_action", "payment_intent.amount_capturable_updated",
+])
+def test_an_unhandled_event_for_a_known_attempt_is_recorded_not_reported_applied(
+    shop, outbox, event_type
+):
+    # Stripe sends these for every PaymentIntent of the account; an
+    # endpoint subscribed to them found the attempt, changed nothing, and
+    # answered "applied": true - in the Dashboard's delivery log, the same
+    # answer as a payment applied to the order.
+    buyer, order, payment = _awaiting_3ds(shop)
+    outbox.take()
+
+    response = shop.intent_event(event_type, payment, event_id=f"evt_{event_type}")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"status": "processed", "applied": False}
+    assert f"evt_{event_type}" in shop.webhook_event_ids()
+    assert order_state(shop, order["id"]) == ("new", "pending")
+    assert payment_rows(shop, order["id"]) == [("requires_action", 1999, 0, "USD", False)]
+    assert outbox.take() == []
