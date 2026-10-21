@@ -42,6 +42,16 @@ ZERO_DECIMAL_CURRENCIES = frozenset({
     "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF",
 })
 THREE_DECIMAL_CURRENCIES = frozenset({"BHD", "JOD", "KWD", "OMR", "TND"})
+# Stripe's "Special cases" (https://docs.stripe.com/currencies#special-cases,
+# read from the page's HTML in October 2026; it lists ISK, HUF, TWD, UGX):
+# - ISK is sent with two decimals that must be 00 ("You can't charge
+#   fractions of ISK"). Prices here have two decimals, so an order could be
+#   placed for an amount Stripe then refuses to charge: refused.
+# - UGX: the same rule; already refused as zero-decimal above.
+# - HUF and TWD: only payouts are restricted (manual payouts in multiples
+#   of 100); "you can charge two-decimal amounts". This application makes
+#   no payouts, so both stay accepted.
+WHOLE_UNITS_ONLY_CURRENCIES = frozenset({"ISK"})
 
 # Secrets are checked (Settings.check_deployment_settings) everywhere but here: on a
 # developer's machine and in the test suite the .env.example placeholders
@@ -422,6 +432,11 @@ class Settings(BaseSettings):
     # unit), with KWD as a tenth of its price. Nothing in between notices.
     @validator("STORE_CURRENCY")
     def validate_store_currency(cls, v: str) -> str:
+        if v in WHOLE_UNITS_ONLY_CURRENCIES:
+            raise ValueError(
+                f"STORE_CURRENCY {v} can only be charged in whole units; prices "
+                "here have two decimal places, so it is not supported"
+            )
         if v in ZERO_DECIMAL_CURRENCIES or v in THREE_DECIMAL_CURRENCIES:
             decimals = "no" if v in ZERO_DECIMAL_CURRENCIES else "three"
             raise ValueError(
