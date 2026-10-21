@@ -1448,26 +1448,51 @@ def _apply_refund_event(db: Session, event_type: str, object_data: dict) -> dict
 
     order = db.query(Order).filter(Order.id == payment_row.order_id).with_for_update().first()
     db.refresh(payment_row)
+    flagged = False
     for refund_object in refund_objects:
-        _apply_refund_object(db, payment_row, refund_object)
+        flagged = _apply_refund_object(db, payment_row, refund_object) or flagged
     _settle_refunds(db, order, payment_row)
     order.updated_at = datetime.utcnow()
     db.commit()
+    if flagged:
+        return {"status": "processed", "applied": True, "requires_manual_review": True}
     return {"status": "processed", "applied": True}
 
 
-def _apply_refund_object(db: Session, payment_row: Payment, refund_object: dict) -> None:
+def _apply_refund_object(db: Session, payment_row: Payment, refund_object: dict) -> bool:
+    """
+    Bring one recorded refund up to date with the provider's report of it.
+    Returns True when the refund turned out not to return the money - it
+    failed or was canceled after it had been recorded (Stripe: card
+    refunds can fail days later, refund.failed): its amount is taken back
+    out of amount_refunded, so the order is no longer refunded by it, and
+    it is flagged for manual review, since the customer has to be refunded
+    some other way. This used to go unnoticed: the order stayed refunded.
+    A failed or canceled refund is final and stays as it is.
+    """
     refund_id = refund_object.get("id")
     # Refund.status is nullable in Stripe's API reference.
     status = refund_object.get("status")
     if not isinstance(refund_id, str) or not isinstance(status, str):
-        return
+        return False
     refund_row = db.query(PaymentRefund).filter(PaymentRefund.refund_id == refund_id).first()
     if refund_row is None:
-        return
-    if refund_row.status in _REFUND_STATUSES_NOT_RETURNED or status in _REFUND_STATUSES_NOT_RETURNED:
-        return
+        return False
+    if refund_row.status in _REFUND_STATUSES_NOT_RETURNED:
+        return False
     refund_row.status = status
+    if status not in _REFUND_STATUSES_NOT_RETURNED:
+        return False
+    payment_row.amount_refunded -= refund_row.amount
+    failure_reason = refund_object.get("failure_reason")
+    refund_row.failure_reason = failure_reason if isinstance(failure_reason, str) else None
+    refund_row.requires_manual_review = True
+    logger.warning(
+        "Refund %s of payment %s (order %s) is %s after it was recorded (%s): "
+        "the customer was not refunded, needs manual review",
+        refund_id, payment_row.id, payment_row.order_id, status, refund_row.failure_reason,
+    )
+    return True
 
 
 @router.post(
