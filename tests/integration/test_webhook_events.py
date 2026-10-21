@@ -152,3 +152,52 @@ def test_an_unhandled_event_for_a_known_attempt_is_recorded_not_reported_applied
     assert order_state(shop, order["id"]) == ("new", "pending")
     assert payment_rows(shop, order["id"]) == [("requires_action", 1999, 0, "USD", False)]
     assert outbox.take() == []
+
+
+# -- A report about an attempt that already paid the order --------------------------
+
+@pytest.mark.parametrize("report", [
+    {"amount": 1998}, {"amount": 2000}, {"currency": "eur"}, {"amount": 0},
+])
+def test_a_differing_report_about_the_attempt_that_paid_does_not_orphan_the_order(
+    shop, outbox, report
+):
+    # Found by the stateful test (test_payment_state_machine.py): /pay
+    # applied the success, then a payment_intent.succeeded for the same
+    # attempt reported another amount or currency. The mismatch check ran
+    # before anything else and flagged the attempt that had paid the
+    # order: the order stayed "paid" with no unflagged charge behind it,
+    # and could no longer be refunded ("No successful payment found").
+    product = shop.product(price="19.99", stock=3)
+    buyer = shop.buyer()
+    admin = shop.admin()
+    order = shop.order_of(buyer, product)
+    assert shop.pay(buyer, order["id"]).status_code == 200
+    payment = shop.payments(order["id"])[0]
+    outbox.take()
+
+    response = shop.intent_event("payment_intent.succeeded", payment, **report)
+
+    assert response.status_code == 200
+    assert order_state(shop, order["id"]) == ("confirmed", "paid")
+    assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
+    assert outbox.take() == []
+    assert shop.refund(admin, order["id"]).status_code == 200
+    assert order_state(shop, order["id"]) == ("confirmed", "refunded")
+
+
+def test_a_differing_session_report_about_the_attempt_that_paid_is_ignored(shop, outbox):
+    product = shop.product(price="19.99", stock=3)
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    assert shop.checkout_session(buyer, order["id"]).status_code == 200
+    payment = shop.payments(order["id"])[0]
+    assert shop.session_event("checkout.session.completed", payment,
+                              payment_intent="pi_paid").status_code == 200
+
+    response = shop.session_event("checkout.session.async_payment_succeeded",
+                                  shop.payments(order["id"])[0], amount=1)
+
+    assert response.status_code == 200
+    assert order_state(shop, order["id"]) == ("confirmed", "paid")
+    assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
