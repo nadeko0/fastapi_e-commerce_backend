@@ -14,12 +14,13 @@ provider's answer, simulated by changing it from another session while the
 provider call is in flight.
 
 What remains possible on Postgres. The lock is released before the call to
-the provider (no transaction stays open across an HTTP call), so two /pay
-requests that arrive together can both be charged when they carry
-different Idempotency-Keys (two attempts, e.g. two tabs that each made
-their own key; the header is required, so one attempt retried is replayed,
-not charged again). The second success is then recorded and flagged for manual review
-(a refund), never applied to the order a second time.
+the provider (no transaction stays open across an HTTP call). One attempt
+retried is a replay (the Idempotency-Key is required), and a second attempt
+with its own key is refused while the first is in flight
+(test_payment_rules.py). Once the first has been in flight for longer than
+PAYMENT_ATTEMPT_STALE_AFTER_MINUTES, a second one may start, and both can
+then be charged: the second success is recorded and flagged for manual
+review (a refund), never applied to the order a second time.
 """
 import uuid
 
@@ -33,6 +34,7 @@ from test_payment import (
     ORDER_AMOUNT_CENTS,
     ORDER_CURRENCY_REPORTED,
     ORDERS_PREFIX,
+    _age_attempts,
     _create_admin,
     _create_verified_buyer_with_order,
     _get_order,
@@ -240,6 +242,7 @@ def test_webhook_success_for_an_order_another_attempt_paid_is_flagged(
     setup = _create_verified_buyer_with_order(client, db_session)
     order = setup["order"]
     first_intent_id = _pay_requiring_action(client, setup)
+    _age_attempts(db_session, order["id"])  # long enough not to block another
     paid = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
@@ -269,6 +272,7 @@ def test_checkout_session_completed_after_pay_is_flagged(client, db_session, sta
     setup = _create_verified_buyer_with_order(client, db_session)
     order = setup["order"]
     session = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"])).json()["data"]
+    _age_attempts(db_session, order["id"])  # long enough not to block /pay
     paid = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )

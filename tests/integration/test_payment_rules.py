@@ -12,7 +12,10 @@ from test_payment import (
     ORDER_AMOUNT_CENTS,
     ORDER_CURRENCY_REPORTED,
     ORDERS_PREFIX,
+    TOKEN_DECLINE,
+    TOKEN_REQUIRES_ACTION,
     WEBHOOK_URL,
+    _age_attempts,
     _create_admin,
     _create_verified_buyer_with_order,
     _get_order,
@@ -24,6 +27,7 @@ from test_payment import (
     _webhook_body,
 )
 
+from app.core.config import settings
 from app.models.payment import WebhookEvent
 from app.models.product import Product
 from app.services.payment.stripe_provider import StripePaymentProvider
@@ -186,6 +190,81 @@ def test_a_new_key_for_a_paid_order_is_refused_not_charged(client, db_session):
     assert len(StripePaymentProvider._intents_by_id) == 1
 
 
+def _post_attempt(client, setup, flow, key):
+    url = f"{ORDERS_PREFIX}/{setup['order']['id']}/{flow}"
+    headers = {**setup["headers"], "Idempotency-Key": key}
+    if flow == "pay":
+        body = _payment_payload(setup["order"], token=TOKEN_REQUIRES_ACTION)
+        return client.post(url, json=body, headers=headers)
+    return client.post(url, headers=headers)
+
+
+@pytest.mark.parametrize("first_flow", ["pay", "checkout-session"])
+@pytest.mark.parametrize("second_flow", ["pay", "checkout-session"])
+def test_a_second_attempt_while_one_is_in_flight_is_refused(
+    client, db_session, first_flow, second_flow
+):
+    # The header made one attempt retried a replay, but two attempts with
+    # their own keys (two tabs, a client that made a new key per click)
+    # both passed the unpaid guard, the order lock being released before
+    # the provider call, and both could charge the customer. While an
+    # attempt is still open (waiting for 3D Secure, a Checkout Session not
+    # completed, or a request still talking to the provider), another one
+    # is refused before the provider is asked anything.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    first = _post_attempt(client, setup, first_flow, "attempt-1")
+    assert first.status_code == 200, first.text
+    provider_objects = (
+        len(StripePaymentProvider._intents_by_id), len(StripePaymentProvider._sessions_by_id)
+    )
+
+    second = _post_attempt(client, setup, second_flow, "attempt-2")
+
+    assert second.status_code == 409, second.text
+    assert second.json()["detail"] == (
+        "Another payment attempt for this order is in progress; "
+        "finish it or retry with the same Idempotency-Key"
+    )
+    assert len(_get_payments(db_session, setup["order"]["id"])) == 1
+    assert (
+        len(StripePaymentProvider._intents_by_id), len(StripePaymentProvider._sessions_by_id)
+    ) == provider_objects
+    # Replaying the first attempt's own key still returns it.
+    replay = _post_attempt(client, setup, first_flow, "attempt-1")
+    attempt_id = "id" if first_flow == "pay" else "payment_id"
+    assert replay.status_code == 200
+    assert replay.json()["data"][attempt_id] == first.json()["data"][attempt_id]
+
+
+def test_an_attempt_left_in_flight_too_long_no_longer_blocks(client, db_session):
+    # A request that crashed between recording its attempt and hearing back
+    # from the provider leaves the attempt "processing" for good: it must
+    # not lock the order against payment until the order expires.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    assert _post_attempt(client, setup, "pay", "attempt-1").status_code == 200
+    order_id = setup["order"]["id"]
+
+    _age_attempts(db_session, order_id, settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES - 1)
+    assert _post_attempt(client, setup, "pay", "attempt-2").status_code == 409
+
+    _age_attempts(db_session, order_id, 2)
+    retried = _post_attempt(client, setup, "pay", "attempt-3")
+    assert retried.status_code == 200, retried.text
+    assert len(_get_payments(db_session, order_id)) == 2
+
+
+def test_a_finished_attempt_does_not_block_the_next_one(client, db_session):
+    setup = _create_verified_buyer_with_order(client, db_session)
+    declined = client.post(
+        f"{ORDERS_PREFIX}/{setup['order']['id']}/pay",
+        json=_payment_payload(setup["order"], token=TOKEN_DECLINE),
+        headers={**setup["headers"], "Idempotency-Key": "attempt-1"},
+    )
+    assert declined.status_code == 402
+
+    assert _pay(client, setup, key="attempt-2").status_code == 200
+
+
 def test_replaying_a_checkout_session_after_the_order_was_paid_returns_it(client, db_session):
     # The idempotency check comes before the "already paid" guard, so a
     # client retrying its own request gets its original answer.
@@ -193,6 +272,8 @@ def test_replaying_a_checkout_session_after_the_order_was_paid_returns_it(client
     url = f"{ORDERS_PREFIX}/{setup['order']['id']}/checkout-session"
     headers = {**setup["headers"], "Idempotency-Key": "session-key"}
     first = client.post(url, headers=headers)
+    # The session is abandoned long enough not to block a card payment.
+    _age_attempts(db_session, setup["order"]["id"])
     assert _pay(client, setup).status_code == 200
 
     replay = client.post(url, headers=headers)

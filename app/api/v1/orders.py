@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -633,6 +633,47 @@ def _guard_order_payable(order: Order) -> None:
         )
 
 
+# Payment.status values of an attempt whose outcome is not known yet: the
+# request is still talking to the provider (or died doing so), the customer
+# is in 3D Secure, or a Checkout Session has not been completed or expired.
+_IN_FLIGHT_PAYMENT_STATUSES = ("processing", "requires_action")
+
+
+def _guard_no_attempt_in_flight(db: Session, order: Order) -> None:
+    """
+    Shared by /pay and /checkout-session, called with the order row locked:
+    refuse a new attempt while another one for this order may still charge
+    the customer. The Idempotency-Key makes one attempt retried a replay,
+    but two attempts with their own keys (two tabs, a client making a new
+    key per click) both passed the unpaid guard - the lock is released
+    before the provider call - and both could be charged; the second
+    success was only flagged for manual review. The caller's own key was
+    already checked for a replay, so any attempt found here is another one.
+
+    An attempt in flight for longer than PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
+    no longer blocks: a request that crashed after recording its attempt
+    would otherwise lock the order until it expires. If such an attempt
+    does succeed after all, the webhook flags the second success for manual
+    review, as before.
+    """
+    started_after = datetime.utcnow() - timedelta(
+        minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
+    )
+    in_flight = db.query(Payment.id).filter(
+        Payment.order_id == order.id,
+        Payment.status.in_(_IN_FLIGHT_PAYMENT_STATUSES),
+        Payment.created_at > started_after,
+    ).first()
+    if in_flight:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Another payment attempt for this order is in progress; "
+                "finish it or retry with the same Idempotency-Key"
+            ),
+        )
+
+
 def _guard_currency_matches_order(requested_currency: Optional[str], order: Order) -> None:
     """
     Shared by /pay and /checkout-session: the order is charged in its own
@@ -695,7 +736,7 @@ _MANUAL_REVIEW_RESPONSE = {"status": "processed", "applied": False, "requires_ma
         400: {"description": "Order already paid, cancelled, or amount mismatch"},
         402: {"description": "Card declined by the payment provider"},
         404: {"description": "Order not found"},
-        409: {"description": "Idempotency key already used with different payment parameters"},
+        409: {"description": "Another attempt for this order is in progress, or idempotency key already used with different payment parameters"},
         422: {"description": "Missing or malformed Idempotency-Key header"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
@@ -761,6 +802,7 @@ async def process_payment(
         )
 
     _guard_order_payable(order)
+    _guard_no_attempt_in_flight(db, order)
 
     if payment.amount != order.total_amount:
         raise HTTPException(
@@ -930,7 +972,7 @@ async def process_payment(
     responses={
         400: {"description": "Order already paid or cancelled"},
         404: {"description": "Order not found"},
-        409: {"description": "Idempotency key already used with different checkout session parameters"},
+        409: {"description": "Another attempt for this order is in progress, or idempotency key already used with different checkout session parameters"},
         422: {"description": "Missing or malformed Idempotency-Key header"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
@@ -989,6 +1031,7 @@ async def create_checkout_session(
         )
 
     _guard_order_payable(order)
+    _guard_no_attempt_in_flight(db, order)
     _guard_currency_matches_order(payload.currency, order)
 
     amount_cents = _decimal_to_cents(order.total_amount)
