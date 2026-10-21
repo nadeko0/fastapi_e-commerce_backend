@@ -63,11 +63,17 @@ MAX_AMOUNT = 999_999_999_99  # 999,999,999.99 in major units
 # exhaustive (Stripe supports ~135 currencies) but enough to catch the
 # common real-world mistake of a made-up or malformed currency code slipping
 # past a naive regex-only check.
+#
+# The last row are the other currencies https://docs.stripe.com/currencies
+# names in its text (its "Special cases" and minimum-amount table, read in
+# October 2026). TWD in particular is a STORE_CURRENCY the configuration
+# accepts (app/core/config.py), and the mock refused every payment in it.
 VALID_CURRENCIES = {
     "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "SEK", "NZD",
     "MXN", "SGD", "HKD", "NOK", "KRW", "TRY", "RUB", "INR", "BRL", "ZAR",
     "DKK", "PLN", "THB", "IDR", "HUF", "CZK", "ILS", "CLP", "PHP", "AED",
     "COP", "SAR", "MYR", "RON",
+    "ARS", "ISK", "TWD", "UGX",
 }
 
 
