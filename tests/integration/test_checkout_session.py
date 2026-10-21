@@ -22,6 +22,7 @@ from test_payment import (
     ORDER_CURRENCY_REPORTED,
     ORDERS_PREFIX,
     TOKEN_SUCCESS_DEFAULT,
+    _age_attempts,
     _create_admin,
     _create_verified_buyer_with_order,
     _get_order,
@@ -389,6 +390,7 @@ class TestCreateCheckoutSessionEndpoint:
             json={"success_url": f"{frontend}/thanks?order=1", "cancel_url": f"{frontend}/cart"},
             headers={**setup["headers"], "Idempotency-Key": "own-urls"},
         )
+        _age_attempts(db_session, order["id"])  # so the second session may start
         defaults = client.post(
             CHECKOUT_SESSION_URL(order["id"]),
             headers={**setup["headers"], "Idempotency-Key": "default-urls"},
@@ -548,6 +550,7 @@ class TestCheckoutSessionWebhook:
         setup = _create_verified_buyer_with_order(client, db_session)
         order = setup["order"]
         session = self._create_session(client, setup["headers"], order)
+        _age_attempts(db_session, order["id"])  # long enough not to block /pay
         paid = client.post(
             f"{ORDERS_PREFIX}/{order['id']}/pay",
             json=_payment_payload(order, token=TOKEN_SUCCESS_DEFAULT),

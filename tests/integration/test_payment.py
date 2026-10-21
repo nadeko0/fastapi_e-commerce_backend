@@ -16,6 +16,7 @@ import json
 import threading
 import time
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -111,6 +112,17 @@ def db_session():
 def _get_order(db_session, order_id: int) -> Order:
     db_session.expire_all()
     return db_session.query(Order).filter(Order.id == order_id).first()
+
+
+def _age_attempts(db_session, order_id: int, minutes: int = None):
+    """Move every payment attempt of the order `minutes` into the past; by
+    default just past the point where an attempt still in flight stops
+    blocking another one (PAYMENT_ATTEMPT_STALE_AFTER_MINUTES)."""
+    if minutes is None:
+        minutes = settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES + 1
+    for payment in _get_payments(db_session, order_id):
+        payment.created_at -= timedelta(minutes=minutes)
+    db_session.commit()
 
 
 def _get_payments(db_session, order_id: int):
@@ -895,10 +907,12 @@ def test_webhook_success_for_cancelled_order_is_flagged_not_applied(client, db_s
 
 def _paid_order_with_an_abandoned_attempt(client, db_session):
     """An order paid by a second /pay attempt while the first, left waiting
-    for 3D Secure, is still open at Stripe. Returns (setup, first intent id)."""
+    for 3D Secure long enough not to block it, is still open at Stripe.
+    Returns (setup, first intent id)."""
     setup = _create_verified_buyer_with_order(client, db_session)
     order = setup["order"]
     abandoned_intent_id = _pay_requiring_action(client, setup)
+    _age_attempts(db_session, order["id"])
 
     paid = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",

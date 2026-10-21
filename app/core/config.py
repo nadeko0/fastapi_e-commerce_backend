@@ -402,6 +402,13 @@ class Settings(BaseSettings):
     # paying, including 3D Secure; a payment that completes after expiry is
     # flagged for manual review (a refund), not applied.
     UNPAID_ORDER_EXPIRE_MINUTES: int = Field(30, ge=1)
+    # How long a payment attempt whose outcome is not known yet (talking to
+    # the provider, in 3D Secure, an open Checkout Session) keeps another
+    # attempt for the same order from starting (409). Long enough for 3D
+    # Secure; short enough that an attempt left behind by a crashed request,
+    # or a Checkout Session the customer walked away from, does not keep
+    # the order from being paid.
+    PAYMENT_ATTEMPT_STALE_AFTER_MINUTES: int = Field(5, ge=1)
 
     @validator("FRONTEND_URL")
     def validate_frontend_url(cls, v: str) -> str:
