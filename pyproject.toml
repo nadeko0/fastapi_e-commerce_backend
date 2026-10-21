@@ -42,6 +42,10 @@ filterwarnings = ["error::jwt.warnings.InsecureKeyLengthWarning"]
 
 [tool.coverage.run]
 source = ["app"]
+# Measure branches as well as lines: a line-only report hides an untested
+# else/early-return arm. The payment layer is gated at 100% in CI (see the
+# "Payment layer coverage gate" step in .github/workflows/ci.yml).
+branch = true
 # Without this, coverage.py loses track of a coroutine after it awaits a
 # SQLAlchemy asyncio call (which switches greenlets) and reports the rest
 # of the function as never run: routes on AsyncSession showed 65% while
