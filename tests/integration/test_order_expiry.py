@@ -15,6 +15,7 @@ can still be cancelled, so stock is returned exactly once.
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy import inspect as sa_inspect
 from test_orders import (
     CART_PREFIX,
     ORDERS_PREFIX,
@@ -33,6 +34,7 @@ from app.core.config import settings
 from app.models.order import Order
 from app.models.payment import Payment
 from app.models.product import Product, ProductVariant
+from app.services.orders import cancel_order_and_restock
 from app.services.payment.stripe_provider import TOKEN_SUCCESS_DEFAULT, StripePaymentProvider
 
 
@@ -251,6 +253,43 @@ def test_expiry_cancels_an_order_whose_payment_failed(client, db_session, tasks_
 
     assert tasks.cancel_expired_unpaid_orders() == 1
     assert _stock(db_session, product) == 10
+
+
+def test_expiry_rechecks_an_order_paid_after_it_was_listed(
+    client, db_session, tasks_db, monkeypatch
+):
+    # The task lists candidates first and locks them one by one; an order
+    # paid in between is seen as paid under the lock and left alone.
+    token, order, product, _ = _place(client, db_session)
+    _age(db_session, order["id"], settings.UNPAID_ORDER_EXPIRE_MINUTES + 1)
+    real_check = tasks.is_unpaid_and_new
+
+    def _paid_meanwhile(locked_order):
+        db_order = db_session.get(Order, order["id"])
+        db_order.payment_status = "paid"
+        db_order.status = "confirmed"
+        db_session.commit()
+        tasks_session = sa_inspect(locked_order).session
+        tasks_session.refresh(locked_order)
+        return real_check(locked_order)
+
+    monkeypatch.setattr(tasks, "is_unpaid_and_new", _paid_meanwhile)
+
+    assert tasks.cancel_expired_unpaid_orders() == 0
+    assert _order(db_session, order["id"]).status == "confirmed"
+    assert _stock(db_session, product) == 7
+
+
+def test_cancel_and_restock_refuses_an_order_that_cannot_be_cancelled(client, db_session):
+    _, order, product, _ = _place(client, db_session)
+    db_order = db_session.get(Order, order["id"])
+    db_order.status = "delivered"
+    db_session.commit()
+
+    assert cancel_order_and_restock(db_session, db_order) is False
+    db_session.commit()
+    assert _order(db_session, order["id"]).status == "delivered"
+    assert _stock(db_session, product) == 7
 
 
 def test_running_the_expiry_twice_restocks_once(client, db_session, tasks_db):
