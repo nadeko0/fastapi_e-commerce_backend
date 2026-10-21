@@ -1270,6 +1270,12 @@ async def refund_payment(
         already_applied = False
 
     if not already_applied:
+        # Re-read under the order's lock before adding to it: payment_row
+        # was read before the provider call, and another refund of this
+        # charge may have been recorded since. Adding to that stale copy
+        # overwrote it - two refunds taken by the provider, one recorded,
+        # and an order whose refunds covered the charge left "paid".
+        _lock_order_and_reload(db, order, payment_row)
         payment_row.amount_refunded += refund.amount
         is_full_refund = payment_row.amount_refunded >= payment_row.amount
         # A full refund moves the order to REFUNDED; a partial refund leaves
