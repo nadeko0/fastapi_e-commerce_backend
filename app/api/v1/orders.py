@@ -1194,9 +1194,20 @@ async def refund_payment(
             detail="Only a paid order can be refunded"
         )
 
+    # The charge that paid the order: its succeeded attempt that is not
+    # flagged for manual review. An order charged twice (a stale attempt
+    # completing after another paid it) has a second succeeded attempt,
+    # flagged; that money is returned by whoever reconciles the flag. This
+    # used to take the newest succeeded attempt whatever its flag, which
+    # could be the second charge: the order was then marked refunded while
+    # the charge that paid it was never returned, and could no longer be.
     payment_row = (
         db.query(Payment)
-        .filter(Payment.order_id == order.id, Payment.status == "succeeded")
+        .filter(
+            Payment.order_id == order.id,
+            Payment.status == "succeeded",
+            Payment.requires_manual_review.is_(False),
+        )
         .order_by(Payment.id.desc())
         .first()
     )
