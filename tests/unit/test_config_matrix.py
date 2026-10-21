@@ -84,6 +84,20 @@ def test_a_store_currency_without_two_decimals_is_refused_at_startup(currency):
     assert "two decimal" in str(refused.value)
 
 
+def test_a_store_currency_stripe_charges_in_whole_units_only_is_refused():
+    # Stripe's special case (https://docs.stripe.com/currencies, "Special
+    # cases"): ISK is sent with two decimals that must be 00, "You can't
+    # charge fractions of ISK". Prices here have two decimals, so an order
+    # of 10.50 ISK would be placed, its stock taken, and its payment then
+    # refused by Stripe.
+    with pytest.raises(ValidationError, match="STORE_CURRENCY") as refused:
+        _settings(STORE_CURRENCY="ISK")
+    assert "whole units" in str(refused.value)
+
+
+# HUF and TWD are special cases only for payouts (manual payouts in
+# multiples of 100), which this application does not make; their charges
+# take two decimals.
 @pytest.mark.parametrize("currency", ["USD", "EUR", "GBP", "HUF", "TWD"])
 def test_two_decimal_store_currencies_are_accepted(currency):
     assert _settings(STORE_CURRENCY=currency).STORE_CURRENCY == currency
