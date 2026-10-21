@@ -127,6 +127,25 @@ def test_an_amount_beyond_any_order_total_is_a_validation_error(amount):
         RefundCreate(amount=amount)
 
 
+# A fraction of a cent was rounded away, silently, after the gt=0 check had
+# passed: a refund of 0.001 became a refund of 0.00, and 99.995 was taken
+# as 100.00 (half-even). Money with more than two decimals is refused.
+@pytest.mark.parametrize("amount", ["0.001", "0.004", "0.005", "99.995", "10.001"])
+def test_a_fraction_of_a_cent_is_refused_not_rounded(amount):
+    with pytest.raises(ValidationError):
+        RefundCreate(amount=amount)
+    with pytest.raises(ValidationError):
+        PaymentCreate(order_id=1, payment_method="stripe", amount=amount)
+
+
+@pytest.mark.parametrize("amount,cents", [("0.01", "0.01"), ("10.5", "10.50"),
+                                          ("10.500", "10.50"), ("7", "7.00")])
+def test_whole_cents_are_accepted_however_they_are_written(amount, cents):
+    assert RefundCreate(amount=amount).amount == Decimal(cents)
+    assert PaymentCreate(order_id=1, payment_method="stripe",
+                         amount=amount).amount == Decimal(cents)
+
+
 def test_the_largest_order_total_is_still_accepted():
     assert RefundCreate(amount="99999999.99").amount == Decimal("99999999.99")
     assert PaymentCreate(order_id=1, payment_method="stripe",

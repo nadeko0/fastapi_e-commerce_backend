@@ -128,12 +128,20 @@ class OrderListResponse(BaseModel):
 # past its 28-digit context, which pydantic does not turn into a 422, so
 # {"amount": 1e30} used to answer 500.
 ORDER_AMOUNT_MAX_DIGITS = 10
+# Whole cents only: a fraction of a cent used to be rounded away by those
+# validators after gt=0 had passed, so a refund of 0.001 went out as 0.00
+# and 99.995 was taken as 100.00. Trailing zeros do not count (10.500 is
+# 10.50), and a JSON number is read by its shortest form (19.99, not the
+# float's binary expansion).
+ORDER_AMOUNT_DECIMAL_PLACES = 2
 
 class PaymentCreate(BaseModel):
     """Schema for payment processing"""
     order_id: int
     payment_method: str = Field(..., pattern="^(stripe|paypal)$")
-    amount: Decimal = Field(..., max_digits=ORDER_AMOUNT_MAX_DIGITS)
+    amount: Decimal = Field(
+        ..., max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
+    )
     # Optional: the order is always charged in its own currency
     # (Order.currency). A client may still send the code it expects to pay
     # in; one that differs is rejected with 400, the same as an amount that
@@ -235,6 +243,7 @@ class RefundCreate(BaseModel):
     """Schema for issuing a refund on a paid order."""
     amount: Optional[Decimal] = Field(
         None, gt=0, max_digits=ORDER_AMOUNT_MAX_DIGITS,
+        decimal_places=ORDER_AMOUNT_DECIMAL_PLACES,
         description="Amount to refund; omit for a full refund",
     )
 
