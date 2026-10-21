@@ -161,6 +161,22 @@ def test_password_changed_watermark_written_by_the_sync_service_is_read_back():
     assert asyncio.run(superseded(43, 1)) is False
 
 
+def test_watermarks_and_issued_at_times_compare_below_the_second():
+    # Both are written with sub-second precision now; what was written in
+    # whole seconds before the change still compares the same way.
+    RedisService().setex(f"{redis_async.PASSWORD_CHANGED_KEY_PREFIX}42", 60, 1767268800.5)
+    superseded = redis_async.is_token_superseded
+    assert asyncio.run(superseded(42, 1767268800.25)) is True
+    assert asyncio.run(superseded(42, 1767268800.75)) is False
+    # A token issued before the change carries a whole-second iat.
+    assert asyncio.run(superseded(42, 1767268800)) is True
+    assert asyncio.run(superseded(42, 1767268801)) is False
+    # A watermark stored in whole seconds before the change.
+    RedisService().setex(f"{redis_async.PASSWORD_CHANGED_KEY_PREFIX}43", 60, 1767268800)
+    assert asyncio.run(superseded(43, 1767268799.9)) is True
+    assert asyncio.run(superseded(43, 1767268800.1)) is False
+
+
 def test_a_token_without_issued_at_predates_every_watermark():
     RedisService().setex(f"{redis_async.PASSWORD_CHANGED_KEY_PREFIX}42", 60, 1767268800)
 

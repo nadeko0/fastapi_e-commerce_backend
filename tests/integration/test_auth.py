@@ -620,8 +620,8 @@ def test_reset_password_invalidates_previously_issued_access_token(
         assert pre_reset.status_code == 200
 
         # Advance the clock so the reset's "password changed at" watermark
-        # (second-granularity, like the token's own iat) is unambiguously
-        # later than the old token's issued-at time.
+        # is later than the old token's issued-at time (a frozen clock
+        # would give both the same instant).
         frozen.tick(delta=timedelta(seconds=2))
 
         reset_token = _reset_token_for(valid_registration_payload["email"])
@@ -904,7 +904,6 @@ def test_signing_out_everywhere_ends_sessions_the_family_index_does_not_know(
         old_laptop = _login_again(client, valid_registration_payload)
         claims = jwt.decode(old_laptop["refresh_token"], options={"verify_signature": False})
         fake_redis.srem(f"refresh_user:{claims['sub']}", claims["family"])
-        # The watermark has one-second granularity, like a token's iat.
         clock.tick(timedelta(seconds=2))
 
         response = client.post(
@@ -918,6 +917,35 @@ def test_signing_out_everywhere_ends_sessions_the_family_index_does_not_know(
         ).status_code == 401
         # Signing in again afterwards works.
         clock.tick(timedelta(seconds=2))
+        fresh = _login_again(client, valid_registration_payload)
+        assert client.get(
+            f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {fresh['access_token']}"}
+        ).status_code == 200
+        assert _refresh(client, fresh["refresh_token"]).status_code == 200
+
+
+def test_signing_out_everywhere_ends_a_session_started_the_same_second(
+    client, valid_registration_payload
+):
+    # The watermark and a token's iat were whole seconds, and a token is
+    # refused only if issued strictly before the watermark: a token issued
+    # earlier in the same second as the sign-out survived it.
+    with freeze_time("2026-01-01 12:00:00.100000") as clock:
+        phone = _login_tokens(client, valid_registration_payload)
+        laptop = _login_again(client, valid_registration_payload)
+        clock.tick(timedelta(milliseconds=300))
+
+        response = client.post(
+            f"{API_PREFIX}/logout", headers={"Authorization": f"Bearer {phone['access_token']}"}
+        )
+
+        assert response.status_code == 200
+        assert client.get(
+            f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {laptop['access_token']}"}
+        ).status_code == 401
+        assert _refresh(client, laptop["refresh_token"]).status_code == 401
+        # Signing in again, still within that second, works.
+        clock.tick(timedelta(milliseconds=300))
         fresh = _login_again(client, valid_registration_payload)
         assert client.get(
             f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {fresh['access_token']}"}

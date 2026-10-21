@@ -108,9 +108,10 @@ def test_the_tokens_handed_out_are_what_they_say(client, db_session):
 
     assert tokens["token_type"] == "bearer"
     assert (access["sub"], access["type"]) == (str(user_id), "access")
-    assert access["exp"] - access["iat"] == settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    # iat has sub-second precision, exp is whole seconds.
+    assert access["exp"] - int(access["iat"]) == settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     assert (refresh["sub"], refresh["type"]) == (str(user_id), "refresh")
-    assert refresh["exp"] - refresh["iat"] == settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400
+    assert refresh["exp"] - int(refresh["iat"]) == settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400
     assert refresh["jti"] and refresh["family"] and access["jti"]
 
 
