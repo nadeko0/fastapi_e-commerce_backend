@@ -158,7 +158,27 @@ async def create_order(
     # OrderItem insert fails its NOT NULL constraint. Pre-existing bug,
     # never caught because no prior test exercised order creation
     # end-to-end; surfaced while adding payment tests that need real orders.
-    db.flush()
+    #
+    # This INSERT is also where two concurrent requests with the same key
+    # meet: both passed the pre-check above, and the unique index
+    # (uix_order_user_idempotency_key) fails the second one here, not at
+    # the commit below. Only the commit used to be guarded, so the loser of
+    # that race answered 500 instead of the order the winner created.
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(Order).filter(
+            Order.user_id == current_user.id,
+            Order.idempotency_key == idempotency_key,
+        ).first()
+        if existing:
+            return APIResponse.success_response(OrderResponse.from_orm(existing))
+        # Only the key's unique index can fail a bare order INSERT (its
+        # foreign keys were just read and nothing deletes orders' users or
+        # addresses mid-request); re-raised rather than mistaken for a
+        # replay if that ever changes.
+        raise  # pragma: no cover
 
     total_amount = Decimal('0.00')
     for item in cart.items.values():
@@ -234,19 +254,7 @@ async def create_order(
         total_amount += price_at_time * item.quantity
 
     order.total_amount = total_amount
-    try:
-        db.commit()
-    except IntegrityError:
-        # Two concurrent requests with the same idempotency key both passed
-        # the pre-check above; the unique index catches the duplicate here.
-        db.rollback()
-        existing = db.query(Order).filter(
-            Order.user_id == current_user.id,
-            Order.idempotency_key == idempotency_key,
-        ).first()
-        if existing:
-            return APIResponse.success_response(OrderResponse.from_orm(existing))
-        raise
+    db.commit()
 
 
     # Take out of the cart only what this order was built from, not the
