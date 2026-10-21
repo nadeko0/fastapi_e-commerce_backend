@@ -192,7 +192,7 @@ class StripePaymentProvider(PaymentProvider):
         payment_intent_id: str,
         *,
         idempotency_key: Optional[str] = None,
-        return_url: Optional[str] = None,
+        return_url: str,
     ) -> PaymentIntent:
         self._simulate_network_call()
 

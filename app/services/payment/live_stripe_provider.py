@@ -202,7 +202,7 @@ class LiveStripePaymentProvider(PaymentProvider):
         payment_intent_id: str,
         *,
         idempotency_key: Optional[str] = None,
-        return_url: Optional[str] = None,
+        return_url: str,
     ) -> PaymentIntent:
         # Stripe requires `return_url` at confirm time for any PaymentIntent
         # that could produce a redirect-based next_action - and 3DS
@@ -212,12 +212,12 @@ class LiveStripePaymentProvider(PaymentProvider):
         # *alternative* redirect payment methods (iDEAL etc.), not from a
         # card's own 3DS challenge/return flow. Confirmed via a real Stripe
         # account notice after this suite's 3DS test ran without one.
-        # This backend has no real frontend redirect target yet, so callers
-        # without a real post-payment page fall back to a placeholder -
-        # replace with the actual frontend return URL once one exists.
+        # Required, with no fallback: it used to default to a placeholder
+        # page on a domain that is not ours, where 3D Secure would have
+        # sent real customers. /pay builds it on FRONTEND_URL.
         params: Dict[str, Any] = {
             "api_key": self._api_key,
-            "return_url": return_url or "https://example.com/checkout/return",
+            "return_url": return_url,
         }
         if idempotency_key is not None:
             params["idempotency_key"] = idempotency_key
@@ -280,12 +280,11 @@ class LiveStripePaymentProvider(PaymentProvider):
                 }
             ],
             # Mandatory Stripe-side params for a hosted Checkout Session -
-            # see base.py's create_checkout_session docstring. This backend
-            # has no real frontend (same situation as confirm_payment_intent's
-            # return_url above), so callers without a real success/cancel
-            # page fall back to placeholders at the API boundary
-            # (app/api/v1/orders.py), not here - this method always requires
-            # both, matching real Stripe's own requirement.
+            # see base.py's create_checkout_session docstring. Callers
+            # without their own success/cancel page get the frontend's
+            # (FRONTEND_URL) at the API boundary (app/api/v1/orders.py), not
+            # here - this method always requires both, matching real
+            # Stripe's own requirement.
             "success_url": success_url,
             "cancel_url": cancel_url,
             "idempotency_key": idempotency_key,

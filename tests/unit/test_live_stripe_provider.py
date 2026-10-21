@@ -31,6 +31,7 @@ from app.services.payment.types import (
 )
 
 API_KEY = "sk_test_unit_only"
+RETURN_URL = "https://shop.test/checkout/return?order_id=7"
 
 
 class _SdkObject:
@@ -198,23 +199,35 @@ def test_expanded_payment_method_and_errors_are_flattened(provider, sdk):
 
 # -- PaymentIntent.confirm / retrieve --------------------------------------------
 
-def test_confirm_sends_a_return_url_and_the_key(provider, sdk):
+def test_confirm_sends_the_return_url_and_the_key(provider, sdk):
     confirm = sdk(stripe.PaymentIntent, "confirm", result=_intent(status="requires_action"))
 
-    intent = provider.confirm_payment_intent("pi_123", idempotency_key="k:confirm")
+    intent = provider.confirm_payment_intent(
+        "pi_123", idempotency_key="k:confirm", return_url=RETURN_URL
+    )
 
     args, params = confirm.calls[0]
     assert args == ("pi_123",)
     assert params == {"api_key": API_KEY, "idempotency_key": "k:confirm",
-                      "return_url": "https://example.com/checkout/return"}
+                      "return_url": RETURN_URL}
     assert intent.status == PaymentIntentStatus.REQUIRES_ACTION
 
 
-def test_confirm_passes_a_given_return_url_and_no_key_when_none(provider, sdk):
+def test_confirm_sends_no_key_when_none(provider, sdk):
     confirm = sdk(stripe.PaymentIntent, "confirm", result=_intent())
-    provider.confirm_payment_intent("pi_123", return_url="https://shop.example/back")
+    provider.confirm_payment_intent("pi_123", return_url=RETURN_URL)
     _, params = confirm.calls[0]
-    assert params == {"api_key": API_KEY, "return_url": "https://shop.example/back"}
+    assert params == {"api_key": API_KEY, "return_url": RETURN_URL}
+
+
+def test_confirm_has_no_placeholder_return_url(provider, sdk):
+    # It fell back to https://example.com/checkout/return: a caller that
+    # forgot the URL sent real customers to example.com after 3D Secure.
+    # The caller must say where the customer returns to.
+    confirm = sdk(stripe.PaymentIntent, "confirm", result=_intent())
+    with pytest.raises(TypeError):
+        provider.confirm_payment_intent("pi_123")
+    assert confirm.calls == []
 
 
 @pytest.mark.parametrize(
@@ -231,7 +244,7 @@ def test_confirm_passes_a_given_return_url_and_no_key_when_none(provider, sdk):
 def test_confirm_translates_sdk_errors(provider, sdk, raised, expected, code):
     sdk(stripe.PaymentIntent, "confirm", raises=raised)
     with pytest.raises(expected) as caught:
-        provider.confirm_payment_intent("pi_123")
+        provider.confirm_payment_intent("pi_123", return_url=RETURN_URL)
     if code:
         assert caught.value.code == code
 

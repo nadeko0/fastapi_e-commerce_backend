@@ -73,6 +73,10 @@ pytestmark = pytest.mark.skipif(
     ),
 )
 
+# The provider has no return_url fallback of its own. A test-only page: the
+# URL the provider used to fall back to, which Stripe's test mode accepted.
+RETURN_URL = "https://example.com/checkout/return"
+
 PM_SUCCESS = "pm_card_visa"
 PM_DECLINE = "pm_card_visa_chargeDeclined"
 PM_3DS_REQUIRED = "pm_card_authenticationRequired"
@@ -99,7 +103,7 @@ class TestSuccessfulPayment:
         assert pi.amount == 1099
         assert pi.currency == "usd"
 
-        confirmed = provider.confirm_payment_intent(pi.id)
+        confirmed = provider.confirm_payment_intent(pi.id, return_url=RETURN_URL)
         assert confirmed.status == PaymentIntentStatus.SUCCEEDED
         assert confirmed.id == pi.id
 
@@ -116,7 +120,7 @@ class TestDecliningCard:
             payment_method=PM_DECLINE,
         )
         with pytest.raises(CardError) as exc_info:
-            provider.confirm_payment_intent(pi.id)
+            provider.confirm_payment_intent(pi.id, return_url=RETURN_URL)
         assert exc_info.value.code == "card_declined"
         assert exc_info.value.decline_code == "generic_decline"
 
@@ -135,7 +139,7 @@ class TestThreeDSecureRequired:
             idempotency_key=_idem_key(),
             payment_method=PM_3DS_REQUIRED,
         )
-        confirmed = provider.confirm_payment_intent(pi.id)
+        confirmed = provider.confirm_payment_intent(pi.id, return_url=RETURN_URL)
         # Per PaymentProvider's contract (base.py) and the mock's own
         # modeling of this same token: requires_action is a non-terminal
         # *return value*, not an exception - the caller (orders.py) is
@@ -161,7 +165,7 @@ class TestRefund:
             idempotency_key=_idem_key(),
             payment_method=PM_SUCCESS,
         )
-        provider.confirm_payment_intent(pi.id)
+        provider.confirm_payment_intent(pi.id, return_url=RETURN_URL)
 
         refund = provider.create_refund(payment_intent_id=pi.id)
         assert refund.payment_intent == pi.id
@@ -176,7 +180,7 @@ class TestRefund:
             idempotency_key=_idem_key(),
             payment_method=PM_SUCCESS,
         )
-        provider.confirm_payment_intent(pi.id)
+        provider.confirm_payment_intent(pi.id, return_url=RETURN_URL)
 
         refund = provider.create_refund(payment_intent_id=pi.id, amount=400)
         assert refund.amount == 400

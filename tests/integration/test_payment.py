@@ -62,6 +62,8 @@ USERS_PREFIX = "/api/v1/users"
 CART_PREFIX = "/api/v1/cart"
 ORDERS_PREFIX = "/api/v1/orders"
 WEBHOOK_URL = f"{ORDERS_PREFIX}/webhooks/stripe"
+# Where 3D Secure returns the customer to; every confirm must name one.
+RETURN_URL = "http://localhost:3000/checkout/return?order_id=1"
 
 
 def _with_idempotency_key(headers):
@@ -721,6 +723,36 @@ def test_requires_action_is_a_distinct_non_terminal_state(client, db_session):
     assert payments[0].status == "requires_action"
 
 
+def test_pay_confirms_with_a_return_url_on_the_frontend(client, db_session, monkeypatch):
+    # Where 3D Secure sends the customer back after authenticating. /pay
+    # sent none, and the live provider then fell back to a placeholder,
+    # https://example.com/checkout/return: real customers would have been
+    # sent to example.com. Built on FRONTEND_URL like the Checkout Session
+    # pages, and naming the order the customer returns to.
+    calls = []
+    real_confirm = StripePaymentProvider.confirm_payment_intent
+
+    def _spy(self, payment_intent_id, **kwargs):
+        calls.append(kwargs)
+        return real_confirm(self, payment_intent_id, **kwargs)
+
+    monkeypatch.setattr(StripePaymentProvider, "confirm_payment_intent", _spy)
+    monkeypatch.setattr(settings, "FRONTEND_URL", "https://shop.test")
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+
+    response = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
+        headers=_with_idempotency_key(setup["headers"]),
+    )
+
+    assert response.status_code == 200, response.text
+    assert [c.get("return_url") for c in calls] == [
+        f"https://shop.test/checkout/return?order_id={order['id']}"
+    ]
+
+
 # -- Webhook signature verification -------------------------------------------
 
 def test_webhook_missing_signature_is_rejected(client, db_session):
@@ -1178,7 +1210,7 @@ def test_base_provider_abstract_methods_all_raise_not_implemented():
     with pytest.raises(NotImplementedError):
         provider.create_payment_intent(amount=100, currency="USD", idempotency_key="k")
     with pytest.raises(NotImplementedError):
-        provider.confirm_payment_intent("pi_x")
+        provider.confirm_payment_intent("pi_x", return_url=RETURN_URL)
     with pytest.raises(NotImplementedError):
         provider.retrieve_payment_intent("pi_x")
     with pytest.raises(NotImplementedError):
@@ -1228,7 +1260,7 @@ def test_provider_idempotency_key_reused_with_same_amount_returns_cached_intent(
 def test_provider_confirm_unknown_payment_intent_raises_card_error():
     provider = StripePaymentProvider()
     with pytest.raises(CardError) as exc_info:
-        provider.confirm_payment_intent("pi_does_not_exist")
+        provider.confirm_payment_intent("pi_does_not_exist", return_url=RETURN_URL)
     assert exc_info.value.code == "resource_missing"
 
 
@@ -1240,10 +1272,10 @@ def test_provider_confirm_already_succeeded_intent_is_a_noop():
     intent = provider.create_payment_intent(
         amount=1000, currency="USD", idempotency_key="k1", payment_method=TOKEN_SUCCESS_DEFAULT
     )
-    first = provider.confirm_payment_intent(intent.id)
+    first = provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
     assert first.status == PaymentIntentStatus.SUCCEEDED
 
-    second = provider.confirm_payment_intent(intent.id)
+    second = provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
     assert second.status == PaymentIntentStatus.SUCCEEDED
     assert second is first
 
@@ -1257,11 +1289,11 @@ def test_provider_confirm_requires_action_intent_finalizes_on_second_confirm():
     intent = provider.create_payment_intent(
         amount=1000, currency="USD", idempotency_key="k2", payment_method=TOKEN_REQUIRES_ACTION
     )
-    first = provider.confirm_payment_intent(intent.id)
+    first = provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
     assert first.status == PaymentIntentStatus.REQUIRES_ACTION
     assert first.next_action is not None
 
-    second = provider.confirm_payment_intent(intent.id)
+    second = provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
     assert second.status == PaymentIntentStatus.SUCCEEDED
     assert second.next_action is None
 
@@ -1306,7 +1338,7 @@ def test_provider_refund_amount_exceeding_refundable_raises_card_error():
     intent = provider.create_payment_intent(
         amount=1000, currency="USD", idempotency_key="k5", payment_method=TOKEN_SUCCESS_DEFAULT
     )
-    provider.confirm_payment_intent(intent.id)
+    provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
 
     with pytest.raises(CardError) as exc_info:
         provider.create_refund(payment_intent_id=intent.id, amount=1001)
@@ -1454,7 +1486,7 @@ def test_provider_create_refund_rejects_non_integer_amount():
     intent = provider.create_payment_intent(
         amount=1000, currency="USD", idempotency_key="refund-fuzz", payment_method=TOKEN_SUCCESS_DEFAULT
     )
-    provider.confirm_payment_intent(intent.id)
+    provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
 
     for bad_amount in (5.0, Decimal("5.00"), "500", True):
         with pytest.raises(InvalidRequestError):
@@ -1593,7 +1625,7 @@ def test_provider_failure_between_create_and_confirm_leaves_well_defined_state(
     real_confirm = StripePaymentProvider.confirm_payment_intent
     call_count = {"n": 0}
 
-    def _flaky_confirm(self, payment_intent_id, *, idempotency_key=None):
+    def _flaky_confirm(self, payment_intent_id, *, idempotency_key=None, return_url):
         call_count["n"] += 1
         raise PaymentProviderTimeoutError("simulated drop during confirm")
 

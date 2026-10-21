@@ -828,9 +828,15 @@ async def process_payment(
         # found by an end-to-end run against Stripe's test mode
         # (scripts/loadtest, FINDINGS.md); the in-process mock accepted it,
         # so the test suite never saw it. The mock now rejects it too.
+        #
+        # return_url is where 3D Secure sends the customer back after
+        # authenticating: the frontend's checkout page for this order, built
+        # on FRONTEND_URL like the Checkout Session pages. Stripe adds the
+        # PaymentIntent's id and client secret to it as query parameters.
         intent = await run_in_threadpool(
             provider.confirm_payment_intent,
             intent.id, idempotency_key=f"{provider_idempotency_key}:confirm",
+            return_url=f"{settings.FRONTEND_URL}/checkout/return?order_id={order.id}",
         )
     except PaymentProviderTimeoutError:
         # Provider unreachable/timed out: we do not know whether Stripe
