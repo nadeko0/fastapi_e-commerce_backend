@@ -17,6 +17,7 @@ from app.models.address import Address
 from app.models.order import Order
 from app.models.order_items import OrderItem
 from app.models.payment import Payment, WebhookEvent
+from app.models.payment_ledger import PaymentRefund
 from app.models.product import Product, ProductVariant
 from app.models.user import User
 from app.schemas.common import APIResponse
@@ -1220,7 +1221,6 @@ async def refund_payment(
     current_user: User = Depends(get_current_admin_user),  # Refunds are a support/admin action
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_payment_provider),
-    redis: RedisService = Depends(),
     # Required like /pay's: without a key, a retried or double-clicked
     # partial refund was a second refund, the money returned twice.
     idempotency_key: str = Header(
@@ -1230,15 +1230,15 @@ async def refund_payment(
 ):
     """Issue a full or partial refund for a paid order (admin only).
 
-    Unlike /pay and /checkout-session, there is no local Payment-row table to
-    key a pre-check off of (Payment rows model charge attempts, not refunds,
-    and a single payment can be refunded multiple times). The
-    Idempotency-Key header is instead forwarded to the payment provider
-    as-is, which is where real Stripe already dedupes refund requests by key
-    - see StripePaymentProvider.create_refund's own idempotency cache, which
-    mirrors that behavior for the mock. Without this, a retried refund
-    request (client timeout, double-click "Refund") would create a second,
-    distinct refund instead of returning the first one's result."""
+    Unlike /pay and /checkout-session, the key is not looked up locally
+    first: a refund only gets its id from the provider. The Idempotency-Key
+    header is forwarded to the payment provider (namespaced, see
+    _provider_idempotency_key), which is where real Stripe dedupes refund
+    requests by key - see StripePaymentProvider.create_refund's own
+    idempotency cache, which mirrors that behavior for the mock. A retried
+    refund request (client timeout, double-click "Refund") therefore gets
+    the first one's refund back, and that refund is recorded once
+    (PaymentRefund, by refund id)."""
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(
@@ -1308,41 +1308,27 @@ async def refund_payment(
     except (CardError, InvalidRequestError) as e:
         raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message)
 
+    # Re-read under the order's lock before adding to it: payment_row was
+    # read before the provider call, and another refund of this charge may
+    # have been recorded since. Adding to that stale copy overwrote it - two
+    # refunds taken by the provider, one recorded, and an order whose
+    # refunds covered the charge left "paid".
+    _lock_order_and_reload(db, order, payment_row)
     # provider.create_refund's own idempotency cache means a retried request
     # with the same Idempotency-Key returns the *same* refund.id instead of
-    # creating a new one - but that alone doesn't stop this endpoint from
-    # double-applying it to payment_row.amount_refunded, since this code
-    # would otherwise run unconditionally on both the original call and the
-    # replay. SETNX on the refund's own id guards the local bookkeeping the
-    # same way the provider guards its own side: the second call sees its
-    # key already set and skips straight to returning the (unchanged)
-    # current state instead of incrementing amount_refunded a second time.
-    # Fails open (treats as new/never-applied) on a Redis error - the
-    # provider-level guard above already prevents refunding more than the
-    # original charge, so the worst case here is only ever this
-    # bookkeeping-accuracy layer, not an actual double refund at Stripe.
-    try:
-        already_applied = not redis._redis.set(f"refund_applied:{refund.id}", "1", nx=True)
-    except Exception as e:
-        logger.error("Redis error guarding refund idempotency for %s: %s", refund.id, e)
-        already_applied = False
-
-    if not already_applied:
-        # Re-read under the order's lock before adding to it: payment_row
-        # was read before the provider call, and another refund of this
-        # charge may have been recorded since. Adding to that stale copy
-        # overwrote it - two refunds taken by the provider, one recorded,
-        # and an order whose refunds covered the charge left "paid".
-        _lock_order_and_reload(db, order, payment_row)
-        payment_row.amount_refunded += refund.amount
-        is_full_refund = payment_row.amount_refunded >= payment_row.amount
+    # creating a new one; recording it by that id (unique) keeps the replay
+    # from being counted a second time. This used to be a Redis SETNX
+    # marker that failed open: with Redis down, a retried refund was added
+    # to amount_refunded again, and two retries of more than half the
+    # charge broke the refunded <= amount constraint and answered 500.
+    if _record_refund(db, payment_row, refund, source="admin"):
         # A full refund moves the order to REFUNDED; a partial refund leaves
         # it PAID (the order was fulfilled - only part of the charge was
         # returned).
-        if is_full_refund:
+        if payment_row.amount_refunded >= payment_row.amount:
             order.payment_status = PaymentStatus.REFUNDED
         order.updated_at = datetime.utcnow()
-        db.commit()
+    db.commit()
 
     return APIResponse.success_response(RefundResponse(
         id=refund.id,
@@ -1356,6 +1342,27 @@ async def refund_payment(
         status=refund.status.value,
         payment_status=order.payment_status,
     ))
+
+
+def _record_refund(db: Session, payment_row: Payment, refund, source: str) -> bool:
+    """
+    Record one provider refund of `payment_row`'s charge, once: False when
+    a refund with this id is already recorded, True when it is new and its
+    amount has been added to payment_row.amount_refunded. The caller holds
+    the order's lock (_lock_order_and_reload) and commits.
+    """
+    if db.query(PaymentRefund.id).filter(PaymentRefund.refund_id == refund.id).first():
+        return False
+    db.add(PaymentRefund(
+        payment_id=payment_row.id,
+        refund_id=refund.id,
+        amount=refund.amount,
+        currency=payment_row.currency,
+        status=refund.status.value,
+        source=source,
+    ))
+    payment_row.amount_refunded += refund.amount
+    return True
 
 
 @router.post(
