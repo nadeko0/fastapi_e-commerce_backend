@@ -242,9 +242,11 @@ class Shop:
                                 headers={"Stripe-Signature": signature,
                                          "Content-Type": "application/json"})
 
-    def intent_event(self, event_type, payment: Payment, amount=None, currency=None, **extra):
+    def intent_event(self, event_type, payment: Payment, amount=None, currency=None,
+                     event_id=None, **extra):
         """A payment_intent.* event for the attempt, reporting by default
-        exactly what the attempt charges."""
+        exactly what the attempt charges. The same event_id twice is a
+        redelivery of one event."""
         obj = {
             "id": payment.payment_intent_id, "object": "payment_intent",
             "amount": payment.amount if amount is None else amount,
@@ -253,7 +255,7 @@ class Shop:
             "metadata": {"order_id": str(payment.order_id)},
             **extra,
         }
-        return self.webhook(event_type, obj)
+        return self.webhook(event_type, obj, event_id=event_id)
 
     def session_event(self, event_type, payment: Payment, payment_status="paid",
                       payment_intent=None, amount=None, currency=None):
