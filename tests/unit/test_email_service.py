@@ -39,6 +39,7 @@ def _order(status="new", with_items=True):
         id=1,
         status=SimpleNamespace(value=status),
         total_amount="19.98",
+        currency="USD",  # every Order and OrderResponse carries one
         created_at=datetime.utcnow(),
         items=[_order_item()] if with_items else [],
     )
@@ -97,6 +98,7 @@ def test_send_order_status_update_email_accepts_plain_string_status(monkeypatch)
         id=1,
         status="confirmed",  # plain str, as a real Order.status is
         total_amount="19.98",
+        currency="USD",  # every Order and OrderResponse carries one
         created_at=datetime.utcnow(),
     )
 

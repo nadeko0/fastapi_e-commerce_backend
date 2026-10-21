@@ -24,9 +24,12 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
     # validation beyond length) and is rendered into an HTML email a customer
     # opens. Escape it so a name containing markup cannot inject HTML/JS into
     # the message - same reasoning as full_name in send_welcome_email. quantity
-    # and price_at_time are server-side numerics, not escaped.
+    # and price_at_time are server-side numerics, not escaped. Amounts are in
+    # the order's own currency (Order.currency, the store's when it was
+    # placed): every order email used to print "$" before them, so a EUR or
+    # PLN store told its customers they had paid dollars.
     items_html = "".join([
-        f"<tr><td>{html.escape(item.product_name)}</td><td>{item.quantity}</td><td>${item.price_at_time}</td></tr>"
+        f"<tr><td>{html.escape(item.product_name)}</td><td>{item.quantity}</td><td>{item.price_at_time} {order.currency}</td></tr>"
         for item in order.items
     ])
 
@@ -55,7 +58,7 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
                 {items_html}
             </table>
 
-            <p>Total Amount: ${order.total_amount}</p>
+            <p>Total Amount: {order.total_amount} {order.currency}</p>
             <p>Order Status: {status_value}</p>
 
             <p>Order Date: {order.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
@@ -91,7 +94,7 @@ def send_order_status_update_email(to_email: str, order: Order) -> bool:
 
             <h3>Order Details:</h3>
             <p>Order Date: {order.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p>Total Amount: ${order.total_amount}</p>
+            <p>Total Amount: {order.total_amount} {order.currency}</p>
 
             <p>Thank you for your patience!</p>
         </body>
@@ -113,7 +116,7 @@ def send_order_cancellation_email(to_email: str, order: Order) -> bool:
 
             <h3>Order Details:</h3>
             <p>Order Date: {order.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p>Total Amount: ${order.total_amount}</p>
+            <p>Total Amount: {order.total_amount} {order.currency}</p>
 
             <p>If you have any questions, please contact our support team.</p>
         </body>

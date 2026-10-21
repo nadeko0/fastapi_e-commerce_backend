@@ -499,7 +499,7 @@ def test_send_order_confirmation_renders_the_real_email(db_session, tasks_db, mo
     assert to_email == user.email
     assert subject == f"Order Confirmation #{order.id}"
     assert "Widget" in body and "<td>3</td>" in body
-    assert f"Total Amount: ${order.total_amount}" in body
+    assert f"Total Amount: {order.total_amount} {order.currency}" in body
 
 
 def test_send_order_confirmation_marker_outlives_the_redelivery_window(
