@@ -500,6 +500,31 @@ def _checkout_session_row_to_response(payment_row: Payment, order: Order) -> Che
     )
 
 
+def _replay_checkout_session(payment_row: Payment, order: Order):
+    """
+    /checkout-session's answer to a key this order has already used. An
+    attempt with a session is replayed as it is. One without a session - a
+    twin request still waiting on the provider, a session that timed out
+    or was refused, a /pay attempt that used the same key - has nothing a
+    CheckoutSessionResponse could describe, and the key cannot be used for
+    a second attempt: the unique index on (order, key) refuses the row.
+    Such a retry used to go on and hit that index, answering 500; it is a
+    409 telling the client to start a new attempt with a new key.
+    """
+    if payment_row.checkout_session_id:
+        return APIResponse.success_response(
+            _checkout_session_row_to_response(payment_row, order)
+        )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "This Idempotency-Key belongs to a payment attempt without a checkout "
+            "session (still in progress, or failed); retry later, or start a new "
+            "attempt with a new Idempotency-Key"
+        ),
+    )
+
+
 def _apply_payment_success(
     db: Session,
     order: Order,
@@ -1033,10 +1058,8 @@ async def create_checkout_session(
         Payment.order_id == order.id,
         Payment.idempotency_key == idempotency_key,
     ).first()
-    if existing_payment and existing_payment.checkout_session_id:
-        return APIResponse.success_response(
-            _checkout_session_row_to_response(existing_payment, order)
-        )
+    if existing_payment:
+        return _replay_checkout_session(existing_payment, order)
 
     _guard_order_payable(order)
     _guard_no_attempt_in_flight(db, order)
@@ -1072,11 +1095,11 @@ async def create_checkout_session(
             Payment.order_id == order.id,
             Payment.idempotency_key == idempotency_key,
         ).first()
-        if existing_payment and existing_payment.checkout_session_id:
-            return APIResponse.success_response(
-                _checkout_session_row_to_response(existing_payment, order)
-            )
-        raise
+        if existing_payment:
+            return _replay_checkout_session(existing_payment, order)
+        # See the same re-raise in create_order: only the key's unique
+        # index can fail this INSERT.
+        raise  # pragma: no cover
 
     try:
         session = await run_in_threadpool(
