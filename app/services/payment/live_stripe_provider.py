@@ -80,7 +80,9 @@ def _to_payment_intent(pi: Any) -> PaymentIntent:
     return PaymentIntent(
         id=pi["id"],
         amount=pi["amount"],
-        currency=pi["currency"],
+        # Stripe answers in lower case; this API's currencies (orders, the
+        # mock) are upper case. Refunds reported "usd" against a "USD" order.
+        currency=pi["currency"].upper(),
         status=_map_status(pi["status"]),
         client_secret=pi.get("client_secret") or "",
         payment_method=payment_method,
@@ -114,7 +116,7 @@ def _to_checkout_session(s: Any) -> CheckoutSession:
         status=_SESSION_STATUS_MAP.get(s["status"], CheckoutSessionStatus.OPEN),
         payment_status=s.get("payment_status") or "unpaid",
         amount_total=s.get("amount_total") or 0,
-        currency=s.get("currency") or "",
+        currency=(s.get("currency") or "").upper(),
         payment_intent=payment_intent,
         metadata=dict(s.get("metadata") or {}),
     )
@@ -132,7 +134,7 @@ def _to_refund(r: Any) -> Refund:
         id=r["id"],
         payment_intent=r["payment_intent"],
         amount=r["amount"],
-        currency=r["currency"],
+        currency=r["currency"].upper(),
         status=status,
     )
 

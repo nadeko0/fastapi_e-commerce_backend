@@ -68,3 +68,26 @@ def test_the_mock_charges_exactly_the_minor_units_in_the_orders_currency(currenc
     )
 
     assert (intent.amount, intent.currency) == (cents, currency)
+
+
+@pytest.mark.parametrize("currency", STORE_CURRENCIES)
+def test_the_mock_reports_currencies_in_upper_case_however_they_were_sent(currency):
+    # As the live provider does with Stripe's lower-case answers.
+    provider = StripePaymentProvider()
+    intent = provider.create_payment_intent(
+        amount=5000, currency=currency.lower(), idempotency_key=f"lower-{currency}",
+        payment_method="pm_card_visa",
+    )
+    provider.confirm_payment_intent(intent.id, return_url="http://localhost:3000/r")
+    session = provider.create_checkout_session(
+        amount=5000, currency=currency.lower(), idempotency_key=f"lower-cs-{currency}",
+        success_url="http://localhost:3000/s", cancel_url="http://localhost:3000/c",
+    )
+
+    assert intent.currency == currency
+    assert session.currency == currency
+    assert provider.create_refund(payment_intent_id=intent.id).currency == currency
+    # The same request again, in the other case, is the same request.
+    assert provider.create_payment_intent(
+        amount=5000, currency=currency, idempotency_key=f"lower-{currency}",
+    ).id == intent.id

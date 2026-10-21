@@ -101,7 +101,7 @@ class TestSuccessfulPayment:
         )
         assert pi.status == PaymentIntentStatus.REQUIRES_CONFIRMATION
         assert pi.amount == 1099
-        assert pi.currency == "usd"
+        assert pi.currency == "USD"
 
         confirmed = provider.confirm_payment_intent(pi.id, return_url=RETURN_URL)
         assert confirmed.status == PaymentIntentStatus.SUCCEEDED
@@ -170,7 +170,7 @@ class TestRefund:
         refund = provider.create_refund(payment_intent_id=pi.id)
         assert refund.payment_intent == pi.id
         assert refund.amount == 2500
-        assert refund.currency == "usd"
+        assert refund.currency == "USD"
         assert refund.status.value == "succeeded"
 
     def test_partial_refund_of_captured_payment(self, provider):
