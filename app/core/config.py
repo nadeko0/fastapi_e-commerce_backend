@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, NoDecode
 
 from app import __version__
 from app.core.currencies import (
+    STRIPE_PRESENTMENT_CURRENCIES,
     THREE_DECIMAL_CURRENCIES,
     WHOLE_UNITS_ONLY_CURRENCIES,
     ZERO_DECIMAL_CURRENCIES,
@@ -413,6 +414,14 @@ class Settings(BaseSettings):
     # unit), with KWD as a tenth of its price. Nothing in between notices.
     @validator("STORE_CURRENCY")
     def validate_store_currency(cls, v: str) -> str:
+        # Shaped like a currency is not enough: "ABC" matches the pattern
+        # and the application would start, then Stripe would refuse every
+        # payment in it.
+        if v not in STRIPE_PRESENTMENT_CURRENCIES:
+            raise ValueError(
+                f"STORE_CURRENCY {v} is not a currency Stripe accepts for payments "
+                "(https://docs.stripe.com/currencies)"
+            )
         if v in WHOLE_UNITS_ONLY_CURRENCIES:
             raise ValueError(
                 f"STORE_CURRENCY {v} can only be charged in whole units; prices "
