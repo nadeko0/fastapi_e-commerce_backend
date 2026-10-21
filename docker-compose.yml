@@ -30,6 +30,11 @@ services:
       - "${DOCKER_API_PORT:-8000}:8000"
     env_file:
       - .env
+    # The unprivileged role (docker/postgres/initdb/10-app-role.sh), not
+    # POSTGRES_USER from .env, which is the superuser and schema owner.
+    environment:
+      POSTGRES_USER: ${APP_DB_USER:?APP_DB_USER must be set in .env}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env}
     volumes:
       - api_logs:/app/logs
     depends_on:
@@ -63,6 +68,11 @@ services:
     command: ["celery", "-A", "app.tasks", "worker", "--loglevel=info"]
     env_file:
       - .env
+    # The unprivileged role (docker/postgres/initdb/10-app-role.sh), not
+    # POSTGRES_USER from .env, which is the superuser and schema owner.
+    environment:
+      POSTGRES_USER: ${APP_DB_USER:?APP_DB_USER must be set in .env}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env}
     depends_on:
       db:
         condition: service_healthy
@@ -96,6 +106,11 @@ services:
       - --schedule=/tmp/celerybeat-schedule
     env_file:
       - .env
+    # The unprivileged role (docker/postgres/initdb/10-app-role.sh), not
+    # POSTGRES_USER from .env, which is the superuser and schema owner.
+    environment:
+      POSTGRES_USER: ${APP_DB_USER:?APP_DB_USER must be set in .env}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env}
     depends_on:
       db:
         condition: service_healthy
@@ -114,6 +129,27 @@ services:
     healthcheck:
       disable: true
 
+  # Migrations, as POSTGRES_USER (the schema owner; the api's role cannot
+  # create or alter tables). Not started by `docker compose up`:
+  #   docker compose --profile migrate run --rm migrate
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles:
+      - migrate
+    command: ["alembic", "upgrade", "head"]
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    logging: *default-logging
+    healthcheck:
+      disable: true
+
   db:
     image: postgres:15-alpine
     # max_connections: each API worker can open up to 2 x (DB_POOL_SIZE +
@@ -123,10 +159,16 @@ services:
     command: ["postgres", "-c", "max_connections=200"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # Run once, on an empty data directory: creates APP_DB_USER, the role
+      # the api and Celery connect as.
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     env_file:
       - .env
     ports:
-      - "${DOCKER_POSTGRES_PORT:-5432}:5432"
+      # Loopback only: for a developer's own tools. Without an address Docker
+      # listens on every interface, past the host's firewall (it writes its
+      # own iptables rules). The services use the backend network.
+      - "127.0.0.1:${DOCKER_POSTGRES_PORT:-5432}:5432"
     networks:
       - backend
     restart: unless-stopped
@@ -141,6 +183,8 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
+      - APP_DB_USER=${APP_DB_USER:?APP_DB_USER must be set in .env}
+      - APP_DB_PASSWORD=${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env}
 
   redis:
     image: redis:7-alpine
@@ -171,7 +215,8 @@ services:
       - --maxmemory-policy
       - noeviction
     ports:
-      - "${DOCKER_REDIS_PORT:-6379}:6379"
+      # Loopback only, as for db above.
+      - "127.0.0.1:${DOCKER_REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     networks:
