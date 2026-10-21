@@ -142,6 +142,20 @@ def test_a_garbled_header_is_refused(provider, name):
     _refused(provider, _body(), _garbled_headers()[name])
 
 
+# While a webhook secret is being rolled, Stripe signs each event with the
+# old and the new secret and sends both v1 signatures; any one of them
+# matching is enough (stripe.WebhookSignature.verify_header).
+@pytest.mark.parametrize("order", ["matching first", "matching last"])
+def test_one_matching_signature_among_several_is_enough(provider, order):
+    body = _body()
+    ts = _epoch(NOW)
+    good, other = _signature(body, SECRET, ts), _signature(body, OTHER_SECRET, ts)
+    signatures = [good, other] if order == "matching first" else [other, good]
+    header = f"t={ts}," + ",".join(f"v1={s}" for s in signatures)
+
+    assert _verify(provider, body, header).id == "evt_1"
+
+
 def test_several_signatures_none_matching_are_refused(provider):
     body = _body()
     ts = _epoch(NOW)
