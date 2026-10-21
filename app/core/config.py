@@ -28,6 +28,21 @@ def _split_comma_separated(v: str | List[str]) -> List[str]:
 # app/core/rate_limit.py.
 RATE_LIMIT_PATTERN = r"^([1-9]\d*)/(?:([1-9]\d*) ?)?(second|minute|hour|day)s?$"
 
+# Currencies whose smallest unit is not a hundredth, which STORE_CURRENCY
+# refuses. Copied from Stripe's own lists, not from memory:
+# - zero-decimal: https://docs.stripe.com/currencies#zero-decimal
+#   ("Zero-decimal currencies"; UGX is also among its special cases, sent
+#   as two decimals that must be 00, so no fraction can be charged either);
+# - three-decimal: https://support.stripe.com/questions/which-payments-methods-and-products-are-available-in-the-uae
+#   ("We also support charges in the following three-decimal currencies").
+#   docs.stripe.com/currencies mentions three-decimal support but, as
+#   fetched in October 2026, lists no three-decimal currencies itself.
+ZERO_DECIMAL_CURRENCIES = frozenset({
+    "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA",
+    "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF",
+})
+THREE_DECIMAL_CURRENCIES = frozenset({"BHD", "JOD", "KWD", "OMR", "TND"})
+
 # Secrets are checked (Settings.check_deployment_settings) everywhere but here: on a
 # developer's machine and in the test suite the .env.example placeholders
 # are fine.
@@ -369,8 +384,9 @@ class Settings(BaseSettings):
     # no currency of their own; each order records this value when it is
     # placed (Order.currency) and is only ever charged in it, whatever a
     # payment request says. Amounts are converted to the smallest unit by
-    # multiplying by 100 (_decimal_to_cents in app/api/v1/orders.py), so a
-    # currency without a minor unit (JPY, KRW) is not supported here yet.
+    # multiplying by 100 (_decimal_to_cents in app/api/v1/orders.py) and
+    # prices are stored with two decimals, so only a currency with exactly
+    # two decimals works: validate_store_currency refuses the others.
     STORE_CURRENCY: str = Field("USD", pattern=r"^[A-Z]{3}$")
     # Where the storefront is served: scheme, host and port, no trailing
     # slash. A Checkout Session sends the customer back here after Stripe's
@@ -393,6 +409,19 @@ class Settings(BaseSettings):
         if parts.scheme not in ("http", "https") or not parts.hostname or "@" in parts.netloc:
             raise ValueError("FRONTEND_URL must be an http(s) URL with a host")
         return v.rstrip("/")
+
+    # In every environment, not only in a deployment: with JPY a 1000 yen
+    # order was sent to the provider as 100000 (yen, Stripe's smallest JPY
+    # unit), with KWD as a tenth of its price. Nothing in between notices.
+    @validator("STORE_CURRENCY")
+    def validate_store_currency(cls, v: str) -> str:
+        if v in ZERO_DECIMAL_CURRENCIES or v in THREE_DECIMAL_CURRENCIES:
+            decimals = "no" if v in ZERO_DECIMAL_CURRENCIES else "three"
+            raise ValueError(
+                f"STORE_CURRENCY {v} has {decimals} decimals; only currencies with two "
+                "decimal places are supported (amounts are charged in hundredths)"
+            )
+        return v
 
     @model_validator(mode="after")
     def check_deployment_settings(self) -> "Settings":
