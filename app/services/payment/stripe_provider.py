@@ -437,6 +437,12 @@ class StripePaymentProvider(PaymentProvider):
     ) -> WebhookEventData:
         if not sig_header:
             raise SignatureVerificationError("Missing Stripe-Signature header")
+        if not webhook_secret:
+            # An HMAC with an empty key is one anybody can compute: with
+            # STRIPE_WEBHOOK_SECRET left empty, the mock used to accept any
+            # event "signed" with "". Stripe's library refuses to verify
+            # without a secret; so does the mock.
+            raise SignatureVerificationError("No webhook secret configured", sig_header)
         if not sig_header.isascii():
             # Anyone can send this (Starlette decodes header bytes as
             # latin-1), and hmac.compare_digest below raises TypeError on

@@ -112,6 +112,13 @@ def test_a_signature_of_another_timestamp_is_refused(provider):
     _refused(provider, body, f"t={_epoch(NOW)},v1={signature}")
 
 
+def test_an_empty_secret_verifies_nothing(provider):
+    # With no secret configured, a body "signed" with an empty key must not
+    # pass: Stripe's library refuses to verify anything without a secret.
+    body = _body()
+    _refused(provider, body, _header(body, secret=""), secret="")
+
+
 # -- the header ---------------------------------------------------------------------
 
 @pytest.mark.parametrize("header", [None, ""])
