@@ -574,6 +574,71 @@ def test_duplicate_payment_request_same_idempotency_key_returns_same_intent(
     assert len(payments) == 1
 
 
+def _two_orders_of_the_same_amount(client, db_session):
+    return (
+        _create_verified_buyer_with_order(client, db_session, email="one@example.com"),
+        _create_verified_buyer_with_order(client, db_session, email="two@example.com"),
+    )
+
+
+def test_the_same_key_on_two_orders_is_two_payments(client, db_session):
+    # Our own replay check is per order (unique on order_id + key), but the
+    # key went to the provider as-is, where it is per account. A second
+    # order paid with a key already used for another order of the same
+    # amount got the first order's PaymentIntent back: against Stripe its
+    # confirm finds it already succeeded, so the second order would be
+    # marked paid without being charged; here the duplicate intent id made
+    # the request fail with a 500.
+    first, second = _two_orders_of_the_same_amount(client, db_session)
+
+    a = client.post(f"{ORDERS_PREFIX}/{first['order']['id']}/pay",
+                    json=_payment_payload(first["order"]),
+                    headers={**first["headers"], "Idempotency-Key": "shared-key"})
+    b = client.post(f"{ORDERS_PREFIX}/{second['order']['id']}/pay",
+                    json=_payment_payload(second["order"]),
+                    headers={**second["headers"], "Idempotency-Key": "shared-key"})
+
+    assert a.status_code == 200, a.text
+    assert b.status_code == 200, b.text
+    assert a.json()["data"]["transaction_id"] != b.json()["data"]["transaction_id"]
+    assert len(StripePaymentProvider._intents_by_id) == 2
+    assert _get_order(db_session, second["order"]["id"]).payment_status == "paid"
+
+
+def test_the_same_key_on_two_orders_is_two_checkout_sessions(client, db_session):
+    first, second = _two_orders_of_the_same_amount(client, db_session)
+
+    a = client.post(f"{ORDERS_PREFIX}/{first['order']['id']}/checkout-session",
+                    headers={**first["headers"], "Idempotency-Key": "shared-key"})
+    b = client.post(f"{ORDERS_PREFIX}/{second['order']['id']}/checkout-session",
+                    headers={**second["headers"], "Idempotency-Key": "shared-key"})
+
+    assert a.status_code == 200, a.text
+    assert b.status_code == 200, b.text
+    assert a.json()["data"]["checkout_session_id"] != b.json()["data"]["checkout_session_id"]
+
+
+def test_the_same_refund_key_on_two_orders_is_two_refunds(client, db_session):
+    # Refused with 409 ("key already used with different parameters") for
+    # the second order: the provider saw one key for two payments.
+    first, second = _two_orders_of_the_same_amount(client, db_session)
+    admin = _create_admin(db_session)
+    for setup in (first, second):
+        paid = client.post(f"{ORDERS_PREFIX}/{setup['order']['id']}/pay",
+                           json=_payment_payload(setup["order"]), headers=setup["headers"])
+        assert paid.status_code == 200
+
+    refunds = [
+        client.post(f"{ORDERS_PREFIX}/{setup['order']['id']}/refund", json={},
+                    headers={**admin["headers"], "Idempotency-Key": "refund-key"})
+        for setup in (first, second)
+    ]
+
+    assert [r.status_code for r in refunds] == [200, 200], refunds[1].text
+    assert refunds[0].json()["data"]["id"] != refunds[1].json()["data"]["id"]
+    assert _get_order(db_session, second["order"]["id"]).payment_status == "refunded"
+
+
 # -- requires_action / 3D Secure ----------------------------------------------
 
 def test_requires_action_is_a_distinct_non_terminal_state(client, db_session):

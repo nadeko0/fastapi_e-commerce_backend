@@ -427,6 +427,22 @@ async def cancel_own_order(
     return APIResponse.success_response(OrderResponse.from_orm(order))
 
 
+def _provider_idempotency_key(kind: str, order: Order, client_key: Optional[str]) -> str:
+    """
+    The idempotency key sent to the payment provider for one request about
+    `order`. A client's Idempotency-Key is unique only per order in our own
+    tables (Payment: order_id + key), while the provider scopes keys to the
+    whole account: sent as-is, the same key used for a second order of the
+    same amount got the first order's PaymentIntent back, whose confirm
+    then reported "succeeded" - the second order marked paid without being
+    charged. So the key is namespaced by the kind of request and the order.
+    Without a client key every request gets a fresh one (no replay).
+    """
+    if client_key is None:
+        return f"{kind}-auto-{uuid.uuid4().hex}"
+    return f"{kind}-order-{order.id}:{client_key}"
+
+
 def _decimal_to_cents(amount: Decimal) -> int:
     """Stripe (and every real payment processor) represents amounts as
     integers in the smallest currency unit - never as Decimal/float dollars.
@@ -743,7 +759,7 @@ async def process_payment(
     _guard_currency_matches_order(payment.currency, order)
 
     amount_cents = _decimal_to_cents(payment.amount)
-    provider_idempotency_key = idempotency_key or f"auto-{uuid.uuid4().hex}"
+    provider_idempotency_key = _provider_idempotency_key("pay", order, idempotency_key)
 
     payment_row = Payment(
         order_id=order.id,
@@ -954,7 +970,7 @@ async def create_checkout_session(
     _guard_currency_matches_order(payload.currency, order)
 
     amount_cents = _decimal_to_cents(order.total_amount)
-    provider_idempotency_key = idempotency_key or f"auto-{uuid.uuid4().hex}"
+    provider_idempotency_key = _provider_idempotency_key("checkout", order, idempotency_key)
     # A client's own URLs are already known to be on the frontend's origin
     # (CheckoutSessionCreate); omitted ones are the frontend's checkout
     # pages. {CHECKOUT_SESSION_ID} is filled in by Stripe.
@@ -1105,7 +1121,13 @@ async def refund_payment(
             provider.create_refund,
             payment_intent_id=payment_intent_id,
             amount=refund_amount_cents,
-            idempotency_key=idempotency_key,
+            # Namespaced like /pay's (see _provider_idempotency_key), but
+            # still None without a client key: then no replay protection
+            # is asked of the provider at all, as before.
+            idempotency_key=(
+                _provider_idempotency_key("refund", order, idempotency_key)
+                if idempotency_key else None
+            ),
         )
     except PaymentProviderTimeoutError:
         raise HTTPException(
