@@ -124,7 +124,8 @@ async def is_token_blacklisted(token_id: str) -> bool:
 async def is_token_superseded(user_id: Union[str, int], issued_at: Optional[Any]) -> bool:
     """Whether a token of this user issued at `issued_at` (its `iat`) predates
     the user's "password changed at" watermark, written by
-    invalidate_tokens_issued_before_now in app/core/security.py.
+    invalidate_tokens_issued_before_now in app/core/security.py on a
+    password change and on signing out everywhere.
 
     Fails closed, like is_token_blacklisted: both ask whether a token has
     been revoked, and when Redis cannot be asked - or the watermark cannot
