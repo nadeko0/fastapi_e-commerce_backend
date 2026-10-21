@@ -63,6 +63,32 @@ def test_lower_bounds(name, value):
     assert getattr(_settings(**{name: value + 1}), name) == value + 1
 
 
+# Stripe's zero-decimal currencies, and the three-decimal ones it charges
+# in, as Stripe lists them: https://docs.stripe.com/currencies (zero-decimal)
+# and https://support.stripe.com/questions/which-payments-methods-and-products-are-available-in-the-uae
+# (three-decimal).
+@pytest.mark.parametrize(
+    "currency",
+    [
+        "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "UGX", "VND",
+        "VUV", "XAF", "XOF", "XPF",
+        "BHD", "JOD", "KWD", "OMR", "TND",
+    ],
+)
+def test_a_store_currency_without_two_decimals_is_refused_at_startup(currency):
+    # Amounts are sent to the provider multiplied by 100 and prices are
+    # stored with two decimals: in JPY a 1000 yen order would be charged
+    # 100,000 yen, in KWD a tenth of its price.
+    with pytest.raises(ValidationError, match="STORE_CURRENCY") as refused:
+        _settings(STORE_CURRENCY=currency)
+    assert "two decimal" in str(refused.value)
+
+
+@pytest.mark.parametrize("currency", ["USD", "EUR", "GBP", "HUF", "TWD"])
+def test_two_decimal_store_currencies_are_accepted(currency):
+    assert _settings(STORE_CURRENCY=currency).STORE_CURRENCY == currency
+
+
 def test_a_password_reset_link_lives_an_hour_by_default():
     assert _settings().PASSWORD_RESET_TOKEN_EXPIRE_MINUTES == 60
 
