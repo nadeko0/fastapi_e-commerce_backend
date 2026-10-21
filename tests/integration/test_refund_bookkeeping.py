@@ -136,3 +136,28 @@ def test_concurrent_refunds_adding_up_to_the_charge_mark_the_order_refunded(shop
     assert response.json()["data"]["payment_status"] == "refunded"
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 1999, "USD", False)]
     assert order_state(shop, order["id"]) == ("confirmed", "refunded")
+
+
+def test_refund_is_reported_in_the_orders_currency_code(shop, monkeypatch):
+    # Stripe reports currencies in lower case, and the live provider
+    # passes Refund.currency through as Stripe sent it: the refund answer
+    # said "usd" about an order, a payment and a charge in "USD".
+    product = shop.product(price="19.99", stock=4)
+    buyer = shop.buyer()
+    admin = shop.admin()
+    order = shop.order_of(buyer, product)
+    assert shop.pay(buyer, order["id"]).status_code == 200
+    real_refund = StripePaymentProvider.create_refund
+
+    def _as_stripe_reports_it(self, **kwargs):
+        refund = real_refund(self, **kwargs)
+        refund.currency = refund.currency.lower()
+        return refund
+
+    monkeypatch.setattr(StripePaymentProvider, "create_refund", _as_stripe_reports_it)
+
+    response = shop.refund(admin, order["id"], amount="1.00")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["currency"] == "USD"
+    assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 100, "USD", False)]
