@@ -438,16 +438,25 @@ class StripePaymentProvider(PaymentProvider):
         if not sig_header:
             raise SignatureVerificationError("Missing Stripe-Signature header")
 
-        parts: Dict[str, str] = {}
+        # Every v1 signature is kept, not just the first: while a webhook
+        # secret is being rolled, Stripe signs each event with the old and
+        # the new secret and sends both, and one matching is enough (as in
+        # stripe.WebhookSignature.verify_header). Only the first used to be
+        # checked, so a valid event whose matching signature came second
+        # was refused.
+        timestamp_raw: Optional[str] = None
+        signatures = []
         for item in sig_header.split(","):
             if "=" not in item:
                 continue
             key, _, value = item.partition("=")
-            parts.setdefault(key.strip(), value.strip())
+            key, value = key.strip(), value.strip()
+            if key == "t" and timestamp_raw is None:
+                timestamp_raw = value
+            elif key == "v1" and value:
+                signatures.append(value)
 
-        timestamp_raw = parts.get("t")
-        signature = parts.get("v1")
-        if not timestamp_raw or not signature:
+        if not timestamp_raw or not signatures:
             raise SignatureVerificationError(
                 "Unable to extract timestamp and signature from header", sig_header
             )
@@ -460,7 +469,7 @@ class StripePaymentProvider(PaymentProvider):
         expected = self.sign_payload(payload, webhook_secret, timestamp=timestamp).split(
             ",v1="
         )[1]
-        if not hmac.compare_digest(expected, signature):
+        if not any(hmac.compare_digest(expected, signature) for signature in signatures):
             raise SignatureVerificationError(
                 "Signature does not match the expected value for this payload", sig_header
             )
