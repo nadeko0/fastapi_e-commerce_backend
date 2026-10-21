@@ -455,3 +455,85 @@ def test_data_retention_reports_the_users_own_retention_period(client, db_sessio
 
     assert response.status_code == 200
     assert response.json()["data"]["retention_days"] == _stored_user(db_session).data_retention_period
+
+
+# --- More of the legal surface ----------------------------------------------
+
+
+def test_the_policies_name_the_controller_and_how_to_reach_the_dpo(client):
+    from app.core.config import settings
+
+    privacy = client.get(f"{LEGAL_PREFIX}/privacy-policy").json()["data"]["content"]
+    terms = client.get(f"{LEGAL_PREFIX}/terms-of-service").json()["data"]["content"]
+    cookies = client.get(f"{LEGAL_PREFIX}/cookie-policy").json()["data"]["content"]
+
+    assert settings.DPO_EMAIL in privacy and settings.COMPANY_ADDRESS in privacy
+    assert str(settings.USER_DATA_RETENTION_DAYS) in privacy
+    assert settings.COMPANY_VAT in terms
+    for cookie in settings.ESSENTIAL_COOKIES:
+        assert cookie in cookies
+    # Nothing left unfilled.
+    for content in (privacy, terms, cookies):
+        assert "{" not in content and "}" not in content
+
+
+def test_a_consent_change_through_legal_is_visible_through_users(client):
+    token = _register_and_login(client, _valid_registration_payload())
+
+    client.post(
+        f"{LEGAL_PREFIX}/consent",
+        json={"marketing_consent": True, "privacy_policy_accepted": True},
+        headers=_auth_headers(token),
+    )
+    status_after = client.get(f"{LEGAL_PREFIX}/consent-status", headers=_auth_headers(token))
+    export = client.get(f"{USERS_PREFIX}/data/export", headers=_auth_headers(token))
+
+    assert status_after.json()["data"]["marketing_consent"] is True
+    assert export.json()["data"]["personal_data"]["marketing_consent"] is True
+    # One history, whichever route wrote it.
+    assert [c["type"] for c in export.json()["data"]["consents"]][-1] == "marketing"
+
+
+def test_a_consent_update_with_a_missing_field_is_422(client):
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/consent", json={"marketing_consent": True}, headers=_auth_headers(token)
+    )
+
+    assert response.status_code == 422
+
+
+def test_a_deletion_request_with_the_password_sends_both_mails(client, monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        "app.services.email.send_gdpr_request_received",
+        lambda to_email, kind, request_id: sent.append(("received", kind)),
+    )
+    monkeypatch.setattr(
+        "app.services.email.send_gdpr_deletion_confirmation",
+        lambda to_email, request_id: sent.append(("confirmed", "deletion")),
+    )
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/data-request",
+        json={"request_type": "deletion", "password": _valid_registration_payload()["password"],
+              "reason": "moving on"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    assert sent == [("received", "deletion"), ("confirmed", "deletion")]
+
+
+def test_a_password_is_not_needed_for_an_unknown_request_type_to_be_refused(client):
+    token = _register_and_login(client, _valid_registration_payload())
+
+    response = client.post(
+        f"{LEGAL_PREFIX}/data-request",
+        json={"request_type": "rectification", "password": "anything"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 400
