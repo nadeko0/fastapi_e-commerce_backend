@@ -7,6 +7,7 @@ provider charges exactly that many minor units in that currency.
 Refund arithmetic (partials summing to the capture, never above it) is
 property-tested against both providers in test_payment_provider_contract.py.
 """
+import re
 import uuid
 from decimal import Decimal
 
@@ -14,14 +15,16 @@ import pytest
 from hypothesis import HealthCheck, given
 from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
+from pydantic import ValidationError
 
-from app.api.v1.orders import _decimal_to_cents
+from app.api.v1.orders import _cents_to_decimal, _decimal_to_cents
 from app.core.config import (
     THREE_DECIMAL_CURRENCIES,
     WHOLE_UNITS_ONLY_CURRENCIES,
     ZERO_DECIMAL_CURRENCIES,
 )
-from app.schemas.order import PaymentCreate
+from app.schemas.order import PaymentCreate, RefundCreate
+from app.services.payment.exceptions import InvalidRequestError
 from app.services.payment.stripe_provider import StripePaymentProvider
 
 # Two-decimal currencies a store may run in (STORE_CURRENCY): the common
@@ -49,7 +52,78 @@ def _pay(amount):
     return PaymentCreate(order_id=1, payment_method="stripe", amount=amount).amount
 
 
+# -- conversion ------------------------------------------------------------------
+
+@given(amount=order_amounts)
+def test_an_accepted_amount_converts_to_minor_units_and_back_exactly(amount):
+    accepted = _pay(amount)
+    cents = _decimal_to_cents(accepted)
+
+    assert type(cents) is int
+    assert cents == int(amount * 100)
+    assert _cents_to_decimal(cents) == amount == accepted
+    assert _cents_to_decimal(cents).as_tuple().exponent == -2
+
+
+@given(cents=st.integers(min_value=0, max_value=int(LARGEST_ORDER_TOTAL * 100)))
+def test_every_minor_unit_count_is_an_amount_the_schemas_accept(cents):
+    amount = _cents_to_decimal(cents)
+    assert _decimal_to_cents(_pay(amount)) == cents
+    if cents:
+        assert _decimal_to_cents(RefundCreate(amount=amount).amount) == cents
+
+
+@pytest.mark.parametrize("amount,cents", [
+    ("0", 0), ("0.00", 0), ("0.01", 1), ("0.10", 10), ("0.99", 99), ("1", 100),
+    ("19.99", 1999), ("99999999.99", 9999999999),
+])
+def test_the_boundaries_convert_exactly(amount, cents):
+    assert _decimal_to_cents(_pay(amount)) == cents
+    assert _cents_to_decimal(cents) == Decimal(amount)
+
+
+@given(amount=st.floats(min_value=0.01, max_value=99999999.99, allow_nan=False))
+def test_a_json_number_is_taken_by_its_shortest_form(amount):
+    # A client sends JSON numbers, which arrive as floats. One whose
+    # shortest form has at most two decimals is that many cents, never the
+    # float's binary neighbour; any other is refused (422), not rounded.
+    text = repr(amount)
+    try:
+        accepted = _pay(amount)
+    except ValidationError:
+        assert Decimal(text).normalize().as_tuple().exponent < -2
+    else:
+        assert accepted == Decimal(text)
+
+
+def test_a_zero_refund_is_refused_and_a_cent_is_the_smallest():
+    with pytest.raises(ValidationError):
+        RefundCreate(amount="0.00")
+    assert RefundCreate(amount="0.01").amount == Decimal("0.01")
+
+
+@pytest.mark.parametrize("currency", STORE_CURRENCIES)
+def test_a_zero_order_total_is_never_sent_as_a_charge(currency):
+    # PaymentCreate accepts 0.00 (a free order has that total); the
+    # provider is what refuses to charge nothing.
+    with pytest.raises(InvalidRequestError):
+        StripePaymentProvider().create_payment_intent(
+            amount=_decimal_to_cents(_pay("0.00")), currency=currency, idempotency_key="zero",
+        )
+
+
 # -- currencies ------------------------------------------------------------------
+
+@given(code=st.text(alphabet=st.characters(min_codepoint=32, max_codepoint=0x24F),
+                    max_size=5))
+def test_a_payment_currency_must_be_three_capital_letters(code):
+    if re.fullmatch(r"[A-Z]{3}", code):
+        assert PaymentCreate(order_id=1, payment_method="stripe", amount="1",
+                             currency=code).currency == code
+    else:
+        with pytest.raises(ValidationError):
+            PaymentCreate(order_id=1, payment_method="stripe", amount="1", currency=code)
+
 
 @pytest.mark.parametrize("currency", STORE_CURRENCIES)
 def test_each_store_currency_is_one_the_configuration_accepts(currency):
