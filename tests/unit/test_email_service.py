@@ -366,6 +366,20 @@ def test_a_refused_recipient_is_not_written_to_the_log(monkeypatch, caplog):
     assert "SMTPRecipientsRefused" in caplog.text
 
 
+def test_an_email_provider_must_implement_send():
+    from app.services.email.base import EmailProvider
+
+    with pytest.raises(TypeError):
+        EmailProvider()
+
+    class _Lazy(EmailProvider):
+        def send(self, to_email, subject, html_content):
+            return super().send(to_email, subject, html_content)
+
+    with pytest.raises(NotImplementedError):
+        _Lazy().send("a@example.com", "subject", "<p>body</p>")
+
+
 @pytest.mark.parametrize(
     "address,masked",
     [("jane.doe@example.com", "j***@example.com"), ("x@y.org", "x***@y.org"), ("garbage", "***")],

@@ -66,3 +66,113 @@ def test_cookie_consent_is_refused_rather_than_recorded_without_effect(
 
     assert response.status_code == 400
     assert len(_stored(db_session).consent_history) == history_before
+
+
+def test_gdpr_consent_cannot_be_withdrawn_here_but_can_be_granted_again(
+    client, db_session, headers
+):
+    refused = client.post(
+        f"{USERS}/consent", params={"consent_type": "gdpr", "granted": False}, headers=headers
+    )
+    granted = client.post(
+        f"{USERS}/consent", params={"consent_type": "gdpr", "granted": True}, headers=headers
+    )
+
+    assert refused.status_code == 400
+    assert granted.status_code == 200
+    user = _stored(db_session)
+    assert user.gdpr_consent is True
+    assert [e["type"] for e in user.consent_history].count("gdpr") == 2  # registration + grant
+
+
+def test_an_unknown_consent_type_is_422(client, headers):
+    response = client.post(
+        f"{USERS}/consent", params={"consent_type": "telepathy", "granted": True}, headers=headers
+    )
+    assert response.status_code == 422
+
+
+# --- export ---------------------------------------------------------------
+
+
+def test_the_export_holds_the_account_its_consents_and_its_addresses(client, headers):
+    client.post(f"{USERS}/addresses", headers=headers, json={
+        "street": "1 Export Street", "city": "Springfield", "state": "Illinois",
+        "postal_code": "62701", "country": "US",
+    })
+    client.post(
+        f"{USERS}/consent", params={"consent_type": "marketing", "granted": True}, headers=headers
+    )
+
+    response = client.get(f"{USERS}/data/export", headers=headers)
+
+    data = response.json()["data"]
+    assert data["personal_data"]["email"] == EMAIL
+    assert "hashed_password" not in data["personal_data"]
+    assert [a["street"] for a in data["addresses"]] == ["1 Export Street"]
+    assert [c["type"] for c in data["consents"]] == [
+        "gdpr", "privacy_policy", "marketing", "marketing",
+    ]
+    assert data["orders"] == []
+    metadata = data["export_metadata"]
+    assert metadata["status"] == "completed"
+    assert metadata["request_id"].startswith(f"export_{data['personal_data']['id']}_")
+
+
+def test_the_export_is_also_announced_by_email(client, monkeypatch, headers):
+    sent = []
+    monkeypatch.setattr(
+        "app.api.v1.users.send_gdpr_export_email", lambda to_email, meta: sent.append(to_email)
+    )
+
+    client.get(f"{USERS}/data/export", headers=headers)
+
+    assert sent == [EMAIL]
+
+
+def test_one_users_export_never_contains_another_users_data(client, headers):
+    client.post(f"{USERS}/register", json={
+        "email": "other.person@example.com", "password": PASSWORD, "full_name": "Other",
+        "gdpr_consent": True, "privacy_policy_accepted": True,
+    })
+    other = client.post(
+        f"{USERS}/login", data={"username": "other.person@example.com", "password": PASSWORD}
+    ).json()["data"]["access_token"]
+    client.post(f"{USERS}/addresses", headers={"Authorization": f"Bearer {other}"}, json={
+        "street": "9 Other Road", "city": "Springfield", "state": "Illinois",
+        "postal_code": "62701", "country": "US",
+    })
+
+    data = client.get(f"{USERS}/data/export", headers=headers).json()["data"]
+
+    assert data["addresses"] == []
+    assert "other.person@example.com" not in str(data)
+
+
+# --- erasure --------------------------------------------------------------
+
+
+def test_erasure_without_confirmation_is_422_and_changes_nothing(client, db_session, headers):
+    response = client.post(
+        f"{USERS}/data/delete", json={"confirmation": False, "password": PASSWORD}, headers=headers
+    )
+
+    assert response.status_code == 422
+    assert _stored(db_session).is_active is True
+
+
+def test_erasure_schedules_the_account_and_ends_its_sessions(client, db_session, headers):
+    response = client.post(
+        f"{USERS}/data/delete", json={"confirmation": True, "password": PASSWORD}, headers=headers
+    )
+
+    assert response.status_code == 200
+    user = _stored(db_session)
+    assert (user.is_active, user.data_deletion_requested) == (False, True)
+    assert user.data_deletion_date is not None
+    assert client.get(f"{USERS}/me", headers=headers).status_code == 400
+    # And a second request is refused: the account is no longer active.
+    again = client.post(
+        f"{USERS}/data/delete", json={"confirmation": True, "password": PASSWORD}, headers=headers
+    )
+    assert again.status_code == 400

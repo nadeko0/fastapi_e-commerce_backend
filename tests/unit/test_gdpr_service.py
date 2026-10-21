@@ -1,6 +1,9 @@
 import asyncio
 from datetime import datetime, timedelta
 
+import pytest
+from fastapi import HTTPException
+
 from app.models.user import User
 from app.schemas.legal import ConsentUpdate
 from app.services.gdpr import GDPRService
@@ -130,3 +133,87 @@ def test_validate_retention_period_true_when_no_created_at(db_session):
     service = GDPRService(db_session)
 
     assert service.validate_retention_period(user) is True
+
+
+# --- failure paths: nothing half-done, and a clear 500 ----------------------
+
+
+def test_withdrawing_privacy_policy_acceptance_is_recorded_with_its_date(db_session):
+    user = _make_user(db_session)
+    service = GDPRService(db_session)
+
+    result = service.update_user_consent(
+        user=user,
+        consent_update=ConsentUpdate(marketing_consent=False, privacy_policy_accepted=False),
+        ip_address="1.2.3.4",
+    )
+
+    assert result == {"marketing": False, "privacy_policy": False}
+    assert user.privacy_policy_accepted_date is not None
+    assert [(e["type"], e["granted"], e["ip_address"]) for e in user.consent_history] == [
+        ("privacy_policy", False, "1.2.3.4"),
+    ]
+
+
+def _commit_fails(monkeypatch, db_session):
+    """Make the session's commit raise; return the record of rollbacks."""
+    rolled_back = []
+    original_rollback = db_session.rollback
+
+    def broken_commit():
+        raise RuntimeError("database gone")
+
+    def recording_rollback():
+        rolled_back.append(True)
+        original_rollback()
+
+    monkeypatch.setattr(db_session, "commit", broken_commit)
+    monkeypatch.setattr(db_session, "rollback", recording_rollback)
+    return rolled_back
+
+
+def test_a_consent_update_that_cannot_be_stored_is_rolled_back_and_a_500(db_session, monkeypatch):
+    user = _make_user(db_session)
+    rolled_back = _commit_fails(monkeypatch, db_session)
+
+    with pytest.raises(HTTPException) as error:
+        GDPRService(db_session).update_user_consent(
+            user=user,
+            consent_update=ConsentUpdate(marketing_consent=True, privacy_policy_accepted=True),
+        )
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "Failed to update consent preferences"
+    assert rolled_back == [True]
+
+
+def test_an_export_request_whose_mail_fails_is_a_500(db_session, monkeypatch):
+    def broken(*args):
+        raise OSError("smtp down")
+
+    monkeypatch.setattr("app.services.email.send_gdpr_request_received", broken)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(GDPRService(db_session).process_data_export(_make_user(db_session)))
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "Failed to process data export request"
+
+
+def test_a_deletion_request_that_cannot_be_stored_leaves_the_account_as_it_was(
+    db_session, monkeypatch
+):
+    user = _make_user(db_session)
+    monkeypatch.setattr("app.services.email.send_gdpr_request_received", lambda *a: True)
+    rolled_back = _commit_fails(monkeypatch, db_session)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(GDPRService(db_session).process_data_deletion(user))
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "Failed to process deletion request"
+    assert rolled_back == [True]
+    db_session.expire_all()
+    stored = db_session.get(User, user.id)
+    assert stored.is_active is True
+    assert stored.data_deletion_requested is False
