@@ -22,6 +22,7 @@ import time
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
+from app.core.currencies import STRIPE_PRESENTMENT_CURRENCIES
 from app.services.payment.base import PaymentProvider, webhook_event_from_payload
 from app.services.payment.exceptions import (
     CardError,
@@ -149,24 +150,14 @@ DEFAULT_WEBHOOK_TOLERANCE_SECONDS = 300
 # per-currency maximum (which varies), just a conservative guard.
 MAX_AMOUNT = 999_999_999_99  # 999,999,999.99 in major units
 
-# A representative subset of real ISO 4217 currency codes Stripe supports,
-# used to reject arbitrary/typo'd currency strings ("XYZ", "usd1", "dollars")
-# rather than silently accepting anything matching a 3-letter shape. Not
-# exhaustive (Stripe supports ~135 currencies) but enough to catch the
-# common real-world mistake of a made-up or malformed currency code slipping
-# past a naive regex-only check.
-#
-# The last row are the other currencies https://docs.stripe.com/currencies
-# names in its text (its "Special cases" and minimum-amount table, read in
-# October 2026). TWD in particular is a STORE_CURRENCY the configuration
-# accepts (app/core/config.py), and the mock refused every payment in it.
-VALID_CURRENCIES = {
-    "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "SEK", "NZD",
-    "MXN", "SGD", "HKD", "NOK", "KRW", "TRY", "RUB", "INR", "BRL", "ZAR",
-    "DKK", "PLN", "THB", "IDR", "HUF", "CZK", "ILS", "CLP", "PHP", "AED",
-    "COP", "SAR", "MYR", "RON",
-    "ARS", "ISK", "TWD", "UGX",
-}
+# Every currency Stripe takes for payments: the presentment currencies
+# https://docs.stripe.com/currencies lists for any account country (see
+# app/core/currencies.py). It used to be a 38-code subset, while the
+# configuration accepts every two-decimal one of them: a KES or AMD store
+# started and the mock refused every payment. Anything else ("XYZ",
+# "usd1", "dollars") is still refused rather than accepted for being
+# three letters long.
+VALID_CURRENCIES = STRIPE_PRESENTMENT_CURRENCIES
 
 
 def _require_valid_amount(amount: Any) -> None:
