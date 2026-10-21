@@ -1477,6 +1477,15 @@ def _apply_refund_object(db: Session, payment_row: Payment, refund_object: dict)
         return False
     refund_row = db.query(PaymentRefund).filter(PaymentRefund.refund_id == refund_id).first()
     if refund_row is None:
+        # A refund this app has not recorded: made in the Stripe Dashboard
+        # (or by another integration), or one of ours whose event overtook
+        # the /refund request still waiting for the provider's answer -
+        # that request then finds it recorded and does not count it again.
+        # Refunds made outside the app used to be ignored altogether: the
+        # order stayed paid for money already returned.
+        amount = refund_object.get("amount")
+        if isinstance(amount, int) and not isinstance(amount, bool) and amount > 0:
+            _record_refund(db, payment_row, refund_id, amount, status, source="provider")
         return False
     if refund_row.status in _REFUND_STATUSES_NOT_RETURNED:
         return False

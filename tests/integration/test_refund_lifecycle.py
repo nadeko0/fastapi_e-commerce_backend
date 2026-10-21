@@ -28,6 +28,7 @@ from payment_support import (
     use_production_sessions,
 )
 
+from app.models.payment import Payment
 from app.models.payment_ledger import PaymentRefund
 from app.services.payment.stripe_provider import StripePaymentProvider
 from app.services.payment.types import RefundStatus
@@ -196,6 +197,28 @@ def test_a_failed_refund_stays_failed_whatever_arrives_after_it(shop, paid):
 
 # -- Refunds made outside the app -------------------------------------------------
 
+def test_a_refund_made_in_the_dashboard_is_recorded(shop, paid):
+    # It was never seen: amount_refunded stayed 0 and the order "paid"
+    # for money already returned.
+    order_id = paid["order"]["id"]
+
+    partial = shop.webhook("refund.created", _refund_object(
+        paid["payment"], "re_dashboard_1", 700, "succeeded"))
+    assert partial.status_code == 200, partial.text
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 700, "USD", False)]
+    assert order_state(shop, order_id) == ("confirmed", "paid")
+
+    rest = shop.webhook("refund.created", _refund_object(
+        paid["payment"], "re_dashboard_2", 1299, "succeeded"))
+    assert rest.status_code == 200
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 1999, "USD", False)]
+    assert order_state(shop, order_id) == ("confirmed", "refunded")
+    assert _ledger(shop, order_id) == [
+        ("re_", 700, "succeeded", "provider", False),
+        ("re_", 1299, "succeeded", "provider", False),
+    ]
+
+
 def test_our_own_refund_reported_by_its_webhook_is_counted_once(shop, paid):
     order_id = paid["order"]["id"]
     refund = shop.refund(paid["admin"], order_id, amount="5.00").json()["data"]
@@ -210,6 +233,34 @@ def test_our_own_refund_reported_by_its_webhook_is_counted_once(shop, paid):
 
     assert payment_rows(shop, order_id) == [("succeeded", 1999, 500, "USD", False)]
     assert _ledger(shop, order_id) == [("re_", 500, "succeeded", "admin", False)]
+
+
+def test_a_refund_webhook_that_overtakes_the_refund_request_is_counted_once(
+    shop, paid, monkeypatch
+):
+    # refund.created arrives while /refund is still waiting for the
+    # provider's answer: the webhook records the refund first, and /refund
+    # then finds it recorded instead of adding it again.
+    order_id = paid["order"]["id"]
+    real_refund = StripePaymentProvider.create_refund
+    early = []
+
+    def _webhook_first(self, **kwargs):
+        refund = real_refund(self, **kwargs)
+        early.append(shop.webhook("refund.created", _refund_object(
+            paid["payment"], refund.id, refund.amount, "succeeded")))
+        return refund
+
+    monkeypatch.setattr(StripePaymentProvider, "create_refund", _webhook_first)
+
+    response = shop.refund(paid["admin"], order_id)
+
+    assert early[0].status_code == 200, early[0].text
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["payment_status"] == "refunded"
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 1999, "USD", False)]
+    assert _ledger(shop, order_id) == [("re_", 1999, "succeeded", "provider", False)]
+    assert order_state(shop, order_id) == ("confirmed", "refunded")
 
 
 def test_charge_refunded_without_its_refund_list_changes_nothing(shop, paid):
@@ -236,3 +287,26 @@ def test_refund_events_for_a_charge_this_app_did_not_make_are_acknowledged(shop,
     assert response.status_code == 200
     assert response.json()["data"] == {"status": "processed", "applied": False}
     assert payment_rows(shop, paid["order"]["id"]) == [("succeeded", 1999, 0, "USD", False)]
+
+
+def test_a_refund_of_a_flagged_second_charge_leaves_the_order_alone(shop, paid):
+    # A charge flagged for manual review (here: a success reported for an
+    # attempt after another one paid the order) is refunded by whoever
+    # reconciles it, typically in the Dashboard. Its refund is recorded on
+    # that charge; the order, paid by the other one, stays paid.
+    order_id = paid["order"]["id"]
+    second = shop.payments(order_id)[0]
+
+    flagged = Payment(order_id=order_id, provider="stripe", payment_intent_id="pi_second_charge",
+                      idempotency_key=uuid.uuid4().hex, amount=1999, currency="USD",
+                      status="succeeded", requires_manual_review=True)
+    shop.db.add(flagged)
+    shop.db.commit()
+
+    response = shop.webhook("refund.created", _refund_object(flagged, "re_second", 1999, "succeeded"))
+
+    assert response.status_code == 200
+    assert payment_rows(shop, order_id) == [
+        ("succeeded", 1999, 0, "USD", False), ("succeeded", 1999, 1999, "USD", True)]
+    assert order_state(shop, order_id) == ("confirmed", "paid")
+    assert second.amount_refunded == 0
