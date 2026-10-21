@@ -367,7 +367,6 @@ async def update_order_status(
         )
 
 
-    old_status = order.status
     if status == OrderStatus.CANCELLED:
         # Releases the stock create_order took (the one restock path, shared
         # with the customer's own cancel and the unpaid-order expiry).
@@ -379,12 +378,13 @@ async def update_order_status(
     db.commit()
 
 
-    if status != old_status:
-        background_tasks.add_task(
-            send_order_status_update_email,
-            order.user.email,
-            OrderResponse.from_orm(order)
-        )
+    # The transition was validated above and no status moves to itself, so
+    # the status always changed: the customer is always told.
+    background_tasks.add_task(
+        send_order_status_update_email,
+        order.user.email,
+        OrderResponse.from_orm(order)
+    )
 
     return APIResponse.success_response(OrderResponse.from_orm(order))
 
