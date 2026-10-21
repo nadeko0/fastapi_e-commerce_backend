@@ -455,7 +455,7 @@ def test_checking_a_reset_token_does_not_reveal_whose_it_is(
 def test_a_used_password_reset_token_cannot_be_used_again(
     client, monkeypatch, valid_registration_payload
 ):
-    # The link lives for a day, travels in a URL (proxy logs, browser
+    # The link lives for an hour, travels in a URL (proxy logs, browser
     # history, Referer) and used to keep working after it had done its job:
     # whoever saw it could set the password again, as often as they liked.
     email = valid_registration_payload["email"]
@@ -487,6 +487,34 @@ def test_a_reset_token_issued_before_the_last_password_change_is_refused(
     assert client.get(f"{API_PREFIX}/password/reset/{older}").status_code == 400
     assert _reset(client, older, "Hijacked123").status_code == 400
     assert _can_log_in(client, email, "NewStr0ngPass")
+
+
+def test_a_reset_link_lives_an_hour_by_default(client, monkeypatch, valid_registration_payload):
+    # It lived 24 hours, hard-coded: a day for a link that travels in a URL
+    # (proxy logs, browser history, Referer) to be found and used.
+    email = valid_registration_payload["email"]
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    with freeze_time("2026-01-01 12:00:00") as clock:
+        token = _emailed_reset_token(client, monkeypatch, email)
+        clock.tick(timedelta(minutes=60, seconds=-1))
+        assert client.get(f"{API_PREFIX}/password/reset/{token}").status_code == 200
+
+        clock.tick(timedelta(seconds=2))
+        assert client.get(f"{API_PREFIX}/password/reset/{token}").status_code == 400
+        assert _reset(client, token, "Hijacked123").status_code == 400
+
+
+def test_a_reset_link_lives_as_long_as_configured(client, monkeypatch, valid_registration_payload):
+    monkeypatch.setattr(settings, "PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", 5)
+    email = valid_registration_payload["email"]
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    with freeze_time("2026-01-01 12:00:00") as clock:
+        token = _emailed_reset_token(client, monkeypatch, email)
+        clock.tick(timedelta(minutes=5, seconds=-1))
+        assert client.get(f"{API_PREFIX}/password/reset/{token}").status_code == 200
+
+        clock.tick(timedelta(seconds=2))
+        assert client.get(f"{API_PREFIX}/password/reset/{token}").status_code == 400
 
 
 # --- Adversarial scenarios ---------------------------------------------

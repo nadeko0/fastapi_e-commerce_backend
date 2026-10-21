@@ -52,12 +52,19 @@ def test_every_limit_setting_is_covered_here():
 
 
 @pytest.mark.parametrize(
-    "name,value", [("REDIS_GUEST_CART_TTL_DAYS", 0), ("CART_MAX_LINES", 0), ("BCRYPT_MAX_CONCURRENCY", 0)]
+    "name,value", [
+        ("REDIS_GUEST_CART_TTL_DAYS", 0), ("CART_MAX_LINES", 0), ("BCRYPT_MAX_CONCURRENCY", 0),
+        ("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", 0),
+    ]
 )
 def test_lower_bounds(name, value):
     with pytest.raises(ValidationError):
         _settings(**{name: value})
     assert getattr(_settings(**{name: value + 1}), name) == value + 1
+
+
+def test_a_password_reset_link_lives_an_hour_by_default():
+    assert _settings().PASSWORD_RESET_TOKEN_EXPIRE_MINUTES == 60
 
 
 def test_development_forces_one_worker_debug_and_reload():

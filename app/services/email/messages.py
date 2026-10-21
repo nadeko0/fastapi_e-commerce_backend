@@ -277,7 +277,7 @@ def send_password_reset_email(to_email: str, reset_token: str) -> bool:
             <p>Click the link below to reset your password:</p>
             <p><a href="{reset_link}">Reset Password</a></p>
 
-            <p>This link will expire in 24 hours.</p>
+            <p>This link will expire in {settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes.</p>
 
             <p>If you didn't request this, please ignore this email.</p>
 

@@ -130,6 +130,11 @@ class Settings(BaseSettings):
     BCRYPT_MAX_CONCURRENCY: Optional[int] = Field(None, ge=1)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # How long a password-reset link works. It was 24 hours, hard-coded: a
+    # day for a link that travels in a URL (proxy logs, browser history,
+    # Referer) to be found and used. An hour is enough to open an email;
+    # a new link is one request away.
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = Field(60, ge=1)
 
     POSTGRES_SERVER: str
     POSTGRES_USER: str

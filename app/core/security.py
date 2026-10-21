@@ -513,7 +513,7 @@ class PasswordResetClaims(NamedTuple):
 def generate_password_reset_token(email: str, hashed_password: str) -> str:
     """`hashed_password` is the account's current hash: the token is good
     until it changes (see PasswordResetClaims.matches)."""
-    expire = datetime.utcnow() + timedelta(hours=24)
+    expire = datetime.utcnow() + timedelta(minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES)
     to_encode = {
         "exp": expire,
         "sub": email,
