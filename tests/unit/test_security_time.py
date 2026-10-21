@@ -22,11 +22,11 @@ from app.core.security import (
 
 
 def test_password_change_watermark_is_the_current_utc_epoch(fake_redis):
-    before = int(time.time())
+    before = time.time()
     invalidate_tokens_issued_before_now(42)
-    after = int(time.time())
+    after = time.time()
 
-    watermark = int(fake_redis.get("pwd_changed:42"))
+    watermark = float(fake_redis.get("pwd_changed:42"))
     assert before <= watermark <= after, (
         f"watermark {watermark} is {before - watermark} s away from now: "
         "tokens issued in that gap before a password reset would stay valid"

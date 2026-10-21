@@ -137,13 +137,27 @@ def user_id_from_subject(subject: object) -> Optional[int]:
     user_id = int(subject)
     return user_id if user_id <= _MAX_USER_ID else None
 
+# `iat` is a NumericDate with sub-second precision (RFC 7519 allows a
+# fractional one): the epoch seconds as a float, compared against the
+# per-user watermark (invalidate_tokens_issued_before_now), which has the
+# same precision. A datetime would not do: PyJWT 2.15 turns a datetime claim
+# into whole seconds on encode (timegm), and a token issued earlier in the
+# same second as a password change or a sign-out-everywhere then survived
+# it. A float is encoded as is, and on decode PyJWT checks it with int(),
+# so validation is unchanged. `exp` stays whole seconds. Tokens issued
+# before this carry a whole-second iat and still compare correctly.
+def _issued_at_and_expiry(lifetime: timedelta) -> Tuple[float, int]:
+    issued_at = time.time()
+    return issued_at, int(issued_at) + int(lifetime.total_seconds())
+
 def create_access_token(subject: Union[str, int]) -> str:
-    now = datetime.utcnow()
-    expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    issued_at, expire = _issued_at_and_expiry(
+        timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
     # jti: identifies this token on the logout blacklist (see _blacklist_id).
     to_encode = {
         "exp": expire,
-        "iat": now,
+        "iat": issued_at,
         "sub": str(subject),
         "type": "access",
         "jti": str(uuid.uuid4()),
@@ -152,11 +166,12 @@ def create_access_token(subject: Union[str, int]) -> str:
     return encoded_jwt
 
 def create_refresh_token(subject: Union[str, int], jti: Optional[str] = None, family: Optional[str] = None) -> str:
-    now = datetime.utcnow()
-    expire = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    issued_at, expire = _issued_at_and_expiry(
+        timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    )
     to_encode = {
         "exp": expire,
-        "iat": now,
+        "iat": issued_at,
         "sub": str(subject),
         "type": "refresh",
         # jti: identifies this specific token so it can be single-use
@@ -331,7 +346,11 @@ def invalidate_tokens_issued_before_now(user_id: Union[str, int]) -> bool:
     # token issued in the two hours before a password reset stayed valid -
     # exactly the tokens this exists to kill. Invisible where TZ is UTC
     # (most containers), which is why it went unnoticed.
-    return redis_service.setex(key, ttl_seconds, int(time.time()))
+    # Not rounded to the second: compared with a token's sub-second iat
+    # (see _issued_at_and_expiry), so that a token issued earlier in the
+    # same second is refused and one issued right after is not. A watermark
+    # stored in whole seconds before this still compares correctly.
+    return redis_service.setex(key, ttl_seconds, time.time())
 
 # The three dependencies below run on the event loop for every authenticated
 # request, so nothing in them may block: the Redis lookups go through the
