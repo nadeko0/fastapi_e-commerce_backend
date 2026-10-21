@@ -87,3 +87,42 @@ def test_an_event_whose_processing_failed_is_applied_when_stripe_redelivers_it(
 
     third = shop.intent_event("payment_intent.succeeded", payment, event_id=event_id)
     assert third.json()["data"] == {"status": "already_processed"}
+
+
+# -- payment_intent.canceled ---------------------------------------------------
+
+def test_a_canceled_payment_intent_fails_its_attempt_and_stops_blocking_the_order(
+    shop, outbox
+):
+    # A PaymentIntent canceled at Stripe (from the Dashboard, or a 3D
+    # Secure authentication the customer never finished, canceled by the
+    # integration) can never be charged. Its event was not handled: the
+    # attempt stayed requires_action, and while it did, every new attempt
+    # was refused with 409 "Another payment attempt ... is in progress".
+    buyer, order, payment = _awaiting_3ds(shop)
+    outbox.take()
+    assert shop.pay(buyer, order["id"]).status_code == 409
+
+    response = shop.intent_event("payment_intent.canceled", payment,
+                                 status="canceled", cancellation_reason="abandoned")
+
+    assert response.status_code == 200, response.text
+    assert payment_rows(shop, order["id"]) == [("failed", 1999, 0, "USD", False)]
+    assert order_state(shop, order["id"]) == ("new", "failed")
+    retry = shop.pay(buyer, order["id"])
+    assert retry.status_code == 200, retry.text
+    assert order_state(shop, order["id"]) == ("confirmed", "paid")
+    assert [p[0] for p in payment_rows(shop, order["id"])] == ["failed", "succeeded"]
+
+
+def test_a_cancel_reported_after_the_attempt_succeeded_changes_nothing(shop, outbox):
+    buyer, order, payment = _awaiting_3ds(shop)
+    assert shop.intent_event("payment_intent.succeeded", payment).status_code == 200
+    outbox.take()
+
+    response = shop.intent_event("payment_intent.canceled", payment, status="canceled")
+
+    assert response.status_code == 200
+    assert order_state(shop, order["id"]) == ("confirmed", "paid")
+    assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
+    assert outbox.take() == []
