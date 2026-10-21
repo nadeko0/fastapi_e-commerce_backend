@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal
 
 import pytest
 from fastapi.routing import APIRoute
@@ -10,8 +11,11 @@ from sqlalchemy import text
 from app.api.v1.admin import router as admin_router
 from app.core.config import settings
 from app.core.security import get_password_hash
+from app.models.address import Address
 from app.models.category import Category
 from app.models.enums import UserRole
+from app.models.order import Order
+from app.models.order_items import OrderItem
 from app.models.product import Product, ProductVariant
 from app.models.user import User
 
@@ -907,3 +911,335 @@ def test_admin_moves_product_to_another_category(client, db_session):
     assert response.status_code == 200
     assert response.json()["data"]["category_id"] == new.id
     assert response.json()["data"]["category_name"] == "New Shelf"
+
+
+# --- Catalog business rules -------------------------------------------------
+
+
+def _order_line_for(db_session, product_id):
+    """A real order line referencing the product, which is what makes
+    delete_product keep the row (order history must survive)."""
+    buyer = User(
+        email="buyer@example.com", hashed_password="x", gdpr_consent=True,
+        privacy_policy_accepted=True, consent_history=[],
+    )
+    db_session.add(buyer)
+    db_session.commit()
+    address = Address(
+        user_id=buyer.id, street="1 Main St", city="Town", state="ST",
+        postal_code="10001", country="US",
+    )
+    db_session.add(address)
+    db_session.commit()
+    order = Order(user_id=buyer.id, shipping_address_id=address.id, total_amount="19.99")
+    db_session.add(order)
+    db_session.commit()
+    db_session.add(OrderItem(
+        order_id=order.id, product_id=product_id, quantity=1, price_at_time="19.99",
+    ))
+    db_session.commit()
+    return order
+
+
+def test_admin_delete_product_with_orders_deactivates_instead_of_deleting(
+    client, db_session
+):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    order = _order_line_for(db_session, product["id"])
+
+    response = client.delete(
+        f"{ADMIN_PREFIX}/products/{product['id']}", headers=_auth_headers(admin_token)
+    )
+
+    assert response.status_code == 200
+    db_session.expire_all()
+    kept = db_session.get(Product, product["id"])
+    assert kept is not None and kept.is_active is False
+    assert db_session.query(OrderItem).filter(OrderItem.order_id == order.id).count() == 1
+    # Gone from the storefront all the same.
+    assert client.get(f"{CATALOG_PREFIX}/products/{product['id']}").status_code == 404
+    listing = client.get(f"{CATALOG_PREFIX}/products").json()["data"]
+    assert product["id"] not in [p["id"] for p in listing["items"]]
+
+
+def test_admin_delete_product_drops_its_cached_copy(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    _order_line_for(db_session, product["id"])
+    assert client.get(f"{CATALOG_PREFIX}/products/{product['id']}").status_code == 200
+
+    client.delete(f"{ADMIN_PREFIX}/products/{product['id']}", headers=_auth_headers(admin_token))
+
+    assert client.get(f"{CATALOG_PREFIX}/products/{product['id']}").status_code == 404
+
+
+def test_admin_update_product_is_visible_through_the_cache(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    before = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()["data"]
+    assert before["price"] == "19.99"
+
+    client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}",
+        json={"price": "25.00", "stock_quantity": 0},
+        headers=_auth_headers(admin_token),
+    )
+
+    after = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()["data"]
+    assert (after["price"], after["stock_quantity"]) == ("25.00", 0)
+
+
+def test_admin_create_category_shows_up_in_the_cached_tree(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    _make_category(db_session, name="Existing")
+    first = client.get(f"{CATALOG_PREFIX}/categories/tree").json()["data"]
+
+    client.post(
+        f"{ADMIN_PREFIX}/categories", json={"name": "Brand New"},
+        headers=_auth_headers(admin_token),
+    )
+
+    second = client.get(f"{CATALOG_PREFIX}/categories/tree").json()["data"]
+    assert "Brand New" not in str(first)
+    assert "Brand New" in str(second)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("price", "-0.01"),
+        ("stock_quantity", -1),
+        ("name", "ab"),
+        ("name", "x" * 201),
+        ("description", "too short"),
+        ("images", []),
+        ("images", ["not a url"]),
+        ("category_id", None),
+    ],
+)
+def test_admin_create_product_rejects_invalid_fields(client, db_session, field, value):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    payload = {**_valid_product_payload(category.id), field: value}
+
+    response = client.post(
+        f"{ADMIN_PREFIX}/products", json=payload, headers=_auth_headers(admin_token)
+    )
+
+    assert response.status_code == 422
+    assert db_session.query(Product).count() == 0
+
+
+@pytest.mark.parametrize("payload", [{"name": "Kid", "parent_id": 0}, {"name": "K"}])
+def test_admin_create_category_rejects_invalid_fields(client, db_session, payload):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+
+    response = client.post(
+        f"{ADMIN_PREFIX}/categories", json=payload, headers=_auth_headers(admin_token)
+    )
+
+    assert response.status_code == 422
+    assert db_session.query(Category).count() == 0
+
+
+@settings_hypothesis(
+    max_examples=25,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    price=st.decimals(min_value=0, max_value=10**7, places=2, allow_nan=False),
+    stock=st.integers(min_value=0, max_value=10**6),
+)
+def test_admin_product_price_and_stock_round_trip_exactly(client, db_session, price, stock):
+    """Money is a Decimal with two places all the way through: what the
+    admin sends is exactly what is stored and served back, never a float
+    approximation."""
+    if not db_session.query(User).filter(User.email == "admin@example.com").first():
+        _make_admin(db_session)
+    if not db_session.query(Category).first():
+        _make_category(db_session)
+    category_id = db_session.query(Category.id).first()[0]
+    admin_token = _login_as(client, "admin@example.com", "AdminPass1")
+    payload = {
+        **_valid_product_payload(category_id), "price": str(price), "stock_quantity": stock,
+    }
+
+    created = client.post(
+        f"{ADMIN_PREFIX}/products", json=payload, headers=_auth_headers(admin_token)
+    ).json()["data"]
+
+    assert Decimal(created["price"]) == price
+    assert created["stock_quantity"] == stock
+    db_session.expire_all()
+    stored = db_session.get(Product, created["id"])
+    assert (stored.price, stored.stock_quantity) == (price, stock)
+
+
+def test_admin_stock_edit_to_negative_is_rejected_and_leaves_stock(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}",
+        json={"stock_quantity": -5},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 422
+    db_session.expire_all()
+    assert db_session.get(Product, product["id"]).stock_quantity == 15
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"sku": ""},
+        {"sku": "S" * 101},
+        {"sku": "NEG-STOCK", "stock_quantity": -1},
+        {"sku": "NEG-PRICE", "price_override": "-1.00"},
+    ],
+)
+def test_admin_create_variant_rejects_invalid_fields(client, db_session, payload):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+
+    response = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json=payload,
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 422
+    assert db_session.query(ProductVariant).count() == 0
+
+
+def test_admin_variant_price_override_is_rounded_to_cents(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+
+    response = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "ROUNDED", "price_override": "9.999"},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.json()["data"]["price_override"] == "10.00"
+
+
+def test_admin_update_variant_to_a_sku_another_variant_holds_is_409(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    for sku in ("HELD-SKU", "MOVER-SKU"):
+        client.post(
+            f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+            json={"sku": sku},
+            headers=_auth_headers(admin_token),
+        )
+    mover = db_session.query(ProductVariant).filter(ProductVariant.sku == "MOVER-SKU").one()
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{mover.id}",
+        json={"sku": "HELD-SKU"},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 409
+    db_session.expire_all()
+    assert db_session.get(ProductVariant, mover.id).sku == "MOVER-SKU"
+
+
+def test_admin_update_variant_resending_its_own_sku_is_not_a_conflict(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    variant = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "SAME-SKU"},
+        headers=_auth_headers(admin_token),
+    ).json()["data"]
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
+        json={"sku": "SAME-SKU", "is_active": False},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["is_active"] is False
+
+
+def test_admin_variant_of_another_product_is_not_found_through_this_one(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    owner = _create_product(client, admin_token, category.id)
+    other = _create_product(client, admin_token, category.id)
+    variant = client.post(
+        f"{ADMIN_PREFIX}/products/{owner['id']}/variants",
+        json={"sku": "OWNED-SKU", "stock_quantity": 2},
+        headers=_auth_headers(admin_token),
+    ).json()["data"]
+
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{other['id']}/variants/{variant['id']}",
+        json={"stock_quantity": 99},
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 404
+    db_session.expire_all()
+    assert db_session.get(ProductVariant, variant["id"]).stock_quantity == 2
+
+
+def test_admin_variant_listing_shows_inactive_variants_in_creation_order(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session)
+    product = _create_product(client, admin_token, category.id)
+    for sku, active in (("V-1", True), ("V-2", False), ("V-3", True)):
+        client.post(
+            f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+            json={"sku": sku, "is_active": active},
+            headers=_auth_headers(admin_token),
+        )
+
+    body = client.get(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        headers=_auth_headers(admin_token),
+    ).json()["data"]
+
+    assert [(v["sku"], v["is_active"]) for v in body["items"]] == [
+        ("V-1", True), ("V-2", False), ("V-3", True),
+    ]
+    assert body["total"] == 3
+
+
+def test_admin_variant_listing_for_a_missing_product_is_404(client, db_session):
+    admin = _make_admin(db_session)
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+
+    response = client.get(
+        f"{ADMIN_PREFIX}/products/999999/variants", headers=_auth_headers(admin_token)
+    )
+
+    assert response.status_code == 404
