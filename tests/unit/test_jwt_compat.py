@@ -12,10 +12,11 @@ import jwt
 
 from app.core.config import settings
 from app.core.security import (
+    get_password_hash,
     revoke_refresh_token,
-    validate_token,
     verify_password_reset_token,
 )
+from app.models.user import User
 
 LEGACY_SECRET = "legacy-python-jose-secret-0123456789"
 LEGACY_ACCESS_CLAIMS = {"exp": 4102444800, "iat": 1767225600, "sub": "42", "type": "access"}
@@ -31,10 +32,30 @@ LEGACY_RESET_TOKEN = (
 )
 
 
-def test_an_access_token_issued_by_python_jose_still_validates(monkeypatch):
+def test_an_access_token_issued_by_python_jose_still_authenticates(
+    monkeypatch, client, db_session
+):
+    # Through the real request path: the user it names (42) exists, and
+    # GET /users/me answers as that user.
+    db_session.add(User(
+        id=42,
+        email="legacy@example.com",
+        hashed_password=get_password_hash("Str0ngPass1"),
+        gdpr_consent=True,
+        privacy_policy_accepted=True,
+    ))
+    db_session.commit()
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", LEGACY_SECRET)
+    assert jwt.decode(LEGACY_ACCESS_TOKEN, LEGACY_SECRET, algorithms=["HS256"]) == (
+        LEGACY_ACCESS_CLAIMS
+    )
 
-    assert validate_token(LEGACY_ACCESS_TOKEN) == LEGACY_ACCESS_CLAIMS
+    response = client.get(
+        "/api/v1/users/me", headers={"Authorization": f"Bearer {LEGACY_ACCESS_TOKEN}"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["id"] == 42
 
 
 def test_a_reset_token_issued_by_python_jose_still_decodes_but_is_no_longer_honoured(

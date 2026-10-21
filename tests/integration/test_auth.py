@@ -12,10 +12,8 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from app.core.config import settings
 from app.core.security import (
     blacklist_token,
-    create_access_token,
     generate_email_verification_token,
     generate_password_reset_token,
-    validate_token,
 )
 
 API_PREFIX = "/api/v1/users"
@@ -955,14 +953,30 @@ def test_logout_revokes_an_access_token_without_jti_in_every_spelling(
     assert (plain_after.status_code, padded_after.status_code) == (401, 401)
 
 
-def test_validate_token_rejects_a_blacklisted_token_in_every_spelling():
-    token = create_access_token(7)
-    assert validate_token(_pad_signature(token)) is not None
+def test_a_blacklisted_token_is_refused_in_every_spelling(client, valid_registration_payload):
+    # Through the real request path (get_current_user), not a helper of
+    # its own: the blacklist is keyed by jti, so "=" padding buys nothing.
+    token = _register_and_login(client, valid_registration_payload)
+    padded = {"Authorization": f"Bearer {_pad_signature(token)}"}
+    assert client.get(f"{API_PREFIX}/me", headers=padded).status_code == 200
 
     blacklist_token(token, expires_in=600)
 
-    assert validate_token(token) is None
-    assert validate_token(_pad_signature(token)) is None
+    assert client.get(
+        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {token}"}
+    ).status_code == 401
+    assert client.get(f"{API_PREFIX}/me", headers=padded).status_code == 401
+
+
+def test_there_is_no_token_validator_besides_the_auth_dependency():
+    # validate_token decoded any token of ours - refresh, reset, email
+    # verification - as long as it was not blacklisted, and was used
+    # nowhere. Wired up for authentication some day it would have repeated
+    # the bug app/api/deps.py describes. One way to authenticate a token:
+    # get_current_user.
+    import app.core.security as security_module
+
+    assert not hasattr(security_module, "validate_token")
 
 
 # --- Revocation when Redis fails: closed, every time ---------------------

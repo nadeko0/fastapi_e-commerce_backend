@@ -479,19 +479,6 @@ def blacklist_token(token: str, expires_in: int) -> bool:
         return False
     return redis_service.add_to_blacklist(_blacklist_id(token, payload), expires_in)
 
-def validate_token(token: str) -> Optional[dict]:
-    try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM]
-        )
-    except jwt.PyJWTError:
-        return None
-    if redis_service.is_blacklisted(_blacklist_id(token, payload)):
-        return None
-    return payload
-
 # A password reset token is single-use without any server-side state: it
 # carries a fingerprint of the password hash it was issued against, and is
 # only good while the account still has that hash. Using it changes the hash,
