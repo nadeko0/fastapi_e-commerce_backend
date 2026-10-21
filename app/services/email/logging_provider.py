@@ -7,12 +7,12 @@ deterministic, dependency-free stand-in for the real thing.
 """
 import logging
 
-from app.services.email.base import EmailProvider
+from app.services.email.base import EmailProvider, mask_email
 
 logger = logging.getLogger(__name__)
 
 
 class LoggingEmailProvider(EmailProvider):
     def send(self, to_email: str, subject: str, html_content: str) -> bool:
-        logger.info(f"Email suppressed (LoggingEmailProvider): to={to_email} subject={subject!r}")
+        logger.info(f"Email suppressed (LoggingEmailProvider): to={mask_email(to_email)} subject={subject!r}")
         return True
