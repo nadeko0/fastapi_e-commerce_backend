@@ -146,6 +146,19 @@ def test_a_garbled_header_is_refused(provider, name):
     _refused(provider, _body(), _garbled_headers()[name])
 
 
+# Starlette decodes header bytes as latin-1, so anyone can send these. Both
+# providers compared the signature with hmac.compare_digest, which raises
+# TypeError for text that is not ASCII: the webhook answered 500, not 400.
+@pytest.mark.parametrize("header", ["t={ts},v1=é", "t={ts},v1=" + "é" * 64,
+                                    "t={ts},v1={sig}ÿ", "t=é,v1=00"],
+                         ids=["one character", "signature-sized", "after a valid signature",
+                              "in the timestamp"])
+def test_a_header_with_characters_outside_ascii_is_refused(provider, header):
+    body = _body()
+    ts = _epoch(NOW)
+    _refused(provider, body, header.format(ts=ts, sig=_signature(body, SECRET, ts)))
+
+
 # While a webhook secret is being rolled, Stripe signs each event with the
 # old and the new secret and sends both v1 signatures; any one of them
 # matching is enough (stripe.WebhookSignature.verify_header).

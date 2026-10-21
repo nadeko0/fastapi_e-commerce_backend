@@ -383,6 +383,12 @@ class LiveStripePaymentProvider(PaymentProvider):
     ) -> WebhookEventData:
         if not sig_header:
             raise SignatureVerificationError("Missing Stripe-Signature header")
+        if not sig_header.isascii():
+            # Anyone can send this (Starlette decodes header bytes as
+            # latin-1). The SDK compares signatures with hmac.compare_digest
+            # on text, which raises TypeError for anything not ASCII - an
+            # exception the webhook route does not expect, so a 500.
+            raise SignatureVerificationError("Malformed Stripe-Signature header", sig_header)
         try:
             event = stripe.Webhook.construct_event(
                 payload, sig_header, webhook_secret, tolerance=tolerance_seconds
