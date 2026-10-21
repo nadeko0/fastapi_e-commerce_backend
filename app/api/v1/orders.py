@@ -1333,8 +1333,9 @@ async def stripe_webhook(
     """
     Receive Stripe webhook events for both payment flows and reconcile
     order/payment state:
-      - payment_intent.succeeded / payment_intent.payment_failed - the
-        server-confirmed-PaymentIntent flow (/pay).
+      - payment_intent.succeeded / payment_intent.payment_failed /
+        payment_intent.canceled - the server-confirmed-PaymentIntent flow
+        (/pay).
       - checkout.session.completed / .async_payment_succeeded /
         .async_payment_failed / .expired - the hosted-redirect Checkout
         Session flow (/checkout-session).
@@ -1442,7 +1443,15 @@ async def stripe_webhook(
             db, order, payment_row, background_tasks, order.user.email
         ):
             return APIResponse.success_response(_MANUAL_REVIEW_RESPONSE)
-    elif event.type == "payment_intent.payment_failed":
+    elif event.type in ("payment_intent.payment_failed", "payment_intent.canceled"):
+        # A canceled PaymentIntent (from the Dashboard, by the integration,
+        # or by Stripe after an abandoned authentication) can never be
+        # charged: the attempt is over, like a failed one. It used to be
+        # unhandled, so the attempt stayed "requires_action" and blocked
+        # every new attempt for the order while it was recent
+        # (_guard_no_attempt_in_flight). A succeeded intent cannot be
+        # canceled, and _apply_payment_failure leaves a succeeded attempt
+        # alone in any case.
         _apply_payment_failure(db, order, payment_row)
     elif event.type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
         # Backfill the real PaymentIntent id now that Stripe has attached
