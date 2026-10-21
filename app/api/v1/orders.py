@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from fastapi import status as http_status
@@ -1363,6 +1363,80 @@ async def refund_payment(
         status=refund_row.status,
         payment_status=order.payment_status,
     ))
+
+
+@router.get(
+    "/{order_id}/payments",
+    response_model=APIResponse[List[dict]],
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Order not found"},
+    },
+)
+async def list_order_payments(
+    order_id: int,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Every payment attempt of an order, oldest first, with its refunds and
+    disputes (admin only). Amounts are in major units, as everywhere in the
+    API. `requires_manual_review` on an attempt (a second charge, a success
+    for a cancelled order or for the wrong amount) or on a refund (one that
+    failed after it was recorded) marks what a person has to reconcile; an
+    open dispute (closed_at null) holds the order."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+    payments = db.query(Payment).filter(Payment.order_id == order.id).order_by(Payment.id).all()
+    payment_ids = [p.id for p in payments]
+    refunds = db.query(PaymentRefund).filter(
+        PaymentRefund.payment_id.in_(payment_ids)
+    ).order_by(PaymentRefund.id).all()
+    disputes = db.query(PaymentDispute).filter(
+        PaymentDispute.payment_id.in_(payment_ids)
+    ).order_by(PaymentDispute.id).all()
+    return APIResponse.success_response([
+        {
+            "id": p.id,
+            "status": p.status,
+            "amount": _cents_to_decimal(p.amount),
+            "amount_refunded": _cents_to_decimal(p.amount_refunded),
+            "currency": p.currency,
+            "transaction_id": p.payment_intent_id,
+            "checkout_session_id": p.checkout_session_id,
+            "requires_manual_review": p.requires_manual_review,
+            "created_at": p.created_at,
+            "refunds": [
+                {
+                    "id": r.refund_id,
+                    "amount": _cents_to_decimal(r.amount),
+                    "currency": r.currency,
+                    "status": r.status,
+                    "source": r.source,
+                    "failure_reason": r.failure_reason,
+                    "requires_manual_review": r.requires_manual_review,
+                    "created_at": r.created_at,
+                }
+                for r in refunds if r.payment_id == p.id
+            ],
+            "disputes": [
+                {
+                    "id": d.dispute_id,
+                    "amount": _cents_to_decimal(d.amount),
+                    "currency": d.currency,
+                    "status": d.status,
+                    "reason": d.reason,
+                    "closed_at": d.closed_at,
+                    "created_at": d.created_at,
+                }
+                for d in disputes if d.payment_id == p.id
+            ],
+        }
+        for p in payments
+    ])
 
 
 # Refund.status values (Stripe: pending, requires_action, succeeded, failed,
