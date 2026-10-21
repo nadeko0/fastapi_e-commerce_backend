@@ -126,3 +126,28 @@ def test_the_init_script_keeps_unix_line_endings():
     with open(os.path.join(_ROOT, _INIT_SCRIPT), "rb") as f:
         assert b"\r\n" not in f.read()
     assert re.search(r"^\*\.sh\s+text\s+eol=lf\s*$", _read(".gitattributes"), re.M)
+
+
+_PINNED = r"@sha256:[0-9a-f]{64}$"
+
+
+def test_base_images_are_pinned_by_digest_on_their_current_majors():
+    # A tag alone can point at a different image on the next pull: builds
+    # stop being reproducible and a replaced image is taken unnoticed. The
+    # tag stays in front of the digest for the reader (Docker uses the
+    # digest). Majors as they were: python 3.13, postgres 15, redis 7,
+    # uv 0.13.0.
+    dockerfile = _read("Dockerfile")
+    references = re.findall(r"^FROM (\S+)", dockerfile, re.M)
+    stages = set(re.findall(r"^FROM \S+ AS (\S+)", dockerfile, re.M))
+    references += [
+        ref for ref in re.findall(r"^COPY --from=(\S+)", dockerfile, re.M) if ref not in stages
+    ]
+    references += re.findall(r"^\s*image: (\S+)", _read("docker-compose.yml"), re.M)
+    expected_tags = [
+        "python:3.13-slim", "python:3.13-slim", "ghcr.io/astral-sh/uv:0.13.0",
+        "postgres:15-alpine", "redis:7-alpine",
+    ]
+    assert sorted(ref.split("@")[0] for ref in references) == sorted(expected_tags), references
+    for ref in references:
+        assert re.search(_PINNED, ref), ref

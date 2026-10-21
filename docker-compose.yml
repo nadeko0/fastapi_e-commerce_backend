@@ -151,7 +151,8 @@ services:
       disable: true
 
   db:
-    image: postgres:15-alpine
+    # Tag and digest, as in the Dockerfile (see the note there).
+    image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
     # max_connections: each API worker can open up to 2 x (DB_POOL_SIZE +
     # DB_MAX_OVERFLOW) connections (a sync and an async pool), so 4 workers
     # with the default 10 + 5 can reach 120, plus the Celery worker. The
@@ -187,7 +188,7 @@ services:
       - APP_DB_PASSWORD=${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env}
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     # One Redis holds the Celery broker queues, the token blacklist and
     # password-change watermarks, the rate-limit counters and every cart.
     # maxmemory: without it, growth (guest carts above all: anyone can make
