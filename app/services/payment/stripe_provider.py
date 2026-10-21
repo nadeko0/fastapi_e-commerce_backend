@@ -18,12 +18,11 @@ usage: https://docs.stripe.com/testing
 """
 import hashlib
 import hmac
-import json
 import time
 import uuid
 from typing import Any, Dict, Optional
 
-from app.services.payment.base import PaymentProvider
+from app.services.payment.base import PaymentProvider, webhook_event_from_payload
 from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
@@ -492,13 +491,4 @@ class StripePaymentProvider(PaymentProvider):
                 "Timestamp outside the tolerance zone", sig_header
             )
 
-        try:
-            body = json.loads(payload.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            raise SignatureVerificationError("Payload is not valid JSON", sig_header)
-
-        event_id = body.get("id") or f"evt_{uuid.uuid4().hex[:24]}"
-        event_type = body.get("type", "")
-        data = body.get("data", {})
-        created = body.get("created", timestamp)
-        return WebhookEventData(id=event_id, type=event_type, data=data, created=created)
+        return webhook_event_from_payload(payload, sig_header, timestamp)

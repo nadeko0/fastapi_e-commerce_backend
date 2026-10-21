@@ -1,7 +1,7 @@
 """
 Webhook signature verification, the same assertions against both
 providers: the mock (its own HMAC check) and the live one (which hands the
-check to the real stripe SDK, stripe.Webhook.construct_event - nothing is
+check to the real stripe SDK, stripe.WebhookSignature.verify_header - nothing is
 stubbed here). A webhook is the one request this application accepts from
 anyone without a login, so the two must agree on every header and body.
 
@@ -192,6 +192,39 @@ def test_a_v0_signature_next_to_a_valid_v1_is_ignored(provider):
     ts = _epoch(NOW)
     header = f"t={ts},v1={_signature(body, SECRET, ts)},v0={'0' * 64}"
     assert _verify(provider, body, header).id == "evt_1"
+
+
+# -- the body -------------------------------------------------------------------------
+
+def test_a_body_that_is_not_utf8_is_refused_even_unsigned(provider):
+    # Anyone can post this: with a made-up signature it must be a refusal
+    # (400), not an exception the route does not expect (500).
+    body = b"\xff\xfe{not utf-8"
+    _refused(provider, body, f"t={_epoch(NOW)},v1={'0' * 64}")
+
+
+def test_a_correctly_signed_body_that_is_not_utf8_is_refused(provider):
+    body = b"\xff\xfe{not utf-8"
+    _refused(provider, body, _header(body))
+
+
+def test_a_correctly_signed_body_that_is_not_json_is_refused(provider):
+    body = b"this is not json"
+    _refused(provider, body, _header(body))
+
+
+@pytest.mark.parametrize("body", [b"[1, 2]", b'"text"', b"null", b"42"])
+def test_a_correctly_signed_body_that_is_not_a_json_object_is_refused(provider, body):
+    _refused(provider, body, _header(body))
+
+
+def test_an_event_missing_optional_fields_gets_the_same_defaults(provider):
+    # Stripe always sends id, type, created and data; both providers fill
+    # the same defaults rather than one failing where the other does not.
+    body = json.dumps({"object": "event"}).encode()
+    event = _verify(provider, body, _header(body))
+    assert event.id.startswith("evt_")
+    assert (event.type, event.data, event.created) == ("", {}, _epoch(NOW))
 
 
 # -- the timestamp ------------------------------------------------------------------
