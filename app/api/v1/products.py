@@ -1,6 +1,9 @@
+import inspect
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -67,6 +70,25 @@ def _matches_text(text: str):
         Product.name.icontains(text, autoescape=True),
         Product.description.icontains(text, autoescape=True),
     )
+
+
+def _product_filter(**params) -> ProductFilter:
+    """Depends(ProductFilter), except that a check across parameters
+    (ProductFilter.validate_price_range) is answered 422 like any other bad
+    query parameter. FastAPI validates each parameter on its own and then
+    calls the class with the results; a ValidationError raised by that call
+    is not request validation to it, and came out as a 500."""
+    try:
+        return ProductFilter(**params)
+    except ValidationError as error:
+        raise RequestValidationError([
+            {**detail, "loc": ("query", *detail["loc"])}
+            for detail in error.errors(include_url=False, include_context=False)
+        ])
+
+
+# The parameters FastAPI reads from the request are the model's fields.
+_product_filter.__signature__ = inspect.signature(ProductFilter)
 
 
 @router.get("/categories", response_model=APIResponse[CategoryListResponse])
@@ -164,7 +186,7 @@ async def get_category(
 
 @router.get("/products", response_model=APIResponse[ProductListResponse])
 async def list_products(
-    filter_params: ProductFilter = Depends(),
+    filter_params: ProductFilter = Depends(_product_filter),
     db: AsyncSession = Depends(get_async_db),
     redis: RedisService = Depends(),
 ):

@@ -262,3 +262,18 @@ def test_list_products_with_characteristics_filter_does_not_crash(client, db_ses
     )
 
     assert response.status_code == 200
+
+
+def test_list_products_with_min_price_above_max_price_is_a_422_not_a_500(client):
+    # ProductFilter checks the pair in a validator that only runs when the
+    # model is built from the separately validated query parameters, which
+    # FastAPI does outside request validation: its ValidationError became a
+    # 500. It must be answered like any other invalid parameter.
+    response = client.get(
+        f"{CATALOG_PREFIX}/products", params={"min_price": "5", "max_price": "4.99"}
+    )
+
+    assert response.status_code == 422
+    (error,) = response.json()["detail"]
+    assert error["loc"] == ["query", "max_price"]
+    assert "max_price must be greater than min_price" in error["msg"]
