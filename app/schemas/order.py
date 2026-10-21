@@ -38,9 +38,6 @@ class OrderItemBase(BaseModel):
     def validate_price(cls, v):
         return Decimal(str(v)).quantize(Decimal('0.01'))
 
-class OrderItemCreate(OrderItemBase):
-    pass
-
 class OrderItemInDB(OrderItemBase):
     id: int
     order_id: int
@@ -90,24 +87,6 @@ class OrderItemResponse(OrderItemInDB):
 
 class OrderBase(BaseModel):
     shipping_address_id: int
-    delivery_instructions: Optional[str] = Field(None, max_length=500)
-
-class OrderCreate(OrderBase):
-    items: List[OrderItemCreate]
-
-    @validator('items')
-    def validate_items(cls, v):
-        if not v:
-            raise ValueError('Order must contain at least one item')
-        # Check for duplicates
-        product_ids = [item.product_id for item in v]
-        if len(product_ids) != len(set(product_ids)):
-            raise ValueError('Duplicate products in order')
-        return v
-
-class OrderUpdate(BaseModel):
-    status: Optional[OrderStatus] = None
-    payment_status: Optional[PaymentStatus] = None
     delivery_instructions: Optional[str] = Field(None, max_length=500)
 
 class OrderInDB(OrderBase):
