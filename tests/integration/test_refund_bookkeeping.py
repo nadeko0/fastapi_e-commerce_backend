@@ -8,6 +8,7 @@ before the provider was called.
 from datetime import timedelta
 
 import pytest
+from conftest import TestingSessionLocal
 from payment_support import (
     PAY_3DS,
     Shop,
@@ -18,6 +19,7 @@ from payment_support import (
 )
 
 from app.core.config import settings
+from app.models.payment import Payment
 from app.services.payment.stripe_provider import StripePaymentProvider
 
 
@@ -70,4 +72,67 @@ def test_refund_returns_the_charge_that_paid_the_order_not_a_flagged_second_one(
     assert response.status_code == 200, response.text
     assert payment_rows(shop, order["id"]) == [
         ("succeeded", 1999, 1999, "USD", False), ("succeeded", 1999, 0, "USD", True)]
+    assert order_state(shop, order["id"]) == ("confirmed", "refunded")
+
+
+def test_refunds_completing_at_the_same_time_are_both_counted(shop, monkeypatch):
+    # The route read the attempt, waited on the provider, and wrote back
+    # what it had read plus its own refund. A refund that completed in the
+    # meantime (another admin, a retried request with its own key) was
+    # overwritten: two refunds taken by Stripe, one recorded.
+    product = shop.product(price="19.99", stock=4)
+    buyer = shop.buyer()
+    admin = shop.admin()
+    order = shop.order_of(buyer, product)
+    assert shop.pay(buyer, order["id"]).status_code == 200
+    real_refund = StripePaymentProvider.create_refund
+
+    def _another_refund_completes_meanwhile(self, **kwargs):
+        other = real_refund(self, payment_intent_id=kwargs["payment_intent_id"],
+                            amount=500, idempotency_key="the-other-refund")
+        db = TestingSessionLocal()
+        try:
+            payment = db.query(Payment).filter(Payment.order_id == order["id"]).one()
+            payment.amount_refunded += other.amount
+            db.commit()
+        finally:
+            db.close()
+        return real_refund(self, **kwargs)
+
+    monkeypatch.setattr(StripePaymentProvider, "create_refund", _another_refund_completes_meanwhile)
+
+    response = shop.refund(admin, order["id"], amount="4.99")
+
+    assert response.status_code == 200, response.text
+    assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 999, "USD", False)]
+    assert order_state(shop, order["id"]) == ("confirmed", "paid")
+
+
+def test_concurrent_refunds_adding_up_to_the_charge_mark_the_order_refunded(shop, monkeypatch):
+    product = shop.product(price="19.99", stock=4)
+    buyer = shop.buyer()
+    admin = shop.admin()
+    order = shop.order_of(buyer, product)
+    assert shop.pay(buyer, order["id"]).status_code == 200
+    real_refund = StripePaymentProvider.create_refund
+
+    def _another_refund_completes_meanwhile(self, **kwargs):
+        other = real_refund(self, payment_intent_id=kwargs["payment_intent_id"],
+                            amount=1000, idempotency_key="the-other-refund")
+        db = TestingSessionLocal()
+        try:
+            payment = db.query(Payment).filter(Payment.order_id == order["id"]).one()
+            payment.amount_refunded += other.amount
+            db.commit()
+        finally:
+            db.close()
+        return real_refund(self, **kwargs)
+
+    monkeypatch.setattr(StripePaymentProvider, "create_refund", _another_refund_completes_meanwhile)
+
+    response = shop.refund(admin, order["id"], amount="9.99")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["payment_status"] == "refunded"
+    assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 1999, "USD", False)]
     assert order_state(shop, order["id"]) == ("confirmed", "refunded")
