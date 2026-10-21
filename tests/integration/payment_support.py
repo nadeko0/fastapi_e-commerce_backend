@@ -176,7 +176,8 @@ class Shop:
 
     def order_of(self, buyer: Buyer, product, quantity=1) -> dict:
         """Cart one product and place the order; the order as returned."""
-        assert self.add_to_cart(buyer, product, quantity).status_code == 200
+        added = self.add_to_cart(buyer, product, quantity)
+        assert added.status_code == 200, added.text
         response = self.place_order(buyer)
         assert response.status_code == 200, response.text
         return response.json()["data"]
