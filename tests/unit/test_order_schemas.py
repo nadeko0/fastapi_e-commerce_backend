@@ -111,3 +111,23 @@ def test_checkout_redirects_may_be_left_out_or_null():
     assert CheckoutSessionCreate().success_url is None
     body = CheckoutSessionCreate.model_validate({"success_url": None, "cancel_url": None})
     assert (body.success_url, body.cancel_url) == (None, None)
+
+
+# An amount too large for the validator's quantize (a 28-digit Decimal
+# context) raised decimal.InvalidOperation out of the validator. That is
+# not a ValueError, so pydantic did not turn it into a validation error:
+# POST /orders/{id}/pay or /refund with {"amount": 1e30} answered 500.
+# Order totals are Numeric(10, 2), so no amount past that is ever payable.
+@pytest.mark.parametrize("amount", ["1e30", "1E+400", "123456789012345678901234567.89",
+                                    "10000000000", "123456789.123"])
+def test_an_amount_beyond_any_order_total_is_a_validation_error(amount):
+    with pytest.raises(ValidationError):
+        PaymentCreate(order_id=1, payment_method="stripe", amount=amount)
+    with pytest.raises(ValidationError):
+        RefundCreate(amount=amount)
+
+
+def test_the_largest_order_total_is_still_accepted():
+    assert RefundCreate(amount="99999999.99").amount == Decimal("99999999.99")
+    assert PaymentCreate(order_id=1, payment_method="stripe",
+                         amount="99999999.99").amount == Decimal("99999999.99")
