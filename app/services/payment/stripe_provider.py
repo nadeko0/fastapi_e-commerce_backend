@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from app.services.payment.base import PaymentProvider, webhook_event_from_payload
 from app.services.payment.exceptions import (
@@ -39,15 +39,104 @@ from app.services.payment.types import (
     WebhookEventData,
 )
 
-# Sentinel payment_method tokens that pick a deterministic mock outcome,
-# named after Stripe's real test-mode tokens for familiarity. Stripe's
-# generic decline card is pm_card_visa_chargeDeclined; the mock used to know
-# only pm_card_chargeDeclined, which is not a Stripe test card, and charged
-# Stripe's own decline card successfully. The old token still declines.
+# The tokens tests use most, named after Stripe's test cards (see the tables
+# below for all of them). Stripe's generic decline card is
+# pm_card_visa_chargeDeclined; the mock used to know only
+# pm_card_chargeDeclined, which is not a Stripe test card, and charged
+# Stripe's own decline card successfully.
 TOKEN_DECLINE = "pm_card_visa_chargeDeclined"
-_LEGACY_TOKEN_DECLINE = "pm_card_chargeDeclined"
 TOKEN_REQUIRES_ACTION = "pm_card_authenticationRequired"
 TOKEN_SUCCESS_DEFAULT = "pm_card_visa"
+TOKEN_PENDING_REFUND = "pm_card_pendingRefund"
+TOKEN_REFUND_FAIL = "pm_card_refundFail"
+
+# -- Stripe's test PaymentMethods -----------------------------------------------
+#
+# The mock answers the test PaymentMethods of https://docs.stripe.com/testing
+# (read in October 2026) the way that page says Stripe does, keyed by the same
+# pm_ ids, so a test reads like Stripe's guide. Error codes, decline codes and
+# statuses are the guide's; the messages are the mock's own wording.
+
+# Cards whose charge succeeds without asking for anything ("Cards by brand",
+# co-branded, "Cards by country", the 3D Secure "Supported" and "Not
+# supported" rows, and the asynchronous-refund cards). Any token not named in
+# the tables below behaves the same - a PaymentMethod id from Stripe.js in
+# test mode too - so this set is the documented list, not a gate.
+SUCCEEDING_TOKENS = frozenset({
+    "pm_card_visa", "pm_card_visa_debit", "pm_card_mastercard", "pm_card_mastercard_debit",
+    "pm_card_mastercard_prepaid", "pm_card_amex", "pm_card_discover", "pm_card_diners",
+    "pm_card_jcb", "pm_card_unionpay", "pm_card_visa_cartesBancaires",
+    "pm_card_mastercard_cartesBancaires", "pm_card_visa_debit_eftposAuCoBranded",
+    "pm_card_mastercard_debit_eftposAuCoBranded",
+    "pm_card_us", "pm_card_ar", "pm_card_br", "pm_card_ca", "pm_card_cl", "pm_card_co",
+    "pm_card_cr", "pm_card_ec", "pm_card_mx", "pm_card_pa", "pm_card_py", "pm_card_pe",
+    "pm_card_uy", "pm_card_ae", "pm_card_ae_mastercard", "pm_card_at", "pm_card_be",
+    "pm_card_bg", "pm_card_by", "pm_card_hr", "pm_card_cy", "pm_card_cz", "pm_card_dk",
+    "pm_card_ee", "pm_card_fi", "pm_card_fr", "pm_card_de", "pm_card_gi", "pm_card_gr",
+    "pm_card_hu", "pm_card_ie", "pm_card_it", "pm_card_lv", "pm_card_li", "pm_card_lt",
+    "pm_card_lu", "pm_card_mt", "pm_card_nl", "pm_card_no", "pm_card_pl", "pm_card_pt",
+    "pm_card_ro", "pm_card_si", "pm_card_sk", "pm_card_es", "pm_card_se", "pm_card_ch",
+    "pm_card_gb", "pm_card_gb_debit", "pm_card_gb_mastercard", "pm_card_au", "pm_card_cn",
+    "pm_card_hk", "pm_card_in", "pm_card_jp", "pm_card_my", "pm_card_nz", "pm_card_sg",
+    "pm_card_tw", "pm_card_th_credit", "pm_card_th_debit",
+    "pm_card_threeDSecureOptional", "pm_card_amex_threeDSecureNotSupported",
+    "pm_card_pendingRefund", "pm_card_refundFail",
+})
+
+_DECLINED = "Your card was declined."
+
+# Cards whose confirmation is declined: token -> (error code, decline code,
+# message). "Declined payments" table; decline code None where the guide
+# gives none.
+DECLINING_TOKENS: Dict[str, Tuple[str, Optional[str], str]] = {
+    "pm_card_visa_chargeDeclined": ("card_declined", "generic_decline", _DECLINED),
+    "pm_card_visa_chargeDeclinedInsufficientFunds": (
+        "card_declined", "insufficient_funds", "Your card has insufficient funds."),
+    "pm_card_visa_chargeDeclinedLostCard": ("card_declined", "lost_card", _DECLINED),
+    "pm_card_visa_chargeDeclinedStolenCard": ("card_declined", "stolen_card", _DECLINED),
+    "pm_card_chargeDeclinedExpiredCard": ("expired_card", None, "Your card has expired."),
+    "pm_card_chargeDeclinedIncorrectCvc": (
+        "incorrect_cvc", None, "Your card's security code is incorrect."),
+    "pm_card_chargeDeclinedProcessingError": (
+        "processing_error", None, "An error occurred while processing your card."),
+    "pm_card_visa_chargeDeclinedVelocityLimitExceeded": (
+        "card_declined", "card_velocity_exceeded", _DECLINED),
+    # "Blocked payments return card errors with an error code of fraud"
+    # (Fraud prevention). Stripe's error-code list has no "fraud"; its
+    # decline-code list has "fraudulent" ("declined because Stripe suspects
+    # that it's fraudulent"), which is what the mock answers, under the
+    # card_declined code every decline carries.
+    "pm_card_radarBlock": ("card_declined", "fraudulent", _DECLINED),
+    # 3D Secure "Required | Error": the 3D Secure lookup fails and "payments
+    # are declined with a card_declined failure code" - at confirmation,
+    # before any authentication.
+    "pm_card_threeDSecureRequiredProcessingError": (
+        "card_declined", "processing_error", _DECLINED),
+    # Not a Stripe test card (Stripe's generic decline is
+    # pm_card_visa_chargeDeclined, above): this mock's own decline token
+    # before it followed the guide, kept so callers written against it still
+    # get a decline. Against Stripe it does not exist.
+    "pm_card_chargeDeclined": ("card_declined", "generic_decline", _DECLINED),
+}
+
+# Cards that need 3D Secure: confirming returns requires_action; once the
+# customer has authenticated (a second confirm, in the mock) the payment
+# succeeds (None) or is declined with the given (code, decline code,
+# message). "3D Secure" table and "Always authenticate".
+AUTHENTICATING_TOKENS: Dict[str, Optional[Tuple[str, Optional[str], str]]] = {
+    "pm_card_authenticationRequired": None,
+    "pm_card_threeDSecure2Required": None,
+    # "declined with a card_declined failure code after authentication";
+    # generic_decline as the decline code, the guide giving none.
+    "pm_card_threeDSecureRequiredChargeDeclined": ("card_declined", "generic_decline", _DECLINED),
+}
+
+# Asynchronous refunds: token -> (status a refund starts in, status it ends
+# in "some time later", the event Stripe sends then). "Refunds" table.
+ASYNC_REFUND_TOKENS: Dict[str, Tuple[RefundStatus, RefundStatus, str]] = {
+    "pm_card_pendingRefund": (RefundStatus.PENDING, RefundStatus.SUCCEEDED, "refund.updated"),
+    "pm_card_refundFail": (RefundStatus.SUCCEEDED, RefundStatus.FAILED, "refund.failed"),
+}
 
 DEFAULT_WEBHOOK_TOLERANCE_SECONDS = 300
 
@@ -137,6 +226,7 @@ class StripePaymentProvider(PaymentProvider):
     _sessions_by_key: Dict[str, CheckoutSession] = {}
     _sessions_by_id: Dict[str, CheckoutSession] = {}
     _refunds_by_key: Dict[str, Refund] = {}
+    _refunds_by_id: Dict[str, Refund] = {}
 
     @classmethod
     def reset_mock_state(cls) -> None:
@@ -145,6 +235,7 @@ class StripePaymentProvider(PaymentProvider):
         cls._sessions_by_key.clear()
         cls._sessions_by_id.clear()
         cls._refunds_by_key.clear()
+        cls._refunds_by_id.clear()
 
     def _simulate_network_call(self) -> None:
         """No-op hook standing in for the real HTTP call to api.stripe.com.
@@ -234,23 +325,20 @@ class StripePaymentProvider(PaymentProvider):
 
         if intent.status == PaymentIntentStatus.REQUIRES_ACTION:
             # Simulates the customer having completed 3D Secure
-            # authentication out-of-band; a follow-up confirm finalizes it.
-            intent.status = PaymentIntentStatus.SUCCEEDED
+            # authentication out-of-band; a follow-up confirm finalizes it:
+            # the payment succeeds, or is declined for a card the guide
+            # declines after authentication.
             intent.next_action = None
+            after_authentication = AUTHENTICATING_TOKENS.get(intent.payment_method)
+            if after_authentication is not None:
+                self._decline(intent, *after_authentication)
+            intent.status = PaymentIntentStatus.SUCCEEDED
             return intent
 
         token = intent.payment_method or TOKEN_SUCCESS_DEFAULT
-        if token in (TOKEN_DECLINE, _LEGACY_TOKEN_DECLINE):
-            intent.status = PaymentIntentStatus.REQUIRES_PAYMENT_METHOD
-            intent.last_payment_error = {
-                "code": "card_declined",
-                "decline_code": "generic_decline",
-                "message": "Your card was declined.",
-            }
-            raise CardError(
-                "Your card was declined.", code="card_declined", decline_code="generic_decline"
-            )
-        if token == TOKEN_REQUIRES_ACTION:
+        if token in DECLINING_TOKENS:
+            self._decline(intent, *DECLINING_TOKENS[token])
+        if token in AUTHENTICATING_TOKENS:
             intent.status = PaymentIntentStatus.REQUIRES_ACTION
             # The shape Stripe returns when a return_url is confirmed with
             # (seen by tests/integration/test_payment_live_stripe.py against
@@ -268,6 +356,21 @@ class StripePaymentProvider(PaymentProvider):
 
         intent.status = PaymentIntentStatus.SUCCEEDED
         return intent
+
+    @staticmethod
+    def _decline(
+        intent: PaymentIntent, code: str, decline_code: Optional[str], message: str
+    ) -> None:
+        """Declines `intent` as Stripe does: the intent stays, waiting for
+        another payment method, with the error recorded on it, and the
+        confirm call raises a card error."""
+        intent.status = PaymentIntentStatus.REQUIRES_PAYMENT_METHOD
+        intent.last_payment_error = {
+            "code": code,
+            "decline_code": decline_code,
+            "message": message,
+        }
+        raise CardError(message, code=code, decline_code=decline_code)
 
     def retrieve_payment_intent(self, payment_intent_id: str) -> PaymentIntent:
         self._simulate_network_call()
@@ -418,16 +521,77 @@ class StripePaymentProvider(PaymentProvider):
             )
 
         intent.amount_refunded += refund_amount
+        # A card from the guide's "Refunds" table starts its refund in the
+        # status the guide gives (pending for pm_card_pendingRefund); every
+        # other refund succeeds at once. settle_refund moves it on.
+        first_status = ASYNC_REFUND_TOKENS.get(
+            intent.payment_method, (RefundStatus.SUCCEEDED,)
+        )[0]
         refund = Refund(
             id=f"re_{uuid.uuid4().hex[:24]}",
             payment_intent=payment_intent_id,
             amount=refund_amount,
             currency=intent.currency,
-            status=RefundStatus.SUCCEEDED,
+            status=first_status,
         )
+        self._refunds_by_id[refund.id] = refund
         if idempotency_key is not None:
             self._refunds_by_key[idempotency_key] = refund
         return refund
+
+    @classmethod
+    def settle_refund(cls, refund_id: str) -> Dict[str, Any]:
+        """Test hook for Stripe finishing an asynchronous refund "some time
+        later" (docs.stripe.com/testing, "Refunds"): pm_card_pendingRefund's
+        refund goes from pending to succeeded and Stripe sends
+        refund.updated; pm_card_refundFail's from succeeded to failed, the
+        amount becomes refundable again, and Stripe sends refund.failed.
+
+        Updates the refund the mock holds and returns the event Stripe would
+        send, as the webhook's parsed JSON body (Stripe's wire format: a
+        lower-case currency). To post it:
+        body = json.dumps(event).encode(); header = sign_payload(body, secret).
+        """
+        refund = cls._refunds_by_id.get(refund_id)
+        if refund is None:
+            raise CardError(f"No such refund: '{refund_id}'", code="resource_missing")
+        intent = cls._intents_by_id[refund.payment_intent]
+        plan = ASYNC_REFUND_TOKENS.get(intent.payment_method)
+        if plan is None or refund.status != plan[0]:
+            raise ValueError(f"Refund {refund_id} has nothing left to settle")
+        _, final_status, event_type = plan
+        refund.status = final_status
+        failure_reason = None
+        if final_status == RefundStatus.FAILED:
+            # The money did not go back to the customer: it can be refunded
+            # again. "unknown" is one of the Refund object's documented
+            # failure_reason values; the guide does not say which this card
+            # reports.
+            intent.amount_refunded -= refund.amount
+            failure_reason = "unknown"
+        return cls.webhook_event(event_type, {
+            "id": refund.id,
+            "object": "refund",
+            "amount": refund.amount,
+            "currency": refund.currency.lower(),
+            "payment_intent": refund.payment_intent,
+            "status": refund.status.value,
+            "failure_reason": failure_reason,
+            "created": int(time.time()),
+        })
+
+    @staticmethod
+    def webhook_event(event_type: str, data_object: Dict[str, Any]) -> Dict[str, Any]:
+        """The body of a webhook Stripe would send about `data_object`: a v1
+        snapshot event (https://docs.stripe.com/api/events/object)."""
+        return {
+            "id": f"evt_{uuid.uuid4().hex[:24]}",
+            "object": "event",
+            "type": event_type,
+            "created": int(time.time()),
+            "livemode": False,
+            "data": {"object": data_object},
+        }
 
     # -- Webhooks --------------------------------------------------------
 
