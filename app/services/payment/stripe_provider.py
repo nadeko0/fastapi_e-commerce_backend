@@ -248,9 +248,17 @@ class StripePaymentProvider(PaymentProvider):
             )
         if token == TOKEN_REQUIRES_ACTION:
             intent.status = PaymentIntentStatus.REQUIRES_ACTION
+            # The shape Stripe returns when a return_url is confirmed with
+            # (seen by tests/integration/test_payment_live_stripe.py against
+            # Stripe's test mode): a redirect to the authentication page,
+            # which sends the customer back to return_url. The mock used to
+            # answer "use_stripe_sdk" and drop the return_url.
             intent.next_action = {
-                "type": "use_stripe_sdk",
-                "use_stripe_sdk": {"type": "three_d_secure_redirect"},
+                "type": "redirect_to_url",
+                "redirect_to_url": {
+                    "url": f"https://checkout.stripe.com/mock/authenticate/{intent.id}",
+                    "return_url": return_url,
+                },
             }
             return intent
 
