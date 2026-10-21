@@ -30,6 +30,7 @@ _PRODUCTION_ENV = {
     "STRIPE_WEBHOOK_SECRET": "whsec_" + "w" * 32,
     "PAYMENT_PROVIDER": "stripe",
     "FRONTEND_URL": "https://shop.example",
+    "PUBLIC_BASE_URL": "https://api.shop.example",
     "STRIPE_SECRET_KEY": "stripe-secret-key-for-tests-not-a-real-key",
 }
 

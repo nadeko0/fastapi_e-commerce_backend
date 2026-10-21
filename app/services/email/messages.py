@@ -162,7 +162,7 @@ def send_low_stock_alert_email(to_email: str, products: List[Product]) -> bool:
     )
 
 def send_welcome_email(to_email: str, full_name: str, verification_token: str) -> bool:
-    base_url = f"http://localhost:{settings.PORT}"
+    base_url = settings.PUBLIC_BASE_URL
     verification_link = f"{base_url}{settings.API_V1_STR}/users/verify-email/{verification_token}"
     # full_name is attacker-controlled (the caller-supplied name at
     # registration, app/api/v1/users.py) and was previously interpolated
@@ -238,7 +238,7 @@ def send_account_exists_email(to_email: str) -> bool:
     )
 
 def send_email_verification(to_email: str, verification_token: str) -> bool:
-    base_url = f"http://localhost:{settings.PORT}"
+    base_url = settings.PUBLIC_BASE_URL
     verification_link = f"{base_url}{settings.API_V1_STR}/users/verify-email/{verification_token}"
 
     html_content = f"""
@@ -265,7 +265,7 @@ def send_email_verification(to_email: str, verification_token: str) -> bool:
     )
 
 def send_password_reset_email(to_email: str, reset_token: str) -> bool:
-    base_url = f"http://localhost:{settings.PORT}"
+    base_url = settings.PUBLIC_BASE_URL
     reset_link = f"{base_url}{settings.API_V1_STR}/users/password/reset/{reset_token}"
 
     html_content = f"""

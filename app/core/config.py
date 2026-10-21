@@ -63,6 +63,25 @@ class Settings(BaseSettings):
     WORKERS: int = 4
     RELOAD: bool = False
 
+    # Where the API is reached from outside, e.g. "https://shop.example.com":
+    # every link in an email (verification, password reset) starts with it.
+    # Must be https anywhere but development, since those links carry
+    # tokens. Unset in development means http://localhost:{PORT}; unset
+    # anywhere else stops the application at startup - the localhost
+    # default must never quietly become the link a customer gets.
+    PUBLIC_BASE_URL: Optional[str] = None
+
+    @validator("PUBLIC_BASE_URL", always=True)
+    def validate_public_base_url(cls, v: Optional[str], values: dict) -> Optional[str]:
+        if v is None:
+            # Only where nothing is deployed may links point at this machine.
+            # A deployment gets no default: check_deployment_settings refuses
+            # to start without an https URL.
+            if values.get("ENVIRONMENT") in _UNDEPLOYED_ENVIRONMENTS:
+                return f"http://localhost:{values.get('PORT', 8000)}"
+            return None
+        return v.rstrip("/")
+
     @validator("WORKERS", pre=True)
     def validate_workers(cls, v: int, values: dict) -> int:
         if values.get("ENVIRONMENT") == "development":
@@ -396,6 +415,9 @@ class Settings(BaseSettings):
         # Paying customers are sent back here from Stripe Checkout.
         if not self.FRONTEND_URL.startswith("https://"):
             problems.append("FRONTEND_URL must be an https:// URL")
+        # Verification and password-reset links in emails point here.
+        if not (self.PUBLIC_BASE_URL or "").startswith("https://"):
+            problems.append("PUBLIC_BASE_URL must be set to an https:// URL")
         if problems:
             raise ValueError(
                 f"ENVIRONMENT={self.ENVIRONMENT!r} is not deployable: " + "; ".join(problems)

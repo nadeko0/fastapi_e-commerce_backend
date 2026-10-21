@@ -438,6 +438,22 @@ def _can_log_in(client, email, password):
     return response.status_code == 200
 
 
+def test_checking_a_reset_token_does_not_reveal_whose_it_is(
+    client, monkeypatch, valid_registration_payload
+):
+    # The link travels in a URL; whoever sees it must not learn the email
+    # it belongs to just by opening it.
+    email = valid_registration_payload["email"]
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    token = _emailed_reset_token(client, monkeypatch, email)
+
+    response = client.get(f"{API_PREFIX}/password/reset/{token}")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"message": "Token is valid"}
+    assert email not in response.text
+
+
 def test_a_used_password_reset_token_cannot_be_used_again(
     client, monkeypatch, valid_registration_payload
 ):

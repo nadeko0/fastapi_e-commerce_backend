@@ -33,6 +33,7 @@ def _settings(environment="production", **overrides):
         ENVIRONMENT=environment,
         PAYMENT_PROVIDER="stripe",
         FRONTEND_URL="https://shop.example",
+        PUBLIC_BASE_URL="https://api.shop.example",
         **{**_GOOD_SECRETS, **overrides},
     )
 

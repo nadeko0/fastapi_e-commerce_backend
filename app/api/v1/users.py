@@ -1014,9 +1014,10 @@ async def validate_reset_token(
         # Already used, or the password has changed since it was issued.
         raise _invalid_reset_token()
 
+    # No email in the answer: the token travels in a URL, and whoever sees
+    # it must not learn whose account it opens just by checking it.
     return APIResponse.success_response({
-        "message": "Token is valid",
-        "email": email
+        "message": "Token is valid"
     })
 
 @router.post(
