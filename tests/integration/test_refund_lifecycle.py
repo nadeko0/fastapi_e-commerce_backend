@@ -310,3 +310,39 @@ def test_a_refund_of_a_flagged_second_charge_leaves_the_order_alone(shop, paid):
         ("succeeded", 1999, 0, "USD", False), ("succeeded", 1999, 1999, "USD", True)]
     assert order_state(shop, order_id) == ("confirmed", "paid")
     assert second.amount_refunded == 0
+
+
+# -- Odd reports ---------------------------------------------------------------------
+
+def test_a_refund_first_seen_as_failed_is_recorded_but_not_counted(shop, paid):
+    # refund.failed for a Dashboard refund whose refund.created never came
+    # (or came later): kept for the record, no money counted as returned.
+    order_id = paid["order"]["id"]
+
+    response = shop.webhook("refund.failed", _refund_object(
+        paid["payment"], "re_never_seen", 500, "failed", failure_reason="declined"))
+
+    assert response.status_code == 200
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 0, "USD", False)]
+    assert _ledger(shop, order_id) == [("re_", 500, "failed", "provider", False)]
+    assert order_state(shop, order_id) == ("confirmed", "paid")
+
+
+def test_a_refund_event_with_an_expanded_payment_intent_is_matched(shop, paid):
+    obj = _refund_object(paid["payment"], "re_expanded", 300, "succeeded")
+    obj["payment_intent"] = {"id": paid["payment"].payment_intent_id, "object": "payment_intent"}
+
+    shop.webhook("refund.created", obj)
+
+    assert payment_rows(shop, paid["order"]["id"]) == [("succeeded", 1999, 300, "USD", False)]
+
+
+@pytest.mark.parametrize("amount", [None, 0, -5, "500", True])
+def test_an_unknown_refund_without_a_usable_amount_is_not_recorded(shop, paid, amount):
+    obj = _refund_object(paid["payment"], "re_no_amount", amount, "succeeded")
+
+    response = shop.webhook("refund.created", obj)
+
+    assert response.status_code == 200
+    assert payment_rows(shop, paid["order"]["id"]) == [("succeeded", 1999, 0, "USD", False)]
+    assert _ledger(shop, paid["order"]["id"]) == []
