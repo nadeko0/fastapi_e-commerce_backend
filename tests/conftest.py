@@ -8,6 +8,10 @@ os.environ.setdefault("POSTGRES_SERVER", "localhost")
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
 os.environ.setdefault("POSTGRES_DB", "test")
+# The suite runs as development whatever a developer's .env says: a .env set
+# to production would otherwise make Settings refuse to load (placeholder
+# secrets, the mock payment provider), and the results would depend on it.
+os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("REDIS_HOST", "localhost")
 # Nothing listens on port 1. Tests use a fake Redis; one that slips past it
 # must fail here exactly as in CI (which has no Redis), not quietly use a
