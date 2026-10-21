@@ -122,11 +122,18 @@ class OrderListResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+# Order.total_amount is Numeric(10, 2), so no amount paid or refunded for an
+# order has more digits than that. Checked by the amount fields themselves,
+# before their validators quantize: quantize raises decimal.InvalidOperation
+# past its 28-digit context, which pydantic does not turn into a 422, so
+# {"amount": 1e30} used to answer 500.
+ORDER_AMOUNT_MAX_DIGITS = 10
+
 class PaymentCreate(BaseModel):
     """Schema for payment processing"""
     order_id: int
     payment_method: str = Field(..., pattern="^(stripe|paypal)$")
-    amount: Decimal
+    amount: Decimal = Field(..., max_digits=ORDER_AMOUNT_MAX_DIGITS)
     # Optional: the order is always charged in its own currency
     # (Order.currency). A client may still send the code it expects to pay
     # in; one that differs is rejected with 400, the same as an amount that
@@ -227,7 +234,8 @@ class CheckoutSessionResponse(BaseModel):
 class RefundCreate(BaseModel):
     """Schema for issuing a refund on a paid order."""
     amount: Optional[Decimal] = Field(
-        None, gt=0, description="Amount to refund; omit for a full refund"
+        None, gt=0, max_digits=ORDER_AMOUNT_MAX_DIGITS,
+        description="Amount to refund; omit for a full refund",
     )
 
     @validator('amount')
