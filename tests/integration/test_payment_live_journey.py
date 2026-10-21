@@ -57,8 +57,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 SUCCEEDING = ["pm_card_visa", "pm_card_mastercard", "pm_card_amex", "pm_card_jcb",
-              "pm_card_unionpay", "pm_card_de", "pm_card_gb", "pm_card_jp", "pm_card_br",
-              "pm_card_in"]
+              "pm_card_unionpay", "pm_card_de", "pm_card_gb", "pm_card_jp", "pm_card_br"]
 DECLINED = ["pm_card_visa_chargeDeclined", "pm_card_visa_chargeDeclinedInsufficientFunds",
             "pm_card_visa_chargeDeclinedLostCard", "pm_card_visa_chargeDeclinedStolenCard",
             "pm_card_chargeDeclinedExpiredCard", "pm_card_chargeDeclinedIncorrectCvc",
@@ -66,7 +65,20 @@ DECLINED = ["pm_card_visa_chargeDeclined", "pm_card_visa_chargeDeclinedInsuffici
             "pm_card_visa_chargeDeclinedVelocityLimitExceeded", "pm_card_radarBlock"]
 THREE_DS_REQUIRED = ["pm_card_threeDSecure2Required",
                      "pm_card_threeDSecureRequiredChargeDeclined",
-                     "pm_card_threeDSecureRequiredProcessingError"]
+                     "pm_card_threeDSecureRequiredProcessingError",
+                     # Indian cards are authenticated (RBI rules): Stripe's test
+                     # mode answers requires_action for the India test card.
+                     "pm_card_in"]
+# Refunds made with pm_card_pendingRefund / pm_card_refundFail reach their final
+# status minutes later in test mode, too late for an ordinary run. What Stripe
+# reports at once is always checked; waiting for the final status is opt-in.
+_SLOW = os.environ.get("STRIPE_LIVE_SLOW") == "1"
+_SLOW_TIMEOUT = 15 * 60
+
+
+def _final_status_or_skip():
+    if not _SLOW:
+        pytest.skip("Stripe settles this refund minutes later; set STRIPE_LIVE_SLOW=1 to wait for it")
 
 
 @pytest.fixture
@@ -249,7 +261,8 @@ def test_a_pending_refund_is_completed_when_stripe_says_so(shop, stripe_sdk):
     body = response.json()["data"]
     assert (body["status"], body["payment_status"]) == ("pending", "paid")
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
-    refund = _wait_for_refund(stripe_sdk, body["id"], {"succeeded", "failed"})
+    _final_status_or_skip()
+    refund = _wait_for_refund(stripe_sdk, body["id"], {"succeeded", "failed"}, timeout=_SLOW_TIMEOUT)
     assert refund.status == "succeeded"
     assert _deliver(shop, "refund.updated", refund.to_dict()).status_code == 200
     assert order_state(shop, order["id"]) == ("confirmed", "refunded")
@@ -264,7 +277,11 @@ def test_a_refund_that_fails_later_is_undone_and_flagged(shop, stripe_sdk):
     response = shop.refund(admin, order["id"])
 
     assert response.status_code == 200, response.text
-    refund = _wait_for_refund(stripe_sdk, response.json()["data"]["id"], {"failed"})
+    # Stripe reports this refund succeeded at first, and the app counts it.
+    assert response.json()["data"]["status"] == "succeeded"
+    assert order_state(shop, order["id"]) == ("confirmed", "refunded")
+    _final_status_or_skip()
+    refund = _wait_for_refund(stripe_sdk, response.json()["data"]["id"], {"failed"}, timeout=_SLOW_TIMEOUT)
     assert refund.status == "failed"
     delivered = _deliver(shop, "refund.failed", refund.to_dict())
     assert delivered.json()["data"]["requires_manual_review"] is True
