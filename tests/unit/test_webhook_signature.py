@@ -245,3 +245,61 @@ def test_a_signature_a_little_in_the_future_is_accepted(provider, ahead):
     # Clock skew between Stripe and this server, within the same window.
     ts = _epoch(NOW) + ahead
     assert _verify(provider, _body(), _header(_body(), timestamp=ts)).id == "evt_1"
+
+
+@pytest.mark.parametrize("ahead", [TOLERANCE + 1, 3600, 86400 * 365 * 10])
+def test_a_signature_from_further_in_the_future_is_refused(provider, ahead):
+    # A signature dated ahead would otherwise stay valid until that date
+    # plus the tolerance: one captured delivery could be replayed for years.
+    _refused(provider, _body(), _header(_body(), timestamp=_epoch(NOW) + ahead))
+
+
+def test_a_zero_tolerance_accepts_only_the_current_second(provider):
+    # Stripe's library treats a tolerance of 0 as "do not check the
+    # timestamp at all"; both providers treat it as a window of zero
+    # seconds instead, so a misconfigured 0 refuses webhooks (visible)
+    # rather than accepting replays forever (silent).
+    body = _body()
+    assert _verify(provider, body, _header(body), tolerance=0).id == "evt_1"
+    _refused(provider, body, _header(body, timestamp=_epoch(NOW) - 1), tolerance=0)
+    _refused(provider, body, _header(body, timestamp=_epoch(NOW) - 86400), tolerance=0)
+
+
+# -- time zones -----------------------------------------------------------------------
+#
+# The check compares epoch seconds (time.time()) with the header's epoch
+# timestamp, so it cannot depend on the local zone or on a calendar
+# boundary. Checked at instants where a local-time computation would go
+# wrong: midnight UTC, month, year and leap-day ends, and the daylight
+# saving changes of Europe and the US - each with the frozen clock shifted
+# to a range of local offsets (freezegun's tz_offset changes local time,
+# not UTC).
+
+AWKWARD_INSTANTS = {
+    "midnight UTC": datetime(2026, 10, 22, 0, 0, 0, tzinfo=timezone.utc),
+    "end of a 31-day month": datetime(2026, 10, 31, 23, 59, 59, tzinfo=timezone.utc),
+    "new year": datetime(2027, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+    "end of February in a leap year": datetime(2028, 2, 29, 23, 59, 59, tzinfo=timezone.utc),
+    "EU summer time begins": datetime(2026, 3, 29, 1, 0, 0, tzinfo=timezone.utc),
+    "EU summer time ends": datetime(2026, 10, 25, 1, 0, 0, tzinfo=timezone.utc),
+    "US daylight time begins": datetime(2026, 3, 8, 7, 0, 0, tzinfo=timezone.utc),
+    "US daylight time ends": datetime(2026, 11, 1, 6, 0, 0, tzinfo=timezone.utc),
+}
+LOCAL_OFFSETS = [-12, -5, 0, 1, 2, 5.5, 14]
+
+
+@pytest.mark.parametrize("instant", list(AWKWARD_INSTANTS), ids=list(AWKWARD_INSTANTS))
+@pytest.mark.parametrize("offset", LOCAL_OFFSETS)
+def test_the_tolerance_window_is_the_same_at_any_instant_in_any_zone(provider, instant, offset):
+    moment = AWKWARD_INSTANTS[instant]
+    ts = _epoch(moment)
+    body = _body(created=ts)
+    with freeze_time(moment, tz_offset=offset):
+        assert _verify(provider, body, _header(body, timestamp=ts)).created == ts
+        assert _verify(provider, body, _header(body, timestamp=ts - TOLERANCE)).id == "evt_1"
+        assert _verify(provider, body, _header(body, timestamp=ts + TOLERANCE)).id == "evt_1"
+        _refused(provider, body, _header(body, timestamp=ts - TOLERANCE - 1))
+        _refused(provider, body, _header(body, timestamp=ts + TOLERANCE + 1))
+        # An hour off - what a local-time slip across a DST change would be.
+        _refused(provider, body, _header(body, timestamp=ts - 3600))
+        _refused(provider, body, _header(body, timestamp=ts + 3600))
