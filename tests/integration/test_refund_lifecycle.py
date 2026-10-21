@@ -144,6 +144,56 @@ def test_a_refund_event_missing_its_id_or_status_changes_nothing(shop, paid, mon
     assert _ledger(shop, order_id) == [("re_", 1999, "pending", "admin", False)]
 
 
+# -- Succeeded, then failed --------------------------------------------------------
+
+@pytest.mark.parametrize("event_type,status", [
+    ("refund.failed", "failed"),
+    ("refund.updated", "failed"),
+    ("refund.updated", "canceled"),
+])
+def test_a_refund_that_fails_after_it_was_recorded_is_undone_and_flagged(
+    shop, paid, outbox, event_type, status
+):
+    # pm_card_refundFail: the refund is created succeeded and fails later.
+    # The order stayed "refunded" while the customer got nothing back.
+    order_id = paid["order"]["id"]
+    refund = shop.refund(paid["admin"], order_id).json()["data"]
+    assert order_state(shop, order_id) == ("confirmed", "refunded")
+    outbox.take()
+
+    response = shop.webhook(event_type, _refund_object(
+        paid["payment"], refund["id"], 1999, status, failure_reason="expired_or_canceled_card"))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["requires_manual_review"] is True
+    assert order_state(shop, order_id) == ("confirmed", "paid")
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 0, "USD", False)]
+    assert _ledger(shop, order_id) == [("re_", 1999, status, "admin", True)]
+    # The charge can be refunded again. At Stripe a failed refund's amount
+    # goes back to the balance and is refundable again; the mock provider
+    # does not model refund failures, so its record is corrected here.
+    StripePaymentProvider._intents_by_id[paid["payment"].payment_intent_id].amount_refunded = 0
+    assert shop.refund(paid["admin"], order_id, amount="1.00").status_code == 200
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 100, "USD", False)]
+
+
+def test_a_failed_refund_stays_failed_whatever_arrives_after_it(shop, paid):
+    order_id = paid["order"]["id"]
+    refund = shop.refund(paid["admin"], order_id, amount="5.00").json()["data"]
+    failed = _refund_object(paid["payment"], refund["id"], 500, "failed")
+    assert shop.webhook("refund.failed", failed).status_code == 200
+
+    for late in ("refund.updated", "refund.created"):
+        response = shop.webhook(late, _refund_object(
+            paid["payment"], refund["id"], 500, "succeeded"))
+        assert response.status_code == 200
+
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 0, "USD", False)]
+    assert _ledger(shop, order_id) == [("re_", 500, "failed", "admin", True)]
+    assert shop.webhook("refund.failed", failed).status_code == 200
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 0, "USD", False)]
+
+
 # -- Refunds made outside the app -------------------------------------------------
 
 def test_our_own_refund_reported_by_its_webhook_is_counted_once(shop, paid):
