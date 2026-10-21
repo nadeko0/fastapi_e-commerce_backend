@@ -1365,10 +1365,19 @@ async def stripe_webhook(
     # constraint on event_id is the idempotency guard - a duplicate
     # delivery is detected and short-circuited before any state mutation
     # (order update or email) happens a second time.
+    #
+    # Flushed, not committed: the event is recorded in the same transaction
+    # as what it changes, and every path below ends in the commit that
+    # keeps both. It used to be committed here, before anything was
+    # applied, so an event whose processing then failed (a database error,
+    # a crash) was already "processed": the redelivery was answered
+    # already_processed and the payment it reported was never applied.
+    # A concurrent duplicate still stops here - its INSERT waits on the
+    # unique index until the first delivery commits, then fails.
     webhook_event = WebhookEvent(event_id=event.id, event_type=event.type)
     db.add(webhook_event)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:
         db.rollback()
         return APIResponse.success_response({"status": "already_processed"})
@@ -1401,6 +1410,7 @@ async def stripe_webhook(
         # webhook for a test event sent from the Stripe dashboard, or one
         # that predates this payment) - acknowledge so Stripe stops
         # retrying, but there is nothing to apply.
+        db.commit()
         return APIResponse.success_response({"status": "processed", "applied": False})
 
     # Locked for the rest of this event's handling (every branch ends in a
@@ -1478,6 +1488,9 @@ async def stripe_webhook(
         # why it never touches an attempt that succeeded or a paid order.
         _apply_payment_failure(db, order, payment_row)
 
+    # Records the event for a type with no handling of its own (the
+    # branches above have committed already).
+    db.commit()
     return APIResponse.success_response({"status": "processed", "applied": True})
 
 
