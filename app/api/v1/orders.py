@@ -982,7 +982,25 @@ async def process_payment(
             next_action=intent.next_action,
         ))
 
-    # intent.status == SUCCEEDED
+    if intent.status == PaymentIntentStatus.PROCESSING:
+        # Accepted but not settled yet (Stripe's "processing", and any
+        # status the live provider does not model, e.g. requires_capture,
+        # which it reports as PROCESSING). Not a success: no money has been
+        # taken. The attempt stays in flight and its outcome arrives by
+        # webhook, as for 3D Secure above. This branch and the one below
+        # used to be missing - everything other than requires_action was
+        # applied as a success, and the order marked paid and confirmed.
+        return APIResponse.success_response(_payment_row_to_response(payment_row, order))
+
+    if intent.status != PaymentIntentStatus.SUCCEEDED:
+        # Confirmed without an error and still unpaid (requires_payment_method,
+        # canceled, ...): a failed attempt, like a decline.
+        _apply_payment_failure(db, order, payment_row)
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="The payment was not completed; please try again or use another payment method",
+        )
+
     _apply_payment_success(db, order, payment_row, background_tasks, current_user.email)
 
     return APIResponse.success_response(PaymentResponse(
