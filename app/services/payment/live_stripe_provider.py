@@ -25,6 +25,7 @@ Per-instance api_key (passed as a request-level kwarg to every SDK call,
 never assigned to the global `stripe.api_key`) so multiple providers using
 different keys can coexist safely in the same process - relevant for tests.
 """
+import time
 from typing import Any, Dict, Optional
 
 import stripe
@@ -416,7 +417,16 @@ class LiveStripePaymentProvider(PaymentProvider):
             )
         except stripe_error.SignatureVerificationError as e:
             raise SignatureVerificationError(str(e.user_message or e), sig_header)
-        return webhook_event_from_payload(payload, sig_header, _signed_at(sig_header))
+        # The SDK checks the timestamp on one side only (older than the
+        # tolerance) and not at all when the tolerance is 0, so a signature
+        # dated in the future stayed valid until that date plus the
+        # tolerance, and a tolerance set to 0 turned replay protection off.
+        # Both sides, in epoch seconds, as the mock does: a tolerance of 0
+        # is a window of zero seconds.
+        signed_at = _signed_at(sig_header)
+        if abs(time.time() - signed_at) > tolerance_seconds:
+            raise SignatureVerificationError("Timestamp outside the tolerance zone", sig_header)
+        return webhook_event_from_payload(payload, sig_header, signed_at)
 
     @staticmethod
     def _translate_card_error(e: "stripe_error.CardError") -> CardError:
