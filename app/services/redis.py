@@ -636,8 +636,9 @@ class RedisService:
 
     def revoke_user_refresh_families(self, user_id: int) -> bool:
         """Revoke every rotation chain of a user ("sign out everywhere").
-        Families issued before the per-user index existed are not in it and
-        live out their expiry."""
+        Families issued before the per-user index existed are not in it:
+        logout() also moves the user's token watermark, which refuses
+        those (invalidate_tokens_issued_before_now)."""
         try:
             user_key = f"refresh_user:{user_id}"
             for family_id in self._redis.smembers(user_key):

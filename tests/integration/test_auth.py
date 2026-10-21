@@ -890,6 +890,62 @@ def test_signing_out_everywhere_leaves_other_users_signed_in(
     assert _refresh(client, theirs["refresh_token"]).status_code == 200
 
 
+def test_signing_out_everywhere_ends_sessions_the_family_index_does_not_know(
+    client, fake_redis, valid_registration_payload
+):
+    # Sign-out-everywhere revoked only the families in the per-user index
+    # (refresh_user:{id}). A refresh token issued before that index existed
+    # is in no index, and went on minting access tokens until it expired,
+    # as did every access token handed out before the logout. Now the
+    # logout also moves the user's watermark, the one a password change
+    # sets: every token issued before it is refused.
+    with freeze_time("2026-01-01 12:00:00") as clock:
+        phone = _login_tokens(client, valid_registration_payload)
+        old_laptop = _login_again(client, valid_registration_payload)
+        claims = jwt.decode(old_laptop["refresh_token"], options={"verify_signature": False})
+        fake_redis.srem(f"refresh_user:{claims['sub']}", claims["family"])
+        # The watermark has one-second granularity, like a token's iat.
+        clock.tick(timedelta(seconds=2))
+
+        response = client.post(
+            f"{API_PREFIX}/logout", headers={"Authorization": f"Bearer {phone['access_token']}"}
+        )
+
+        assert response.status_code == 200
+        assert _refresh(client, old_laptop["refresh_token"]).status_code == 401
+        assert client.get(
+            f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {old_laptop['access_token']}"}
+        ).status_code == 401
+        # Signing in again afterwards works.
+        clock.tick(timedelta(seconds=2))
+        fresh = _login_again(client, valid_registration_payload)
+        assert client.get(
+            f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {fresh['access_token']}"}
+        ).status_code == 200
+        assert _refresh(client, fresh["refresh_token"]).status_code == 200
+
+
+def test_signing_out_everywhere_that_cannot_move_the_watermark_says_so(
+    client, monkeypatch, fake_redis, valid_registration_payload
+):
+    tokens = _login_tokens(client, valid_registration_payload)
+    real_setex = fake_redis.setex
+
+    def setex_fails_for_the_watermark(name, *args, **kwargs):
+        if str(name).startswith("pwd_changed:"):
+            raise RedisConnectionError("Redis is down")
+        return real_setex(name, *args, **kwargs)
+
+    with monkeypatch.context() as outage:
+        outage.setattr(fake_redis, "setex", setex_fails_for_the_watermark)
+        response = client.post(
+            f"{API_PREFIX}/logout", headers={"Authorization": f"Bearer {tokens['access_token']}"}
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Logout is temporarily unavailable, please retry"
+
+
 def test_logout_blacklists_the_access_token_too(client, valid_registration_payload):
     tokens = _login_tokens(client, valid_registration_payload)
 

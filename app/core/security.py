@@ -270,7 +270,7 @@ class RevocationUnavailable(Exception):
 
 def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
     """Blacklist the current access token, and revoke the refresh token's
-    whole family - or, without a refresh token, every family of the user
+    whole family - or, without a refresh token, every token of the user
     ("sign out everywhere"): without one there is no telling which session
     is ending, and leaving them all valid let a refresh token go on minting
     access tokens for REFRESH_TOKEN_EXPIRE_DAYS after "logout". Raises
@@ -296,12 +296,24 @@ def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
             raise RevocationUnavailable("refresh token family not revoked")
         return
     user_id = user_id_from_subject(payload.get("sub"))
-    if user_id is not None and not redis_service.revoke_user_refresh_families(user_id):
+    if user_id is None:
+        return
+    if not redis_service.revoke_user_refresh_families(user_id):
         raise RevocationUnavailable("refresh token families not revoked")
+    # The per-user family index only knows the families registered since it
+    # was added: a refresh token issued before that is in no index and
+    # survived the revocation above until it expired. The password-change
+    # watermark has no such gap: every access and refresh token of the user
+    # issued before now is refused (is_token_superseded), whether or not
+    # anything else knows of it.
+    if not invalidate_tokens_issued_before_now(user_id):
+        raise RevocationUnavailable("tokens issued before the logout not invalidated")
 
 # Token fixation mitigation: a token issued before a password reset must not
 # remain usable afterward, otherwise a user resetting their password because
 # they suspect their current token/password is compromised gains nothing.
+# Signing out everywhere (logout without a refresh token) moves the same
+# watermark, for the same reason.
 # There is no per-token registry (JWTs are stateless and the reset flow has
 # no access token to blacklist - the user may not even be logged in when
 # requesting a reset), so instead of blacklisting individual tokens we record
@@ -309,7 +321,7 @@ def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
 # token whose `iat` predates it. TTL matches the longest-lived token
 # (refresh) so the watermark outlives every token that could still exist.
 # Returns False when Redis could not be told; the caller must then not
-# report the password change as done (see reset_password).
+# report the password change (or the logout) as done (see reset_password).
 def invalidate_tokens_issued_before_now(user_id: Union[str, int]) -> bool:
     key = f"pwd_changed:{user_id}"
     ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
