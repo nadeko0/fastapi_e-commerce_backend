@@ -666,6 +666,13 @@ def _guard_order_payable(order: Order) -> None:
         )
 
 
+# Payment.payment_intent_id of an attempt until the provider has given it
+# a real id (the column is NOT NULL and unique): /pay stores the
+# PaymentIntent's id when it is created, and a Checkout Session attempt
+# when its session completes.
+_PENDING_INTENT_ID_PREFIX = "pending-"
+
+
 # Payment.status values of an attempt whose outcome is not known yet: the
 # request is still talking to the provider (or died doing so), the customer
 # is in 3D Secure, or a Checkout Session has not been completed or expired.
@@ -756,6 +763,39 @@ def _flag_payment_for_manual_review(db: Session, payment_row: Payment, reason: s
         payment_row.id, payment_row.order_id, reason,
     )
     return _MANUAL_REVIEW_RESPONSE
+
+
+def _attempt_still_storing_its_id(db: Session, object_data: dict) -> bool:
+    """
+    Whether an event that matched no Payment row is nevertheless for an
+    attempt of ours that has not stored its provider id yet: the object's
+    metadata names one of our orders (both flows send order_id), and that
+    order has an attempt still in flight (processing, recent) carrying
+    only the "pending-..." placeholder, with no Checkout Session id. The
+    metadata alone is not enough - another deployment sharing the Stripe
+    account numbers its orders the same way - and an attempt in flight for
+    longer than PAYMENT_ATTEMPT_STALE_AFTER_MINUTES (its request died) does
+    not hold events back.
+    """
+    metadata = object_data.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    try:
+        order_id = int(metadata.get("order_id"))
+    except (TypeError, ValueError):
+        return False
+    if not 0 < order_id < 2 ** 31:
+        return False
+    started_after = datetime.utcnow() - timedelta(
+        minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
+    )
+    return db.query(Payment.id).filter(
+        Payment.order_id == order_id,
+        Payment.status == "processing",
+        Payment.checkout_session_id.is_(None),
+        Payment.payment_intent_id.like(f"{_PENDING_INTENT_ID_PREFIX}%"),
+        Payment.created_at > started_after,
+    ).first() is not None
 
 
 # The webhook's answer for an event recorded but not applied to the order.
@@ -850,7 +890,7 @@ async def process_payment(
     payment_row = Payment(
         order_id=order.id,
         provider="stripe",
-        payment_intent_id=f"pending-{uuid.uuid4().hex[:24]}",
+        payment_intent_id=f"{_PENDING_INTENT_ID_PREFIX}{uuid.uuid4().hex[:24]}",
         idempotency_key=idempotency_key,
         amount=amount_cents,
         currency=order.currency,
@@ -1096,7 +1136,7 @@ async def create_checkout_session(
     payment_row = Payment(
         order_id=order.id,
         provider="stripe",
-        payment_intent_id=f"pending-{uuid.uuid4().hex[:24]}",
+        payment_intent_id=f"{_PENDING_INTENT_ID_PREFIX}{uuid.uuid4().hex[:24]}",
         idempotency_key=idempotency_key,
         amount=amount_cents,
         currency=order.currency,
@@ -1411,10 +1451,23 @@ async def stripe_webhook(
         )
 
     if payment_row is None:
+        if _attempt_still_storing_its_id(db, object_data):
+            # One of our orders has an attempt that has not stored its
+            # PaymentIntent/Checkout Session id yet: this event overtook the
+            # request still waiting on the provider's answer. Acknowledged,
+            # it used to be dropped as "not ours". Answered 503 and left
+            # unrecorded instead (the rollback discards the event row), so
+            # Stripe redelivers it - with backoff, by when the id is stored.
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The payment attempt for this event is not recorded yet; retry later",
+            )
         # Unknown/foreign payment_intent or checkout.session (e.g. a
-        # webhook for a test event sent from the Stripe dashboard, or one
-        # that predates this payment) - acknowledge so Stripe stops
-        # retrying, but there is nothing to apply.
+        # webhook for a test event sent from the Stripe dashboard, an
+        # object another integration on the account created, or one that
+        # predates this payment) - recorded and acknowledged so Stripe
+        # stops retrying, but there is nothing to apply.
         db.commit()
         return APIResponse.success_response({"status": "processed", "applied": False})
 
