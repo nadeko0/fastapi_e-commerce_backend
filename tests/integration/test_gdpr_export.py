@@ -106,6 +106,85 @@ def test_data_delete_deactivates_account(client, valid_registration_payload):
 
 
 
+def _account_with_orders(client, db_session, payload, orders):
+    """An account with one address and `orders` orders of one item each."""
+    from decimal import Decimal
+
+    from app.models.address import Address
+    from app.models.category import Category
+    from app.models.order import Order
+    from app.models.order_items import OrderItem
+    from app.models.product import Product
+    from app.models.user import User
+
+    access_token = _register_and_login(client, payload)
+    user = db_session.query(User).filter(User.email == payload["email"]).one()
+    category = Category(name=f"Cat {uuid.uuid4().hex[:6]}", parent_id=None, level=0, path=[])
+    db_session.add(category)
+    db_session.commit()
+    address = Address(
+        user_id=user.id, street="123 Main Street", city="Springfield", state="Illinois",
+        postal_code="62701", country="US", is_default=True,
+    )
+    db_session.add(address)
+    db_session.commit()
+    product = Product(
+        name=f"Widget {uuid.uuid4().hex[:6]}", description="A fine widget, long enough",
+        price=Decimal("9.99"), stock_quantity=10, images=[], characteristics={},
+        category_id=category.id,
+    )
+    db_session.add(product)
+    db_session.commit()
+    for _ in range(orders):
+        order = Order(
+            user_id=user.id, status="new", payment_status="pending",
+            shipping_address_id=address.id, total_amount=Decimal("9.99"),
+        )
+        db_session.add(order)
+        db_session.commit()
+        db_session.add(OrderItem(
+            order_id=order.id, product_id=product.id, quantity=1, price_at_time=product.price,
+        ))
+        db_session.commit()
+    return {"Authorization": f"Bearer {access_token}"}
+
+
+def test_data_export_over_the_size_cap_is_refused_with_a_clear_answer(
+    client, db_session, monkeypatch, valid_registration_payload
+):
+    # The export was loaded whole, however large: every address, order and
+    # item into the worker's memory and into one response. Now it has a
+    # ceiling, and past it the account holder is told how to get the data
+    # instead (an Art. 15 request still has to be answered).
+    from app.core.config import settings
+
+    headers = _account_with_orders(client, db_session, valid_registration_payload, orders=2)
+    # 1 address + 2 orders + 2 items = 5 records.
+    monkeypatch.setattr(settings, "GDPR_EXPORT_MAX_RECORDS", 4, raising=False)
+
+    response = client.get(f"{API_PREFIX}/data/export", headers=headers)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["records"] == 5
+    assert detail["limit"] == 4
+    assert settings.DPO_EMAIL in detail["error"]
+
+
+def test_data_export_at_the_size_cap_is_served(
+    client, db_session, monkeypatch, valid_registration_payload
+):
+    from app.core.config import settings
+
+    headers = _account_with_orders(client, db_session, valid_registration_payload, orders=2)
+    monkeypatch.setattr(settings, "GDPR_EXPORT_MAX_RECORDS", 5, raising=False)
+
+    response = client.get(f"{API_PREFIX}/data/export", headers=headers)
+
+    assert response.status_code == 200
+    assert len(response.json()["data"]["orders"]) == 2
+
+
 def test_data_export_query_count_does_not_grow_with_the_number_of_orders(
     client, db_session, valid_registration_payload
 ):

@@ -289,6 +289,12 @@ class Settings(BaseSettings):
     # startup and was never used, which suggested otherwise. A leftover
     # line in an old .env is ignored like any unknown variable.
     GDPR_EXPORT_EXPIRY_HOURS: int = 24
+    # The most records GET /users/data/export assembles in one response:
+    # addresses + orders + order items of the account. The export is built
+    # in the worker's memory and sent whole; past this it is refused with a
+    # pointer to DPO_EMAIL instead. Far above any real customer's history
+    # (an order holds at most CART_MAX_LINES items).
+    GDPR_EXPORT_MAX_RECORDS: int = Field(5000, ge=1)
     INACTIVE_ACCOUNT_DELETE_DAYS: int = 730  # 2 years
     # Grace period between a user requesting erasure (Art. 17) and the
     # scheduled hard delete. Distinct from INACTIVE_ACCOUNT_DELETE_DAYS,
