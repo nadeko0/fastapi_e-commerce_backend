@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -1321,48 +1322,152 @@ async def refund_payment(
     # marker that failed open: with Redis down, a retried refund was added
     # to amount_refunded again, and two retries of more than half the
     # charge broke the refunded <= amount constraint and answered 500.
-    if _record_refund(db, payment_row, refund, source="admin"):
-        # A full refund moves the order to REFUNDED; a partial refund leaves
-        # it PAID (the order was fulfilled - only part of the charge was
-        # returned).
-        if payment_row.amount_refunded >= payment_row.amount:
-            order.payment_status = PaymentStatus.REFUNDED
-        order.updated_at = datetime.utcnow()
+    refund_row = _record_refund(
+        db, payment_row, refund.id, refund.amount, refund.status.value, source="admin"
+    )
+    # Refunded once the refunds that have succeeded cover the charge. A
+    # partial refund leaves the order PAID (it was fulfilled - only part of
+    # the charge was returned), and so does a pending one: it used to be
+    # reported as completed, and the order marked refunded, as soon as the
+    # provider accepted it.
+    _settle_refunds(db, order, payment_row)
+    order.updated_at = datetime.utcnow()
     db.commit()
 
     return APIResponse.success_response(RefundResponse(
         id=refund.id,
         order_id=order.id,
-        amount=_cents_to_decimal(refund.amount),
+        amount=_cents_to_decimal(refund_row.amount),
         # The charge's own code, as on the order and the payment: Stripe
         # reports currencies in lower case and the live provider passes
         # Refund.currency through as sent, so this answered "usd" for a
         # USD order.
         currency=payment_row.currency,
-        status=refund.status.value,
+        # As recorded: a replay, or a request whose refund a webhook has
+        # already reported, says where the refund is now.
+        status=refund_row.status,
         payment_status=order.payment_status,
     ))
 
 
-def _record_refund(db: Session, payment_row: Payment, refund, source: str) -> bool:
+# Refund.status values (Stripe: pending, requires_action, succeeded, failed,
+# canceled) of a refund whose money is not going back to the customer.
+# Final: a refund in one of them never changes again.
+_REFUND_STATUSES_NOT_RETURNED = ("failed", "canceled")
+
+
+def _record_refund(
+    db: Session, payment_row: Payment, refund_id: str, amount: int, status: str, source: str
+) -> PaymentRefund:
     """
-    Record one provider refund of `payment_row`'s charge, once: False when
-    a refund with this id is already recorded, True when it is new and its
-    amount has been added to payment_row.amount_refunded. The caller holds
-    the order's lock (_lock_order_and_reload) and commits.
+    Record one provider refund of `payment_row`'s charge, once, and return
+    its row. A refund already recorded (by id) is returned as it is; a new
+    one is added, and its amount to payment_row.amount_refunded unless it
+    has already failed. The caller holds the order's lock
+    (_lock_order_and_reload) and commits.
     """
-    if db.query(PaymentRefund.id).filter(PaymentRefund.refund_id == refund.id).first():
-        return False
-    db.add(PaymentRefund(
+    refund_row = db.query(PaymentRefund).filter(PaymentRefund.refund_id == refund_id).first()
+    if refund_row is not None:
+        return refund_row
+    refund_row = PaymentRefund(
         payment_id=payment_row.id,
-        refund_id=refund.id,
-        amount=refund.amount,
+        refund_id=refund_id,
+        amount=amount,
         currency=payment_row.currency,
-        status=refund.status.value,
+        status=status,
         source=source,
-    ))
-    payment_row.amount_refunded += refund.amount
-    return True
+    )
+    db.add(refund_row)
+    if status not in _REFUND_STATUSES_NOT_RETURNED:
+        payment_row.amount_refunded += amount
+    return refund_row
+
+
+def _settle_refunds(db: Session, order: Order, payment_row: Payment) -> None:
+    """
+    The order's payment_status from the refunds of the charge that paid
+    it: REFUNDED once the refunds that have succeeded cover the charge,
+    PAID otherwise. amount_refunded also counts refunds still pending
+    (the money is on its way back, and may not be refunded twice), so
+    those are taken out first. A charge flagged for manual review (a
+    second charge) did not pay the order, and an order that is not paid
+    or refunded is left alone.
+    """
+    if payment_row.requires_manual_review or order.payment_status not in (
+        PaymentStatus.PAID, PaymentStatus.REFUNDED,
+    ):
+        return
+    db.flush()
+    not_completed = db.query(func.coalesce(func.sum(PaymentRefund.amount), 0)).filter(
+        PaymentRefund.payment_id == payment_row.id,
+        PaymentRefund.status.notin_(("succeeded",) + _REFUND_STATUSES_NOT_RETURNED),
+    ).scalar()
+    returned = payment_row.amount_refunded - not_completed
+    order.payment_status = (
+        PaymentStatus.REFUNDED if returned >= payment_row.amount else PaymentStatus.PAID
+    )
+
+
+def _object_id(value) -> Optional[str]:
+    """An object reference in an event payload: an id string, or the
+    expanded object carrying one."""
+    if isinstance(value, dict):
+        value = value.get("id")
+    return value if isinstance(value, str) and value else None
+
+
+# Events about a refund of a charge: the Refund itself (refund.*), or the
+# Charge it refunded, which lists its refunds only in older API versions
+# or when expanded - Stripe: "Listen to refund.created for information
+# about the refund".
+_REFUND_EVENT_TYPES = ("refund.created", "refund.updated", "refund.failed", "charge.refunded")
+
+
+def _apply_refund_event(db: Session, event_type: str, object_data: dict) -> dict:
+    """
+    A refund reported by the provider, applied to the charge's Payment row
+    (found by the PaymentIntent it refunds) under the order's lock. A
+    refund already recorded - by /refund or by an earlier event - is
+    brought up to date; its amount is counted once.
+    """
+    if event_type == "charge.refunded":
+        listed = object_data.get("refunds")
+        refund_objects = listed.get("data") if isinstance(listed, dict) else None
+        refund_objects = [r for r in refund_objects or [] if isinstance(r, dict)]
+    else:
+        refund_objects = [object_data]
+    payment_intent_id = _object_id(object_data.get("payment_intent"))
+    payment_row = (
+        db.query(Payment).filter(Payment.payment_intent_id == payment_intent_id).first()
+        if payment_intent_id
+        else None
+    )
+    if payment_row is None or not refund_objects:
+        db.commit()
+        return {"status": "processed", "applied": False}
+
+    order = db.query(Order).filter(Order.id == payment_row.order_id).with_for_update().first()
+    db.refresh(payment_row)
+    for refund_object in refund_objects:
+        _apply_refund_object(db, payment_row, refund_object)
+    _settle_refunds(db, order, payment_row)
+    order.updated_at = datetime.utcnow()
+    db.commit()
+    return {"status": "processed", "applied": True}
+
+
+def _apply_refund_object(db: Session, payment_row: Payment, refund_object: dict) -> None:
+    refund_id = refund_object.get("id")
+    # Refund.status is nullable in Stripe's API reference.
+    status = refund_object.get("status")
+    if not isinstance(refund_id, str) or not isinstance(status, str):
+        return
+    refund_row = db.query(PaymentRefund).filter(PaymentRefund.refund_id == refund_id).first()
+    if refund_row is None:
+        return
+    if refund_row.status in _REFUND_STATUSES_NOT_RETURNED or status in _REFUND_STATUSES_NOT_RETURNED:
+        return
+    refund_row.status = status
 
 
 @router.post(
@@ -1435,6 +1540,8 @@ async def stripe_webhook(
         return APIResponse.success_response({"status": "already_processed"})
 
     object_data = event.data.get("object", {}) if isinstance(event.data, dict) else {}
+    if event.type in _REFUND_EVENT_TYPES:
+        return APIResponse.success_response(_apply_refund_event(db, event.type, object_data))
     is_checkout_session_event = event.type.startswith("checkout.session.")
 
     if is_checkout_session_event:
