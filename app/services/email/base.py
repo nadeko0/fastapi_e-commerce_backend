@@ -8,6 +8,17 @@ needs them).
 from abc import ABC, abstractmethod
 
 
+def mask_email(address: str) -> str:
+    """How a recipient appears in the logs: "jane.doe@example.com" becomes
+    "j***@example.com". The domain stays, because delivery problems are
+    usually per provider; the mailbox does not, because the logs are kept
+    apart from the account and are not scrubbed when it is erased."""
+    local, at, domain = address.partition("@")
+    if not at:
+        return "***"
+    return f"{local[:1]}***@{domain}"
+
+
 class EmailProvider(ABC):
     @abstractmethod
     def send(self, to_email: str, subject: str, html_content: str) -> bool:

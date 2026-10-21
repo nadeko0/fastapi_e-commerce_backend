@@ -2,9 +2,12 @@ import logging
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from app.schemas.user import GDPRExport
 from app.services import email as email_module
 from app.services.email import smtp_provider as smtp_provider_module
+from app.services.email.base import mask_email
 from app.services.email.logging_provider import LoggingEmailProvider
 from app.services.email.smtp_provider import SmtpEmailProvider
 
@@ -326,6 +329,49 @@ def test_smtp_provider_send_failure_is_logged_not_printed(monkeypatch, caplog):
 
     assert result is False
     assert any("Failed to send email" in record.message for record in caplog.records)
+
+
+def test_a_refused_recipient_is_not_written_to_the_log(monkeypatch, caplog):
+    # smtplib names the refused address in the exception; a traceback in
+    # the log would carry it.
+    class _RefusingSMTP:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def starttls(self):
+            pass
+
+        def login(self, *a):
+            pass
+
+        def send_message(self, message):
+            raise smtp_provider_module.smtplib.SMTPRecipientsRefused(
+                {"jane.doe@example.com": (550, b"no such user")}
+            )
+
+    monkeypatch.setattr(smtp_provider_module.smtplib, "SMTP", _RefusingSMTP)
+
+    with caplog.at_level(logging.ERROR, logger="app.services.email.smtp_provider"):
+        result = SmtpEmailProvider().send("jane.doe@example.com", "subject", "<p>body</p>")
+
+    assert result is False
+    assert "jane.doe@example.com" not in caplog.text
+    assert "j***@example.com" in caplog.text
+    assert "SMTPRecipientsRefused" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "address,masked",
+    [("jane.doe@example.com", "j***@example.com"), ("x@y.org", "x***@y.org"), ("garbage", "***")],
+)
+def test_mask_email(address, masked):
+    assert mask_email(address) == masked
 
 
 # -- LoggingEmailProvider -------------------------------------------------

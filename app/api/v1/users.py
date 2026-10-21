@@ -158,7 +158,7 @@ async def register_user(
     try:
         db.commit()
         existing_email = None
-        new_email, new_full_name = user.email, user.full_name
+        new_email, new_full_name, new_user_id = user.email, user.full_name, user.id
     except IntegrityError:
         # The email (in any case: see uq_users_email_lower) has an account.
         db.rollback()
@@ -176,17 +176,18 @@ async def register_user(
     if background_tasks:
         if new_email:
             verification_token = generate_email_verification_token(new_email)
-            logger.info(f"Queuing welcome email for user {new_email}")
+            logger.info(f"Queuing welcome email for user {new_user_id}")
             background_tasks.add_task(
                 send_welcome_email,
                 new_email,
                 new_full_name,
                 verification_token
             )
-            logger.info(f"Welcome email task queued for user {new_email}")
+            logger.info(f"Welcome email task queued for user {new_user_id}")
         elif existing_email:
             # To the address on the account, which may differ in case from
             # the one typed.
+            logger.info("Registration for an existing account; owner notified")
             background_tasks.add_task(send_account_exists_email, existing_email)
 
     return APIResponse.success_response({"message": REGISTRATION_RECEIVED})
@@ -251,13 +252,13 @@ async def resend_verification_email(
 
     if background_tasks:
         verification_token = generate_email_verification_token(current_user.email)
-        logger.info(f"Queuing verification email resend for user {current_user.email}")
+        logger.info(f"Queuing verification email resend for user {current_user.id}")
         background_tasks.add_task(
             send_email_verification,
             current_user.email,
             verification_token
         )
-        logger.info(f"Verification email resend task queued for user {current_user.email}")
+        logger.info(f"Verification email resend task queued for user {current_user.id}")
 
     return APIResponse.success_response({
         "message": "Verification email sent"
@@ -300,7 +301,6 @@ async def login(
 
     user = _user_by_email(db, form_data.username)
     user_id = user.id if user else None
-    user_email = user.email if user else None
     hashed_password = user.hashed_password if user else None
     # Read here with the others, off the row already loaded, because the
     # session is closed next.
@@ -359,10 +359,10 @@ async def login(
     )
     db.commit()
 
-    logger.info(f"Generating tokens for user {user_email}")
+    logger.info(f"Generating tokens for user {user_id}")
     access_token = create_access_token(user_id)
     refresh_token = issue_refresh_token(user_id)
-    logger.info(f"Tokens generated for user {user_email}")
+    logger.info(f"Tokens generated for user {user_id}")
 
     # The cart the visitor filled before logging in becomes part of the
     # account's cart. Last, and Redis only: the password is verified, the
@@ -549,13 +549,13 @@ async def export_user_data(
 
 
     if background_tasks:
-        logger.info(f"Queuing GDPR data export email for user {current_user.email}")
+        logger.info(f"Queuing GDPR data export email for user {current_user.id}")
         background_tasks.add_task(
             send_gdpr_export_email,
             current_user.email,
             export_metadata
         )
-        logger.info(f"GDPR data export email task queued for user {current_user.email}")
+        logger.info(f"GDPR data export email task queued for user {current_user.id}")
 
     return APIResponse.success_response(export)
 
@@ -592,7 +592,7 @@ async def delete_user_data(
     user.data_deletion_date = datetime.utcnow()
     db.commit()
 
-    logger.info(f"Scheduling hard delete for user {user.email} after 1 day")
+    logger.info(f"Scheduling hard delete for user {user.id} after 1 day")
 
     return APIResponse.success_response({
         "message": "Account will be permanently deleted within 24 hours",
@@ -623,9 +623,10 @@ async def update_current_user(
 ):
     """Update fields on the current authenticated user's profile."""
 
-    logger.info(f"Updating profile for user {current_user.email}")
-    logger.debug(f"Received update request: {user_in.model_dump(exclude_unset=True)}")
-
+    # Field names only, never their values: names and phone numbers are
+    # personal data, and the logs are kept apart from the account and not
+    # scrubbed when it is erased.
+    logger.info(f"Updating profile for user {current_user.id}")
 
     update_data = user_in.model_dump(exclude_unset=True)
     if not update_data:
@@ -646,16 +647,11 @@ async def update_current_user(
     try:
 
         for field, new_value in update_data.items():
-            old_value = getattr(user, field)
             setattr(user, field, new_value)
-            logger.info(
-                f"Updated {field} for user {user.email}: "
-                f"'{old_value}' -> '{new_value}'"
-            )
 
         db.commit()
         logger.info(
-            f"Profile updated successfully for user {user.email}. "
+            f"Profile updated successfully for user {user.id}. "
             f"Updated fields: {list(update_data.keys())}"
         )
 
@@ -665,7 +661,8 @@ async def update_current_user(
 
     except Exception as e:
         db.rollback()
-        logger.error(f"Failed to update profile for user {current_user.email}: {str(e)}")
+        # The exception's type only: its message can quote the values.
+        logger.error(f"Failed to update profile for user {current_user.id}: {type(e).__name__}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update profile"
@@ -748,11 +745,11 @@ async def create_address(
         db.commit()
         db.refresh(address)
 
-        logger.info(f"Created address with ID: {address.id} for user {current_user.email}")
+        logger.info(f"Created address with ID: {address.id} for user {current_user.id}")
 
 
         created = db.query(Address).get(address.id)
-        logger.info(f"Verified address exists: {created and created.id} for user {current_user.email}")
+        logger.info(f"Verified address exists: {created and created.id} for user {current_user.id}")
 
         return APIResponse.success_response(AddressResponse.from_orm(address))
     except ValidationError as e:
@@ -791,7 +788,7 @@ async def update_address(
         Address.user_id == current_user.id
     ).first()
 
-    logger.info(f"Found address {address_id} for update request from user {current_user.email}")
+    logger.info(f"Found address {address_id} for update request from user {current_user.id}")
 
     if not address:
         raise HTTPException(
@@ -847,7 +844,7 @@ async def delete_address(
         Address.user_id == current_user.id
     ).first()
 
-    logger.info(f"Processing deletion request for address {address_id} from user {current_user.email}")
+    logger.info(f"Processing deletion request for address {address_id} from user {current_user.id}")
 
     if not address:
         raise HTTPException(
@@ -900,7 +897,7 @@ async def set_default_address(
         Address.user_id == current_user.id
     ).first()
 
-    logger.info(f"Processing set default request for address {default_address.address_id} from user {current_user.email}")
+    logger.info(f"Processing set default request for address {default_address.address_id} from user {current_user.id}")
 
     if not address:
         raise HTTPException(
@@ -975,13 +972,13 @@ async def request_password_reset(
     if user:
         token = generate_password_reset_token(user.email, user.hashed_password)
         if background_tasks:
-            logger.info(f"Queuing password reset email for user {user.email}")
+            logger.info(f"Queuing password reset email for user {user.id}")
             background_tasks.add_task(
                 send_password_reset_email,
                 user.email,
                 token
             )
-            logger.info(f"Password reset email task queued for user {user.email}")
+            logger.info(f"Password reset email task queued for user {user.id}")
 
 
     return APIResponse.success_response({
