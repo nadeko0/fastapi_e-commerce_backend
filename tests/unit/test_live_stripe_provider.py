@@ -163,6 +163,16 @@ def test_card_error_keeps_the_decline_code(provider, sdk):
     assert (caught.value.code, caught.value.decline_code) == ("card_declined", "insufficient_funds")
 
 
+def test_a_card_error_without_a_body_or_code_is_a_plain_decline(provider, sdk):
+    # The SDK builds e.error from the response body; with none (a decline
+    # the SDK raised without one) there is no decline code to keep.
+    sdk(stripe.PaymentIntent, "confirm",
+        raises=stripe_error.CardError("Your card was declined.", None, None))
+    with pytest.raises(CardError) as caught:
+        provider.confirm_payment_intent("pi_123", return_url=RETURN_URL)
+    assert (caught.value.code, caught.value.decline_code) == ("card_declined", None)
+
+
 # -- PaymentIntent mapping -------------------------------------------------------
 
 @pytest.mark.parametrize(
