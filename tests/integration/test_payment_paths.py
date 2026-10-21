@@ -18,6 +18,7 @@ from decimal import Decimal
 import pytest
 from conftest import TestingSessionLocal
 from payment_support import (
+    CART,
     PAY_3DS,
     Outbox,
     Shop,
@@ -37,6 +38,7 @@ from app.services.payment.exceptions import (
     PaymentProviderTimeoutError,
 )
 from app.services.payment.stripe_provider import StripePaymentProvider
+from app.services.redis import RedisService
 
 
 @pytest.fixture(autouse=True)
@@ -103,6 +105,47 @@ def test_order_needs_a_phone_number_on_the_profile(shop, outbox):
     assert "phone" in response.json()["detail"]
     assert shop.stock(product) == 5
     assert shop.db.query(Order).count() == 0
+    assert outbox.take() == []
+
+
+def test_order_racing_a_twin_with_the_same_key_returns_the_twins_order(
+    shop, outbox, monkeypatch
+):
+    # Two checkouts with one key both pass the "already placed?" read; the
+    # unique index lets one insert its order. The loser rolls back and
+    # answers with the winner's order. That index fails the INSERT, which
+    # the flush right after db.add(order) sends - and only the commit
+    # further down was guarded, so the loser answered 500.
+    product = shop.product(price="7.50", stock=5)
+    buyer = shop.buyer()
+    assert shop.add_to_cart(buyer, product, 2).status_code == 200
+    key = new_key()
+    real_get_cart = RedisService.get_cart
+    twin = {}
+
+    def _twin_commits_first(self, user_id):
+        if twin:
+            return real_get_cart(self, user_id)
+        twin["id"] = _insert_from_another_session(Order(
+            user_id=buyer.user_id, status="new", payment_status="pending",
+            shipping_address_id=buyer.address_id, idempotency_key=key,
+            total_amount=Decimal("15.00"), currency="USD",
+        ))
+        return real_get_cart(self, user_id)
+
+    monkeypatch.setattr(RedisService, "get_cart", _twin_commits_first)
+
+    response = shop.place_order(buyer, key=key)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["id"] == twin["id"]
+    assert [o.id for o in shop.db.query(Order).all()] == [twin["id"]]
+    # The loser took no stock (the twin row was inserted directly, so it
+    # took none either) and its cart lines were not removed.
+    assert shop.stock(product) == 5
+    cart = shop.client.get(CART, headers=buyer.headers)
+    assert [i["quantity"] for i in cart.json()["data"]["items"]] == [2]
+    # Only the request that placed the order confirms it.
     assert outbox.take() == []
 
 
