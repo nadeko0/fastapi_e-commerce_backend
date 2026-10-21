@@ -9,6 +9,7 @@ from freezegun import freeze_time
 from hypothesis import HealthCheck, given
 from hypothesis import settings as settings_hypothesis
 from hypothesis import strategies as st
+from test_payment import _with_idempotency_key
 
 from app.core.security import get_password_hash
 from app.models.address import Address
@@ -433,7 +434,7 @@ def test_non_admin_cannot_refund_even_their_own_order(client, db_session):
     order = _order(db_session, _customer(db_session), payment_status="paid")
 
     response = client.post(
-        f"{ORDERS}/{order.id}/refund", json={}, headers=_headers(client, "buyer@example.com")
+        f"{ORDERS}/{order.id}/refund", json={}, headers=_with_idempotency_key(_headers(client, "buyer@example.com"))
     )
 
     assert response.status_code == 403
@@ -441,7 +442,7 @@ def test_non_admin_cannot_refund_even_their_own_order(client, db_session):
 
 def test_admin_refund_of_a_missing_order_is_404(client, db_session):
     response = client.post(
-        f"{ORDERS}/999999/refund", json={}, headers=_admin_headers(client, db_session)
+        f"{ORDERS}/999999/refund", json={}, headers=_with_idempotency_key(_admin_headers(client, db_session))
     )
 
     assert response.status_code == 404
@@ -458,7 +459,7 @@ def test_admin_refund_needs_a_succeeded_payment(client, db_session):
     db_session.commit()
 
     response = client.post(
-        f"{ORDERS}/{order.id}/refund", json={}, headers=_admin_headers(client, db_session)
+        f"{ORDERS}/{order.id}/refund", json={}, headers=_with_idempotency_key(_admin_headers(client, db_session))
     )
 
     assert response.status_code == 400
@@ -473,7 +474,7 @@ def test_admin_refund_amount_must_be_positive(client, db_session, amount):
 
     response = client.post(
         f"{ORDERS}/{order.id}/refund", json={"amount": amount},
-        headers=_admin_headers(client, db_session),
+        headers=_with_idempotency_key(_admin_headers(client, db_session)),
     )
 
     assert response.status_code == 422

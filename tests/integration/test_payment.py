@@ -276,7 +276,7 @@ def test_successful_payment_confirms_intent_and_advances_order(client, db_sessio
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     assert response.status_code == 200
@@ -303,7 +303,7 @@ def test_payment_amount_stored_as_integer_cents_not_decimal_dollars(client, db_s
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
     assert response.status_code == 200
 
@@ -333,7 +333,7 @@ def test_pay_in_a_currency_other_than_the_orders_is_rejected(client, db_session)
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order, currency="JPY"),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     assert response.status_code == 400
@@ -350,7 +350,7 @@ def test_pay_without_a_currency_charges_the_orders_currency(client, db_session):
     del payload["currency"]
 
     response = client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/pay", json=payload, headers=setup["headers"]
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=payload, headers=_with_idempotency_key(setup["headers"])
     )
 
     assert response.status_code == 200, response.text
@@ -365,7 +365,7 @@ def _pay_requiring_action(client, setup):
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
     assert response.status_code == 200, response.text
     return response.json()["data"]["transaction_id"]
@@ -432,7 +432,7 @@ def test_declined_payment_marks_order_failed_not_paid(client, db_session):
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order, token=TOKEN_DECLINE),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     assert response.status_code == 402
@@ -463,7 +463,7 @@ def test_provider_timeout_leaves_order_state_unchanged(client, db_session, monke
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     assert response.status_code == 503
@@ -574,6 +574,58 @@ def test_duplicate_payment_request_same_idempotency_key_returns_same_intent(
     assert len(payments) == 1
 
 
+@pytest.mark.parametrize("bad_headers", [{}, {"Idempotency-Key": "short"}])
+@pytest.mark.parametrize("flow", ["pay", "checkout-session"])
+def test_a_payment_attempt_requires_an_idempotency_key(client, db_session, flow, bad_headers):
+    # The header used to be optional. Two /pay requests without it that
+    # arrived together (double click, second tab, a retry after a lost
+    # response) both passed the unpaid guard and both charged the card; the
+    # second success was only flagged for manual review, the customer was
+    # still charged twice. Like POST /orders, a request that cannot be
+    # deduplicated is now refused before it touches anything.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    url = f"{ORDERS_PREFIX}/{order['id']}/{flow}"
+    body = _payment_payload(order) if flow == "pay" else None
+
+    response = client.post(url, json=body, headers={**setup["headers"], **bad_headers})
+
+    assert response.status_code == 422
+    assert "Idempotency-Key" in response.text
+    assert _get_payments(db_session, order["id"]) == []
+    assert StripePaymentProvider._intents_by_id == {}
+    assert StripePaymentProvider._sessions_by_id == {}
+    db_order = _get_order(db_session, order["id"])
+    assert (db_order.status, db_order.payment_status) == ("new", "pending")
+
+
+@pytest.mark.parametrize("bad_headers", [{}, {"Idempotency-Key": "short"}])
+def test_a_refund_requires_an_idempotency_key(client, db_session, bad_headers):
+    # Same gap on the admin side: two partial refunds without a key (a
+    # double click on "Refund") were two refunds, the money returned twice.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    admin = _create_admin(db_session)
+    paid = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order),
+        headers=_with_idempotency_key(setup["headers"]),
+    )
+    assert paid.status_code == 200, paid.text
+
+    response = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/refund",
+        json={"amount": "5.00"},
+        headers={**admin["headers"], **bad_headers},
+    )
+
+    assert response.status_code == 422
+    assert "Idempotency-Key" in response.text
+    assert [i.amount_refunded for i in StripePaymentProvider._intents_by_id.values()] == [0]
+    assert _get_payments(db_session, order["id"])[0].amount_refunded == 0
+    assert _get_order(db_session, order["id"]).payment_status == "paid"
+
+
 def _two_orders_of_the_same_amount(client, db_session):
     return (
         _create_verified_buyer_with_order(client, db_session, email="one@example.com"),
@@ -625,7 +677,7 @@ def test_the_same_refund_key_on_two_orders_is_two_refunds(client, db_session):
     admin = _create_admin(db_session)
     for setup in (first, second):
         paid = client.post(f"{ORDERS_PREFIX}/{setup['order']['id']}/pay",
-                           json=_payment_payload(setup["order"]), headers=setup["headers"])
+                           json=_payment_payload(setup["order"]), headers=_with_idempotency_key(setup["headers"]))
         assert paid.status_code == 200
 
     refunds = [
@@ -652,7 +704,7 @@ def test_requires_action_is_a_distinct_non_terminal_state(client, db_session):
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     assert response.status_code == 200
@@ -705,7 +757,7 @@ def test_webhook_success_finalizes_a_requires_action_payment(client, db_session)
     pay_response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
     intent_id = pay_response.json()["data"]["transaction_id"]
 
@@ -739,7 +791,7 @@ def test_duplicate_webhook_delivery_does_not_double_apply(client, db_session, mo
     pay_response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
     intent_id = pay_response.json()["data"]["transaction_id"]
 
@@ -778,7 +830,7 @@ def test_webhook_success_for_cancelled_order_is_flagged_not_applied(client, db_s
     pay_response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
     intent_id = pay_response.json()["data"]["transaction_id"]
 
@@ -819,7 +871,7 @@ def _paid_order_with_an_abandoned_attempt(client, db_session):
     paid = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
     assert paid.status_code == 200, paid.text
     assert _get_order(db_session, order["id"]).payment_status == "paid"
@@ -848,7 +900,7 @@ def test_late_payment_failed_for_another_attempt_does_not_unpay_the_order(client
     again = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
     assert again.status_code == 400
 
@@ -858,7 +910,7 @@ def test_late_payment_failed_does_not_turn_a_refunded_order_into_failed(client, 
     order = setup["order"]
     admin = _create_admin(db_session)
     refund = client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/refund", json={}, headers=admin["headers"]
+        f"{ORDERS_PREFIX}/{order['id']}/refund", json={}, headers=_with_idempotency_key(admin["headers"])
     )
     assert refund.status_code == 200, refund.text
     assert _get_order(db_session, order["id"]).payment_status == "refunded"
@@ -897,7 +949,7 @@ def test_cannot_start_a_payment_on_an_already_cancelled_order(client, db_session
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
     assert response.status_code == 400
 
@@ -912,13 +964,13 @@ def test_partial_refund_keeps_order_paid(client, db_session):
     client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/refund",
         json={"amount": "5.00"},
-        headers=admin["headers"],
+        headers=_with_idempotency_key(admin["headers"]),
     )
 
     assert response.status_code == 200
@@ -941,13 +993,13 @@ def test_full_refund_marks_order_refunded(client, db_session):
     client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/refund",
         json={},
-        headers=admin["headers"],
+        headers=_with_idempotency_key(admin["headers"]),
     )
 
     assert response.status_code == 200
@@ -970,20 +1022,20 @@ def test_a_fully_refunded_order_cannot_be_paid_again(client, db_session, flow):
     order = setup["order"]
     admin = _create_admin(db_session)
     client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=setup["headers"]
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
-    refund = client.post(f"{ORDERS_PREFIX}/{order['id']}/refund", json={}, headers=admin["headers"])
+    refund = client.post(f"{ORDERS_PREFIX}/{order['id']}/refund", json={}, headers=_with_idempotency_key(admin["headers"]))
     assert refund.json()["data"]["payment_status"] == "refunded"
 
     if flow == "pay":
         response = client.post(
             f"{ORDERS_PREFIX}/{order['id']}/pay",
             json=_payment_payload(order),
-            headers=setup["headers"],
+            headers=_with_idempotency_key(setup["headers"]),
         )
     else:
         response = client.post(
-            f"{ORDERS_PREFIX}/{order['id']}/checkout-session", headers=setup["headers"]
+            f"{ORDERS_PREFIX}/{order['id']}/checkout-session", headers=_with_idempotency_key(setup["headers"])
         )
 
     assert response.status_code == 400
@@ -1005,7 +1057,7 @@ def test_refund_with_idempotency_key_is_not_double_applied(client, db_session):
     client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     headers_with_key = {**admin["headers"], "Idempotency-Key": "refund-key-1"}
@@ -1038,7 +1090,7 @@ def test_refund_with_reused_idempotency_key_and_different_amount_is_rejected(cli
     client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     headers_with_key = {**admin["headers"], "Idempotency-Key": "refund-key-2"}
@@ -1066,7 +1118,7 @@ def test_refund_requires_a_paid_order(client, db_session):
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/refund",
         json={},
-        headers=admin["headers"],
+        headers=_with_idempotency_key(admin["headers"]),
     )
 
     assert response.status_code == 400
@@ -1430,7 +1482,7 @@ def test_pay_with_currency_code_that_matches_regex_but_is_not_real_iso_returns_4
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=payload,
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     assert response.status_code == 400
@@ -1482,7 +1534,7 @@ def test_concurrent_identical_webhook_deliveries_do_not_double_apply(client, db_
     pay_response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
     intent_id = pay_response.json()["data"]["transaction_id"]
 
@@ -1553,7 +1605,7 @@ def test_provider_failure_between_create_and_confirm_leaves_well_defined_state(
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=setup["headers"],
+        headers=_with_idempotency_key(setup["headers"]),
     )
 
     assert response.status_code == 503
@@ -1649,13 +1701,13 @@ def test_payment_provider_calls_run_off_the_event_loop(client, db_session, monke
     setup = _create_verified_buyer_with_order(client, db_session)
     order = setup["order"]
     paid = client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=setup["headers"]
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
     assert paid.status_code == 200, paid.text
 
     admin_headers = _create_admin(db_session)["headers"]
     refunded = client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/refund", json={}, headers=admin_headers
+        f"{ORDERS_PREFIX}/{order['id']}/refund", json={}, headers=_with_idempotency_key(admin_headers)
     )
     assert refunded.status_code == 200, refunded.text
 

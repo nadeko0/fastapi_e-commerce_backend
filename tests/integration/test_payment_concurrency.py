@@ -15,8 +15,10 @@ provider call is in flight.
 
 What remains possible on Postgres. The lock is released before the call to
 the provider (no transaction stays open across an HTTP call), so two /pay
-requests without an Idempotency-Key that arrive together can both be
-charged. The second success is then recorded and flagged for manual review
+requests that arrive together can both be charged when they carry
+different Idempotency-Keys (two attempts, e.g. two tabs that each made
+their own key; the header is required, so one attempt retried is replayed,
+not charged again). The second success is then recorded and flagged for manual review
 (a refund), never applied to the order a second time.
 """
 import uuid
@@ -40,6 +42,7 @@ from test_payment import (
     _post_webhook,
     _sign,
     _webhook_body,
+    _with_idempotency_key,
 )
 
 from app.api.deps import get_db as deps_get_db
@@ -134,7 +137,7 @@ def test_pay_reads_the_order_only_with_a_row_lock(client, db_session, postgres_s
     postgres_sql.clear()
 
     response = client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=setup["headers"]
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
 
     assert response.status_code == 200, response.text
@@ -148,7 +151,7 @@ def test_checkout_session_reads_the_order_only_with_a_row_lock(client, db_sessio
     order = setup["order"]
     postgres_sql.clear()
 
-    response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=setup["headers"])
+    response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"]))
 
     assert response.status_code == 200, response.text
     reads = _order_reads(postgres_sql)
@@ -238,7 +241,7 @@ def test_webhook_success_for_an_order_another_attempt_paid_is_flagged(
     order = setup["order"]
     first_intent_id = _pay_requiring_action(client, setup)
     paid = client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=setup["headers"]
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
     assert paid.status_code == 200, paid.text
     assert status_emails == ["paid"]
@@ -265,9 +268,9 @@ def test_checkout_session_completed_after_pay_is_flagged(client, db_session, sta
     # is completed after /pay already took the money.
     setup = _create_verified_buyer_with_order(client, db_session)
     order = setup["order"]
-    session = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=setup["headers"]).json()["data"]
+    session = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"])).json()["data"]
     paid = client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=setup["headers"]
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
     assert paid.status_code == 200, paid.text
 
@@ -301,7 +304,7 @@ def test_pay_whose_order_is_paid_while_the_provider_call_is_in_flight_is_flagged
     )
 
     response = client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=setup["headers"]
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
 
     assert response.status_code == 200, response.text
@@ -328,7 +331,7 @@ def test_decline_whose_order_is_paid_while_the_provider_call_is_in_flight_keeps_
     )
 
     response = client.post(
-        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=setup["headers"]
+        f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
 
     assert response.status_code == 402
