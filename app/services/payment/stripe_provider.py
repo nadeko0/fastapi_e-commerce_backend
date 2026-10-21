@@ -443,14 +443,14 @@ class StripePaymentProvider(PaymentProvider):
         # the new secret and sends both, and one matching is enough (as in
         # stripe.WebhookSignature.verify_header). Only the first used to be
         # checked, so a valid event whose matching signature came second
-        # was refused.
+        # was refused. Nothing is stripped, as in the library: a header with
+        # spaces in it is not one Stripe sent, and the mock used to accept it.
         timestamp_raw: Optional[str] = None
         signatures = []
         for item in sig_header.split(","):
             if "=" not in item:
                 continue
             key, _, value = item.partition("=")
-            key, value = key.strip(), value.strip()
             if key == "t" and timestamp_raw is None:
                 timestamp_raw = value
             elif key == "v1" and value:

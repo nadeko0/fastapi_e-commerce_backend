@@ -134,6 +134,10 @@ def _garbled_headers():
         "only the v0 scheme": f"t={ts},v0={sig}",
         "upper-case hex": f"t={ts},v1={sig.upper()}",
         "truncated signature": f"t={ts},v1={sig[:-1]}",
+        # Stripe's library splits on "," and "=" and nothing else; a header
+        # with spaces in it does not come from Stripe.
+        "space after the comma": f"t={ts}, v1={sig}",
+        "space around the equals sign": f"t = {ts},v1 = {sig}",
     }
 
 
