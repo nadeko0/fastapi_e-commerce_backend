@@ -1,12 +1,17 @@
 from datetime import datetime, timedelta
 
+import pytest
+from freezegun import freeze_time
+from hypothesis import HealthCheck, given
+from hypothesis import settings as settings_hypothesis
+from hypothesis import strategies as st
 from sqlalchemy import event
 
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.models.address import Address
 from app.models.user import User
-from app.tasks import purge_expired_deletion_requests
+from app.tasks import cleanup_inactive_accounts, purge_expired_deletion_requests
 
 
 def _make_deletion_requested_user(db_session, email, days_since_request):
@@ -269,6 +274,114 @@ def test_purge_processes_every_batch(db_session, monkeypatch):
     db_session.expire_all()
     for account in accounts:
         assert db_session.get(User, account.id).email.endswith("@deleted.invalid")
+
+
+PURGE_NOW = datetime(2026, 10, 20, 3, 0, 0)
+
+
+def _requested_at(db_session, email, requested_at, **overrides):
+    fields = {
+        "email": email, "hashed_password": "x", "gdpr_consent": True,
+        "privacy_policy_accepted": True, "is_active": False,
+        "data_deletion_requested": True, "data_deletion_date": requested_at,
+        **overrides,
+    }
+    user = User(**fields)
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+def test_purge_grace_period_boundary_is_inclusive(db_session):
+    grace = timedelta(days=settings.DATA_DELETION_GRACE_PERIOD_DAYS)
+    due = _requested_at(db_session, "due@example.com", PURGE_NOW - grace)
+    early = _requested_at(
+        db_session, "early@example.com", PURGE_NOW - grace + timedelta(seconds=1)
+    )
+
+    with freeze_time(PURGE_NOW):
+        assert purge_expired_deletion_requests(db_session) == 1
+
+    db_session.expire_all()
+    assert db_session.get(User, due.id).email.endswith("@deleted.invalid")
+    assert db_session.get(User, early.id).email == "early@example.com"
+
+    # One second later the second request is due as well, and only it.
+    with freeze_time(PURGE_NOW + timedelta(seconds=1)):
+        assert purge_expired_deletion_requests(db_session) == 1
+    db_session.expire_all()
+    assert db_session.get(User, early.id).email.endswith("@deleted.invalid")
+
+
+@settings_hypothesis(max_examples=40, deadline=None,
+                     suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(seconds_ago=st.integers(min_value=-86_400, max_value=3 * 86_400))
+def test_purge_takes_a_request_exactly_when_its_grace_period_is_over(db_session, seconds_ago):
+    """Any request age: purged on this run iff at least the grace period has
+    passed. Accounts left from earlier examples are either already
+    anonymised (skipped, F-37) or still in their grace period at this same
+    frozen instant, so each run counts only the new account."""
+    grace_seconds = settings.DATA_DELETION_GRACE_PERIOD_DAYS * 86_400
+    user = _requested_at(
+        db_session, f"u{db_session.query(User).count()}@example.com",
+        PURGE_NOW - timedelta(seconds=seconds_ago),
+    )
+
+    with freeze_time(PURGE_NOW):
+        purged = purge_expired_deletion_requests(db_session)
+
+    assert purged == (1 if seconds_ago >= grace_seconds else 0)
+    db_session.expire_all()
+    assert db_session.get(User, user.id).email.endswith("@deleted.invalid") is bool(purged)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # Deletion requested, but the account was reactivated since.
+        {"is_active": True},
+        # Merely inactive, no erasure request: not this sweep's business.
+        {"data_deletion_requested": False},
+        # Flag set without a date: never treated as due.
+        {"data_deletion_date": None},
+    ],
+)
+def test_purge_needs_an_inactive_account_with_a_dated_request(db_session, overrides):
+    user = _requested_at(
+        db_session, "keep@example.com", PURGE_NOW - timedelta(days=365), **overrides
+    )
+
+    with freeze_time(PURGE_NOW):
+        assert purge_expired_deletion_requests(db_session) == 0
+
+    db_session.expire_all()
+    assert db_session.get(User, user.id).email == "keep@example.com"
+
+
+def test_purged_account_can_no_longer_log_in(client, db_session):
+    _make_deletion_requested_user(
+        db_session, "former@example.com",
+        days_since_request=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 1,
+    )
+    purge_expired_deletion_requests(db_session)
+
+    for username in ("former@example.com", "deleted-user-1@deleted.invalid"):
+        response = client.post(
+            "/api/v1/users/login", data={"username": username, "password": "Str0ngPass1"}
+        )
+        assert response.status_code in (400, 401), (username, response.text)
+
+
+def test_cleanup_inactive_accounts_task_runs_the_purge_in_its_own_session(
+    db_session, tasks_db
+):
+    _make_deletion_requested_user(
+        db_session, "task@example.com",
+        days_since_request=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 1,
+    )
+
+    assert cleanup_inactive_accounts() == 1
+    assert cleanup_inactive_accounts() == 0
 
 
 def test_purge_ignores_active_accounts(db_session):

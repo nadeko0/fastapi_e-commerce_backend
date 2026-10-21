@@ -1,11 +1,18 @@
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from conftest import TestingSessionLocal
+from freezegun import freeze_time
+from hypothesis import HealthCheck, given
+from hypothesis import settings as settings_hypothesis
+from hypothesis import strategies as st
 from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 
 from app import tasks
 from app.core.security import get_password_hash
+from app.models.address import Address
 from app.models.category import Category
 from app.models.order import Order
 from app.models.order_items import OrderItem
@@ -465,3 +472,343 @@ def test_check_low_stock_sends_nothing_when_all_products_well_stocked(
     tasks.check_low_stock(threshold=5)
 
     assert sent == []
+
+
+# --- Email tasks: what is sent, retries, the "already sent" markers ----------
+
+
+def test_send_order_confirmation_renders_the_real_email(db_session, tasks_db, monkeypatch):
+    """End to end through the real message builder, only the provider
+    replaced: the task hands it a freshly queried Order, not the
+    OrderResponse the API passes, and that difference broke it before."""
+    outbox = []
+
+    class Capture:
+        def send(self, to_email, subject, html_content):
+            outbox.append((to_email, subject, html_content))
+            return True
+
+    monkeypatch.setattr("app.services.email.get_email_provider", lambda: Capture())
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product, quantity=3)
+
+    tasks.send_order_confirmation(order.id)
+
+    [(to_email, subject, body)] = outbox
+    assert to_email == user.email
+    assert subject == f"Order Confirmation #{order.id}"
+    assert "Widget" in body and "<td>3</td>" in body
+    assert f"Total Amount: ${order.total_amount}" in body
+
+
+def test_send_order_confirmation_marker_outlives_the_redelivery_window(
+    db_session, tasks_db, monkeypatch, fake_redis
+):
+    monkeypatch.setattr("app.tasks.send_order_confirmation_email", lambda *a: True)
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product)
+
+    tasks.send_order_confirmation(order.id)
+
+    ttl = fake_redis.ttl(f"email_sent:order_confirmation:{order.id}")
+    visibility_timeout = tasks.celery.conf.broker_transport_options["visibility_timeout"]
+    assert visibility_timeout < ttl <= tasks.EMAIL_SENT_MARKER_TTL_SECONDS
+
+
+def test_send_order_confirmation_for_a_missing_order_claims_no_marker(
+    db_session, tasks_db, fake_redis
+):
+    tasks.send_order_confirmation(424242)
+
+    assert fake_redis.exists("email_sent:order_confirmation:424242") == 0
+
+
+def test_email_tasks_still_send_when_redis_is_down(db_session, tasks_db, monkeypatch, fake_redis):
+    # mark_once fails open: one possible duplicate beats a silently lost email.
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    def unreachable(*args, **kwargs):
+        raise RedisConnectionError("Redis is down")
+
+    monkeypatch.setattr(fake_redis, "set", unreachable)
+    sent = []
+    monkeypatch.setattr(
+        "app.tasks.send_order_confirmation_email", lambda to, order: sent.append("confirmation")
+    )
+    monkeypatch.setattr(
+        "app.tasks.send_order_status_update_email", lambda to, order: sent.append("status")
+    )
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product)
+
+    tasks.send_order_confirmation(order.id)
+    tasks.send_order_status_update(order.id)
+
+    assert sent == ["confirmation", "status"]
+
+
+def test_email_task_gives_up_after_max_retries(db_session, tasks_db, monkeypatch):
+    """A database that stays down: the first attempt plus max_retries (3)
+    retries, then the task fails with the database error - and the marker
+    was never claimed, so a later manual re-run still sends the email."""
+    attempts = []
+
+    def broken_factory():
+        attempts.append(1)
+        session = TestingSessionLocal()
+
+        @event.listens_for(session, "do_orm_execute")
+        def _fail(orm_execute_state):
+            raise OperationalError("SELECT ...", {}, Exception("connection refused"))
+
+        return session
+
+    monkeypatch.setattr("app.tasks.SessionLocal", broken_factory)
+    sent = []
+    monkeypatch.setattr("app.tasks.send_order_confirmation_email", lambda *a: sent.append(a))
+
+    result = tasks.send_order_confirmation.apply(args=(7,))
+
+    assert result.failed()
+    assert isinstance(result.result, OperationalError)
+    assert len(attempts) == 1 + tasks.send_order_confirmation.max_retries
+    assert sent == []
+    assert RedisService().mark_once("email_sent:order_confirmation:7", 60) is True
+
+
+def test_email_tasks_do_not_retry_a_programming_error(db_session, tasks_db, monkeypatch):
+    # autoretry_for is scoped to OperationalError: a bug fails at once.
+    attempts = []
+
+    def buggy(to_email, order):
+        attempts.append(1)
+        raise ValueError("template bug")
+
+    monkeypatch.setattr("app.tasks.send_order_status_update_email", buggy)
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product)
+
+    result = tasks.send_order_status_update.apply(args=(order.id,))
+
+    assert result.failed()
+    assert attempts == [1]
+
+
+# --- check_low_stock -------------------------------------------------------------
+
+
+def _products(db_session, stocks, active=True):
+    category = db_session.query(Category).first()
+    if category is None:
+        category = Category(name="Shelf", parent_id=None, level=0, path=[])
+        db_session.add(category)
+        db_session.commit()
+    made = []
+    for i, stock in enumerate(stocks):
+        product = Product(
+            name=f"P{len(made)}-{stock}-{active}-{i}", description="A product for the stock alert",
+            price=Decimal("1.00"), stock_quantity=stock, images=[], characteristics={},
+            category_id=category.id, is_active=active,
+        )
+        db_session.add(product)
+        made.append(product)
+    db_session.commit()
+    return made
+
+
+@pytest.mark.parametrize("threshold", [0, 1, 5, 10])
+def test_check_low_stock_alerts_at_or_below_the_threshold(
+    db_session, tasks_db, monkeypatch, threshold
+):
+    alerts = []
+    monkeypatch.setattr(
+        "app.tasks.send_low_stock_alert_email",
+        lambda to_email, products: alerts.append((to_email, sorted(p.id for p in products))),
+    )
+    at, below, above = _products(db_session, [threshold, max(threshold - 1, 0), threshold + 1])
+
+    tasks.check_low_stock(threshold=threshold)
+
+    expected = sorted({at.id, below.id})
+    assert alerts == [(tasks.settings.ADMIN_EMAIL, expected)]
+    assert above.id not in alerts[0][1]
+
+
+def test_check_low_stock_ignores_inactive_products(db_session, tasks_db, monkeypatch):
+    alerts = []
+    monkeypatch.setattr(
+        "app.tasks.send_low_stock_alert_email", lambda to, products: alerts.append(products)
+    )
+    _products(db_session, [0, 1], active=False)
+
+    tasks.check_low_stock()
+
+    assert alerts == []
+
+
+def test_check_low_stock_default_threshold_is_five(db_session, tasks_db, monkeypatch):
+    alerts = []
+    monkeypatch.setattr(
+        "app.tasks.send_low_stock_alert_email",
+        lambda to, products: alerts.append(sorted(p.stock_quantity for p in products)),
+    )
+    _products(db_session, [5, 6, 0])
+
+    tasks.check_low_stock()
+
+    assert alerts == [[0, 5]]
+
+
+def test_low_stock_alert_lists_every_low_product_in_one_email(
+    db_session, tasks_db, monkeypatch
+):
+    outbox = []
+
+    class Capture:
+        def send(self, to_email, subject, html_content):
+            outbox.append((to_email, html_content))
+            return True
+
+    monkeypatch.setattr("app.services.email.get_email_provider", lambda: Capture())
+    low = _products(db_session, [1, 2, 3])
+
+    tasks.check_low_stock(threshold=5)
+
+    [(to_email, body)] = outbox
+    assert to_email == tasks.settings.ADMIN_EMAIL
+    for product in low:
+        assert product.name in body
+
+
+# --- update_product_stats ------------------------------------------------------
+
+STATS_NOW = datetime(2026, 10, 20, 12, 0, 0)
+
+
+def _stats_fixture(db_session):
+    user = db_session.query(User).first() or _make_verified_user(db_session)
+    address = db_session.query(Address).first()
+    if address is None:
+        address = Address(
+            user_id=user.id, street="1 Main St", city="Town", state="ST",
+            postal_code="10001", country="US",
+        )
+        db_session.add(address)
+        db_session.commit()
+    products = db_session.query(Product).order_by(Product.id).all() or _products(
+        db_session, [10, 10, 10]
+    )
+    return user, address, products
+
+
+def _stats_order(db_session, user, address, lines, *, status, payment_status, created_at):
+    order = Order(
+        user_id=user.id, shipping_address_id=address.id, status=status,
+        payment_status=payment_status, created_at=created_at,
+        total_amount=sum(Decimal(price) * qty for _, qty, price in lines),
+    )
+    db_session.add(order)
+    db_session.commit()
+    for product, qty, price in lines:
+        db_session.add(OrderItem(
+            order_id=order.id, product_id=product.id, quantity=qty, price_at_time=Decimal(price),
+        ))
+    db_session.commit()
+
+
+@settings_hypothesis(
+    max_examples=30,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    orders=st.lists(
+        st.tuples(
+            st.integers(min_value=0, max_value=2),  # which product
+            st.integers(min_value=1, max_value=9),  # quantity
+            st.integers(min_value=1, max_value=10_000),  # unit price in cents
+            st.sampled_from(["confirmed", "delivered", "cancelled"]),
+            st.sampled_from(["paid", "pending", "refunded"]),
+            st.integers(min_value=0, max_value=40 * 24),  # age in hours
+        ),
+        max_size=12,
+    )
+)
+def test_update_product_stats_aggregates_exactly_the_qualifying_lines(
+    db_session, tasks_db, fake_redis, orders
+):
+    """Popular products are the sum of quantity and of quantity *
+    price_at_time per product, over paid, non-cancelled orders of the last
+    30 days - compared against the same rule computed here in Python."""
+    db_session.query(OrderItem).delete()
+    db_session.query(Order).delete()
+    db_session.commit()
+    user, address, products = _stats_fixture(db_session)
+    expected = {}
+    for index, qty, cents, status, payment_status, age_hours in orders:
+        product, price = products[index], Decimal(cents) / 100
+        created_at = STATS_NOW - timedelta(hours=age_hours)
+        _stats_order(
+            db_session, user, address, [(product, qty, str(price))],
+            status=status, payment_status=payment_status, created_at=created_at,
+        )
+        if status != "cancelled" and payment_status == "paid" and age_hours <= 30 * 24:
+            quantity, revenue = expected.get(product.id, (0, Decimal(0)))
+            expected[product.id] = (quantity + qty, revenue + price * qty)
+
+    # Read inside the frozen clock: fakeredis dates the 1-hour TTL from it.
+    with freeze_time(STATS_NOW):
+        tasks.update_product_stats()
+        popular = RedisService().get("product_stats")["popular_products"]
+
+    assert {p["id"]: (p["total_quantity"], p["total_revenue"]) for p in popular} == {
+        pid: (q, float(r)) for pid, (q, r) in expected.items()
+    }
+    quantities = [p["total_quantity"] for p in popular]
+    assert quantities == sorted(quantities, reverse=True)
+
+
+def test_update_product_stats_window_includes_exactly_thirty_days(
+    db_session, tasks_db, fake_redis
+):
+    user, address, (inside, outside, _) = _stats_fixture(db_session)
+    paid = {"status": "confirmed", "payment_status": "paid"}
+    _stats_order(db_session, user, address, [(inside, 1, "1.00")],
+                 created_at=STATS_NOW - timedelta(days=30), **paid)
+    _stats_order(db_session, user, address, [(outside, 1, "1.00")],
+                 created_at=STATS_NOW - timedelta(days=30, seconds=1), **paid)
+
+    with freeze_time(STATS_NOW):
+        tasks.update_product_stats()
+        stats = RedisService().get("product_stats")
+        ttl = fake_redis.ttl("product_stats")
+
+    assert [p["id"] for p in stats["popular_products"]] == [inside.id]
+    assert stats["updated_at"] == STATS_NOW.isoformat()
+    assert 0 < ttl <= 3600
+
+
+def test_update_product_stats_keeps_the_top_twenty(db_session, tasks_db, fake_redis):
+    user, address, _ = _stats_fixture(db_session)
+    many = _products(db_session, [10] * 22)
+    for qty, product in enumerate(many, start=1):
+        _stats_order(db_session, user, address, [(product, qty, "1.00")],
+                     status="confirmed", payment_status="paid", created_at=datetime.utcnow())
+
+    tasks.update_product_stats()
+
+    popular = RedisService().get("product_stats")["popular_products"]
+    assert len(popular) == 20
+    assert [p["total_quantity"] for p in popular] == list(range(22, 2, -1))
+
+
+def test_update_product_stats_with_no_sales_caches_an_empty_list(
+    db_session, tasks_db, fake_redis
+):
+    tasks.update_product_stats()
+
+    assert RedisService().get("product_stats")["popular_products"] == []
