@@ -35,6 +35,7 @@ def _production(**overrides):
         "STRIPE_SECRET_KEY": REAL_LOOKING_SECRET_KEY,
         "STRIPE_WEBHOOK_SECRET": REAL_LOOKING_WEBHOOK_SECRET,
         "FRONTEND_URL": "https://shop.example",
+        "PUBLIC_BASE_URL": "https://api.shop.example",
         # The other secrets a deployment needs (Settings.check_deployment_settings),
         # so that only the value under test can be what is refused.
         "JWT_SECRET_KEY": "k" * 64,
