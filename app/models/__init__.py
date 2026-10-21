@@ -7,6 +7,7 @@ from app.models.category import Category
 from app.models.order import Order
 from app.models.order_items import OrderItem
 from app.models.payment import Payment, WebhookEvent
+from app.models.payment_ledger import PaymentRefund
 from app.models.product import Product, ProductVariant
 from app.models.user import User
 
@@ -22,4 +23,5 @@ __all__ = [
     'Category',
     'Payment',
     'WebhookEvent',
+    'PaymentRefund',
 ]

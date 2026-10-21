@@ -508,6 +508,34 @@ def test_refund_still_recorded_when_redis_cannot_guard_the_bookkeeping(
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 499, "USD", False)]
 
 
+def test_a_refund_replayed_while_redis_is_down_is_counted_once(shop, fake_redis, monkeypatch):
+    # The only guard against counting a replayed refund twice was a Redis
+    # SETNX marker, and it failed open: with Redis down, a retried refund
+    # (same Idempotency-Key, so the provider returned the same refund) was
+    # added to amount_refunded a second time. Two retries of 10.00 on a
+    # 19.99 charge broke the refunded <= amount constraint and answered 500.
+    _, _, order = _paid_order(shop)
+    admin = shop.admin()
+    real_set = fake_redis.set
+
+    def _set(name, *args, **kwargs):
+        if str(name).startswith("refund_applied:"):
+            raise ConnectionError("Redis is down")
+        return real_set(name, *args, **kwargs)
+
+    monkeypatch.setattr(fake_redis, "set", _set)
+    key = new_key()
+
+    first = shop.refund(admin, order["id"], amount="10.00", key=key)
+    replay = shop.refund(admin, order["id"], amount="10.00", key=key)
+
+    assert first.status_code == 200, first.text
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["data"]["id"] == first.json()["data"]["id"]
+    assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 1000, "USD", False)]
+    assert order_state(shop, order["id"]) == ("confirmed", "paid")
+
+
 # -- Outcomes reported twice or out of order -------------------------------------
 
 def test_success_reported_again_by_webhook_after_pay_changes_nothing(shop, outbox):
