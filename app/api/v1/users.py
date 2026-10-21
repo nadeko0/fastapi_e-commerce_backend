@@ -438,10 +438,28 @@ async def logout(
         )
     return APIResponse.success_response({"message": "Logged out successfully"})
 
+# Where each consent type is stored on User: (flag, date). Spelled out
+# rather than derived from the type's name, which is what this route used
+# to do - f"{type}_consent" - and "privacy_policy_consent" is no column
+# (the column is privacy_policy_accepted), nor is "cookies_consent": the
+# flag was set on a plain Python attribute and lost, while the history
+# recorded the change and the route answered 200. Cookie consent has no
+# column at all; it is the cookie banner's business, and refused here.
+_CONSENT_COLUMNS = {
+    ConsentType.GDPR: ("gdpr_consent", "gdpr_consent_date"),
+    ConsentType.MARKETING: ("marketing_consent", "marketing_consent_date"),
+    ConsentType.PRIVACY_POLICY: ("privacy_policy_accepted", "privacy_policy_accepted_date"),
+}
+
 @router.post(
     "/consent",
     response_model=APIResponse[UserResponse],
-    responses={400: {"description": "GDPR consent cannot be revoked via this endpoint"}},
+    responses={
+        400: {
+            "description": "GDPR consent cannot be revoked via this endpoint; "
+                           "cookie consent is not stored on the account"
+        },
+    },
 )
 async def update_consent(
     consent_type: ConsentType,
@@ -457,6 +475,13 @@ async def update_consent(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GDPR consent cannot be revoked. Use data deletion instead."
         )
+    columns = _CONSENT_COLUMNS.get(consent_type)
+    if columns is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cookie consent is not stored on the account. Use the cookie banner."
+        )
+    flag_column, date_column = columns
 
     # current_user comes from get_current_active_user -> get_current_user,
     # which depends on app.api.deps.get_db - a *different* get_db than the
@@ -471,8 +496,8 @@ async def update_consent(
     # row to the session this route actually commits.
     user = db.query(User).filter(User.id == current_user.id).first()
 
-    setattr(user, f"{consent_type.value}_consent", granted)
-    setattr(user, f"{consent_type.value}_consent_date", datetime.utcnow())
+    setattr(user, flag_column, granted)
+    setattr(user, date_column, datetime.utcnow())
 
     # Add to consent history (Art. 7(1): controller must be able to
     # demonstrate consent was given). Shape matches
