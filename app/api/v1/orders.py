@@ -1809,10 +1809,17 @@ async def stripe_webhook(
         # A success for a cancelled order, or for one another attempt
         # already paid, is flagged rather than applied inside
         # _apply_payment_success (the same rule for /pay's own outcome).
-        if not _reported_charge_matches_order(object_data, "amount_received", order):
+        if payment_row.status != "succeeded" and not _reported_charge_matches_order(
+            object_data, "amount_received", order
+        ):
             # Stripe charged something other than what the order costs (or
             # in another currency): marking the order paid would ship it
             # for the wrong money. Recorded and flagged for manual review.
+            # Only for an attempt not yet known to have succeeded: a report
+            # about one already applied changes nothing (see
+            # _apply_payment_success). Checked first, this used to flag the
+            # attempt that had paid the order, leaving the order paid with
+            # no unflagged charge behind it - and impossible to refund.
             return APIResponse.success_response(
                 _flag_payment_for_manual_review(
                     db, payment_row, "charged amount or currency differs from the order"
@@ -1864,7 +1871,9 @@ async def stripe_webhook(
             return APIResponse.success_response({"status": "processed", "applied": False})
 
         # Same conflict handling as payment_intent.succeeded above.
-        if not _reported_charge_matches_order(object_data, "amount_total", order):
+        if payment_row.status != "succeeded" and not _reported_charge_matches_order(
+            object_data, "amount_total", order
+        ):
             return APIResponse.success_response(
                 _flag_payment_for_manual_review(
                     db, payment_row, "charged amount or currency differs from the order"
