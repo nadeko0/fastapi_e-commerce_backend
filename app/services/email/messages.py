@@ -207,6 +207,36 @@ def send_welcome_email(to_email: str, full_name: str, verification_token: str) -
         html_content
     )
 
+def send_account_exists_email(to_email: str) -> bool:
+    """Sent instead of a welcome email when someone registers with an email
+    that already has an account. Registration answers both cases the same
+    way (so it cannot be used to find out which emails are registered);
+    this email is how the owner of the mailbox, and only they, learn which
+    case it was. Nothing in it comes from the request."""
+    html_content = f"""
+    <html>
+        <body>
+            <h2>You already have an account</h2>
+            <p>Someone - probably you - just tried to register at {settings.PROJECT_NAME}
+            with this email address, which already has an account. No new account was
+            created and your existing one was not changed.</p>
+
+            <p>If it was you, log in with your existing password. If you have forgotten
+            it, request a password reset from the login page.</p>
+
+            <p>If it was not you, you can ignore this email.</p>
+
+            <p>Best regards,<br>The {settings.PROJECT_NAME} Team</p>
+        </body>
+    </html>
+    """
+
+    return email.get_email_provider().send(
+        to_email,
+        f"You already have an account at {settings.PROJECT_NAME}",
+        html_content
+    )
+
 def send_email_verification(to_email: str, verification_token: str) -> bool:
     base_url = f"http://localhost:{settings.PORT}"
     verification_link = f"{base_url}{settings.API_V1_STR}/users/verify-email/{verification_token}"

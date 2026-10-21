@@ -151,6 +151,18 @@ def test_send_welcome_email_escapes_html_in_full_name(monkeypatch):
     assert "&lt;img src=x onerror=alert(1)&gt;" in body
 
 
+def test_send_account_exists_email(monkeypatch):
+    calls = _no_real_smtp(monkeypatch)
+
+    result = email_module.send_account_exists_email("owner@example.com")
+
+    assert result is True
+    (to_email, subject, body) = calls[0]
+    assert to_email == "owner@example.com"
+    assert "already have an account" in subject
+    assert "No new account was" in body
+
+
 def test_send_email_verification(monkeypatch):
     calls = _no_real_smtp(monkeypatch)
 
