@@ -785,6 +785,69 @@ def test_logout_invalidates_refresh_token(client, valid_registration_payload):
     assert refresh_response.status_code == 401
 
 
+def _login_again(client, payload):
+    response = client.post(
+        f"{API_PREFIX}/login",
+        data={"username": payload["email"], "password": payload["password"]},
+    )
+    return response.json()["data"]
+
+
+def _refresh(client, refresh_token):
+    return client.post(f"{API_PREFIX}/refresh", json={"refresh_token": refresh_token})
+
+
+def test_logout_without_a_refresh_token_signs_out_everywhere(
+    client, valid_registration_payload
+):
+    # The refresh token was optional, and leaving it out revoked nothing
+    # but the access token: the refresh token went on minting new access
+    # tokens for REFRESH_TOKEN_EXPIRE_DAYS. Without one, logout cannot tell
+    # which session is meant, so it ends all of them.
+    phone = _login_tokens(client, valid_registration_payload)
+    laptop = _login_again(client, valid_registration_payload)
+    rotated = _refresh(client, laptop["refresh_token"]).json()["data"]["refresh_token"]
+
+    response = client.post(
+        f"{API_PREFIX}/logout", headers={"Authorization": f"Bearer {phone['access_token']}"}
+    )
+
+    assert response.status_code == 200
+    assert _refresh(client, phone["refresh_token"]).status_code == 401
+    assert _refresh(client, rotated).status_code == 401
+
+
+def test_logout_with_a_refresh_token_ends_only_that_session(
+    client, valid_registration_payload
+):
+    phone = _login_tokens(client, valid_registration_payload)
+    laptop = _login_again(client, valid_registration_payload)
+
+    client.post(
+        f"{API_PREFIX}/logout",
+        json={"refresh_token": phone["refresh_token"]},
+        headers={"Authorization": f"Bearer {phone['access_token']}"},
+    )
+
+    assert _refresh(client, phone["refresh_token"]).status_code == 401
+    assert _refresh(client, laptop["refresh_token"]).status_code == 200
+
+
+def test_signing_out_everywhere_leaves_other_users_signed_in(
+    client, valid_registration_payload
+):
+    mine = _login_tokens(client, valid_registration_payload)
+    theirs = _login_tokens(
+        client, {**valid_registration_payload, "email": "someone.else@example.com"}
+    )
+
+    client.post(
+        f"{API_PREFIX}/logout", headers={"Authorization": f"Bearer {mine['access_token']}"}
+    )
+
+    assert _refresh(client, theirs["refresh_token"]).status_code == 200
+
+
 def test_logout_blacklists_the_access_token_too(client, valid_registration_payload):
     tokens = _login_tokens(client, valid_registration_payload)
 
@@ -986,6 +1049,18 @@ def test_logout_that_cannot_revoke_the_refresh_token_says_so(
         response = client.post(
             f"{API_PREFIX}/logout", json={"refresh_token": tokens["refresh_token"]}, headers=headers
         )
+
+    assert response.status_code == 503
+
+
+def test_signing_out_everywhere_that_cannot_revoke_says_so(
+    client, monkeypatch, fake_redis, valid_registration_payload
+):
+    tokens = _login_tokens(client, valid_registration_payload)
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    with monkeypatch.context() as outage:
+        _redis_command_fails(outage, fake_redis, "smembers")
+        response = client.post(f"{API_PREFIX}/logout", headers=headers)
 
     assert response.status_code == 503
 

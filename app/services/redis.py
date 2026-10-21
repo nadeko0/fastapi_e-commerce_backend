@@ -586,6 +586,12 @@ class RedisService:
             family_key = f"refresh_family:{family_id}"
             self._redis.sadd(family_key, jti)
             self._redis.expire(family_key, ttl_seconds)
+            # Every family of the user, so that a logout without a refresh
+            # token can end all of their sessions (revoke_user_refresh_families).
+            # Its expiry follows the newest family: none outlives it.
+            user_key = f"refresh_user:{user_id}"
+            self._redis.sadd(user_key, family_id)
+            self._redis.expire(user_key, ttl_seconds)
             return True
         except RedisError as e:
             self._handle_redis_error(f"register_refresh_token: {str(e)}")
@@ -626,6 +632,21 @@ class RedisService:
             return True
         except RedisError as e:
             self._handle_redis_error(f"revoke_refresh_family: {str(e)}")
+            return False
+
+    def revoke_user_refresh_families(self, user_id: int) -> bool:
+        """Revoke every rotation chain of a user ("sign out everywhere").
+        Families issued before the per-user index existed are not in it and
+        live out their expiry."""
+        try:
+            user_key = f"refresh_user:{user_id}"
+            for family_id in self._redis.smembers(user_key):
+                if not self.revoke_refresh_family(family_id):
+                    return False
+            self._redis.delete(user_key)
+            return True
+        except RedisError as e:
+            self._handle_redis_error(f"revoke_user_refresh_families: {str(e)}")
             return False
 
 
