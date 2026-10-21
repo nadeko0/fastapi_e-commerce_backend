@@ -1880,10 +1880,14 @@ async def stripe_webhook(
         # failure/expiry for this attempt. See _apply_payment_failure for
         # why it never touches an attempt that succeeded or a paid order.
         _apply_payment_failure(db, order, payment_row)
+    else:
+        # A type with no handling of its own (payment_intent.created,
+        # .processing, ...: Stripe sends them to an endpoint subscribed to
+        # them). Recorded, and answered as not applied - it used to be
+        # answered "applied" like a payment that was.
+        db.commit()
+        return APIResponse.success_response({"status": "processed", "applied": False})
 
-    # Records the event for a type with no handling of its own (the
-    # branches above have committed already).
-    db.commit()
     return APIResponse.success_response({"status": "processed", "applied": True})
 
 
