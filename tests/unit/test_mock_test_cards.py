@@ -6,6 +6,7 @@ the asynchronous refund cards with the events Stripe sends for them.
 """
 import pytest
 
+from app.services.payment.exceptions import CardError
 from app.services.payment.stripe_provider import StripePaymentProvider
 from app.services.payment.types import PaymentIntentStatus
 
@@ -40,3 +41,23 @@ def test_3d_secure_asks_for_a_redirect_back_to_the_return_url():
     assert intent.next_action["type"] == "redirect_to_url"
     assert intent.next_action["redirect_to_url"]["return_url"] == RETURN_URL
     assert intent.next_action["redirect_to_url"]["url"].startswith("https://")
+
+
+# Stripe's generic decline card is pm_card_visa_chargeDeclined (the opt-in
+# live suite declines with it against Stripe's test mode). The mock only
+# knew "pm_card_chargeDeclined", which is not a Stripe test card, and
+# charged pm_card_visa_chargeDeclined successfully: a client tested with
+# Stripe's own decline card saw its order paid.
+def test_stripes_generic_decline_card_is_declined():
+    provider = StripePaymentProvider()
+    intent = provider.create_payment_intent(amount=5000, currency="USD", idempotency_key="k",
+                                            payment_method="pm_card_visa_chargeDeclined")
+
+    with pytest.raises(CardError) as declined:
+        provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
+
+    assert (declined.value.code, declined.value.decline_code) == ("card_declined",
+                                                                  "generic_decline")
+    assert provider.retrieve_payment_intent(intent.id).status == (
+        PaymentIntentStatus.REQUIRES_PAYMENT_METHOD
+    )
