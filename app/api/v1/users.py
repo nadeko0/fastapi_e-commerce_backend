@@ -5,7 +5,7 @@ from typing import List
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -494,7 +494,11 @@ async def update_consent(
     db.refresh(user)
     return APIResponse.success_response(UserResponse.from_orm(user))
 
-@router.get("/data/export", response_model=APIResponse[GDPRExportData])
+@router.get(
+    "/data/export",
+    response_model=APIResponse[GDPRExportData],
+    responses={400: {"description": "Too much data for an inline export (GDPR_EXPORT_MAX_RECORDS)"}},
+)
 async def export_user_data(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -528,6 +532,33 @@ async def export_user_data(
     # FINDINGS.md). It also depended on current_user still being attached to
     # a live session, which is the auth dependency's business, not this
     # route's.
+    #
+    # Counted first, in one query, and refused past GDPR_EXPORT_MAX_RECORDS:
+    # the export is assembled in this worker's memory and sent as one
+    # response, so its size must have a ceiling. Past it the holder is told
+    # where to get the data instead - the request itself (Art. 15) still has
+    # to be answered, just not inline.
+    records = db.query(
+        select(func.count()).select_from(Address)
+        .where(Address.user_id == current_user.id).scalar_subquery()
+        + select(func.count()).select_from(Order)
+        .where(Order.user_id == current_user.id).scalar_subquery()
+        + select(func.count()).select_from(OrderItem)
+        .join(Order, OrderItem.order_id == Order.id)
+        .where(Order.user_id == current_user.id).scalar_subquery()
+    ).scalar()
+    if records > settings.GDPR_EXPORT_MAX_RECORDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": (
+                    "Your data is too large for an export here. Contact "
+                    f"{settings.DPO_EMAIL} and it will be sent to you."
+                ),
+                "records": records,
+                "limit": settings.GDPR_EXPORT_MAX_RECORDS,
+            },
+        )
     addresses = db.query(Address).filter(Address.user_id == current_user.id).all()
     orders = (
         db.query(Order)
