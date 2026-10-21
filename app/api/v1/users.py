@@ -66,6 +66,7 @@ from app.schemas.user import (
     normalize_email,
 )
 from app.services.email import (
+    send_account_exists_email,
     send_email_verification,
     send_gdpr_export_email,
     send_password_reset_email,
@@ -94,10 +95,14 @@ def _user_by_email(db: Session, email: str):
 
 
 
+REGISTRATION_RECEIVED = (
+    "Registration received. Check your inbox: we have sent you an email "
+    "with what to do next."
+)
+
 @router.post(
     "/register",
-    response_model=APIResponse[UserResponse],
-    responses={409: {"description": "Email already registered"}},
+    response_model=APIResponse[dict],
 )
 async def register_user(
     user_in: UserCreate,
@@ -105,78 +110,86 @@ async def register_user(
     db: Session = Depends(get_db),
     background_tasks: BackgroundTasks = None,
 ):
-    """Register a new user account and queue a welcome/verification email."""
-    try:
-        now = datetime.utcnow()
-        client_ip = request.client.host if request.client else None
-        client_ua = request.headers.get("user-agent")
-        user = User(
-            email=user_in.email,
-            hashed_password=await get_password_hash_async(user_in.password),
-            full_name=user_in.full_name,
-            phone=user_in.phone,
-            gdpr_consent=user_in.gdpr_consent,
-            gdpr_consent_date=now if user_in.gdpr_consent else None,
-            privacy_policy_accepted=user_in.privacy_policy_accepted,
-            privacy_policy_accepted_date=now if user_in.privacy_policy_accepted else None,
-            marketing_consent=user_in.marketing_consent,
-            marketing_consent_date=now if user_in.marketing_consent else None,
-            consent_history=[{
-                "type": ConsentType.GDPR.value,
-                "granted": user_in.gdpr_consent,
-                "timestamp": now.isoformat(),
-                "ip_address": client_ip,
-                "user_agent": client_ua,
-            }, {
-                "type": ConsentType.PRIVACY_POLICY.value,
-                "granted": user_in.privacy_policy_accepted,
-                "timestamp": now.isoformat(),
-                "ip_address": client_ip,
-                "user_agent": client_ua,
-            }, {
-                "type": ConsentType.MARKETING.value,
-                "granted": user_in.marketing_consent,
-                "timestamp": now.isoformat(),
-                "ip_address": client_ip,
-                "user_agent": client_ua,
-            }]
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+    """Register a new user account and queue a welcome/verification email.
 
-        # db.refresh() above opens a fresh transaction (autocommit=False, so
-        # any query after a commit starts a new one) purely to reload the
-        # row - nothing below this line touches `db` again. Left open, that
-        # transaction sits on the checked-out connection for the rest of the
-        # request (background_tasks.add_task below, then response
-        # serialization/transmission) with no further code of ours in that
-        # window to release it - exactly the same exposure login()/
-        # reset_password() had before they were fixed to close early (see
-        # the long comment in login()), except here the window starts even
-        # earlier since there's no bcrypt await to wait for first. Closing
-        # here returns the connection immediately instead of leaving it to
-        # FastAPI's post-return dependency teardown, which a real client
-        # disconnect/cancellation at any point in that window can skip
-        # entirely (fastapi.concurrency.contextmanager_in_threadpool has no
-        # `finally` around its yield).
-        if background_tasks:
-            verification_token = generate_email_verification_token(user.email)
-            logger.info(f"Queuing welcome email for user {user.email}")
+    Answers exactly the same whether or not the email already has an
+    account, so that registration cannot be used to find out which emails
+    are registered (login and password reset already take care not to).
+    For an existing account nothing is created or changed; its owner gets
+    a "you already have an account" email instead of the welcome one."""
+    now = datetime.utcnow()
+    client_ip = request.client.host if request.client else None
+    client_ua = request.headers.get("user-agent")
+    # Hashed in both cases, before the database is asked, so that the
+    # answer for an existing email does not come back a bcrypt early.
+    hashed_password = await get_password_hash_async(user_in.password)
+    user = User(
+        email=user_in.email,
+        hashed_password=hashed_password,
+        full_name=user_in.full_name,
+        phone=user_in.phone,
+        gdpr_consent=user_in.gdpr_consent,
+        gdpr_consent_date=now if user_in.gdpr_consent else None,
+        privacy_policy_accepted=user_in.privacy_policy_accepted,
+        privacy_policy_accepted_date=now if user_in.privacy_policy_accepted else None,
+        marketing_consent=user_in.marketing_consent,
+        marketing_consent_date=now if user_in.marketing_consent else None,
+        consent_history=[{
+            "type": ConsentType.GDPR.value,
+            "granted": user_in.gdpr_consent,
+            "timestamp": now.isoformat(),
+            "ip_address": client_ip,
+            "user_agent": client_ua,
+        }, {
+            "type": ConsentType.PRIVACY_POLICY.value,
+            "granted": user_in.privacy_policy_accepted,
+            "timestamp": now.isoformat(),
+            "ip_address": client_ip,
+            "user_agent": client_ua,
+        }, {
+            "type": ConsentType.MARKETING.value,
+            "granted": user_in.marketing_consent,
+            "timestamp": now.isoformat(),
+            "ip_address": client_ip,
+            "user_agent": client_ua,
+        }]
+    )
+    db.add(user)
+    try:
+        db.commit()
+        existing_email = None
+        new_email, new_full_name = user.email, user.full_name
+    except IntegrityError:
+        # The email (in any case: see uq_users_email_lower) has an account.
+        db.rollback()
+        existing = _user_by_email(db, user_in.email)
+        existing_email = existing.email if existing else None
+        new_email = None
+    # Nothing below touches `db`. Closing here returns the connection now
+    # instead of leaving it to FastAPI's post-return dependency teardown,
+    # which a client disconnect in the rest of the request can skip
+    # entirely (fastapi.concurrency.contextmanager_in_threadpool has no
+    # `finally` around its yield) - the exposure login()/reset_password()
+    # close their sessions early for (see the long comment in login()).
+    db.close()
+
+    if background_tasks:
+        if new_email:
+            verification_token = generate_email_verification_token(new_email)
+            logger.info(f"Queuing welcome email for user {new_email}")
             background_tasks.add_task(
                 send_welcome_email,
-                user.email,
-                user.full_name,
+                new_email,
+                new_full_name,
                 verification_token
             )
-            logger.info(f"Welcome email task queued for user {user.email}")
+            logger.info(f"Welcome email task queued for user {new_email}")
+        elif existing_email:
+            # To the address on the account, which may differ in case from
+            # the one typed.
+            background_tasks.add_task(send_account_exists_email, existing_email)
 
-        return APIResponse.success_response(UserResponse.from_orm(user))
-    except IntegrityError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered"
-        )
+    return APIResponse.success_response({"message": REGISTRATION_RECEIVED})
 
 @router.get(
     "/verify-email/{token}",

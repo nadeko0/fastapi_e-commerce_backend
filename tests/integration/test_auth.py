@@ -53,20 +53,58 @@ def _tamper_signature(token: str) -> str:
     head, signature = token.rsplit(".", 1)
     return f"{head}.{'A' if signature[0] != 'A' else 'B'}{signature[1:]}"
 
-def test_register_returns_created_user(client, valid_registration_payload):
+def _registration_mail(monkeypatch):
+    """What registration queues: welcome mails and "you already have an
+    account" mails, by recipient."""
+    sent = {"welcome": [], "exists": []}
+    monkeypatch.setattr(
+        "app.api.v1.users.send_welcome_email",
+        lambda to_email, *args: sent["welcome"].append(to_email),
+    )
+    monkeypatch.setattr(
+        "app.api.v1.users.send_account_exists_email",
+        lambda to_email, *args: sent["exists"].append(to_email),
+        raising=False,
+    )
+    return sent
+
+
+def test_register_creates_the_account(client, valid_registration_payload, db_session):
+    from app.models.user import User as UserModel
+
     response = client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["data"]["email"] == valid_registration_payload["email"]
-    assert "hashed_password" not in body["data"]
+    assert "hashed_password" not in response.text
+    user = db_session.query(UserModel).filter(
+        UserModel.email == valid_registration_payload["email"]
+    ).one()
+    assert user.full_name == valid_registration_payload["full_name"]
 
 
-def test_register_rejects_duplicate_email(client, valid_registration_payload):
-    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
-    response = client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+def test_registering_an_existing_email_answers_exactly_like_a_new_one(
+    client, monkeypatch, valid_registration_payload
+):
+    # A 409 "Email already registered" told anybody which addresses have an
+    # account here, while login and password reset take care not to. Now
+    # the answer is the same, and only the mailbox's owner learns the
+    # difference: from the email they get.
+    sent = _registration_mail(monkeypatch)
+    email = valid_registration_payload["email"]
 
-    assert response.status_code == 409
+    new = client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    again = client.post(
+        f"{API_PREFIX}/register",
+        json={**valid_registration_payload, "password": "Different1", "full_name": "Someone Else"},
+    )
+
+    assert new.status_code == again.status_code == 200
+    assert new.json()["data"] == again.json()["data"]
+    assert email not in new.text
+    assert sent == {"welcome": [email], "exists": [email]}
+    # The existing account is untouched: its password is still the first one.
+    assert _can_log_in(client, email, valid_registration_payload["password"])
+    assert not _can_log_in(client, email, "Different1")
 
 
 def test_register_requires_gdpr_consent(client, valid_registration_payload):

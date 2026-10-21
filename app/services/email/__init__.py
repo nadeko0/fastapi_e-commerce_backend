@@ -20,6 +20,7 @@ def get_email_provider() -> EmailProvider:
 # this module (`from app.services.email import get_email_provider`) at
 # import time, so the name must already exist on this module object.
 from app.services.email.messages import (  # noqa: E402
+    send_account_exists_email,
     send_email_verification,
     send_gdpr_deletion_confirmation,
     send_gdpr_export_email,
@@ -42,6 +43,7 @@ __all__ = [
     "send_order_cancellation_email",
     "send_low_stock_alert_email",
     "send_welcome_email",
+    "send_account_exists_email",
     "send_email_verification",
     "send_password_reset_email",
     "send_gdpr_export_email",
