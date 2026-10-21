@@ -30,7 +30,7 @@ from typing import Any, Dict, Optional
 import stripe
 from stripe import error as stripe_error
 
-from app.services.payment.base import PaymentProvider
+from app.services.payment.base import PaymentProvider, webhook_event_from_payload
 from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
@@ -134,6 +134,14 @@ def _to_refund(r: Any) -> Refund:
         currency=r["currency"],
         status=status,
     )
+
+
+def _signed_at(sig_header: str) -> int:
+    """The t= timestamp of a Stripe-Signature header the SDK has already
+    verified (so it is there and is an integer), read the way the SDK reads
+    it: the first t= item, split on "=" and nothing stripped."""
+    return int(next(item.split("=", 1)[1] for item in sig_header.split(",")
+                    if item.split("=", 1)[0] == "t"))
 
 
 class LiveStripePaymentProvider(PaymentProvider):
@@ -389,19 +397,26 @@ class LiveStripePaymentProvider(PaymentProvider):
             # on text, which raises TypeError for anything not ASCII - an
             # exception the webhook route does not expect, so a 500.
             raise SignatureVerificationError("Malformed Stripe-Signature header", sig_header)
+        # The SDK decodes the body as UTF-8 before it looks at the signature,
+        # so a body that is not UTF-8 raised UnicodeDecodeError out of it -
+        # for anyone, signed or not. Checked first, and refused like a bad
+        # signature.
         try:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, webhook_secret, tolerance=tolerance_seconds
+            payload.decode("utf-8")
+        except UnicodeDecodeError:
+            raise SignatureVerificationError("Payload is not valid UTF-8", sig_header)
+        # Only the signature check is the SDK's (verify_header, which
+        # stripe.Webhook.construct_event calls first); the body is then read
+        # by the same code as the mock's, which refuses one that is not a
+        # JSON object instead of raising JSONDecodeError or AttributeError
+        # as construct_event did.
+        try:
+            stripe.WebhookSignature.verify_header(
+                payload, sig_header, webhook_secret, tolerance_seconds
             )
         except stripe_error.SignatureVerificationError as e:
             raise SignatureVerificationError(str(e.user_message or e), sig_header)
-        event = event.to_dict()
-        return WebhookEventData(
-            id=event["id"],
-            type=event["type"],
-            data=dict(event["data"]),
-            created=event["created"],
-        )
+        return webhook_event_from_payload(payload, sig_header, _signed_at(sig_header))
 
     @staticmethod
     def _translate_card_error(e: "stripe_error.CardError") -> CardError:

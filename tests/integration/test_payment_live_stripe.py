@@ -239,7 +239,7 @@ class TestWebhookSignature:
     for this sandbox (that requires a publicly reachable URL registered in
     the Dashboard), so - per the coordinator's instruction to at least
     verify construct_webhook_event's signature logic against real Stripe
-    SDK semantics - these tests exercise the real `stripe.Webhook.construct_event`
+    SDK semantics - these tests exercise the real `stripe.WebhookSignature.verify_header`
     function directly (via LiveStripePaymentProvider, which calls it) with a
     locally-generated secret and a payload signed exactly the way Stripe
     signs real webhook deliveries (HMAC-SHA256 over "{timestamp}.{payload}").

@@ -5,15 +5,42 @@ Refund.create, Webhook.construct_event) so that swapping the mock provider
 for the real `stripe` SDK later is mostly a matter of writing a thin adapter,
 not redesigning the call sites in app/api/v1/orders.py.
 """
+import json
+import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
+from app.services.payment.exceptions import SignatureVerificationError
 from app.services.payment.types import (
     CheckoutSession,
     PaymentIntent,
     Refund,
     WebhookEventData,
 )
+
+
+def webhook_event_from_payload(
+    payload: bytes, sig_header: Optional[str], signed_at: int
+) -> WebhookEventData:
+    """The event in a webhook body, read the same way by both providers once
+    its signature is verified. A body that is not a UTF-8 JSON object is
+    refused as SignatureVerificationError (400 at the webhook route), not
+    left to raise whatever json or the SDK raises (a 500): the live provider
+    let UnicodeDecodeError, JSONDecodeError and AttributeError through, the
+    mock the last one. Missing fields get the same defaults in both; Stripe
+    always sends them."""
+    try:
+        body = json.loads(payload.decode("utf-8"))
+    except ValueError:  # UnicodeDecodeError and JSONDecodeError are both ValueErrors
+        raise SignatureVerificationError("Payload is not valid JSON", sig_header)
+    if not isinstance(body, dict):
+        raise SignatureVerificationError("Payload is not a JSON object", sig_header)
+    return WebhookEventData(
+        id=body.get("id") or f"evt_{uuid.uuid4().hex[:24]}",
+        type=body.get("type", ""),
+        data=body.get("data", {}),
+        created=body.get("created", signed_at),
+    )
 
 
 class PaymentProvider(ABC):
