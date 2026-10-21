@@ -157,10 +157,15 @@ services:
     # would not help: maxmemory is per instance. Size REDIS_MAXMEMORY below
     # the container's memory; RATE_LIMIT_GUEST_CART bounds how fast guest
     # carts can fill it.
+    # REDIS_PASSWORD is required (:?): left empty, it used to become a bare
+    # "--requirepass", Redis exited on the config error and nothing that
+    # depends on it started. Now `docker compose` refuses with a message.
+    # (Redis replaces its own process title, so the password does not stay
+    # visible in `ps` inside the container.)
     command:
       - redis-server
       - --requirepass
-      - ${REDIS_PASSWORD}
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
       - --maxmemory
       - ${REDIS_MAXMEMORY:-256mb}
       - --maxmemory-policy
@@ -173,8 +178,14 @@ services:
       - backend
     restart: unless-stopped
     logging: *default-logging
+    # redis-cli takes the password from REDISCLI_AUTH, so the healthcheck's
+    # command line does not carry it. Unauthenticated, ping got NOAUTH and
+    # the container was never healthy. The reply must be PONG: an error
+    # reply alone is not counted on to set redis-cli's exit status.
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5

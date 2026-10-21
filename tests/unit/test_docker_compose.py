@@ -43,3 +43,27 @@ def test_redis_memory_is_capped_and_never_evicted():
     redis = _without_comments(service_block("redis"))
     assert re.search(r"--maxmemory\s*\n\s*- \$\{REDIS_MAXMEMORY:-\d+[kmg]b\}", redis), redis
     assert re.search(r"--maxmemory-policy\s*\n\s*- noeviction\b", redis), redis
+
+
+def test_redis_refuses_to_start_without_a_password():
+    # ${REDIS_PASSWORD} empty or unset turned into "--requirepass" with no
+    # argument (or an empty one): Redis exited with a config error, stayed
+    # unhealthy, and nothing depending on it started. ${VAR:?message} makes
+    # `docker compose` itself stop with that message instead.
+    redis = _without_comments(service_block("redis"))
+    assert re.search(r"--requirepass\s*\n\s*- \$\{REDIS_PASSWORD:\?[^}]+\}", redis), redis
+    assert "${REDIS_PASSWORD}" not in redis
+
+
+def test_redis_healthcheck_authenticates_without_the_password_in_its_arguments():
+    # An unauthenticated `redis-cli ping` gets NOAUTH from a Redis with a
+    # password and the container is never healthy. redis-cli reads
+    # REDISCLI_AUTH from its environment, which keeps the password out of
+    # the healthcheck's command line (`-a` would also print a warning).
+    redis = _without_comments(service_block("redis"))
+    assert re.search(r"REDISCLI_AUTH: \$\{REDIS_PASSWORD:\?[^}]+\}", redis), redis
+    healthcheck = redis[redis.index("healthcheck:"):]
+    assert "redis-cli ping" in healthcheck
+    # Exit status alone is not trusted: the reply has to be PONG.
+    assert "grep -q PONG" in healthcheck
+    assert " -a " not in healthcheck and "REDIS_PASSWORD" not in healthcheck
