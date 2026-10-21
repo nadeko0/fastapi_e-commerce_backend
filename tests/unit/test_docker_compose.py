@@ -67,3 +67,62 @@ def test_redis_healthcheck_authenticates_without_the_password_in_its_arguments()
     # Exit status alone is not trusted: the reply has to be PONG.
     assert "grep -q PONG" in healthcheck
     assert " -a " not in healthcheck and "REDIS_PASSWORD" not in healthcheck
+
+
+_INIT_SCRIPT = "docker/postgres/initdb/10-app-role.sh"
+
+
+def test_postgres_and_redis_are_published_on_loopback_only():
+    # A port published without an address listens on every interface, and
+    # Docker's own iptables rules put it in front of ufw/firewalld. The
+    # services reach both over the compose network; the published ports are
+    # for a developer's own machine.
+    for service, variable, port in (("db", "DOCKER_POSTGRES_PORT", 5432), ("redis", "DOCKER_REDIS_PORT", 6379)):
+        block = _without_comments(service_block(service))
+        published = re.findall(r'^\s*- "([^"]+)"\s*$', block[block.index("ports:"):], re.M)[0]
+        assert published == f"127.0.0.1:${{{variable}:-{port}}}:{port}", (service, published)
+
+
+def test_the_application_connects_as_its_own_role_not_the_superuser():
+    # POSTGRES_USER is the superuser the image creates and the owner of the
+    # schema (migrations); the api and Celery services override it with the
+    # unprivileged role the init script creates.
+    for service in ("api", "celery-worker", "celery-beat"):
+        block = _without_comments(service_block(service))
+        assert re.search(r"POSTGRES_USER: \$\{APP_DB_USER:\?[^}]+\}", block), service
+        assert re.search(r"POSTGRES_PASSWORD: \$\{APP_DB_PASSWORD:\?[^}]+\}", block), service
+
+
+def test_the_database_creates_that_role_on_first_start():
+    db = _without_comments(service_block("db"))
+    assert "./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro" in db
+    assert re.search(r"APP_DB_USER=\$\{APP_DB_USER:\?[^}]+\}", db)
+    assert re.search(r"APP_DB_PASSWORD=\$\{APP_DB_PASSWORD:\?[^}]+\}", db)
+
+
+def test_migrations_have_a_service_that_runs_them_as_the_owner():
+    migrate = _without_comments(service_block("migrate"))
+    assert "alembic" in migrate and "upgrade" in migrate and "head" in migrate
+    assert "APP_DB_USER" not in migrate
+    assert re.search(r"profiles:\s*\n\s*- migrate", migrate)
+
+
+def test_the_init_script_grants_data_access_only():
+    script = _read(_INIT_SCRIPT)
+    assert "NOSUPERUSER" in script and "NOCREATEDB" in script and "NOCREATEROLE" in script
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public" in script
+    assert "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public" in script
+    # Tables the migrations create later, as the owner, are granted too.
+    assert 'ALTER DEFAULT PRIVILEGES FOR ROLE :"owner" IN SCHEMA public' in script
+    assert "ALL PRIVILEGES" not in script and "GRANT CREATE" not in script
+    # The password reaches psql through its environment (\getenv), not its
+    # command line, and the role must not be the superuser itself.
+    assert r"\getenv app_password APP_DB_PASSWORD" in script
+    assert '"$APP_DB_USER" = "$POSTGRES_USER"' in script
+
+
+def test_the_init_script_keeps_unix_line_endings():
+    # Run by sh in the container: a checkout with CRLF breaks it there.
+    with open(os.path.join(_ROOT, _INIT_SCRIPT), "rb") as f:
+        assert b"\r\n" not in f.read()
+    assert re.search(r"^\*\.sh\s+text\s+eol=lf\s*$", _read(".gitattributes"), re.M)
