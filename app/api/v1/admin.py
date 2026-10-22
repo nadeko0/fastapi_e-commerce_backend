@@ -305,7 +305,7 @@ async def list_orders(
             query = query.filter(Order.status == order_status)
         except ValueError:
             raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Invalid order status. Valid values are: {', '.join([s.value for s in OrderStatus])}"
             )
 
@@ -315,7 +315,7 @@ async def list_orders(
             query = query.filter(Order.payment_status == pay_status)
         except ValueError:
             raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Invalid payment status. Valid values are: {', '.join([s.value for s in PaymentStatus])}"
             )
     if start_date:
@@ -493,7 +493,7 @@ def _commit_variant(db: Session, sku: Optional[str], variant_id: Optional[int] =
                 )
         logger.warning("Variant write violated a database constraint", exc_info=e)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The variant violates a data constraint"
         )
 
@@ -731,7 +731,7 @@ async def list_webhook_events(
     if status:
         if status not in WEBHOOK_EVENT_STATUSES:
             raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Invalid webhook event status. Valid values are: {', '.join(WEBHOOK_EVENT_STATUSES)}",
             )
         query = query.filter(WebhookEvent.status == status)
