@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
@@ -70,12 +71,43 @@ class Payment(Base):
     )
 
 
+# WebhookEvent.status values. An event is stored as "received" by the webhook
+# route and applied later by the process_stripe_event task:
+#   received   stored, not applied yet
+#   processing a worker holds the event right now. The claim is the row lock
+#              (SELECT ... FOR UPDATE SKIP LOCKED) of the worker's open
+#              transaction, which also carries the state changes, so this
+#              value is never committed: a crash rolls everything back and
+#              leaves the event as it was. Part of the vocabulary for
+#              readers of the column (and for a future claim that is
+#              committed first).
+#   processed  applied (or acknowledged as nothing to apply)
+#   retrying   an attempt failed, or the event overtook its payment attempt;
+#              the task retries it with a backoff
+#   failed     out of retries; an admin can replay it
+WEBHOOK_EVENT_RECEIVED = "received"
+WEBHOOK_EVENT_PROCESSING = "processing"
+WEBHOOK_EVENT_PROCESSED = "processed"
+WEBHOOK_EVENT_RETRYING = "retrying"
+WEBHOOK_EVENT_FAILED = "failed"
+WEBHOOK_EVENT_STATUSES = (
+    WEBHOOK_EVENT_RECEIVED,
+    WEBHOOK_EVENT_PROCESSING,
+    WEBHOOK_EVENT_PROCESSED,
+    WEBHOOK_EVENT_RETRYING,
+    WEBHOOK_EVENT_FAILED,
+)
+
+
 class WebhookEvent(Base):
     """
-    Records every processed Stripe webhook event id, so a duplicate delivery
-    of the same event (Stripe guarantees at-least-once delivery and retries
-    for up to 72 hours) is detected and short-circuited before any state
-    mutation - the unique constraint on event_id is the idempotency guard.
+    Every Stripe webhook event the route accepted, stored with its payload
+    before anything is applied. Stripe guarantees at-least-once delivery and
+    retries for up to 72 hours, so the unique constraint on event_id is the
+    idempotency guard: a duplicate delivery is answered without being stored
+    or applied again. The route only stores and enqueues; the
+    process_stripe_event task applies the event and marks it processed in
+    the same transaction as what it changed.
     """
 
     __tablename__ = "webhook_events"
@@ -83,4 +115,20 @@ class WebhookEvent(Base):
     id = Column(Integer, primary_key=True, index=True)
     event_id = Column(String, nullable=False, unique=True, index=True)
     event_type = Column(String, nullable=False)
+    # The event as JSON text (id, type, created, data). NULL only for rows
+    # recorded before events were stored; those are all processed.
+    payload = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default=WEBHOOK_EVENT_RECEIVED)
+    # Attempts that did not apply the event (an error, or an event that
+    # overtook its payment attempt).
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    processed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        # The sweeper looks for old events still received or retrying, and
+        # the admin list filters by status, newest first.
+        Index("idx_webhook_event_status_updated", "status", "updated_at"),
+    )

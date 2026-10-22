@@ -17,7 +17,7 @@ from app.core.security import get_current_active_user, get_current_admin_user
 from app.models.address import Address
 from app.models.order import Order
 from app.models.order_items import OrderItem
-from app.models.payment import Payment, WebhookEvent
+from app.models.payment import WEBHOOK_EVENT_PROCESSED, Payment, WebhookEvent
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, PaymentRefund
 from app.models.product import Product, ProductVariant
 from app.models.user import User
@@ -1742,7 +1742,12 @@ async def stripe_webhook(
     # already_processed and the payment it reported was never applied.
     # A concurrent duplicate still stops here - its INSERT waits on the
     # unique index until the first delivery commits, then fails.
-    webhook_event = WebhookEvent(event_id=event.id, event_type=event.type)
+    webhook_event = WebhookEvent(
+        event_id=event.id,
+        event_type=event.type,
+        status=WEBHOOK_EVENT_PROCESSED,
+        processed_at=datetime.utcnow(),
+    )
     db.add(webhook_event)
     try:
         db.flush()
