@@ -95,7 +95,6 @@ jobs:
       - name: Payment and order tests under TZ=${{ matrix.tz }}
         env:
           TZ: ${{ matrix.tz }}
-        env:
           JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
           POSTGRES_SERVER: localhost
           POSTGRES_USER: ci
