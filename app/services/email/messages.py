@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool:
     # order is always an OrderResponse (Pydantic), not the SQLAlchemy Order
     # model: the caller in app/api/v1/orders.py snapshots it via
-    # OrderResponse.from_orm(order) before handing off to a FastAPI
+    # OrderResponse.model_validate(order) before handing off to a FastAPI
     # BackgroundTask, since by the time that task runs the request's DB
     # session is already closed and lazy-loading order.items[i].product
     # would raise DetachedInstanceError. OrderItemResponse carries a

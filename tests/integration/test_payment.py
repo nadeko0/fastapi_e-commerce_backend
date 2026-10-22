@@ -90,7 +90,7 @@ def _reset_stripe_mock_state():
 @pytest.fixture(autouse=True)
 def _stub_order_confirmation_email(monkeypatch):
     # Pre-existing, payment-unrelated bug: create_order's background task
-    # calls send_order_confirmation_email(email, OrderResponse.from_orm(order))
+    # calls send_order_confirmation_email(email, OrderResponse.model_validate(order))
     # but that function (app/services/email.py) formats item.product.name -
     # OrderResponse's items are OrderItemResponse (flat product_name field,
     # no `.product` relationship), so it raises AttributeError on every

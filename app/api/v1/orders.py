@@ -118,7 +118,7 @@ async def create_order(
         Order.idempotency_key == idempotency_key,
     ).first()
     if existing:
-        return APIResponse.success_response(OrderResponse.from_orm(existing))
+        return APIResponse.success_response(OrderResponse.model_validate(existing))
 
     cart = redis.get_cart(current_user.id)
     if not cart or not cart.items:
@@ -177,7 +177,7 @@ async def create_order(
             Order.idempotency_key == idempotency_key,
         ).first()
         if existing:
-            return APIResponse.success_response(OrderResponse.from_orm(existing))
+            return APIResponse.success_response(OrderResponse.model_validate(existing))
         # Only the key's unique index can fail a bare order INSERT (its
         # foreign keys were just read and nothing deletes orders' users or
         # addresses mid-request); re-raised rather than mistaken for a
@@ -279,10 +279,10 @@ async def create_order(
     background_tasks.add_task(
         send_order_confirmation_email,
         current_user.email,
-        OrderResponse.from_orm(order)
+        OrderResponse.model_validate(order)
     )
 
-    return APIResponse.success_response(OrderResponse.from_orm(order))
+    return APIResponse.success_response(OrderResponse.model_validate(order))
 
 @router.get(
     "/{order_id}",
@@ -312,7 +312,7 @@ async def get_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
-    return APIResponse.success_response(OrderResponse.from_orm(order))
+    return APIResponse.success_response(OrderResponse.model_validate(order))
 
 @router.put(
     "/{order_id}/status",
@@ -337,7 +337,7 @@ async def update_order_status(
 ):
     """Transition an order to a new status (admin only)."""
 
-    # See get_order above: OrderResponse.from_orm(order) below serializes
+    # See get_order above: OrderResponse.model_validate(order) below serializes
     # shipping_address and items->product, so eager-load both here too.
     # Locked (FOR UPDATE OF orders only: the joined address is on the
     # nullable side of an outer join, which Postgres cannot lock) so that
@@ -385,10 +385,10 @@ async def update_order_status(
     background_tasks.add_task(
         send_order_status_update_email,
         order.user.email,
-        OrderResponse.from_orm(order)
+        OrderResponse.model_validate(order)
     )
 
-    return APIResponse.success_response(OrderResponse.from_orm(order))
+    return APIResponse.success_response(OrderResponse.model_validate(order))
 
 
 @router.post(
@@ -440,10 +440,10 @@ async def cancel_own_order(
     db.commit()
 
     background_tasks.add_task(
-        send_order_cancellation_email, current_user.email, OrderResponse.from_orm(order)
+        send_order_cancellation_email, current_user.email, OrderResponse.model_validate(order)
     )
 
-    return APIResponse.success_response(OrderResponse.from_orm(order))
+    return APIResponse.success_response(OrderResponse.model_validate(order))
 
 
 def _provider_idempotency_key(kind: str, order: Order, client_key: str) -> str:
@@ -585,7 +585,7 @@ def _apply_payment_success(
     background_tasks.add_task(
         send_order_status_update_email,
         notify_email,
-        OrderResponse.from_orm(order)
+        OrderResponse.model_validate(order)
     )
     return True
 
