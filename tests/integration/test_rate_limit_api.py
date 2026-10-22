@@ -202,18 +202,16 @@ def test_forwarded_header_buys_nothing_without_a_trusted_proxy(limits):
 # --- exemptions, kill switch, Redis outage -----------------------------------------
 
 
-def test_health_webhook_and_docs_are_never_limited(client, limits, monkeypatch, fake_redis):
+def test_health_webhook_and_docs_are_never_limited(client, limits, monkeypatch, fake_redis, request):
     limits(RATE_LIMIT_DEFAULT="1/minute")
     # /health talks to app.main.engine directly: see tests/integration/test_health.py.
-    monkeypatch.setattr(
-        main_module,
-        "engine",
-        create_engine(
-            "sqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        ),
+    health_engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
+    request.addfinalizer(health_engine.dispose)
+    monkeypatch.setattr(main_module, "engine", health_engine)
     for _ in range(3):
         assert client.get("/health").status_code == 200
         assert client.post(f"{API}/orders/webhooks/stripe", content=b"{}").status_code == 400

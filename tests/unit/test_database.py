@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -19,7 +21,8 @@ def sqlite_session_factory(monkeypatch):
     )
     session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     monkeypatch.setattr(database_module, "SessionLocal", session_local)
-    return session_local
+    yield session_local
+    engine.dispose()
 
 
 def test_get_db_yields_a_working_session(sqlite_session_factory):
@@ -62,7 +65,9 @@ def async_sqlite_session_factory(monkeypatch):
     async_engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
     session_local = async_sessionmaker(bind=async_engine, expire_on_commit=False)
     monkeypatch.setattr(database_module, "AsyncSessionLocal", session_local)
-    return session_local
+    yield session_local
+    # Closes the pooled aiosqlite connection (and its worker thread).
+    asyncio.run(async_engine.dispose())
 
 
 def test_get_async_db_commits_on_clean_exit(async_sqlite_session_factory):
