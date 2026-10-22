@@ -1,8 +1,15 @@
 from typing import Annotated, ClassVar, List, Literal, Optional
 from urllib.parse import urlsplit
 
-from pydantic import AnyHttpUrl, Field, TypeAdapter, model_validator, validator
-from pydantic_settings import BaseSettings, NoDecode
+from pydantic import (
+    AnyHttpUrl,
+    Field,
+    TypeAdapter,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app import __version__
 from app.core.currencies import (
@@ -98,26 +105,29 @@ class Settings(BaseSettings):
     # default must never quietly become the link a customer gets.
     PUBLIC_BASE_URL: Optional[str] = None
 
-    @validator("PUBLIC_BASE_URL", always=True)
-    def validate_public_base_url(cls, v: Optional[str], values: dict) -> Optional[str]:
+    @field_validator("PUBLIC_BASE_URL")
+    @classmethod
+    def validate_public_base_url(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
         if v is None:
             # Only where nothing is deployed may links point at this machine.
             # A deployment gets no default: check_deployment_settings refuses
             # to start without an https URL.
-            if values.get("ENVIRONMENT") in _UNDEPLOYED_ENVIRONMENTS:
-                return f"http://localhost:{values.get('PORT', 8000)}"
+            if info.data.get("ENVIRONMENT") in _UNDEPLOYED_ENVIRONMENTS:
+                return f"http://localhost:{info.data.get('PORT', 8000)}"
             return None
         return v.rstrip("/")
 
-    @validator("WORKERS", pre=True)
-    def validate_workers(cls, v: int, values: dict) -> int:
-        if values.get("ENVIRONMENT") == "development":
+    @field_validator("WORKERS", mode="before")
+    @classmethod
+    def validate_workers(cls, v: int, info: ValidationInfo) -> int:
+        if info.data.get("ENVIRONMENT") == "development":
             return 1
         return v
 
-    @validator("DEBUG", "RELOAD", pre=True)
-    def set_debug_settings(cls, v: bool, values: dict) -> bool:
-        if values.get("ENVIRONMENT") == "development":
+    @field_validator("DEBUG", "RELOAD", mode="before")
+    @classmethod
+    def set_debug_settings(cls, v: bool, info: ValidationInfo) -> bool:
+        if info.data.get("ENVIRONMENT") == "development":
             return True
         return False
 
@@ -134,7 +144,8 @@ class Settings(BaseSettings):
     # this env var and so never exercised the parsing path at all).
     BACKEND_CORS_ORIGINS: Annotated[List[str], NoDecode] = []
 
-    @validator("BACKEND_CORS_ORIGINS", pre=True)
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    @classmethod
     def assemble_cors_origins(cls, v: str | List[str]) -> List[str]:
         return [_to_origin(item) for item in _split_comma_separated(v)]
 
@@ -183,22 +194,25 @@ class Settings(BaseSettings):
     DB_POOL_PRE_PING: bool = True
     DB_POOL_RECYCLE: int = 3600
 
-    @validator("DB_POOL_SIZE", "DB_MAX_OVERFLOW", pre=True)
-    def adjust_pool_size(cls, v: str | int, values: dict) -> int:
+    @field_validator("DB_POOL_SIZE", "DB_MAX_OVERFLOW", mode="before")
+    @classmethod
+    def adjust_pool_size(cls, v: str | int, info: ValidationInfo) -> int:
         v_int = int(v) if isinstance(v, str) else v
-        if values.get("ENVIRONMENT") == "development":
+        if info.data.get("ENVIRONMENT") == "development":
             return max(5, v_int // 2)
         return v_int
 
-    @validator("SQL_DEBUG", pre=True)
-    def set_sql_debug(cls, v: bool, values: dict) -> bool:
-        return values.get("DEBUG", False)
+    @field_validator("SQL_DEBUG", mode="before")
+    @classmethod
+    def set_sql_debug(cls, v: bool, info: ValidationInfo) -> bool:
+        return info.data.get("DEBUG", False)
 
-    @validator("DATABASE_URI", pre=True)
-    def assemble_db_connection(cls, v: str | None, values: dict) -> str:
+    @field_validator("DATABASE_URI", mode="before")
+    @classmethod
+    def assemble_db_connection(cls, v: str | None, info: ValidationInfo) -> str:
         if isinstance(v, str):
             return v
-        return f"postgresql+psycopg://{values.get('POSTGRES_USER')}:{values.get('POSTGRES_PASSWORD')}@{values.get('POSTGRES_SERVER')}/{values.get('POSTGRES_DB')}"
+        return f"postgresql+psycopg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}/{info.data.get('POSTGRES_DB')}"
 
     REDIS_HOST: str
     REDIS_PORT: int = 6379
@@ -247,7 +261,8 @@ class Settings(BaseSettings):
     # set, or every visitor shares the proxy's rate-limit counters.
     TRUSTED_PROXIES: Annotated[List[str], NoDecode] = []
 
-    @validator("TRUSTED_PROXIES", pre=True)
+    @field_validator("TRUSTED_PROXIES", mode="before")
+    @classmethod
     def split_trusted_proxies(cls, v: str | List[str]) -> List[str]:
         return _split_comma_separated(v)
     # Per worker process. Unset (the default) means no limit, which is the
@@ -294,7 +309,8 @@ class Settings(BaseSettings):
     # still setting it learns that its value no longer applies.
     RATE_LIMIT_LOGIN_FAILURES: Optional[str] = None
 
-    @validator("RATE_LIMIT_LOGIN_FAILURES")
+    @field_validator("RATE_LIMIT_LOGIN_FAILURES")
+    @classmethod
     def reject_renamed_login_failures(cls, v: Optional[str]) -> None:
         if v is not None:
             raise ValueError(
@@ -353,7 +369,8 @@ class Settings(BaseSettings):
         "session", "csrf_token", "__Host-guest_cart",
     ]
 
-    @validator("ESSENTIAL_COOKIES", pre=True)
+    @field_validator("ESSENTIAL_COOKIES", mode="before")
+    @classmethod
     def split_essential_cookies(cls, v: str | List[str]) -> List[str]:
         return _split_comma_separated(v)
 
@@ -455,7 +472,8 @@ class Settings(BaseSettings):
     RECONCILIATION_MAX_PAYMENTS: int = Field(200, ge=1)
     RECONCILIATION_MAX_CONSECUTIVE_ERRORS: int = Field(5, ge=1)
 
-    @validator("FRONTEND_URL")
+    @field_validator("FRONTEND_URL")
+    @classmethod
     def validate_frontend_url(cls, v: str) -> str:
         parts = urlsplit(v)
         if parts.scheme not in ("http", "https") or not parts.hostname or "@" in parts.netloc:
@@ -465,7 +483,8 @@ class Settings(BaseSettings):
     # In every environment, not only in a deployment: with JPY a 1000 yen
     # order was sent to the provider as 100000 (yen, Stripe's smallest JPY
     # unit), with KWD as a tenth of its price. Nothing in between notices.
-    @validator("STORE_CURRENCY")
+    @field_validator("STORE_CURRENCY")
+    @classmethod
     def validate_store_currency(cls, v: str) -> str:
         # Shaped like a currency is not enough: "ABC" matches the pattern
         # and the application would start, then Stripe would refuse every
@@ -529,9 +548,9 @@ class Settings(BaseSettings):
             )
         return self
 
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        env_file=".env",
         # docker-compose.yml's api service loads the whole .env file via
         # env_file, which also contains docker-compose-only variables
         # (DOCKER_POSTGRES_PORT, DOCKER_REDIS_PORT, DOCKER_NETWORK_NAME -
@@ -542,9 +561,10 @@ class Settings(BaseSettings):
         # image, not just running the local test suite (which sets only
         # the exact env vars Settings expects and so never exercised this
         # path)
-        extra = "ignore"
+        extra="ignore",
         # A validation error otherwise ends with a repr of the whole input,
         # secrets included, and is printed at startup into the logs.
-        hide_input_in_errors = True
+        hide_input_in_errors=True,
+    )
 
 settings = Settings()
