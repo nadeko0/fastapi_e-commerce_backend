@@ -357,7 +357,7 @@ async def list_orders(
     },
 )
 async def get_statistics(
-    period: str = Query("24h", regex="^(24h|7d|30d)$"),
+    period: str = Query("24h", pattern="^(24h|7d|30d)$"),
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
