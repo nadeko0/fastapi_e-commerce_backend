@@ -136,22 +136,41 @@ def test_the_migration_refuses_to_run_over_rows_that_break_a_constraint(db_sessi
     # Postgres would refuse the ALTER TABLE too, but one constraint at a
     # time and without saying how many rows; the migration checks all of
     # them first and names each, before changing anything. The test schema
-    # already has the constraints, so SQLite is told to look away while the
-    # rows a database from before this migration could hold are written.
-    db_session.execute(text("PRAGMA ignore_check_constraints = ON"))
-    db_session.execute(text("UPDATE products SET stock_quantity = -3"))
-    db_session.execute(text("UPDATE payments SET amount_refunded = amount + 1"))
-    db_session.commit()
-    db_session.execute(text("PRAGMA ignore_check_constraints = OFF"))
+    # already has the constraints, so they are switched off while the rows a
+    # database from before this migration could hold are written: SQLite is
+    # told to look away; on PostgreSQL, where the schema outlives the test,
+    # the two constraints are dropped and put back afterwards.
+    postgres = db_session.get_bind().dialect.name == "postgresql"
+    broken = {"ck_product_stock_non_negative", "ck_payment_refunded_within_amount"}
+    constraints = [c for c in _migration().CONSTRAINTS if c[1] in broken]
+    if postgres:
+        for table, name, _condition in constraints:
+            db_session.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT {name}"))
+    else:
+        db_session.execute(text("PRAGMA ignore_check_constraints = ON"))
+    try:
+        db_session.execute(text("UPDATE products SET stock_quantity = -3"))
+        db_session.execute(text("UPDATE payments SET amount_refunded = amount + 1"))
+        db_session.commit()
+        if not postgres:
+            db_session.execute(text("PRAGMA ignore_check_constraints = OFF"))
 
-    connection = db_session.connection()
-    with Operations.context(MigrationContext.configure(connection)):
-        with pytest.raises(RuntimeError) as error:
-            _migration().upgrade()
-    message = str(error.value)
-    assert "ck_product_stock_non_negative" in message and "products" in message
-    assert "ck_payment_refunded_within_amount" in message
-    assert "1 row" in message
+        connection = db_session.connection()
+        with Operations.context(MigrationContext.configure(connection)):
+            with pytest.raises(RuntimeError) as error:
+                _migration().upgrade()
+        message = str(error.value)
+        assert "ck_product_stock_non_negative" in message and "products" in message
+        assert "ck_payment_refunded_within_amount" in message
+        assert "1 row" in message
+    finally:
+        if postgres:
+            db_session.rollback()
+            db_session.execute(text("UPDATE products SET stock_quantity = 0"))
+            db_session.execute(text("UPDATE payments SET amount_refunded = 0"))
+            for table, name, condition in constraints:
+                db_session.execute(text(f"ALTER TABLE {table} ADD CONSTRAINT {name} CHECK ({condition})"))
+            db_session.commit()
 
 
 def test_the_migration_finds_nothing_wrong_with_valid_rows(db_session, order_graph):
