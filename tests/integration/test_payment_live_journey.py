@@ -32,6 +32,7 @@ from payment_support import (
     payment_rows,
     use_production_sessions,
 )
+from stripe_event_support import deliver
 
 from app.core.config import settings
 from app.main import app
@@ -115,9 +116,9 @@ def _deliver(shop, event_type, obj):
                        "type": event_type, "created": int(time.time()),
                        "data": {"object": obj}}).encode()
     signature = StripePaymentProvider.sign_payload(body, settings.STRIPE_WEBHOOK_SECRET)
-    return shop.client.post("/api/v1/orders/webhooks/stripe", content=body,
-                            headers={"Stripe-Signature": signature,
-                                     "Content-Type": "application/json"})
+    return deliver(shop.client.post("/api/v1/orders/webhooks/stripe", content=body,
+                                    headers={"Stripe-Signature": signature,
+                                             "Content-Type": "application/json"}), body)
 
 
 def _wait_for_refund(stripe, refund_id, statuses, timeout=90):

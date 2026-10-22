@@ -20,6 +20,7 @@ from typing import Optional
 
 from conftest import engine
 from sqlalchemy.orm import sessionmaker
+from stripe_event_support import deliver
 
 from app.api.deps import get_db as deps_get_db
 from app.core.config import settings
@@ -229,7 +230,7 @@ class Shop:
 
     # -- Stripe ------------------------------------------------------------
 
-    def webhook(self, event_type, obj, event_id=None, timestamp=None):
+    def _post_event(self, event_type, obj, event_id=None, timestamp=None):
         body = json.dumps({
             "id": event_id or f"evt_{uuid.uuid4().hex[:24]}",
             "object": "event",
@@ -239,9 +240,21 @@ class Shop:
         }).encode()
         signature = StripePaymentProvider.sign_payload(
             body, settings.STRIPE_WEBHOOK_SECRET, timestamp=timestamp)
-        return self.client.post(WEBHOOK, content=body,
-                                headers={"Stripe-Signature": signature,
-                                         "Content-Type": "application/json"})
+        response = self.client.post(WEBHOOK, content=body,
+                                    headers={"Stripe-Signature": signature,
+                                             "Content-Type": "application/json"})
+        return response, body
+
+    def webhook_raw(self, event_type, obj, event_id=None, timestamp=None):
+        """Deliver an event to the route and nothing more: the route's own
+        answer, the event stored and its task message published, not yet
+        applied."""
+        return self._post_event(event_type, obj, event_id, timestamp)[0]
+
+    def webhook(self, event_type, obj, event_id=None, timestamp=None):
+        """Deliver an event: the route stores it, then the worker applies it.
+        The answer carries what applying it produced (see Delivered)."""
+        return deliver(*self._post_event(event_type, obj, event_id, timestamp))
 
     def intent_event(self, event_type, payment: Payment, amount=None, currency=None,
                      event_id=None, **extra):

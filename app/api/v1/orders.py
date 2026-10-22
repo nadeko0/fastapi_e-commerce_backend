@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta
@@ -17,7 +18,7 @@ from app.core.security import get_current_active_user, get_current_admin_user
 from app.models.address import Address
 from app.models.order import Order
 from app.models.order_items import OrderItem
-from app.models.payment import WEBHOOK_EVENT_PROCESSED, Payment, WebhookEvent
+from app.models.payment import Payment
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, PaymentRefund
 from app.models.product import Product, ProductVariant
 from app.models.user import User
@@ -1490,22 +1491,22 @@ def _has_open_dispute(db: Session, order_id: int, payment_id: Optional[int] = No
 )
 async def stripe_webhook(
     request: Request,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_payment_provider),
     stripe_signature: Optional[str] = Header(default=None, alias="Stripe-Signature"),
 ):
     """
-    Receive Stripe webhook events for both payment flows and reconcile
-    order/payment state:
+    Receive Stripe webhook events for both payment flows. The event is
+    verified, stored and acknowledged (200) here; the process_stripe_event
+    task then reconciles order/payment state:
       - payment_intent.succeeded / payment_intent.payment_failed /
         payment_intent.canceled - the server-confirmed-PaymentIntent flow
         (/pay).
       - checkout.session.completed / .async_payment_succeeded /
         .async_payment_failed / .expired - the hosted-redirect Checkout
         Session flow (/checkout-session).
-    Idempotent - duplicate deliveries of the same event.id are detected and
-    short-circuited.
+    Idempotent - duplicate deliveries of the same event.id are answered
+    "already_processed" without being stored or applied again.
 
     No auth dependency: Stripe webhooks are unauthenticated by design and
     are instead trusted via the HMAC signature on the payload (verified
@@ -1529,46 +1530,36 @@ async def stripe_webhook(
             detail="Invalid webhook signature",
         )
 
-    # Idempotent event processing: Stripe guarantees at-least-once delivery
-    # and retries failed/unacknowledged webhooks for up to 72 hours, so the
-    # same event.id can and will arrive more than once. The unique
-    # constraint on event_id is the idempotency guard - a duplicate
-    # delivery is detected and short-circuited before any state mutation
-    # (order update or email) happens a second time.
+    # Stripe's own advice (https://docs.stripe.com/webhooks): answer 2xx
+    # quickly, before any complex logic, and handle events asynchronously.
+    # The event is stored (with its payload), a Celery task is published to
+    # apply it, and the answer goes out; app/services/stripe_events.py has
+    # what an event does and how a failing one is retried.
     #
-    # Flushed, not committed: the event is recorded in the same transaction
-    # as what it changes, and every path below ends in the commit that
-    # keeps both. It used to be committed here, before anything was
-    # applied, so an event whose processing then failed (a database error,
-    # a crash) was already "processed": the redelivery was answered
-    # already_processed and the payment it reported was never applied.
-    # A concurrent duplicate still stops here - its INSERT waits on the
-    # unique index until the first delivery commits, then fails.
-    webhook_event = WebhookEvent(
-        event_id=event.id,
-        event_type=event.type,
-        status=WEBHOOK_EVENT_PROCESSED,
-        processed_at=datetime.utcnow(),
-    )
-    db.add(webhook_event)
-    try:
-        db.flush()
-    except IntegrityError:
-        db.rollback()
-        return APIResponse.success_response({"status": "already_processed"})
-
+    # Stripe guarantees at-least-once delivery and retries unacknowledged
+    # webhooks for up to 72 hours, so the same event.id can and will arrive
+    # more than once. The unique constraint on event_id is the idempotency
+    # guard: a duplicate is answered without being stored, published or
+    # applied again. A store that fails raises, so the answer is a 5xx and
+    # Stripe delivers the event again - nothing is lost. A broker that is
+    # down does not fail the request: the event is stored, and the sweeper
+    # task publishes it later.
     # Imported here: app.services.stripe_events imports this module's
     # payment helpers.
-    from app.services.stripe_events import PaymentAttemptNotRecorded, apply_event
+    from app.services import stripe_events
 
-    try:
-        result = apply_event(db, event.type, event.data, background_tasks)
-    except PaymentAttemptNotRecorded:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The payment attempt for this event is not recorded yet; retry later",
-        )
-    return APIResponse.success_response(result)
+    stored = stripe_events.store_event(
+        db,
+        event.id,
+        event.type,
+        json.dumps(
+            {"id": event.id, "type": event.type, "created": event.created, "data": event.data}
+        ),
+    )
+    if not stored:
+        return APIResponse.success_response({"status": "already_processed"})
+    stripe_events.enqueue_event(event.id)
+    return APIResponse.success_response({"status": "received"})
 
 
 # The transition table lives in app/services/orders.py, shared with the
