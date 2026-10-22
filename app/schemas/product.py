@@ -1,8 +1,28 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    PlainSerializer,
+    validator,
+)
+
+# An image URL is validated as an HttpUrl but kept as the plain string: it
+# is stored in a string-array column and returned as that string. Without
+# the serializer, Pydantic sees a str where the field's schema says HttpUrl
+# and warns (PydanticSerializationUnexpectedValue) on every dump.
+# A plain serializer is the documented way to say "serialize this field
+# yourself" (Pydantic docs, Serialization > Field serializers).
+ImageUrl = Annotated[
+    HttpUrl,
+    AfterValidator(str),
+    PlainSerializer(str, return_type=str),
+]
 
 
 class ProductCharacteristic(BaseModel):
@@ -18,7 +38,7 @@ class ProductBase(BaseModel):
     price: Decimal = Field(..., ge=0)
     stock_quantity: int = Field(..., ge=0)
     category_id: int
-    images: List[HttpUrl] = Field(default_factory=list)
+    images: List[ImageUrl] = Field(default_factory=list)
     characteristics: Dict[str, ProductCharacteristic] = Field(default_factory=dict)
 
     @validator('price')
@@ -43,7 +63,7 @@ class ProductUpdate(BaseModel):
     price: Optional[Decimal] = Field(None, ge=0)
     stock_quantity: Optional[int] = Field(None, ge=0)
     category_id: Optional[int] = None
-    images: Optional[List[HttpUrl]] = None
+    images: Optional[List[ImageUrl]] = None
     characteristics: Optional[Dict[str, ProductCharacteristic]] = None
 
     @validator('name', 'description', 'price', 'stock_quantity', 'category_id', 'images', 'characteristics')
