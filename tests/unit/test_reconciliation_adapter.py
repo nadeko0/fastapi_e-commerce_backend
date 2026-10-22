@@ -6,14 +6,19 @@ the wiring of the adapter (amount_received, the refund list, the statuses as
 Stripe words them) is checked on every run and not only when someone has a
 Stripe test key.
 """
+import uuid
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from test_reconciliation_provider import API_KEY, RETURN_URL, ListingFakeStripe
 
+from app.models.address import Address
+from app.models.order import Order
 from app.models.payment import Payment
 from app.models.payment_discrepancy import PaymentDiscrepancy
 from app.models.payment_ledger import PaymentRefund
+from app.models.user import User
 from app.services.payment.live_stripe_provider import LiveStripePaymentProvider
 from app.services.reconciliation import reconcile_payments
 
@@ -22,6 +27,23 @@ from app.services.reconciliation import reconcile_payments
 def provider(monkeypatch):
     ListingFakeStripe(API_KEY).install(monkeypatch)
     return LiveStripePaymentProvider(api_key=API_KEY)
+
+
+def _order_id(db):
+    """The id of a real order: PostgreSQL enforces payments.order_id."""
+    user = User(email=f"buyer-{uuid.uuid4().hex[:10]}@example.com", hashed_password="x",
+                full_name="Buyer One", role="client", is_active=True)
+    db.add(user)
+    db.commit()
+    address = Address(user_id=user.id, street="1 Main Street", city="Metropolis",
+                      state="NY", postal_code="10001", country="US")
+    db.add(address)
+    db.commit()
+    order = Order(user_id=user.id, status="new", payment_status="pending",
+                  shipping_address_id=address.id, total_amount=Decimal("10.99"))
+    db.add(order)
+    db.commit()
+    return order.id
 
 
 def _open(db):
@@ -38,7 +60,7 @@ def test_reconciling_through_the_live_adapter(db_session, provider):
     provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
     refund = provider.create_refund(payment_intent_id=intent.id, amount=300)
     payment = Payment(
-        order_id=1, provider="stripe", payment_intent_id=intent.id, amount=1099,
+        order_id=_order_id(db), provider="stripe", payment_intent_id=intent.id, amount=1099,
         amount_refunded=300, currency="USD", status="succeeded",
         created_at=datetime.utcnow() - timedelta(days=1))
     db.add(payment)
@@ -72,7 +94,7 @@ def test_reconciling_through_the_live_adapter(db_session, provider):
 
 def test_a_payment_stripe_does_not_have_is_reported_through_the_adapter(db_session, provider):
     db_session.add(Payment(
-        order_id=1, provider="stripe", payment_intent_id="pi_nowhere", amount=100,
+        order_id=_order_id(db_session), provider="stripe", payment_intent_id="pi_nowhere", amount=100,
         currency="USD", status="succeeded", created_at=datetime.utcnow() - timedelta(days=1)))
     db_session.commit()
 
