@@ -1,7 +1,7 @@
 from typing import Annotated, ClassVar, List, Literal, Optional
 from urllib.parse import urlsplit
 
-from pydantic import AnyHttpUrl, Field, model_validator, validator
+from pydantic import AnyHttpUrl, Field, TypeAdapter, model_validator, validator
 from pydantic_settings import BaseSettings, NoDecode
 
 from app import __version__
@@ -26,6 +26,26 @@ def _split_comma_separated(v: str | List[str]) -> List[str]:
             return json.loads(v)
         return [i.strip() for i in v.split(",") if i.strip()]
     return v
+
+
+_HTTP_URL = TypeAdapter(AnyHttpUrl)
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _to_origin(value: str) -> str:
+    # The origin serialization of the Fetch standard: scheme://host[:port],
+    # no path. That is what a browser sends in the Origin header and what
+    # Starlette's CORSMiddleware compares, as an exact string, with
+    # allow_origins. Pydantic's AnyHttpUrl str() adds a "/" to a URL without
+    # a path ("http://localhost:3000/"), which never equals an Origin header.
+    url = _HTTP_URL.validate_python(value)
+    if url.path not in (None, "", "/") or url.query or url.fragment or url.username or url.password:
+        raise ValueError(
+            f"{value!r} is not an origin: use scheme://host[:port] with no path, query, fragment or credentials"
+        )
+    host = f"[{url.host}]" if ":" in (url.host or "") else url.host
+    port = "" if url.port in (None, _DEFAULT_PORTS[url.scheme]) else f":{url.port}"
+    return f"{url.scheme}://{host}{port}"
 
 
 # A rate limit setting: "N/period" with period second, minute, hour or day,
@@ -112,11 +132,11 @@ class Settings(BaseSettings):
     # comma-separated case - ever ran. Confirmed by actually deploying the
     # Docker image, not just running the local test suite (which never sets
     # this env var and so never exercised the parsing path at all).
-    BACKEND_CORS_ORIGINS: Annotated[List[AnyHttpUrl], NoDecode] = []
+    BACKEND_CORS_ORIGINS: Annotated[List[str], NoDecode] = []
 
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v: str | List[str]) -> List[str]:
-        return _split_comma_separated(v)
+        return [_to_origin(item) for item in _split_comma_separated(v)]
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"

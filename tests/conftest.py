@@ -36,6 +36,9 @@ os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # no Redis available in th
 # users and don't need that security margin, so use the minimum valid cost
 # factor here instead - this is the single biggest lever on suite runtime.
 os.environ.setdefault("BCRYPT_ROUNDS", "4")
+# A fixed browser origin for tests/integration/test_cors.py: assigned, not
+# defaulted, so a developer's .env cannot change what that test expects.
+os.environ["BACKEND_CORS_ORIGINS"] = "http://localhost:3000"
 
 import atexit
 import fnmatch
