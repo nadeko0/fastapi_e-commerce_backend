@@ -50,6 +50,9 @@ class PaymentIntent:
     next_action: Optional[Dict[str, Any]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     amount_refunded: int = 0
+    # What Stripe actually collected (PaymentIntent.amount_received): 0 until
+    # the payment succeeds, and not reduced by refunds.
+    amount_received: int = 0
 
 
 @dataclass
@@ -59,6 +62,10 @@ class Refund:
     amount: int  # smallest currency unit
     currency: str
     status: RefundStatus
+    # The status exactly as the provider reports it ("canceled" and
+    # "requires_action" too, which `status` folds into PENDING). Only the
+    # read operations fill it; None means `status.value` is all there is.
+    provider_status: Optional[str] = None
 
 
 @dataclass
