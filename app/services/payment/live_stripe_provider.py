@@ -26,7 +26,7 @@ never assigned to the global `stripe.api_key`) so multiple providers using
 different keys can coexist safely in the same process - relevant for tests.
 """
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import stripe
 from stripe import error as stripe_error
@@ -91,6 +91,7 @@ def _to_payment_intent(pi: Any) -> PaymentIntent:
         ),
         next_action=dict(pi["next_action"]) if pi.get("next_action") else None,
         metadata=dict(pi.get("metadata") or {}),
+        amount_received=pi.get("amount_received") or 0,
     )
 
 
@@ -136,7 +137,16 @@ def _to_refund(r: Any) -> Refund:
         amount=r["amount"],
         currency=r["currency"].upper(),
         status=status,
+        provider_status=status_raw,
     )
+
+
+# Refunds asked for per page (the most Stripe allows) and pages read at most
+# per call: 500 refunds of one PaymentIntent is far beyond anything a store
+# makes, so reaching the cap means something is wrong, and list_refunds says
+# so instead of returning a partial list.
+_REFUND_PAGE_SIZE = 100
+_REFUND_MAX_PAGES = 5
 
 
 def _signed_at(sig_header: str) -> int:
@@ -263,6 +273,8 @@ class LiveStripePaymentProvider(PaymentProvider):
             )
         except stripe_error.APIConnectionError as e:
             raise PaymentProviderTimeoutError(str(e.user_message or e))
+        except stripe_error.RateLimitError as e:
+            raise PaymentProviderTimeoutError(str(e.user_message or e))
         return _to_payment_intent(pi)
 
     # -- Checkout Session ------------------------------------------------
@@ -382,6 +394,32 @@ class LiveStripePaymentProvider(PaymentProvider):
         except stripe_error.APIConnectionError as e:
             raise PaymentProviderTimeoutError(str(e.user_message or e))
         return _to_refund(refund)
+
+    def list_refunds(self, payment_intent_id: str) -> List[Refund]:
+        refunds: List[Refund] = []
+        params: Dict[str, Any] = {
+            "payment_intent": payment_intent_id,
+            "limit": _REFUND_PAGE_SIZE,
+            "api_key": self._api_key,
+        }
+        for _ in range(_REFUND_MAX_PAGES):
+            try:
+                page = stripe.Refund.list(**params)
+            except stripe_error.InvalidRequestError as e:
+                raise InvalidRequestError(
+                    str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
+                )
+            except (stripe_error.APIConnectionError, stripe_error.RateLimitError) as e:
+                raise PaymentProviderTimeoutError(str(e.user_message or e))
+            refunds.extend(_to_refund(r) for r in page.data)
+            if not page.has_more:
+                return refunds
+            params["starting_after"] = refunds[-1].id
+        raise InvalidRequestError(
+            f"More than {_REFUND_PAGE_SIZE * _REFUND_MAX_PAGES} refunds on "
+            f"{payment_intent_id}; not read",
+            code="too_many_refunds",
+        )
 
     # -- Webhooks --------------------------------------------------------
 

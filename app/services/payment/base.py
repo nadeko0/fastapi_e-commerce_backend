@@ -8,7 +8,7 @@ not redesigning the call sites in app/api/v1/orders.py.
 import json
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.services.payment.exceptions import SignatureVerificationError
 from app.services.payment.types import (
@@ -91,6 +91,14 @@ class PaymentProvider(ABC):
     ) -> Refund:
         """Mirrors stripe.Refund.create(payment_intent=..., amount=...).
         amount=None means a full refund of whatever has not yet been refunded."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_refunds(self, payment_intent_id: str) -> List[Refund]:
+        """Mirrors stripe.Refund.list(payment_intent=...): every refund of the
+        PaymentIntent, whatever its status, each with `provider_status` set.
+        A PaymentIntent with none gives []. Read only; used by the daily
+        reconciliation (app/services/reconciliation.py)."""
         raise NotImplementedError
 
     # -- Checkout Session ---------------------------------------------------

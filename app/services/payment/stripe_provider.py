@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.currencies import STRIPE_PRESENTMENT_CURRENCIES
 from app.services.payment.base import PaymentProvider, webhook_event_from_payload
@@ -324,6 +324,7 @@ class StripePaymentProvider(PaymentProvider):
             if after_authentication is not None:
                 self._decline(intent, *after_authentication)
             intent.status = PaymentIntentStatus.SUCCEEDED
+            intent.amount_received = intent.amount
             return intent
 
         token = intent.payment_method or TOKEN_SUCCESS_DEFAULT
@@ -346,6 +347,7 @@ class StripePaymentProvider(PaymentProvider):
             return intent
 
         intent.status = PaymentIntentStatus.SUCCEEDED
+        intent.amount_received = intent.amount
         return intent
 
     @staticmethod
@@ -529,6 +531,17 @@ class StripePaymentProvider(PaymentProvider):
         if idempotency_key is not None:
             self._refunds_by_key[idempotency_key] = refund
         return refund
+
+    def list_refunds(self, payment_intent_id: str) -> List[Refund]:
+        self._simulate_network_call()
+        return [
+            Refund(
+                id=r.id, payment_intent=r.payment_intent, amount=r.amount,
+                currency=r.currency, status=r.status, provider_status=r.status.value,
+            )
+            for r in self._refunds_by_id.values()
+            if r.payment_intent == payment_intent_id
+        ]
 
     @classmethod
     def settle_refund(cls, refund_id: str) -> Dict[str, Any]:

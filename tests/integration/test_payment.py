@@ -1200,6 +1200,9 @@ class _IncompleteProvider(PaymentProvider):
     def create_refund(self, **kwargs):
         return super().create_refund(**kwargs)
 
+    def list_refunds(self, payment_intent_id):
+        return super().list_refunds(payment_intent_id)
+
     def create_checkout_session(self, **kwargs):
         return super().create_checkout_session(**kwargs)
 
@@ -1229,6 +1232,8 @@ def test_base_provider_abstract_methods_all_raise_not_implemented():
         provider.retrieve_payment_intent("pi_x")
     with pytest.raises(NotImplementedError):
         provider.create_refund(payment_intent_id="pi_x")
+    with pytest.raises(NotImplementedError):
+        provider.list_refunds("pi_x")
     with pytest.raises(NotImplementedError):
         provider.create_checkout_session(
             amount=100,
