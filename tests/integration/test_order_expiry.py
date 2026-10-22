@@ -15,7 +15,8 @@ can still be cancelled, so stock is returned exactly once.
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import inspect as sa_inspect
+from conftest import TestingSessionLocal, engine
+from sqlalchemy.orm import Session, sessionmaker
 from test_orders import (
     CART_PREFIX,
     ORDERS_PREFIX,
@@ -259,21 +260,34 @@ def test_expiry_rechecks_an_order_paid_after_it_was_listed(
     client, db_session, tasks_db, monkeypatch
 ):
     # The task lists candidates first and locks them one by one; an order
-    # paid in between is seen as paid under the lock and left alone.
+    # paid in between is seen as paid under the lock and left alone. "In
+    # between" is the commit that ends the listing: the payment is committed
+    # from another session right after it, before the task's locking read.
+    # (Not from inside the locked section: on PostgreSQL that write would wait
+    # for the lock the task holds, which is the point of the lock.)
     token, order, product, _ = _place(client, db_session)
     _age(db_session, order["id"], settings.UNPAID_ORDER_EXPIRE_MINUTES + 1)
-    real_check = tasks.is_unpaid_and_new
 
-    def _paid_meanwhile(locked_order):
-        db_order = db_session.get(Order, order["id"])
-        db_order.payment_status = "paid"
-        db_order.status = "confirmed"
-        db_session.commit()
-        tasks_session = sa_inspect(locked_order).session
-        tasks_session.refresh(locked_order)
-        return real_check(locked_order)
+    class _PaidAfterListing(Session):
+        paid = False
 
-    monkeypatch.setattr(tasks, "is_unpaid_and_new", _paid_meanwhile)
+        def commit(self):
+            super().commit()
+            if not _PaidAfterListing.paid:
+                _PaidAfterListing.paid = True
+                other = TestingSessionLocal()
+                try:
+                    db_order = other.get(Order, order["id"])
+                    db_order.payment_status = "paid"
+                    db_order.status = "confirmed"
+                    other.commit()
+                finally:
+                    other.close()
+
+    monkeypatch.setattr(
+        tasks, "SessionLocal",
+        sessionmaker(class_=_PaidAfterListing, autocommit=False, autoflush=False, bind=engine),
+    )
 
     assert tasks.cancel_expired_unpaid_orders() == 0
     assert _order(db_session, order["id"]).status == "confirmed"

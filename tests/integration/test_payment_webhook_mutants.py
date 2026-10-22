@@ -10,8 +10,10 @@ alerted on), and which attempts still hold back an event that matched nothing.
 import logging
 import uuid
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 import pytest
+from conftest import IS_POSTGRES
 from payment_support import (
     Shop,
     order_state,
@@ -21,8 +23,11 @@ from payment_support import (
 )
 
 from app.core.config import settings
+from app.models.address import Address
+from app.models.order import Order
 from app.models.payment import Payment
 from app.models.payment_ledger import PaymentDispute, PaymentRefund
+from app.models.user import User
 from app.services.stripe_events import _attempt_still_storing_its_id, _object_id
 
 ORDERS_LOGGER = "app.services.stripe_events"
@@ -275,7 +280,40 @@ def test_object_id_is_a_non_empty_string_or_the_id_of_an_object(value, expected)
 
 # -- An event that matched no payment: is its attempt still storing its id? -----------
 
+def _ensure_order(db, order_id):
+    """payments.order_id is a foreign key: PostgreSQL refuses an attempt for an
+    order that does not exist (SQLite does not check), so the order the test
+    names is created, with exactly that id."""
+    if db.get(Order, order_id) is not None:
+        return
+    user = db.query(User).first()
+    if user is None:
+        user = User(
+            email="buyer@example.com", hashed_password="x", full_name="Buyer",
+            gdpr_consent=True, privacy_policy_accepted=True,
+        )
+        db.add(user)
+        db.flush()
+    address = db.query(Address).first()
+    if address is None:
+        address = Address(
+            user_id=user.id, street="1 Main St", city="Town", state="State",
+            postal_code="12345", country="DE", address_type="home",
+        )
+        db.add(address)
+        db.flush()
+    db.add(Order(
+        id=order_id, user_id=user.id, total_amount=Decimal("19.99"),
+        shipping_address_id=address.id,
+    ))
+    db.flush()
+
+
 def _attempt(db, order_id, **overrides):
+    if IS_POSTGRES and order_id > 2 ** 31 - 1:
+        # No such order can exist: the column is a 4-byte integer.
+        return None
+    _ensure_order(db, order_id)
     values = dict(order_id=order_id, payment_intent_id=f"pending-{uuid.uuid4().hex[:12]}",
                   amount=1999, currency="USD", status="processing", checkout_session_id=None)
     values.update(overrides)

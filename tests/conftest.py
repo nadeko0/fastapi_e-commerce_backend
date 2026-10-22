@@ -38,13 +38,19 @@ os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # no Redis available in th
 os.environ.setdefault("BCRYPT_ROUNDS", "4")
 
 import atexit
+import fnmatch
+import re
 import shutil
+import subprocess
+import sys
 import tempfile
+import uuid
 
 import fakeredis
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, StaticPool
@@ -58,53 +64,150 @@ from app.main import app
 from app.models.base import Base
 from app.services.redis import RedisService
 
-# A SQLite *file*, not :memory:. Routes are split between the sync Session
-# and AsyncSession (see app/core/database.py), which in tests means two
-# drivers (pysqlite and aiosqlite) that must see the same data - and an
-# in-memory SQLite database belongs to the one connection that created it.
-# A temp file is the one thing both can open.
-_db_dir = tempfile.mkdtemp(prefix="ecommerce-tests-")
-_db_url_path = os.path.join(_db_dir, "test.db").replace("\\", "/")
+# Optional: run the suite on a real PostgreSQL server.
+#
+#   TEST_DATABASE_URL=postgresql+psycopg://user:password@host:5432/postgres
+#
+# The database named in the URL is only where the connection starts, for
+# CREATE DATABASE (it must exist; the role needs CREATEDB). Every session
+# creates its own database with a unique name, builds the schema in it and
+# drops it at exit, so nothing already on the server is ever written to.
+# Without the variable the SQLite path below is used, exactly as before.
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or None
+IS_POSTGRES = TEST_DATABASE_URL is not None
 
-engine = create_engine(
-    f"sqlite:///{_db_url_path}",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
+# For tests that are only meaningful against a real server (row locks, the
+# database's own CHECK constraints, the migrations). On the default SQLite
+# run they are skipped, with this reason.
+requires_postgres = pytest.mark.skipif(
+    not IS_POSTGRES,
+    reason="needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...",
+)
+
+# The tests whose outcome depends on what the database does (row locks,
+# CHECK constraints, unique indexes, the payment/refund/dispute tables,
+# column types, the migrations), selected with `pytest -m db_sensitive`. CI
+# runs exactly these on PostgreSQL (job test-postgres); the whole suite also
+# passes there. Chosen by file name so that a new test file following the
+# naming convention is picked up without anyone remembering to mark it.
+_DB_SENSITIVE_FILES = (
+    "test_payment*.py",
+    "test_order*.py",
+    "test_checkout_session*.py",
+    "test_refund*.py",
+    "test_disputes.py",
+    "test_webhook*.py",
+    "test_tasks*.py",
+    "test_check_constraints.py",
+    "test_email_case.py",
+    "test_email_migration.py",
+    "test_users.py",
+    "test_registration_and_verification.py",
+    "test_db_pool_concurrency.py",
+    "test_admin_orders.py",
+    "test_postgres_*.py",
 )
 
 
-@event.listens_for(engine, "connect")
-def _sqlite_pragmas(dbapi_connection, _record):
-    cursor = dbapi_connection.cursor()
-    # WAL: a test's own db_session usually still has a read transaction open
-    # when it calls an endpoint, and in SQLite's default journal mode that
-    # open reader would block a write coming from the other driver. WAL lets
-    # readers and a writer coexist. It is a property of the file, so the
-    # aiosqlite connections get it too.
-    cursor.execute("PRAGMA journal_mode=WAL")
-    # Throwaway database: skip fsync, the suite recreates every table per test.
-    cursor.execute("PRAGMA synchronous=OFF")
-    cursor.close()
+def pytest_collection_modifyitems(items):
+    for item in items:
+        if any(fnmatch.fnmatch(item.path.name, pattern) for pattern in _DB_SENSITIVE_FILES):
+            item.add_marker(pytest.mark.db_sensitive)
+
+if IS_POSTGRES:
+    _admin_url = make_url(TEST_DATABASE_URL)
+    if _admin_url.drivername != "postgresql+psycopg":
+        raise RuntimeError("TEST_DATABASE_URL must be a postgresql+psycopg:// URL")
+    _pg_name = f"ecom_pgtests_{uuid.uuid4().hex[:12]}"
+    _admin_engine = create_engine(_admin_url, isolation_level="AUTOCOMMIT")
+    with _admin_engine.connect() as _admin_conn:
+        _admin_conn.execute(text(f'CREATE DATABASE "{_pg_name}"'))
+
+    @atexit.register
+    def _drop_postgres_database():
+        # WITH (FORCE) (PostgreSQL 13+) disconnects pooled leftovers first.
+        engine.dispose()
+        with _admin_engine.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{_pg_name}" WITH (FORCE)'))
+        _admin_engine.dispose()
+
+    TEST_DB_URL = _admin_url.set(database=_pg_name).render_as_string(hide_password=False)
+
+    # The schema is built by `alembic upgrade head`, not Base.metadata.create_all:
+    # the migrations are what production runs, so every session also proves
+    # that the chain builds a schema the models agree with (a constraint or
+    # column added to a model but forgotten in a migration fails here, which
+    # create_all would hide). A subprocess, because Alembic's env.py calls
+    # logging.fileConfig and would disable this process's loggers.
+    subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        env={**os.environ, "DATABASE_URI": TEST_DB_URL},
+        check=True,
+    )
+
+    if sys.platform == "win32":
+        # psycopg's async mode cannot run on Windows' default ProactorEventLoop.
+        # Only a developer's machine needs this; the app itself runs in Linux
+        # containers, and CI is Linux.
+        import asyncio
+
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    _pg_options = "-c statement_timeout=60000"
+    engine = create_engine(TEST_DB_URL, connect_args={"options": _pg_options}, pool_pre_ping=True)
+    # NullPool: TestClient runs each request on its own event loop, and an
+    # async psycopg connection cannot outlive the loop that opened it.
+    async_engine = create_async_engine(
+        TEST_DB_URL, poolclass=NullPool, connect_args={"options": _pg_options}
+    )
+else:
+    TEST_DB_URL = None
+    # A SQLite *file*, not :memory:. Routes are split between the sync Session
+    # and AsyncSession (see app/core/database.py), which in tests means two
+    # drivers (pysqlite and aiosqlite) that must see the same data - and an
+    # in-memory SQLite database belongs to the one connection that created it.
+    # A temp file is the one thing both can open.
+    _db_dir = tempfile.mkdtemp(prefix="ecommerce-tests-")
+    _db_url_path = os.path.join(_db_dir, "test.db").replace("\\", "/")
+
+    engine = create_engine(
+        f"sqlite:///{_db_url_path}",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_connection, _record):
+        cursor = dbapi_connection.cursor()
+        # WAL: a test's own db_session usually still has a read transaction open
+        # when it calls an endpoint, and in SQLite's default journal mode that
+        # open reader would block a write coming from the other driver. WAL lets
+        # readers and a writer coexist. It is a property of the file, so the
+        # aiosqlite connections get it too.
+        cursor.execute("PRAGMA journal_mode=WAL")
+        # Throwaway database: skip fsync, the suite recreates every table per test.
+        cursor.execute("PRAGMA synchronous=OFF")
+        cursor.close()
+
+    # NullPool: TestClient runs each request on its own event loop, and an
+    # aiosqlite connection cannot outlive the loop that opened it.
+    async_engine = create_async_engine(f"sqlite+aiosqlite:///{_db_url_path}", poolclass=NullPool)
+
+    @atexit.register
+    def _remove_test_database():
+        engine.dispose()
+        shutil.rmtree(_db_dir, ignore_errors=True)
 
 
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# NullPool: TestClient runs each request on its own event loop, and an
-# aiosqlite connection cannot outlive the loop that opened it.
-async_engine = create_async_engine(f"sqlite+aiosqlite:///{_db_url_path}", poolclass=NullPool)
-
 # Swapped at the factory, not via dependency_overrides: the real
 # get_async_db (commit on success, rollback + generic 500 on a database
-# error) is then what every test exercises, just against SQLite.
+# error) is then what every test exercises, just against the test database.
 database_module.AsyncSessionLocal = async_sessionmaker(
     bind=async_engine, autoflush=False, expire_on_commit=False
 )
-
-
-@atexit.register
-def _remove_test_database():
-    engine.dispose()
-    shutil.rmtree(_db_dir, ignore_errors=True)
 
 
 def _override_get_db():
@@ -121,8 +224,78 @@ app.dependency_overrides[database_get_db] = _override_get_db
 app.dependency_overrides[deps_get_db] = _override_get_db
 
 
+# Which tables a test wrote to. A test usually touches a handful of the ~25
+# tables, and cleaning only those keeps the per-test cost small. Writes are
+# noticed where every statement of every engine passes (the sync engine, the
+# async one, Celery's SessionLocal, a test's own connection): Engine's
+# cursor-execute event. A statement that is not a plain read or a plain
+# INSERT/UPDATE/DELETE (DDL, a CTE, COPY, ...) marks every table, so an
+# unforeseen kind of write errs towards cleaning more, never less.
+_WRITE = re.compile(
+    r'^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:ONLY\s+)?(?:"?\w+"?\.)?"?(\w+)"?', re.I
+)
+_READ = re.compile(r"^\s*\(?\s*(?:SELECT|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|SET|SHOW)\b", re.I)
+_dirty_tables: set[str] = set()
+
+if IS_POSTGRES:
+    # Child tables first, so DELETE never meets a foreign key still pointing at it.
+    _TABLES_CHILDREN_FIRST = [t for t in reversed(Base.metadata.sorted_tables)]
+    _ALL_TABLES = {t.name for t in _TABLES_CHILDREN_FIRST}
+
+    @event.listens_for(Engine, "before_cursor_execute")
+    def _note_writes(conn, cursor, statement, parameters, context, executemany):
+        match = _WRITE.match(statement)
+        if match:
+            _dirty_tables.add(match.group(1))
+        elif not _READ.match(statement):
+            _dirty_tables.update(_ALL_TABLES)
+
+    def _clean_dirty_tables():
+        # DELETE plus a sequence reset, not TRUNCATE ... RESTART IDENTITY:
+        # TRUNCATE swaps the table's files and costs ~35 ms for two tables on
+        # a Windows server against ~3 ms for DELETE of the few rows a test
+        # leaves (and it takes ACCESS EXCLUSIVE locks). setval(..., false)
+        # makes the next id 1 again, as in the fresh SQLite tables of the
+        # default run; it also undoes ids burnt by rolled-back inserts. A table
+        # no test wrote to is empty already, so no foreign-key closure is
+        # needed.
+        statements = []
+        for table in _TABLES_CHILDREN_FIRST:
+            if table.name not in _dirty_tables:
+                continue
+            statements.append(f'DELETE FROM "{table.name}"')
+            pk = list(table.primary_key.columns)
+            if len(pk) == 1 and pk[0].type.python_type is int:
+                statements.append(
+                    f"SELECT setval(pg_get_serial_sequence('\"{table.name}\"', '{pk[0].name}'), 1, false)"
+                )
+        if statements:
+            with engine.begin() as connection:
+                connection.execute(text("SET LOCAL lock_timeout = '10s'"))
+                connection.exec_driver_sql("; ".join(statements))
+        _dirty_tables.clear()
+
+
 @pytest.fixture(autouse=True)
 def _reset_database():
+    if IS_POSTGRES:
+        # Isolation on Postgres: the schema is built once per session (above)
+        # and the tables the previous test wrote to are emptied before this
+        # one runs. The usual faster pattern, one outer transaction per test
+        # with the Session joined to it through SAVEPOINTs and rolled back at
+        # the end, does not fit this suite: the app and the tests use several
+        # independent connections at once (the sync engine, the async engine
+        # with a new connection per request, Celery tasks' own SessionLocal,
+        # tests that open a second session on purpose), the code under test
+        # commits for real, and the concurrency tests need those commits to be
+        # visible to other connections. One outer transaction would hide
+        # exactly what they are meant to show. Cleaning before the test (not
+        # after) means a previous test that died halfway leaves nothing
+        # behind either. lock_timeout turns a session a test forgot to close
+        # (it would hold row locks) into an error instead of a hung run.
+        _clean_dirty_tables()
+        yield
+        return
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)

@@ -39,6 +39,9 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 filterwarnings = ["error::jwt.warnings.InsecureKeyLengthWarning"]
+markers = [
+    "db_sensitive: outcome depends on the database (locks, constraints, indexes, migrations); applied by file name in tests/conftest.py, run on PostgreSQL in CI",
+]
 
 [tool.coverage.run]
 source = ["app"]

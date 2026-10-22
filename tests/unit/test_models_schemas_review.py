@@ -32,6 +32,15 @@ def _minimal_user(**overrides):
     return User(**defaults)
 
 
+def _category_id(db_session):
+    # products.category_id is a foreign key: PostgreSQL refuses a product for
+    # a category that does not exist (SQLite does not check).
+    category = Category(name="Widgets", path=[], level=0)
+    db_session.add(category)
+    db_session.flush()
+    return category.id
+
+
 def _minimal_product(**overrides):
     defaults = dict(
         name="Widget",
@@ -55,8 +64,9 @@ class TestMutableColumnDefaults:
         assert c2.path == []
 
     def test_product_images_and_characteristics_defaults_are_independent(self, db_session):
-        p1 = _minimal_product(name="Widget A")
-        p2 = _minimal_product(name="Widget B")
+        category_id = _category_id(db_session)
+        p1 = _minimal_product(name="Widget A", category_id=category_id)
+        p2 = _minimal_product(name="Widget B", category_id=category_id)
         db_session.add_all([p1, p2])
         db_session.flush()
 
@@ -68,7 +78,7 @@ class TestMutableColumnDefaults:
         assert p2.characteristics == {}
 
     def test_product_variant_attributes_defaults_are_independent(self, db_session):
-        product = _minimal_product()
+        product = _minimal_product(category_id=_category_id(db_session))
         db_session.add(product)
         db_session.flush()
         v1 = ProductVariant(product_id=product.id, sku="SKU-1")

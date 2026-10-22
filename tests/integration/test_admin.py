@@ -2,6 +2,7 @@ import re
 from decimal import Decimal
 
 import pytest
+from conftest import engine
 from fastapi.routing import APIRoute
 from hypothesis import HealthCheck, given
 from hypothesis import settings as settings_hypothesis
@@ -727,13 +728,36 @@ def _add_variant_constraint(db_session, event):
     constraint added by a later migration looks like to this code. SQLite
     reports RAISE(ABORT) from a trigger as an IntegrityError, exactly like a
     violated CHECK; the table (and with it the trigger) is dropped after
-    every test."""
-    db_session.execute(text(
-        f"CREATE TRIGGER variant_stock_cap BEFORE {event} ON product_variants "
-        "WHEN NEW.stock_quantity > 1000 "
-        "BEGIN SELECT RAISE(ABORT, 'CHECK constraint failed: ck_variant_stock_cap'); END"
-    ))
+    every test. On PostgreSQL the schema outlives the test, so the trigger
+    raises a real check_violation (SQLSTATE 23514) and
+    _drop_variant_constraint removes it again."""
+    if db_session.get_bind().dialect.name == "postgresql":
+        db_session.execute(text(
+            "CREATE FUNCTION variant_stock_cap() RETURNS trigger LANGUAGE plpgsql AS $$ "
+            "BEGIN IF NEW.stock_quantity > 1000 THEN "
+            "RAISE EXCEPTION 'CHECK constraint failed: ck_variant_stock_cap' "
+            "USING ERRCODE = '23514', CONSTRAINT = 'ck_variant_stock_cap'; "
+            "END IF; RETURN NEW; END $$"
+        ))
+        db_session.execute(text(
+            f"CREATE TRIGGER variant_stock_cap BEFORE {event} ON product_variants "
+            "FOR EACH ROW EXECUTE FUNCTION variant_stock_cap()"
+        ))
+    else:
+        db_session.execute(text(
+            f"CREATE TRIGGER variant_stock_cap BEFORE {event} ON product_variants "
+            "WHEN NEW.stock_quantity > 1000 "
+            "BEGIN SELECT RAISE(ABORT, 'CHECK constraint failed: ck_variant_stock_cap'); END"
+        ))
     db_session.commit()
+
+
+@pytest.fixture(autouse=True)
+def _drop_variant_constraint():
+    yield
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("DROP FUNCTION IF EXISTS variant_stock_cap() CASCADE"))
 
 
 def test_admin_update_variant_other_integrity_error_is_not_reported_as_sku_conflict(

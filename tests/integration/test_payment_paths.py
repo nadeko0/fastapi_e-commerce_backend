@@ -16,7 +16,7 @@ row).
 from decimal import Decimal
 
 import pytest
-from conftest import TestingSessionLocal
+from conftest import IS_POSTGRES, TestingSessionLocal
 from payment_support import (
     CART,
     PAY_3DS,
@@ -58,6 +58,19 @@ def outbox(monkeypatch):
 @pytest.fixture
 def shop(client, db_session):
     return Shop(client, db_session)
+
+
+# A twin request that inserts its row while this request holds the order's
+# FOR UPDATE lock cannot exist on PostgreSQL: the insert takes a FOR KEY SHARE
+# lock on the order it references (payments.order_id), which FOR UPDATE
+# conflicts with, so the twin waits until this request has committed (the
+# lock itself is shown in test_postgres_only.py). SQLite, which has no row
+# locks, is where the twin can be simulated.
+_needs_no_row_locks = pytest.mark.skipif(
+    IS_POSTGRES,
+    reason="the simulated twin would wait for the order row lock this request holds "
+    "(an insert referencing the order conflicts with FOR UPDATE)",
+)
 
 
 def _insert_from_another_session(row):
@@ -170,6 +183,7 @@ def test_pay_with_an_amount_other_than_the_total_is_refused_before_the_provider(
     assert order_state(shop, order["id"]) == ("new", "pending")
 
 
+@_needs_no_row_locks
 def test_pay_racing_a_twin_with_the_same_key_returns_the_twins_attempt(
     shop, outbox, monkeypatch
 ):
@@ -287,6 +301,7 @@ def test_pay_whose_intent_ends_unpaid_without_an_error_fails_the_attempt(
 
 # -- POST /orders/{id}/checkout-session ----------------------------------------
 
+@_needs_no_row_locks
 def test_checkout_session_racing_a_twin_with_the_same_key_returns_the_twins_session(
     shop, monkeypatch
 ):
@@ -428,6 +443,7 @@ def test_checkout_session_with_the_key_of_a_declined_pay_attempt_answers_409_not
     assert order_state(shop, order["id"]) == ("new", "failed")
 
 
+@_needs_no_row_locks
 def test_checkout_session_racing_a_twin_still_creating_its_session_answers_409(
     shop, monkeypatch
 ):
