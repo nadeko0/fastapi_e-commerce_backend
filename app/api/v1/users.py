@@ -810,7 +810,7 @@ async def create_address(
         return APIResponse.success_response(AddressResponse.from_orm(address))
     except ValidationError as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "message": "Invalid address data",
                 "errors": e.errors()
@@ -1164,7 +1164,7 @@ async def reset_password(
         })
     except ValidationError as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "message": "Invalid password format",
                 "errors": e.errors()
