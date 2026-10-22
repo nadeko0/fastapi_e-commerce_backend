@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.core.clock import utc_now
 
@@ -45,7 +45,8 @@ class UserBase(BaseModel):
     full_name: Optional[str] = Field(None, min_length=2, max_length=100)
     phone: Optional[str] = Field(None, pattern=r"^\+\d{5,15}$", description="International phone number (5-15 digits)")
 
-    @validator('phone')
+    @field_validator('phone')
+    @classmethod
     def validate_phone(cls, v: Optional[str]) -> Optional[str]:
         if not v:
             return v
@@ -59,11 +60,13 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8, pattern=r"^[A-Za-z\d@$!%*#?&]{8,}$")
 
-    @validator('email', pre=True)
+    @field_validator('email', mode="before")
+    @classmethod
     def normalise_email(cls, v):
         return normalize_email(v) if isinstance(v, str) else v
 
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password_strength(cls, v):
         """Validate password contains both letters and numbers"""
         if not any(c.isalpha() for c in v):
@@ -80,13 +83,15 @@ class UserCreate(UserBase):
     privacy_policy_accepted: bool = Field(..., description="Privacy policy must be accepted")
     marketing_consent: Optional[bool] = Field(default=False)
 
-    @validator('gdpr_consent')
+    @field_validator('gdpr_consent')
+    @classmethod
     def validate_gdpr_consent(cls, v):
         if not v:
             raise ValueError('GDPR consent is required')
         return v
 
-    @validator('privacy_policy_accepted')
+    @field_validator('privacy_policy_accepted')
+    @classmethod
     def validate_privacy_policy(cls, v):
         if not v:
             raise ValueError('Privacy policy must be accepted')
@@ -96,7 +101,8 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=2, max_length=100)
     phone: Optional[str] = Field(None, pattern=r"^\+\d{5,15}$", description="International phone number (5-15 digits)")
 
-    @validator('phone')
+    @field_validator('phone')
+    @classmethod
     def validate_phone(cls, v: Optional[str]) -> Optional[str]:
         if not v:
             return v
@@ -108,7 +114,8 @@ class UserUpdate(BaseModel):
         return f"+{phone}"
     marketing_consent: Optional[bool] = None
 
-    @validator('marketing_consent')
+    @field_validator('marketing_consent')
+    @classmethod
     def reject_null(cls, v):
         """NOT NULL column. full_name and phone are nullable: null clears them."""
         if v is None:
@@ -157,7 +164,8 @@ class TokenPayload(BaseModel):
 class PasswordReset(BaseModel):
     email: EmailStr
 
-    @validator('email', pre=True)
+    @field_validator('email', mode="before")
+    @classmethod
     def normalise_email(cls, v):
         return normalize_email(v) if isinstance(v, str) else v
 
@@ -165,7 +173,8 @@ class PasswordUpdate(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8, pattern=r"^[A-Za-z\d@$!%*#?&]{8,}$")
 
-    @validator('new_password')
+    @field_validator('new_password')
+    @classmethod
     def validate_new_password_strength(cls, v):
         """Validate new password contains both letters and numbers"""
         if not any(c.isalpha() for c in v):
@@ -183,15 +192,14 @@ class GDPRExport(BaseModel):
     expires_at: datetime = Field(..., description="When the export data will be deleted")
     status: str = Field(default="processing", description="Current status of the export")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(json_schema_extra={
             "example": {
                 "request_id": "export_123_1642161234",
                 "request_date": "2025-01-14T19:21:32.388Z",
                 "expires_at": "2025-01-15T19:21:32.388Z",
                 "status": "processing"
             }
-        }
+        })
 
 class GDPRExportData(BaseModel):
     """Schema for the actual GDPR data export content"""
@@ -202,8 +210,7 @@ class GDPRExportData(BaseModel):
     export_metadata: GDPRExport
     generated_at: datetime = Field(default_factory=utc_now)
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(json_schema_extra={
             "example": {
                 "personal_data": {},
                 "consents": [],
@@ -217,7 +224,7 @@ class GDPRExportData(BaseModel):
                 },
                 "generated_at": "2025-01-14T19:21:32.388Z"
             }
-        }
+        })
 
 class GDPRDelete(BaseModel):
     """Schema for GDPR account deletion"""
@@ -225,7 +232,8 @@ class GDPRDelete(BaseModel):
     password: str
     reason: Optional[str] = None
 
-    @validator('confirmation')
+    @field_validator('confirmation')
+    @classmethod
     def validate_confirmation(cls, v):
         if not v:
             raise ValueError('You must confirm account deletion')

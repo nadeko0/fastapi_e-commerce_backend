@@ -9,7 +9,8 @@ from pydantic import (
     Field,
     HttpUrl,
     PlainSerializer,
-    validator,
+    ValidationInfo,
+    field_validator,
 )
 
 # An image URL is validated as an HttpUrl but kept as the plain string: it
@@ -41,12 +42,14 @@ class ProductBase(BaseModel):
     images: List[ImageUrl] = Field(default_factory=list)
     characteristics: Dict[str, ProductCharacteristic] = Field(default_factory=dict)
 
-    @validator('price')
+    @field_validator('price')
+    @classmethod
     def validate_price(cls, v):
         """Ensure price has exactly 2 decimal places"""
         return Decimal(str(v)).quantize(Decimal('0.01'))
 
-    @validator('images')
+    @field_validator('images')
+    @classmethod
     def validate_images(cls, v):
         """Ensure we have at least one image and no duplicates, convert HttpUrl to string"""
         if not v:
@@ -66,7 +69,8 @@ class ProductUpdate(BaseModel):
     images: Optional[List[ImageUrl]] = None
     characteristics: Optional[Dict[str, ProductCharacteristic]] = None
 
-    @validator('name', 'description', 'price', 'stock_quantity', 'category_id', 'images', 'characteristics')
+    @field_validator('name', 'description', 'price', 'stock_quantity', 'category_id', 'images', 'characteristics')
+    @classmethod
     def reject_null(cls, v):
         """Fields may be omitted, but every one maps to a NOT NULL column:
         an explicit null must be a 422, not a database error."""
@@ -74,13 +78,15 @@ class ProductUpdate(BaseModel):
             raise ValueError('may be omitted but cannot be null')
         return v
 
-    @validator('price')
+    @field_validator('price')
+    @classmethod
     def validate_price(cls, v):
         if v is None:
             return v
         return Decimal(str(v)).quantize(Decimal('0.01'))
 
-    @validator('images')
+    @field_validator('images')
+    @classmethod
     def validate_images(cls, v):
         if v is None:
             return v
@@ -124,10 +130,11 @@ class ProductFilter(BaseModel):
     page: int = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
 
-    @validator('max_price')
-    def validate_price_range(cls, v, values):
-        if v is not None and 'min_price' in values and values['min_price'] is not None:
-            if v < values['min_price']:
+    @field_validator('max_price')
+    @classmethod
+    def validate_price_range(cls, v, info: ValidationInfo):
+        if v is not None and 'min_price' in info.data and info.data['min_price'] is not None:
+            if v < info.data['min_price']:
                 raise ValueError('max_price must be greater than min_price')
         return v
 
@@ -152,7 +159,8 @@ class ProductVariantBase(BaseModel):
     stock_quantity: int = Field(0, ge=0)
     is_active: bool = True
 
-    @validator('price_override')
+    @field_validator('price_override')
+    @classmethod
     def validate_price_override(cls, v):
         if v is None:
             return v
@@ -169,7 +177,8 @@ class ProductVariantUpdate(BaseModel):
     stock_quantity: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
 
-    @validator('sku', 'attributes', 'stock_quantity', 'is_active')
+    @field_validator('sku', 'attributes', 'stock_quantity', 'is_active')
+    @classmethod
     def reject_null(cls, v):
         """NOT NULL columns. price_override is left out on purpose: null
         clears it (the variant then inherits the product's price)."""
@@ -177,7 +186,8 @@ class ProductVariantUpdate(BaseModel):
             raise ValueError('may be omitted but cannot be null')
         return v
 
-    @validator('price_override')
+    @field_validator('price_override')
+    @classmethod
     def validate_price_override(cls, v):
         if v is None:
             return v
