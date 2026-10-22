@@ -804,7 +804,7 @@ async def create_address(
         logger.info(f"Created address with ID: {address.id} for user {current_user.id}")
 
 
-        created = db.query(Address).get(address.id)
+        created = db.get(Address, address.id)
         logger.info(f"Verified address exists: {created and created.id} for user {current_user.id}")
 
         return APIResponse.success_response(AddressResponse.from_orm(address))
