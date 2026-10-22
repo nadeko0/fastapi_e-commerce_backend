@@ -42,6 +42,12 @@ filterwarnings = [
     "error::jwt.warnings.InsecureKeyLengthWarning",
     # datetime.utcnow() is deprecated (Python 3.12); use app.core.clock.utc_now().
     "error:datetime.datetime.utcnow:DeprecationWarning",
+    # A connection left open warns only when it is garbage collected, i.e. in
+    # whichever test happens to trigger the collection. The ResourceWarning
+    # itself is raised inside __del__, so pytest sees it as an unraisable
+    # exception: both categories have to be errors for the guard to bite.
+    "error::ResourceWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
 ]
 markers = [
     "db_sensitive: outcome depends on the database (locks, constraints, indexes, migrations); applied by file name in tests/conftest.py, run on PostgreSQL in CI",
