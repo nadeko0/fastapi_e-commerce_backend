@@ -8,13 +8,11 @@ recorded once.
 Payment.amount_refunded stays the running total the rest of the code
 reads: the sum of this charge's refunds recorded here.
 """
-from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -22,6 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from app.core.clock import UTCDateTime, utc_now
 from app.models.base import Base
 
 # Dispute.status values of a dispute that is over; any other is open
@@ -51,8 +50,8 @@ class PaymentRefund(Base):
     # recorded: the customer did not get this money back and a person has
     # to arrange it another way.
     requires_manual_review = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     payment = relationship("Payment", backref="refunds")
 
@@ -76,9 +75,9 @@ class PaymentDispute(Base):
     # event for the dispute does not reopen it.
     status = Column(String, nullable=False)
     reason = Column(String, nullable=True)
-    closed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    closed_at = Column(UTCDateTime, nullable=True)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     payment = relationship("Payment", backref="disputes")
 

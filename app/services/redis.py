@@ -1,8 +1,10 @@
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, Optional
+
+from app.core.clock import utc_now
 
 if TYPE_CHECKING:
     from app.schemas.category import CategoryTreeResponse
@@ -138,7 +140,7 @@ class RedisService:
 
 
                     if 'expires_at' not in parsed:
-                        parsed['expires_at'] = (datetime.utcnow() + self._cart_ttl()).isoformat()
+                        parsed['expires_at'] = (utc_now() + self._cart_ttl()).isoformat()
 
 
                 if model_class.__name__ == 'CategoryTreeResponse':
@@ -189,7 +191,7 @@ class RedisService:
         try:
             cart_key = self._get_cart_key(cart.user_id)
             ttl = self._cart_ttl()
-            cart.expires_at = datetime.utcnow() + ttl
+            cart.expires_at = utc_now() + ttl
             return self._redis.set(
                 cart_key,
                 self._serialize(cart),
@@ -240,7 +242,7 @@ class RedisService:
         """A new, empty Cart for this owner, held in memory only - nothing
         is written to Redis until a mutation stores it."""
         owner = as_cart_owner(user_id)
-        now = datetime.utcnow()
+        now = utc_now()
         return Cart(
             user_id=owner.user_id,
             items={},
@@ -296,7 +298,7 @@ class RedisService:
             # This write re-arms the key's TTL, so expires_at moves with it;
             # it used to keep the value from the day the cart was created.
             ttl = self._cart_ttl(owner)
-            cart.expires_at = datetime.utcnow() + ttl
+            cart.expires_at = utc_now() + ttl
             pipe.multi()
             if owner.is_guest and not cart.items:
                 pipe.delete(cart_key)
@@ -469,7 +471,7 @@ class RedisService:
                     left_out, user_id, settings.CART_MAX_LINES,
                 )
             ttl = self._cart_ttl(account)
-            cart.expires_at = datetime.utcnow() + ttl
+            cart.expires_at = utc_now() + ttl
             pipe.multi()
             pipe.set(account_key, self._serialize(cart), ex=ttl)
             pipe.delete(guest_key)
@@ -514,7 +516,7 @@ class RedisService:
                 pipe.delete(cart_key)
                 return
             ttl = self._cart_ttl(owner)
-            cart.updated_at = datetime.utcnow()
+            cart.updated_at = utc_now()
             cart.expires_at = cart.updated_at + ttl
             pipe.set(cart_key, self._serialize(cart), ex=ttl)
 
@@ -713,7 +715,7 @@ class RedisService:
 
     def create_session(self, user_id: int, session_data: Dict) -> str:
         try:
-            session_id = f"session:{user_id}:{datetime.utcnow().timestamp()}"
+            session_id = f"session:{user_id}:{utc_now().timestamp()}"
             self._redis.set(
                 session_id,
                 self._serialize(session_data),

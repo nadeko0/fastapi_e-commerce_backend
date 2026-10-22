@@ -1,10 +1,7 @@
-from datetime import datetime
-
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -14,6 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from app.core.clock import UTCDateTime, utc_now
 from app.models.base import Base
 
 
@@ -52,8 +50,8 @@ class Payment(Base):
     # payment record is kept truthful but the order is NOT silently
     # overridden; this flag marks the row for manual reconciliation.
     requires_manual_review = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     order = relationship("Order", backref="payments")
 
@@ -123,9 +121,9 @@ class WebhookEvent(Base):
     # overtook its payment attempt).
     attempts = Column(Integer, nullable=False, default=0)
     last_error = Column(Text, nullable=True)
-    processed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    processed_at = Column(UTCDateTime, nullable=True)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     __table_args__ = (
         # The sweeper looks for old events still received or retrying, and

@@ -1,8 +1,7 @@
-from datetime import datetime
-
-from sqlalchemy import ARRAY, JSON, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import ARRAY, JSON, Column, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
 
+from app.core.clock import UTCDateTime, utc_now
 from app.models.base import Base
 
 # See app/models/product.py for why ARRAY needs a SQLite fallback.
@@ -21,8 +20,8 @@ class Category(Base):
     # Category shares (and mutates) one list instance across the session.
     path = Column(_int_array, nullable=False, default=list)
     level = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     parent = relationship("Category", back_populates="children", remote_side=[id])
     children = relationship("Category", back_populates="parent", cascade="all, delete-orphan")

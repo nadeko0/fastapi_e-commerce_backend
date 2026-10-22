@@ -19,6 +19,7 @@ from freezegun import freeze_time
 from payment_support import PAY_OK, Shop, reset_provider
 
 from app import tasks
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.payment import Payment
 from app.models.payment_discrepancy import (
@@ -60,7 +61,7 @@ def provider():
 
 def _later():
     """A moment well after anything made in the test, past the minimum age."""
-    return datetime.utcnow() + timedelta(hours=2)
+    return utc_now() + timedelta(hours=2)
 
 
 def run(db, provider, **kwargs):
@@ -310,7 +311,7 @@ def test_running_twice_records_a_difference_once(shop, provider):
     _, payment = paid(shop)
     payment.amount = 2600
     shop.db.commit()
-    first_run = datetime.utcnow() + timedelta(hours=2)
+    first_run = utc_now() + timedelta(hours=2)
 
     first = run(shop.db, provider, now=first_run)
     second = run(shop.db, provider, now=first_run + timedelta(days=1))
@@ -340,7 +341,7 @@ def test_a_difference_that_goes_away_is_marked_resolved(shop, provider):
     payment.amount = 2600
     shop.db.commit()
     run(shop.db, provider)
-    resolved_at = datetime.utcnow() + timedelta(days=1)
+    resolved_at = utc_now() + timedelta(days=1)
 
     payment.amount = 2500
     shop.db.commit()
@@ -366,7 +367,7 @@ def test_a_difference_that_comes_back_reopens_its_row(shop, provider):
     payment.amount = 2500
     shop.db.commit()
     run(shop.db, provider)
-    back_at = datetime.utcnow() + timedelta(days=3)
+    back_at = utc_now() + timedelta(days=3)
 
     payment.amount = 2600
     shop.db.commit()
@@ -563,9 +564,9 @@ def test_the_window_follows_the_settings(shop, provider, monkeypatch):
 def test_one_order_is_checked_whatever_its_age(shop, provider):
     order = shop.order_of(shop.buyer(), shop.product())
     other = shop.order_of(shop.buyer(), shop.product())
-    young = _payment_made_at(shop, provider, order["id"], datetime.utcnow())
-    old = _payment_made_at(shop, provider, order["id"], datetime.utcnow() - timedelta(days=90))
-    _payment_made_at(shop, provider, other["id"], datetime.utcnow() - timedelta(days=2))
+    young = _payment_made_at(shop, provider, order["id"], utc_now())
+    old = _payment_made_at(shop, provider, order["id"], utc_now() - timedelta(days=90))
+    _payment_made_at(shop, provider, other["id"], utc_now() - timedelta(days=2))
 
     result = reconcile_payments(shop.db, provider, order_id=order["id"])
 

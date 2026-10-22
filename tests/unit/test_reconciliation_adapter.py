@@ -7,12 +7,13 @@ Stripe words them) is checked on every run and not only when someone has a
 Stripe test key.
 """
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from test_reconciliation_provider import API_KEY, RETURN_URL, ListingFakeStripe
 
+from app.core.clock import utc_now
 from app.models.address import Address
 from app.models.order import Order
 from app.models.payment import Payment
@@ -62,7 +63,7 @@ def test_reconciling_through_the_live_adapter(db_session, provider):
     payment = Payment(
         order_id=_order_id(db), provider="stripe", payment_intent_id=intent.id, amount=1099,
         amount_refunded=300, currency="USD", status="succeeded",
-        created_at=datetime.utcnow() - timedelta(days=1))
+        created_at=utc_now() - timedelta(days=1))
     db.add(payment)
     db.flush()
     db.add(PaymentRefund(payment_id=payment.id, refund_id=refund.id, amount=300,
@@ -95,7 +96,7 @@ def test_reconciling_through_the_live_adapter(db_session, provider):
 def test_a_payment_stripe_does_not_have_is_reported_through_the_adapter(db_session, provider):
     db_session.add(Payment(
         order_id=_order_id(db_session), provider="stripe", payment_intent_id="pi_nowhere", amount=100,
-        currency="USD", status="succeeded", created_at=datetime.utcnow() - timedelta(days=1)))
+        currency="USD", status="succeeded", created_at=utc_now() - timedelta(days=1)))
     db_session.commit()
 
     result = reconcile_payments(db_session, provider)

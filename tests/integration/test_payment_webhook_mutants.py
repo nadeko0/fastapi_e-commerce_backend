@@ -9,7 +9,7 @@ alerted on), and which attempts still hold back an event that matched nothing.
 """
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -22,6 +22,7 @@ from payment_support import (
     use_production_sessions,
 )
 
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.address import Address
 from app.models.order import Order
@@ -352,21 +353,15 @@ def test_an_attempt_that_is_not_waiting_for_its_ids_does_not(db_session, overrid
 
 
 def test_an_attempt_in_flight_for_longer_than_the_stale_limit_does_not(db_session):
-    stale = datetime.utcnow() - timedelta(minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES + 1)
+    stale = utc_now() - timedelta(minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES + 1)
     _attempt(db_session, 41, created_at=stale)
 
     assert _attempt_still_storing_its_id(db_session, _event(41)) is False
 
 
 def test_an_attempt_exactly_at_the_stale_limit_does_not(db_session, monkeypatch):
-    now = datetime(2030, 1, 1, 12, 0, 0)
-
-    class Frozen(datetime):
-        @classmethod
-        def utcnow(cls):
-            return now
-
-    monkeypatch.setattr("app.services.stripe_events.datetime", Frozen)
+    now = datetime(2030, 1, 1, 12, 0, 0, tzinfo=UTC)
+    monkeypatch.setattr("app.services.stripe_events.utc_now", lambda: now)
     limit = now - timedelta(minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES)
     _attempt(db_session, 41, created_at=limit)
     assert _attempt_still_storing_its_id(db_session, _event(41)) is False

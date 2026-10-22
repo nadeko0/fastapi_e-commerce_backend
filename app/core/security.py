@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 import weakref
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import NamedTuple, Optional, Tuple, Union
 
 import bcrypt
@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.database import get_async_db
 from app.models.user import User, UserRole
@@ -341,7 +342,7 @@ def invalidate_tokens_issued_before_now(user_id: Union[str, int]) -> bool:
     key = f"pwd_changed:{user_id}"
     ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     # time.time() for the same reason as in logout() above. With
-    # utcnow().timestamp() the watermark was shifted by the host's UTC
+    # datetime.utcnow().timestamp() the watermark was shifted by the host's UTC
     # offset: on a machine at UTC+2 it lay two hours in the past, so every
     # token issued in the two hours before a password reset stayed valid -
     # exactly the tokens this exists to kill. Invisible where TZ is UTC
@@ -544,7 +545,7 @@ class PasswordResetClaims(NamedTuple):
 def generate_password_reset_token(email: str, hashed_password: str) -> str:
     """`hashed_password` is the account's current hash: the token is good
     until it changes (see PasswordResetClaims.matches)."""
-    expire = datetime.utcnow() + timedelta(minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES)
+    expire = utc_now() + timedelta(minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES)
     to_encode = {
         "exp": expire,
         "sub": email,
@@ -569,7 +570,7 @@ def verify_password_reset_token(token: str) -> Optional[PasswordResetClaims]:
     return PasswordResetClaims(email, fingerprint)
 
 def generate_email_verification_token(email: str) -> str:
-    expire = datetime.utcnow() + timedelta(hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS)
+    expire = utc_now() + timedelta(hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS)
     to_encode = {"exp": expire, "sub": email, "type": "verify_email"}
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt

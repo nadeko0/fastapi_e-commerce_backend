@@ -8,6 +8,7 @@ from redis import ConnectionError as RedisConnectionError
 from sqlalchemy import event
 
 import app.core.database as database_module
+from app.core.clock import utc_now
 from app.core.config import Settings, settings
 from app.models.category import Category
 from app.models.product import Product, ProductVariant
@@ -1191,13 +1192,13 @@ def test_cart_expires_at_follows_the_ttl_refreshed_by_a_mutation(client, db_sess
 
     # Age the stored cart: it now claims to expire in an hour.
     stored = json.loads(fake_redis.get(cart_key))
-    stored["expires_at"] = (datetime.utcnow() + timedelta(hours=1)).isoformat()
+    stored["expires_at"] = (utc_now() + timedelta(hours=1)).isoformat()
     fake_redis.set(cart_key, json.dumps(stored))
 
     _add(client, token, product.id, 1)
 
     expires_at = datetime.fromisoformat(json.loads(fake_redis.get(cart_key))["expires_at"])
-    key_expiry = datetime.utcnow() + timedelta(seconds=fake_redis.ttl(cart_key))
+    key_expiry = utc_now() + timedelta(seconds=fake_redis.ttl(cart_key))
     assert abs((expires_at - key_expiry).total_seconds()) < 60
 
 
@@ -1634,7 +1635,7 @@ def test_stored_line_stays_readable_by_the_previous_cart_format(client, db_sessi
 def _store_old_format_cart(fake_redis, user_id, lines):
     """A cart exactly as the previous code wrote it: every line carries
     price_snapshot (a float), name_snapshot and image_snapshot."""
-    now = datetime.utcnow()
+    now = utc_now()
     payload = {
         "user_id": user_id,
         "items": {

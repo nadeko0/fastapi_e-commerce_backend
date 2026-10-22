@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import timedelta
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -9,6 +9,7 @@ from sqlalchemy import String, cast, create_engine, func, literal
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload, selectinload, sessionmaker
 
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.database import _build_connect_args
 from app.core.security import get_password_hash
@@ -281,7 +282,7 @@ def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> i
     Extracted from the cleanup_inactive_accounts task so it can be unit
     tested against a session without going through Celery/the real DB.
     """
-    grace_cutoff = datetime.utcnow() - timedelta(days=settings.DATA_DELETION_GRACE_PERIOD_DAYS)
+    grace_cutoff = utc_now() - timedelta(days=settings.DATA_DELETION_GRACE_PERIOD_DAYS)
 
     # selectinload(User.addresses): without it, `for address in
     # account.addresses` below lazy-loads addresses with one SELECT per
@@ -383,7 +384,7 @@ def expire_unpaid_orders(db) -> int:
     Extracted from the cancel_expired_unpaid_orders task so it can be tested
     against a session without Celery, like purge_expired_deletion_requests.
     """
-    cutoff = datetime.utcnow() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES)
+    cutoff = utc_now() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES)
     candidates = [
         order_id for (order_id,) in db.query(Order.id).filter(
             Order.status == OrderStatus.NEW,
@@ -475,7 +476,7 @@ def update_product_stats() -> None:
             .join(OrderItem)
             .join(Order)
             .filter(
-                Order.created_at >= datetime.utcnow() - timedelta(days=30),
+                Order.created_at >= utc_now() - timedelta(days=30),
                 Order.status != OrderStatus.CANCELLED,
                 Order.payment_status == PaymentStatus.PAID
             )
@@ -495,7 +496,7 @@ def update_product_stats() -> None:
             }
             for p in popular_products
         ],
-        "updated_at": datetime.utcnow().isoformat()
+        "updated_at": utc_now().isoformat()
     }
 
     # RedisService has no set_product_stats method (never did) - this

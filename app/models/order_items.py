@@ -1,8 +1,7 @@
-from datetime import datetime
-
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Integer, Numeric
+from sqlalchemy import CheckConstraint, Column, ForeignKey, Integer, Numeric
 from sqlalchemy.orm import relationship
 
+from app.core.clock import UTCDateTime, utc_now
 from app.models.base import Base
 
 
@@ -20,7 +19,7 @@ class OrderItem(Base):
     variant_id = Column(Integer, ForeignKey("product_variants.id"), nullable=True)
     quantity = Column(Integer, nullable=False)
     price_at_time = Column(Numeric(10, 2), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
 
     order = relationship("Order", back_populates="items")
     product = relationship("Product")

@@ -1,8 +1,8 @@
 import html
-from datetime import datetime
 from typing import TYPE_CHECKING, List
 
 import app.services.email as email
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.order import Order
 from app.models.product import Product
@@ -153,7 +153,7 @@ def send_low_stock_alert_email(to_email: str, products: List[Product]) -> bool:
             </table>
 
             <p>Please review and restock as needed.</p>
-            <p>Generated at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
+            <p>Generated at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
         </body>
     </html>
     """
@@ -305,7 +305,7 @@ def send_gdpr_export_email(to_email: str, export_data: "GDPRExport") -> bool:
             <h3>Export Details:</h3>
             <ul>
                 <li>Request Date: {export_data.request_date.strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
-                <li>Generated at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
+                <li>Generated at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
                 <li>Expires at: {export_data.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
                 <li>Request ID: {export_data.request_id}</li>
             </ul>
@@ -348,7 +348,7 @@ def send_gdpr_deletion_confirmation(to_email: str, request_id: str) -> bool:
             <h3>Deletion Details:</h3>
             <ul>
                 <li>Request ID: {request_id}</li>
-                <li>Completed at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
+                <li>Completed at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
             </ul>
 
             <p>What was deleted:</p>
@@ -397,7 +397,7 @@ def send_gdpr_request_received(to_email: str, request_type: str, request_id: str
             <ul>
                 <li>Request Type: {request_type_text}</li>
                 <li>Request ID: {request_id}</li>
-                <li>Received at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
+                <li>Received at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
                 <li>Estimated completion: Within 30 days</li>
             </ul>
 

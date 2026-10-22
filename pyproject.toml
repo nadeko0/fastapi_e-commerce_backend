@@ -38,7 +38,11 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-filterwarnings = ["error::jwt.warnings.InsecureKeyLengthWarning"]
+filterwarnings = [
+    "error::jwt.warnings.InsecureKeyLengthWarning",
+    # datetime.utcnow() is deprecated (Python 3.12); use app.core.clock.utc_now().
+    "error:datetime.datetime.utcnow:DeprecationWarning",
+]
 markers = [
     "db_sensitive: outcome depends on the database (locks, constraints, indexes, migrations); applied by file name in tests/conftest.py, run on PostgreSQL in CI",
 ]

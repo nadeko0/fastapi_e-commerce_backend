@@ -16,7 +16,7 @@ fixtures (database, fake Redis) are shared by the examples of a test: each
 example makes its own products and buyers and checks only those.
 """
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -26,6 +26,7 @@ from hypothesis import strategies as st
 
 from app import tasks
 from app.api.v1.orders import _cents_to_decimal, _decimal_to_cents
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.security import create_access_token, get_password_hash
 from app.models.address import Address
@@ -265,7 +266,7 @@ def test_stock_equals_start_minus_live_orders_whatever_happens(
             assert response.status_code in (200, 400), response.text
         if kind == "expire":
             for order_id, _ in placed:
-                db_session.get(Order, order_id).created_at = datetime.utcnow() - timedelta(
+                db_session.get(Order, order_id).created_at = utc_now() - timedelta(
                     minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES + 1
                 )
             db_session.commit()

@@ -3,13 +3,14 @@ The admin endpoints of the payment reconciliation: the open discrepancies
 (paginated, optionally of one order) and a run on demand (one order inline,
 everything queued for the worker). Admin only.
 """
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from kombu.exceptions import OperationalError
 from payment_support import PAY_OK, Shop, reset_provider
 
 from app.api.v1 import admin
+from app.core.clock import utc_now
 from app.models.payment_discrepancy import PaymentDiscrepancy
 
 BASE = "/api/v1/admin/reconciliation"
@@ -38,8 +39,8 @@ def _paid(shop):
 def _discrepancy(db, payment, kind="amount", resolved=False, detected_at=None, subject=""):
     row = PaymentDiscrepancy(
         payment_id=payment.id, kind=kind, subject=subject, ours="1", theirs="2",
-        detected_at=detected_at or datetime.utcnow(), last_seen_at=datetime.utcnow(),
-        resolved_at=datetime.utcnow() if resolved else None)
+        detected_at=detected_at or utc_now(), last_seen_at=utc_now(),
+        resolved_at=utc_now() if resolved else None)
     db.add(row)
     db.commit()
     return row
@@ -69,8 +70,8 @@ def test_no_discrepancies_is_an_empty_page(shop, client):
 
 def test_open_discrepancies_are_listed_oldest_first_with_their_order(shop, client):
     order, payment = _paid(shop)
-    old = _discrepancy(shop.db, payment, "status", detected_at=datetime(2026, 10, 1))
-    new = _discrepancy(shop.db, payment, "amount", detected_at=datetime(2026, 10, 2))
+    old = _discrepancy(shop.db, payment, "status", detected_at=datetime(2026, 10, 1, tzinfo=UTC))
+    new = _discrepancy(shop.db, payment, "amount", detected_at=datetime(2026, 10, 2, tzinfo=UTC))
     _discrepancy(shop.db, payment, "currency", resolved=True)
 
     response = client.get(f"{BASE}/discrepancies", headers=shop.admin())
@@ -82,7 +83,7 @@ def test_open_discrepancies_are_listed_oldest_first_with_their_order(shop, clien
     assert first == {
         "id": old.id, "order_id": order["id"], "payment_id": payment.id,
         "transaction_id": payment.payment_intent_id, "kind": "status", "subject": "",
-        "ours": "1", "theirs": "2", "detected_at": "2026-10-01T00:00:00",
+        "ours": "1", "theirs": "2", "detected_at": "2026-10-01T00:00:00Z",
         "last_seen_at": first["last_seen_at"],
     }
 
@@ -90,7 +91,7 @@ def test_open_discrepancies_are_listed_oldest_first_with_their_order(shop, clien
 def test_the_list_is_paginated(shop, client):
     _, payment = _paid(shop)
     ids = [_discrepancy(shop.db, payment, kind=f"k{i}",
-                        detected_at=datetime(2026, 10, 1) + timedelta(hours=i)).id
+                        detected_at=datetime(2026, 10, 1, tzinfo=UTC) + timedelta(hours=i)).id
            for i in range(5)]
     admin_headers = shop.admin()
 

@@ -5,6 +5,8 @@ from typing import Any, Dict, Generic, List, Literal, Mapping, Optional, Tuple, 
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.clock import UTCDatetime, utc_now
+
 _ZERO = Decimal("0.00")
 _CENT = Decimal("0.01")
 
@@ -45,7 +47,7 @@ class ValidationError(BaseModel):
 class ValidationErrorResponse(BaseModel):
     """Response for validation errors"""
     errors: List[ValidationError]
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     request_id: Optional[str] = None
 
 class APIResponse(BaseModel, Generic[DataT]):
@@ -53,7 +55,7 @@ class APIResponse(BaseModel, Generic[DataT]):
     success: bool = True
     data: Optional[DataT] = None
     error: Optional[ErrorDetail] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     request_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -106,7 +108,7 @@ class CartItem(BaseModel):
     product_id: int
     variant_id: Optional[int] = None
     quantity: int = Field(..., gt=0)
-    added_at: datetime = Field(default_factory=datetime.utcnow)
+    added_at: UTCDatetime = Field(default_factory=utc_now)
     # What the customer was shown when the line last went into the cart.
     # A record only: it lets a response say "the price has changed since",
     # and names a product that has since been deleted. Nothing displayed or
@@ -308,11 +310,11 @@ class Cart(BaseModel):
     # reads what this code writes for an account.
     user_id: Optional[int] = None
     items: Dict[str, CartItem] = Field(default_factory=dict)  # cart_item_key(product_id, variant_id) -> CartItem
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: UTCDatetime = Field(default_factory=utc_now)
+    updated_at: UTCDatetime = Field(default_factory=utc_now)
     # When Redis will drop the cart unless it is written again: re-stamped
     # by RedisService on every write, together with the key's TTL.
-    expires_at: datetime
+    expires_at: UTCDatetime
 
     def add_item(
         self,
@@ -350,26 +352,26 @@ class Cart(BaseModel):
                 name_snapshot=name,
                 image_snapshot=image
             )
-        self.updated_at = datetime.utcnow()
+        self.updated_at = utc_now()
 
     def remove_item(self, product_id: int, variant_id: Optional[int] = None) -> None:
         """Remove item from cart"""
         str_id = cart_item_key(product_id, variant_id)
         if str_id in self.items:
             del self.items[str_id]
-            self.updated_at = datetime.utcnow()
+            self.updated_at = utc_now()
 
     def update_quantity(self, product_id: int, quantity: int, variant_id: Optional[int] = None) -> None:
         """Update item quantity"""
         str_id = cart_item_key(product_id, variant_id)
         if str_id in self.items:
             self.items[str_id].quantity = quantity
-            self.updated_at = datetime.utcnow()
+            self.updated_at = utc_now()
 
     def clear(self) -> None:
         """Clear all items from cart"""
         self.items.clear()
-        self.updated_at = datetime.utcnow()
+        self.updated_at = utc_now()
 
     def merge(self, other: 'Cart', max_lines: int) -> int:
         """Take the lines of `other` into this cart (a guest's cart into the
@@ -400,7 +402,7 @@ class Cart(BaseModel):
                 self.items[str_id] = theirs.model_copy()
             else:
                 left_out += 1
-        self.updated_at = datetime.utcnow()
+        self.updated_at = utc_now()
         return left_out
 
     @property

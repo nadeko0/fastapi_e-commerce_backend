@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from redis import ConnectionError as RedisConnectionError
 
+from app.core.clock import utc_now
 from app.core.config import Settings, settings
 from app.core.security import blacklist_token, create_access_token
 from app.main import app
@@ -479,8 +480,8 @@ def test_a_guest_cart_expired_in_redis_starts_again_under_a_new_identifier(
 
 def _expired_token(user_id):
     payload = {
-        "exp": datetime.utcnow() - timedelta(minutes=5),
-        "iat": datetime.utcnow() - timedelta(minutes=20),
+        "exp": utc_now() - timedelta(minutes=5),
+        "iat": utc_now() - timedelta(minutes=20),
         "sub": str(user_id),
         "type": "access",
     }
@@ -489,8 +490,8 @@ def _expired_token(user_id):
 
 def _refresh_typed_token(user_id):
     payload = {
-        "exp": datetime.utcnow() + timedelta(minutes=5),
-        "iat": datetime.utcnow(),
+        "exp": utc_now() + timedelta(minutes=5),
+        "iat": utc_now(),
         "sub": str(user_id),
         "type": "refresh",
     }
@@ -622,7 +623,7 @@ def test_guest_ttl_setting_is_the_one_source_for_key_cookie_and_expires_at(
     assert two_days - 60 < fake_redis.ttl(key) <= two_days
     assert f"Max-Age={two_days}" in _set_cookie(added)
     expires_at = datetime.fromisoformat(json.loads(fake_redis.get(key))["expires_at"])
-    assert abs((expires_at - datetime.utcnow()).total_seconds() - two_days) < 60
+    assert abs((expires_at - utc_now()).total_seconds() - two_days) < 60
 
     _, user_id = _account_with_a_cart(browser, db_session, product.id)
     eleven_days = 11 * 24 * 3600

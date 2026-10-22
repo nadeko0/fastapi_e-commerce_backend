@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Dict, Optional
 
 from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.user import User
 from app.schemas.legal import ConsentUpdate
@@ -25,7 +26,7 @@ class GDPRService:
         """
         Update user's consent preferences and maintain consent history
         """
-        current_time = datetime.utcnow()
+        current_time = utc_now()
 
         # Create consent history entry
         consent_entries = []
@@ -81,7 +82,7 @@ class GDPRService:
         Returns a request ID that can be used to track the export status
         """
         # Generate unique request ID
-        request_id = f"export_{user.id}_{datetime.utcnow().timestamp()}"
+        request_id = f"export_{user.id}_{utc_now().timestamp()}"
 
         try:
             # Send initial confirmation email. In a worker thread, like every
@@ -101,8 +102,8 @@ class GDPRService:
             from app.services.email import send_gdpr_export_email
             export_data = GDPRExport(
                 request_id=request_id,
-                request_date=datetime.utcnow(),
-                expires_at=datetime.utcnow() + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS)
+                request_date=utc_now(),
+                expires_at=utc_now() + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS)
             )
             await run_in_threadpool(send_gdpr_export_email, user.email, export_data)
 
@@ -119,7 +120,7 @@ class GDPRService:
         Process a GDPR data deletion request
         Returns a request ID that can be used to track the deletion status
         """
-        request_id = f"deletion_{user.id}_{datetime.utcnow().timestamp()}"
+        request_id = f"deletion_{user.id}_{utc_now().timestamp()}"
 
         try:
             # Send initial confirmation email
@@ -134,7 +135,7 @@ class GDPRService:
             # DATA_DELETION_GRACE_PERIOD_DAYS has passed.
             user.is_active = False
             user.data_deletion_requested = True
-            user.data_deletion_date = datetime.utcnow()
+            user.data_deletion_date = utc_now()
 
             self.db.commit()
 
@@ -175,5 +176,5 @@ class GDPRService:
             return True
 
         retention_days = user.data_retention_period or settings.USER_DATA_RETENTION_DAYS
-        age_in_days = (datetime.utcnow() - user.created_at).days
+        age_in_days = (utc_now() - user.created_at).days
         return age_in_days <= retention_days

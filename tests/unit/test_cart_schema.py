@@ -1,15 +1,16 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
+from app.core.clock import utc_now
 from app.schemas.common import Cart, CartItem, CartResponse
 
 
 def _cart_with_one_line(quantity=3):
-    cart = Cart(user_id=1, expires_at=datetime.utcnow() + timedelta(days=1))
+    cart = Cart(user_id=1, expires_at=utc_now() + timedelta(days=1))
     cart.add_item(product_id=7, quantity=quantity, price=Decimal("1.50"), name="n", image="i")
     return cart
 
@@ -67,7 +68,7 @@ def _variant(product_id, price_override=None, is_active=True):
 
 
 def _cart(*lines):
-    cart = Cart(user_id=1, expires_at=datetime.utcnow() + timedelta(days=1))
+    cart = Cart(user_id=1, expires_at=utc_now() + timedelta(days=1))
     for product_id, variant_id, quantity, price in lines:
         cart.add_item(
             product_id=product_id, variant_id=variant_id, quantity=quantity,
@@ -157,7 +158,7 @@ def test_pricing_a_line_with_nothing_recorded_reports_no_price_change():
     """The recorded price is optional: a line without one is priced like any
     other and simply has nothing to compare with."""
     cart = Cart(
-        user_id=1, expires_at=datetime.utcnow() + timedelta(days=1),
+        user_id=1, expires_at=utc_now() + timedelta(days=1),
         items={"7": CartItem(product_id=7, quantity=2)},
     )
 
@@ -269,7 +270,7 @@ def test_merge_into_a_cart_already_over_the_cap_adds_no_line_and_drops_none_of_i
 
 
 def test_a_guest_cart_has_no_user_id_and_survives_a_json_round_trip():
-    cart = Cart(expires_at=datetime.utcnow() + timedelta(days=1))
+    cart = Cart(expires_at=utc_now() + timedelta(days=1))
     cart.add_item(product_id=7, quantity=2, price=Decimal("1.50"), name="n", image="i")
 
     restored = Cart.model_validate_json(cart.model_dump_json())

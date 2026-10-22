@@ -1,9 +1,6 @@
-from datetime import datetime
-
 from sqlalchemy import (
     CheckConstraint,
     Column,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -12,6 +9,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from app.core.clock import UTCDateTime, utc_now
 from app.core.config import settings
 from app.models.base import Base
 from app.models.enums import OrderStatus, PaymentStatus, create_string_enum
@@ -34,8 +32,8 @@ class Order(Base):
     # Client-supplied key (Idempotency-Key header) for safe checkout retries.
     # Unique per user: the same key from two different users is not a clash.
     idempotency_key = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     user = relationship("User", back_populates="orders")
     shipping_address = relationship("Address")

@@ -11,12 +11,13 @@ makes real requests: run it by hand now and then, not on every commit.
 """
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from payment_support import Shop
 
+from app.core.clock import utc_now
 from app.models.payment import Payment
 from app.models.payment_discrepancy import (
     KIND_AMOUNT,
@@ -79,7 +80,7 @@ def test_a_payment_and_a_refund_in_stripe_reconcile_and_a_divergence_is_found(
     payment = Payment(
         order_id=order["id"], provider="stripe", payment_intent_id=intent.id,
         amount=1099, amount_refunded=300, currency="USD", status="succeeded",
-        created_at=datetime.utcnow() - timedelta(hours=2))
+        created_at=utc_now() - timedelta(hours=2))
     db_session.add(payment)
     db_session.flush()
     db_session.add(PaymentRefund(

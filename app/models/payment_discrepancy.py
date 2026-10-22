@@ -4,11 +4,9 @@ differ between our payment records and the provider's: one row per
 difference, so an admin sees what differs, since when, and what each side
 says. Nothing in the payment flow reads this table; it only reports.
 """
-from datetime import datetime
 
 from sqlalchemy import (
     Column,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -17,6 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from app.core.clock import UTCDateTime, utc_now
 from app.models.base import Base
 
 # Discrepancy.kind values. "Subject" is the refund id for the refund kinds
@@ -48,11 +47,11 @@ class PaymentDiscrepancy(Base):
     # When this difference was first seen, and last seen, by a run. A
     # difference that went away and came back starts again (detected_at is
     # reset), so detected_at is always "since when".
-    detected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    last_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    detected_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    last_seen_at = Column(UTCDateTime, default=utc_now, nullable=False)
     # Set by the first run that no longer sees the difference; None while
     # it is open.
-    resolved_at = Column(DateTime, nullable=True)
+    resolved_at = Column(UTCDateTime, nullable=True)
 
     payment = relationship("Payment", backref="discrepancies")
 

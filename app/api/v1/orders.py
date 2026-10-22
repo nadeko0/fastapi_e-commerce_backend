@@ -1,7 +1,7 @@
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from typing import List, Optional
 
@@ -12,6 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_active_user, get_current_admin_user
@@ -374,7 +375,7 @@ async def update_order_status(
         cancel_order_and_restock(db, order)
     else:
         order.status = status
-        order.updated_at = datetime.utcnow()
+        order.updated_at = utc_now()
 
     db.commit()
 
@@ -578,7 +579,7 @@ def _apply_payment_success(
     order.payment_status = PaymentStatus.PAID
     if _is_valid_status_transition(order.status, OrderStatus.CONFIRMED):
         order.status = OrderStatus.CONFIRMED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     db.commit()
 
     background_tasks.add_task(
@@ -639,7 +640,7 @@ def _apply_payment_failure(db: Session, order: Order, payment_row: Payment) -> N
     payment_row.status = "failed"
     if order.payment_status in _PAYMENT_STATUSES_A_FAILURE_MAY_REPLACE:
         order.payment_status = PaymentStatus.FAILED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     db.commit()
 
 
@@ -706,7 +707,7 @@ def _guard_no_attempt_in_flight(db: Session, order: Order) -> None:
     does succeed after all, the webhook flags the second success for manual
     review, as before.
     """
-    started_after = datetime.utcnow() - timedelta(
+    started_after = utc_now() - timedelta(
         minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
     )
     in_flight = db.query(Payment.id).filter(
@@ -956,7 +957,7 @@ async def process_payment(
         # 4217 code) - the request was never "sent to the processor", so
         # this attempt is a hard failure, not a retryable transport issue.
         payment_row.status = "failed"
-        order.updated_at = datetime.utcnow()
+        order.updated_at = utc_now()
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1165,7 +1166,7 @@ async def create_checkout_session(
         )
     except InvalidRequestError as e:
         payment_row.status = "failed"
-        order.updated_at = datetime.utcnow()
+        order.updated_at = utc_now()
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1314,7 +1315,7 @@ async def refund_payment(
     # reported as completed, and the order marked refunded, as soon as the
     # provider accepted it.
     _settle_refunds(db, order, payment_row)
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     db.commit()
 
     return APIResponse.success_response(RefundResponse(

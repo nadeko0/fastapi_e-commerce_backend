@@ -1,9 +1,10 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from fastapi import HTTPException
 
+from app.core.clock import utc_now
 from app.models.user import User
 from app.schemas.legal import ConsentUpdate
 from app.services.gdpr import GDPRService
@@ -19,7 +20,7 @@ def _make_user(db_session, email="gdpr.user@example.com", **overrides):
         marketing_consent=False,
         consent_history=[],
         is_active=True,
-        created_at=datetime.utcnow(),
+        created_at=utc_now(),
     )
     defaults.update(overrides)
     user = User(**defaults)
@@ -110,7 +111,7 @@ def test_get_consent_status_returns_current_state(db_session):
 
 
 def test_validate_retention_period_true_when_recent(db_session):
-    user = _make_user(db_session, created_at=datetime.utcnow())
+    user = _make_user(db_session, created_at=utc_now())
     service = GDPRService(db_session)
 
     assert service.validate_retention_period(user) is True
@@ -119,7 +120,7 @@ def test_validate_retention_period_true_when_recent(db_session):
 def test_validate_retention_period_false_when_expired(db_session):
     user = _make_user(
         db_session,
-        created_at=datetime.utcnow() - timedelta(days=1000),
+        created_at=utc_now() - timedelta(days=1000),
         data_retention_period=365,
     )
     service = GDPRService(db_session)

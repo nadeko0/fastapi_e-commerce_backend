@@ -1,11 +1,12 @@
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from redis import ConnectionError as RedisConnectionError
 from redis import TimeoutError as RedisTimeoutError
 
+from app.core.clock import utc_now
 from app.schemas.cart import CartOwner, is_guest_cart_id, new_guest_cart_id
 from app.schemas.category import CategoryTreeResponse
 from app.schemas.common import Cart
@@ -133,16 +134,16 @@ def test_generic_get_setex_and_delete():
 
 def test_delete_cart_removes_cart_key():
     redis = _service()
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     from app.schemas.common import Cart
 
     cart = Cart(
         user_id=7,
         items={},
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(days=1),
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        expires_at=utc_now() + timedelta(days=1),
     )
     redis.update_cart(cart)
 
@@ -312,9 +313,9 @@ def test_update_cart_fails_open_on_connection_error(monkeypatch):
     cart = Cart(
         user_id=1,
         items={},
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(days=1),
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        expires_at=utc_now() + timedelta(days=1),
     )
 
     assert redis.update_cart(cart) is False
@@ -613,8 +614,8 @@ def test_guest_cart_gets_the_guest_ttl_and_account_cart_the_account_ttl(monkeypa
 
     assert 2 * 86400 - 60 < redis._redis.ttl(guest.key) <= 2 * 86400
     assert 9 * 86400 - 60 < redis._redis.ttl("cart:1") <= 9 * 86400
-    assert abs((guest_cart.expires_at - datetime.utcnow()) - timedelta(days=2)) < timedelta(minutes=1)
-    assert abs((account_cart.expires_at - datetime.utcnow()) - timedelta(days=9)) < timedelta(minutes=1)
+    assert abs((guest_cart.expires_at - utc_now()) - timedelta(days=2)) < timedelta(minutes=1)
+    assert abs((account_cart.expires_at - utc_now()) - timedelta(days=9)) < timedelta(minutes=1)
     assert redis.empty_cart(guest).expires_at < redis.empty_cart(1).expires_at
 
 

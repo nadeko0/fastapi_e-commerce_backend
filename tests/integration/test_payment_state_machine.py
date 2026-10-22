@@ -42,7 +42,7 @@ about an attempt that had already paid the order flagged that attempt
 (see test_webhook_events.py).
 """
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -68,6 +68,7 @@ from payment_support import (
 )
 
 from app import tasks
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.order import Order
 from app.models.payment_ledger import PaymentDispute, PaymentRefund
@@ -278,7 +279,7 @@ class PaymentChain(RuleBasedStateMachine):
     def order_outlives_the_unpaid_window(self, index):
         # This order is old enough to expire if unpaid; the task runs.
         self.shop.db.get(Order, self._order_id(index)).created_at = (
-            datetime.utcnow() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES + 1))
+            utc_now() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES + 1))
         self.shop.db.commit()
         tasks.cancel_expired_unpaid_orders()
 
