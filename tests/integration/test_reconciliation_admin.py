@@ -6,6 +6,7 @@ everything queued for the worker). Admin only.
 from datetime import datetime, timedelta
 
 import pytest
+from kombu.exceptions import OperationalError
 from payment_support import PAY_OK, Shop, reset_provider
 
 from app.api.v1 import admin
@@ -156,11 +157,24 @@ def test_a_run_for_an_unknown_order_is_404(shop, client):
 
 def test_a_full_run_is_queued_for_the_worker(shop, client, monkeypatch):
     queued = []
-    monkeypatch.setattr(admin.check_payment_reconciliation, "delay",
+    monkeypatch.setattr(admin.check_payment_reconciliation, "apply_async",
                         lambda *a, **k: queued.append((a, k)))
 
     response = client.post(f"{BASE}/run", headers=shop.admin())
 
     assert response.status_code == 202
     assert response.json()["data"] == {"queued": True}
-    assert queued == [((), {})]
+    # retry=False: an unreachable broker must fail at once, not sit in kombu's retries.
+    assert queued == [((), {"retry": False})]
+
+
+def test_a_full_run_that_cannot_be_queued_is_503_not_500(shop, client, monkeypatch):
+    def broker_down(*args, **kwargs):
+        raise OperationalError("broker unreachable")
+
+    monkeypatch.setattr(admin.check_payment_reconciliation, "apply_async", broker_down)
+
+    response = client.post(f"{BASE}/run", headers=shop.admin())
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Task queue unavailable; reconciliation was not queued"

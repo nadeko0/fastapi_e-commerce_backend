@@ -670,6 +670,7 @@ async def list_reconciliation_discrepancies(
         202: {"description": "The full run is queued (no order_id)"},
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
+        503: {"description": "Task queue unavailable, the full run was not queued"},
     },
 )
 async def run_reconciliation(
@@ -684,7 +685,16 @@ async def run_reconciliation(
     as the daily one, queued for the worker (202), because it makes up to
     two provider calls per payment."""
     if order_id is None:
-        check_payment_reconciliation.delay()
+        try:
+            # retry=False: with the broker down, fail at once instead of
+            # sitting in kombu's publish retries.
+            check_payment_reconciliation.apply_async(retry=False)
+        except Exception as e:
+            logger.warning("Could not queue the reconciliation run", exc_info=e)
+            raise HTTPException(
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Task queue unavailable; reconciliation was not queued",
+            )
         response.status_code = http_status.HTTP_202_ACCEPTED
         return APIResponse.success_response({"queued": True})
     if not db.query(Order.id).filter(Order.id == order_id).first():
@@ -694,6 +704,7 @@ async def run_reconciliation(
         )
     result = await run_in_threadpool(reconcile_payments, db, provider, order_id=order_id)
     return APIResponse.success_response(result.as_dict())
+
 
 @router.get(
     "/webhook-events",
