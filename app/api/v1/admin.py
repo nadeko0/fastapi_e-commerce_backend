@@ -15,6 +15,12 @@ from app.core.security import get_current_admin_user
 from app.models.category import Category
 from app.models.order import Order
 from app.models.order_items import OrderItem
+from app.models.payment import (
+    WEBHOOK_EVENT_FAILED,
+    WEBHOOK_EVENT_RECEIVED,
+    WEBHOOK_EVENT_STATUSES,
+    WebhookEvent,
+)
 from app.models.product import Product, ProductVariant
 from app.models.user import User
 from app.schemas.category import (
@@ -38,9 +44,11 @@ from app.schemas.product import (
     ProductVariantResponse,
     ProductVariantUpdate,
 )
+from app.schemas.webhook_event import WebhookEventListResponse, WebhookEventResponse
 from app.services.payment import PaymentProvider, get_payment_provider
 from app.services.reconciliation import open_discrepancies, reconcile_payments
 from app.services.redis import RedisService
+from app.services.stripe_events import enqueue_event
 from app.tasks import check_payment_reconciliation
 
 logger = logging.getLogger(__name__)
@@ -686,3 +694,93 @@ async def run_reconciliation(
         )
     result = await run_in_threadpool(reconcile_payments, db, provider, order_id=order_id)
     return APIResponse.success_response(result.as_dict())
+
+@router.get(
+    "/webhook-events",
+    response_model=APIResponse[WebhookEventListResponse],
+    responses={
+        403: {"description": "Admin privileges required"},
+        422: {"description": "Invalid status value"},
+    },
+)
+async def list_webhook_events(
+    # Named "status" for the public API/query param; see list_orders above.
+    status: Optional[str] = None,
+    pagination: PaginationParams = Depends(),
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """
+    List the Stripe webhook events the app stored, newest first, optionally
+    by status (received, processing, processed, retrying, failed). Without
+    the payload: it is the provider's raw object. A "failed" event ran out
+    of retries and can be replayed.
+    """
+    query = db.query(WebhookEvent)
+    if status:
+        if status not in WEBHOOK_EVENT_STATUSES:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid webhook event status. Valid values are: {', '.join(WEBHOOK_EVENT_STATUSES)}",
+            )
+        query = query.filter(WebhookEvent.status == status)
+
+    total = query.count()
+    events = (
+        query.order_by(WebhookEvent.created_at.desc(), WebhookEvent.id.desc())
+        .offset((pagination.page - 1) * pagination.size)
+        .limit(pagination.size)
+        .all()
+    )
+    return APIResponse.success_response(WebhookEventListResponse(
+        items=[WebhookEventResponse.model_validate(event) for event in events],
+        total=total,
+        page=pagination.page,
+        size=pagination.size,
+        has_more=total > pagination.page * pagination.size,
+    ))
+
+
+@router.post(
+    "/webhook-events/{event_id}/replay",
+    response_model=APIResponse[WebhookEventResponse],
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Unknown webhook event"},
+        409: {"description": "The event has not failed"},
+    },
+)
+async def replay_webhook_event(
+    event_id: str,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Send a failed Stripe event through the worker again (after the cause of
+    its failure is fixed): it becomes "received" with its attempts reset and
+    is published. If the broker is down it stays received and the sweeper
+    publishes it. Only a failed event can be replayed.
+    """
+    # Locked, so two admins replaying the same event publish it once: the
+    # second finds it received.
+    event = (
+        db.query(WebhookEvent)
+        .filter(WebhookEvent.event_id == event_id)
+        .with_for_update()
+        .first()
+    )
+    if event is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Webhook event not found"
+        )
+    if event.status != WEBHOOK_EVENT_FAILED:
+        db.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=f"Only a failed webhook event can be replayed (this one is {event.status})",
+        )
+    event.status = WEBHOOK_EVENT_RECEIVED
+    event.attempts = 0
+    db.commit()
+    enqueue_event(event.event_id)
+    return APIResponse.success_response(WebhookEventResponse.model_validate(event))
