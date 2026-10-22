@@ -120,9 +120,64 @@ jobs:
           tests/unit/test_money*.py
           tests/unit/test_webhook*.py
 
+  test-postgres:
+    # The main test job runs on a temporary SQLite database. Production is
+    # PostgreSQL, so what only PostgreSQL does (row locks in the pay path,
+    # CHECK constraints, the unique index on lower(email), the refund and
+    # dispute tables, the Alembic migrations) is checked here: the tests that
+    # depend on the database (marker db_sensitive, applied by file name in
+    # tests/conftest.py) plus the PostgreSQL-only ones, against a real server.
+    # tests/conftest.py creates a throwaway database on it, builds the schema
+    # with `alembic upgrade head` and drops it at the end.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # The image docker-compose.yml runs in production, tag and digest
+        # (test_docker_compose.py keeps the two in step). max_connections stays
+        # at the default 100 here: a service container cannot pass the
+        # `-c max_connections=200` that docker-compose.yml sets, and the tests
+        # open far fewer.
+        image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Set up Python
+        run: uv python install
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Database-sensitive tests on PostgreSQL
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/ci
+          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
+          POSTGRES_SERVER: localhost
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+          REDIS_HOST: localhost
+          SMTP_HOST: localhost
+          SMTP_USER: ci@example.com
+          SMTP_PASSWORD: ci
+          EMAILS_FROM_EMAIL: ci@example.com
+          EMAILS_FROM_NAME: CI
+        run: uv run pytest tests/ -m "db_sensitive" -q -p no:cacheprovider -rs
+
   docker-build:
     runs-on: ubuntu-latest
-    needs: [lint, test, test-timezones]
+    needs: [lint, test, test-timezones, test-postgres]
     steps:
       - uses: actions/checkout@v4
       - name: Build image (no push)

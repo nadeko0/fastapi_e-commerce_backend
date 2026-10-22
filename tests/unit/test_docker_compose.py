@@ -151,3 +151,15 @@ def test_base_images_are_pinned_by_digest_on_their_current_majors():
     assert sorted(ref.split("@")[0] for ref in references) == sorted(expected_tags), references
     for ref in references:
         assert re.search(_PINNED, ref), ref
+
+
+def test_ci_tests_against_the_postgres_image_production_runs():
+    # The test-postgres job's service container must be the db service's image,
+    # tag and digest: a Postgres-only behaviour is only worth testing on the
+    # server that is deployed. Bumping one without the other fails here.
+    compose_image = re.search(r"^\s*image: (postgres:\S+)", service_block("db"), re.M).group(1)
+    ci = _read(".github/workflows/ci.yml")
+    job = ci[ci.index("\n  test-postgres:"):]
+    job = job[: job.index("\n  docker-build:")]
+    assert re.search(rf"^\s*image: {re.escape(compose_image)}\s*$", job, re.M)
+    assert "test-postgres" in re.search(r"docker-build:.*?needs: \[([^\]]*)\]", ci, re.S).group(1)
