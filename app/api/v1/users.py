@@ -518,7 +518,7 @@ async def update_consent(
 
     db.commit()
     db.refresh(user)
-    return APIResponse.success_response(UserResponse.from_orm(user))
+    return APIResponse.success_response(UserResponse.model_validate(user))
 
 @router.get(
     "/data/export",
@@ -662,7 +662,7 @@ async def get_current_user_data(
 ):
     """Retrieve the current authenticated user's profile."""
 
-    return APIResponse.success_response(UserResponse.from_orm(current_user))
+    return APIResponse.success_response(UserResponse.model_validate(current_user))
 
 @router.put(
     "/me",
@@ -714,7 +714,7 @@ async def update_current_user(
 
 
         db.refresh(user)
-        return APIResponse.success_response(UserResponse.from_orm(user))
+        return APIResponse.success_response(UserResponse.model_validate(user))
 
     except Exception as e:
         db.rollback()
@@ -808,7 +808,7 @@ async def create_address(
         created = db.get(Address, address.id)
         logger.info(f"Verified address exists: {created and created.id} for user {current_user.id}")
 
-        return APIResponse.success_response(AddressResponse.from_orm(address))
+        return APIResponse.success_response(AddressResponse.model_validate(address))
     except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -879,7 +879,7 @@ async def update_address(
     db.commit()
     db.refresh(address)
 
-    return APIResponse.success_response(AddressResponse.from_orm(address))
+    return APIResponse.success_response(AddressResponse.model_validate(address))
 
 @router.delete(
     "/addresses/{address_id}",
@@ -1008,7 +1008,7 @@ async def get_user_orders(
         .all()
     )
     return APIResponse.success_response([
-        OrderResponse.from_orm(order) for order in orders
+        OrderResponse.model_validate(order) for order in orders
     ])
 
 def _invalid_reset_token() -> HTTPException:

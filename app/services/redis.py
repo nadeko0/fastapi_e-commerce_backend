@@ -147,7 +147,7 @@ class RedisService:
                     if isinstance(parsed, str):
                         parsed = {'tree': [], 'total_categories': 0, 'max_depth': 0}
                     elif not isinstance(parsed, dict):
-                        parsed = parsed.dict() if hasattr(parsed, 'dict') else {'tree': [], 'total_categories': 0, 'max_depth': 0}
+                        parsed = parsed.model_dump() if hasattr(parsed, 'model_dump') else {'tree': [], 'total_categories': 0, 'max_depth': 0}
                 return model_class.model_validate(parsed)
             return parsed
         except (json.JSONDecodeError, AttributeError, TypeError, KeyError, ValidationError) as e:

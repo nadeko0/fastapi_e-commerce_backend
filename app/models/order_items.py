@@ -33,10 +33,10 @@ class OrderItem(Base):
 
     # OrderItemResponse (app/schemas/order.py) requires product_name/
     # product_image as flat fields - these read-only properties (not
-    # columns) let pydantic's from_attributes/from_orm pick them up
+    # columns) let pydantic's from_attributes pick them up
     # straight off the ORM object via the `product` relationship, the same
     # way app/api/v1/cart.py already denormalizes product name/image onto
-    # cart line items. Pre-existing gap: OrderResponse.from_orm(order)
+    # cart line items. Pre-existing gap: OrderResponse.model_validate(order)
     # previously raised a ValidationError on every order (no prior test
     # exercised order creation end-to-end to catch it).
     @property

@@ -49,7 +49,7 @@ async def _count(db: AsyncSession, stmt: Select) -> int:
 
 def _to_product_response(product: Product) -> ProductResponse:
     # ProductResponse requires category_name, which is not a Product
-    # column - ProductResponse.from_orm(product) always raised a 500
+    # column - ProductResponse.model_validate(product) always raised a 500
     # ValidationError ("category_name: Field required") for every route
     # that didn't build the response this way. app/api/v1/admin.py's
     # create/update endpoints already do this; list_products, get_product,
@@ -109,7 +109,7 @@ async def list_categories(
     )).all()
 
     return APIResponse.success_response(CategoryListResponse(
-        items=[CategoryResponse.from_orm(cat) for cat in categories],
+        items=[CategoryResponse.model_validate(cat) for cat in categories],
         total=total,
         page=pagination.page,
         size=pagination.size,
@@ -143,7 +143,7 @@ async def get_category_tree(
         def build_tree(category: Category) -> CategoryTreeNode:
             children = [c for c in categories if c.parent_id == category.id]
             return CategoryTreeNode(
-                **CategoryResponse.from_orm(category).model_dump(),
+                **CategoryResponse.model_validate(category).model_dump(),
                 children=[build_tree(child) for child in children]
             )
 
@@ -182,7 +182,7 @@ async def get_category(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Category not found"
         )
-    return APIResponse.success_response(CategoryResponse.from_orm(category))
+    return APIResponse.success_response(CategoryResponse.model_validate(category))
 
 @router.get("/products", response_model=APIResponse[ProductListResponse])
 async def list_products(
@@ -315,6 +315,6 @@ async def get_product(
     response = _to_product_response(product)
 
 
-    redis.cache_product(product_id, response.dict())
+    redis.cache_product(product_id, response.model_dump())
 
     return APIResponse.success_response(response)

@@ -86,7 +86,7 @@ async def create_category(
                 detail="Parent category not found"
             )
 
-    db_category = Category(**category.dict())
+    db_category = Category(**category.model_dump())
     if category.parent_id:
         parent = db.query(Category).filter(Category.id == category.parent_id).first()
         db_category.level = parent.level + 1
@@ -102,7 +102,7 @@ async def create_category(
 
     redis.delete("category:tree")
 
-    return APIResponse.success_response(CategoryResponse.from_orm(db_category))
+    return APIResponse.success_response(CategoryResponse.model_validate(db_category))
 
 @router.post(
     "/products",
@@ -128,7 +128,7 @@ async def create_product(
         )
 
 
-    db_product = Product(**product.dict())
+    db_product = Product(**product.model_dump())
     db.add(db_product)
     db.commit()
     db.refresh(db_product)
@@ -176,7 +176,7 @@ async def update_product(
             detail="Product not found"
         )
 
-    update_data = product.dict(exclude_unset=True)
+    update_data = product.model_dump(exclude_unset=True)
     # Same check as create_product. Without it a missing category_id was
     # written to the row: a generic 500 from the foreign key on Postgres,
     # and on a database that does not enforce it a committed product whose
@@ -352,7 +352,7 @@ async def list_orders(
     )
 
     return APIResponse.success_response(OrderListResponse(
-        items=[OrderResponse.from_orm(order) for order in orders],
+        items=[OrderResponse.model_validate(order) for order in orders],
         total=total,
         page=pagination.page,
         size=pagination.size,
@@ -535,7 +535,7 @@ async def create_product_variant(
             detail="A variant with this SKU already exists"
         )
 
-    db_variant = ProductVariant(product_id=product_id, **variant.dict())
+    db_variant = ProductVariant(product_id=product_id, **variant.model_dump())
     db.add(db_variant)
     # The pre-check above is a plain read-then-write: two concurrent
     # requests creating a variant with the same SKU can both pass it before
@@ -546,7 +546,7 @@ async def create_product_variant(
     _commit_variant(db, variant.sku)
     db.refresh(db_variant)
 
-    return APIResponse.success_response(ProductVariantResponse.from_orm(db_variant))
+    return APIResponse.success_response(ProductVariantResponse.model_validate(db_variant))
 
 @router.get(
     "/products/{product_id}/variants",
@@ -575,7 +575,7 @@ async def list_product_variants(
     )
 
     return APIResponse.success_response(ProductVariantListResponse(
-        items=[ProductVariantResponse.from_orm(v) for v in variants],
+        items=[ProductVariantResponse.model_validate(v) for v in variants],
         total=len(variants),
     ))
 
@@ -610,7 +610,7 @@ async def update_product_variant(
             detail="Variant not found"
         )
 
-    update_data = variant.dict(exclude_unset=True)
+    update_data = variant.model_dump(exclude_unset=True)
     if "sku" in update_data and update_data["sku"] != db_variant.sku:
         if _variant_sku_exists(db, update_data["sku"]):
             raise HTTPException(
@@ -628,7 +628,7 @@ async def update_product_variant(
     _commit_variant(db, update_data.get("sku"), variant_id)
     db.refresh(db_variant)
 
-    return APIResponse.success_response(ProductVariantResponse.from_orm(db_variant))
+    return APIResponse.success_response(ProductVariantResponse.model_validate(db_variant))
 
 
 # -- Payment reconciliation ----------------------------------------------------------
