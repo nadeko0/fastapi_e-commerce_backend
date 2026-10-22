@@ -17,6 +17,7 @@ from app.models.order_items import OrderItem
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.order import OrderStatus, PaymentStatus
+from app.services import stripe_events
 from app.services.email import (
     send_low_stock_alert_email,
     send_order_cancellation_email,
@@ -83,6 +84,7 @@ celery.conf.update(
         'emails': {},
         'cleanup': {},
         'stats': {},
+        'payments': {},
     },
     # Keyed by the tasks' registered names. Every task below is declared with
     # an explicit name= ("send_order_confirmation", not
@@ -106,6 +108,10 @@ celery.conf.update(
     },
     broker_transport_options={
         'visibility_timeout': 3600,
+        # The webhook route publishes process_stripe_event while Stripe waits
+        # for its answer: a broker that does not answer must fail fast (the
+        # event is stored and the sweeper publishes it), not hang the request.
+        'socket_connect_timeout': 5,
     },
     task_time_limit=300,
     task_soft_time_limit=240,
@@ -424,6 +430,34 @@ def check_payment_reconciliation(order_id: int | None = None) -> dict:
         return reconcile_payments(db, get_payment_provider(), order_id=order_id).as_dict()
 
 @celery.task(
+    bind=True,
+    name="process_stripe_event",
+    queue="payments",
+    # No limit of Celery's own: the number of retries is counted on the
+    # event (WebhookEvent.attempts, STRIPE_EVENT_MAX_RETRIES), where an
+    # admin sees it and a replay resets it.
+    max_retries=None,
+)
+def process_stripe_event(self, event_id: str) -> dict:
+    """Apply a stored Stripe event (see stripe_events.process_stored_event).
+    The webhook route publishes it after storing the event, the sweeper
+    publishes it for an event whose message was lost, and it publishes
+    itself again, with a backoff, for an event it could not apply."""
+    with task_session() as db:
+        outcome = stripe_events.process_stored_event(db, event_id)
+    if outcome.retry_in is not None:
+        raise self.retry(countdown=outcome.retry_in)
+    return outcome.result or {"status": outcome.state}
+
+@celery.task(
+    name="sweep_stripe_events",
+    queue="payments",
+)
+def sweep_stripe_events() -> int:
+    with task_session() as db:
+        return stripe_events.enqueue_stuck_events(db)
+
+@celery.task(
     name="update_product_stats",
     queue="stats",
 )
@@ -523,5 +557,11 @@ celery.conf.beat_schedule = {
     'check-payment-reconciliation': {
         'task': 'check_payment_reconciliation',
         'schedule': crontab(hour=3, minute=15),
+    },
+    # Publishes the Stripe events whose task message was lost (the broker was
+    # down when the webhook route stored them); see STRIPE_EVENT_SWEEP_*.
+    'sweep-stripe-events': {
+        'task': 'sweep_stripe_events',
+        'schedule': timedelta(minutes=5),
     },
 }

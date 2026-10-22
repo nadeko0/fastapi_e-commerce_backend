@@ -1,11 +1,10 @@
 """
-How the Stripe webhook (app/api/v1/orders.py, stripe_webhook) records the
-events it receives: an event is recorded as processed together with what
-it changed, so a delivery that fails half-way is processed again when
-Stripe redelivers it, and only then.
+How Stripe events are recorded (app/api/v1/orders.py, stripe_webhook and
+app/services/stripe_events.py): an event is recorded as processed together
+with what it changed, so one that fails half-way is applied again by the
+worker's retry, and only then.
 """
 import pytest
-from fastapi.testclient import TestClient
 from payment_support import (
     PAY_3DS,
     Outbox,
@@ -16,9 +15,10 @@ from payment_support import (
     use_production_sessions,
 )
 from sqlalchemy.exc import OperationalError
+from stripe_event_support import run_event
 
 import app.services.stripe_events as stripe_events_module
-from app.main import app
+from app.models.payment import WebhookEvent
 
 
 @pytest.fixture(autouse=True)
@@ -47,14 +47,16 @@ def _awaiting_3ds(shop):
     return buyer, order, shop.payments(order["id"])[0]
 
 
-def test_an_event_whose_processing_failed_is_applied_when_stripe_redelivers_it(
+def test_an_event_whose_processing_failed_is_applied_when_the_worker_retries_it(
     shop, outbox, monkeypatch
 ):
     # The event id used to be committed as processed before the event was
     # applied. When applying it failed (a database error mid-way), Stripe
     # got a 500 and redelivered - and the redelivery was answered
     # "already_processed": the customer's payment was never applied and
-    # the order would expire unpaid.
+    # the order would expire unpaid. Now the event is stored first and the
+    # worker applies it: a failure rolls the event's mark back with the
+    # state (it stays retrying), and the retry applies it.
     buyer, order, payment = _awaiting_3ds(shop)
     outbox.take()
     real_apply = stripe_events_module._apply_payment_success
@@ -69,24 +71,32 @@ def test_an_event_whose_processing_failed_is_applied_when_stripe_redelivers_it(
     monkeypatch.setattr(stripe_events_module, "_apply_payment_success", _fails_once)
     event_id = "evt_redelivered_after_a_failure"
 
-    # As a server answers an unhandled error: 500, not an exception.
-    server = Shop(TestClient(app, raise_server_exceptions=False), shop.db)
-    first = server.intent_event("payment_intent.succeeded", payment, event_id=event_id)
-    assert first.status_code == 500
+    first = shop.intent_event("payment_intent.succeeded", payment, event_id=event_id)
+
+    # Stripe is told it was received; the worker could not apply it yet.
+    assert first.status_code == 200
+    assert first.json()["data"] == {"status": "retrying"}
     assert order_state(shop, order["id"]) == ("new", "pending")
-    assert event_id not in shop.webhook_event_ids()
+    assert event_id in shop.webhook_event_ids()
+    assert _status_of(shop, event_id) == "retrying"
+    assert outbox.take() == []
 
-    second = shop.intent_event("payment_intent.succeeded", payment, event_id=event_id)
+    second = run_event(event_id)
 
-    assert second.status_code == 200, second.text
-    assert second.json()["data"] == {"status": "processed", "applied": True}
+    assert second == {"status": "processed", "applied": True}
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
-    assert event_id in shop.webhook_event_ids()
+    assert _status_of(shop, event_id) == "processed"
     assert [(e[0], e[4]) for e in outbox.take()] == [("status_update", "paid")]
 
+    # Stripe delivering it again changes nothing.
     third = shop.intent_event("payment_intent.succeeded", payment, event_id=event_id)
     assert third.json()["data"] == {"status": "already_processed"}
+
+
+def _status_of(shop, event_id):
+    shop.db.expire_all()
+    return shop.db.query(WebhookEvent).filter_by(event_id=event_id).one().status
 
 
 # -- payment_intent.canceled ---------------------------------------------------

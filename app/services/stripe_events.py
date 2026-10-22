@@ -9,10 +9,13 @@ stored event and calls apply_event. The payment helpers that /pay and
 manual-review flag, the refund ledger) stay in app/api/v1/orders.py and are
 imported from there.
 """
+import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.v1.orders import (
@@ -28,7 +31,14 @@ from app.api.v1.orders import (
 )
 from app.core.config import settings
 from app.models.order import Order
-from app.models.payment import Payment
+from app.models.payment import (
+    WEBHOOK_EVENT_FAILED,
+    WEBHOOK_EVENT_PROCESSED,
+    WEBHOOK_EVENT_RECEIVED,
+    WEBHOOK_EVENT_RETRYING,
+    Payment,
+    WebhookEvent,
+)
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, PaymentRefund
 
 logger = logging.getLogger(__name__)
@@ -393,3 +403,218 @@ def apply_event(db: Session, event_type: str, event_data: Any, background_tasks)
         return {"status": "processed", "applied": False}
 
     return {"status": "processed", "applied": True}
+
+
+# -- Storing, publishing, processing and sweeping stored events ------------------
+
+# Characters of an error kept in WebhookEvent.last_error.
+_LAST_ERROR_MAX_CHARS = 2000
+
+
+def store_event(db: Session, event_id: str, event_type: str, payload: str) -> bool:
+    """
+    Store a verified event as "received" and commit. False when an event
+    with this id is already stored: the unique constraint on event_id is
+    the idempotency guard (Stripe delivers at-least-once, and a duplicate
+    can arrive while the first is still being stored - its INSERT waits on
+    the unique index, then fails). Any other database error propagates: the
+    route answers 5xx and Stripe delivers the event again, nothing is lost.
+    """
+    db.add(WebhookEvent(
+        event_id=event_id,
+        event_type=event_type,
+        payload=payload,
+        status=WEBHOOK_EVENT_RECEIVED,
+        attempts=0,
+    ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return False
+    return True
+
+
+def enqueue_event(event_id: str) -> bool:
+    """
+    Publish the process_stripe_event task for a stored event. False, with a
+    warning, when the broker cannot be reached: the event is stored, so
+    nothing is lost - the sweeper (sweep_stripe_events) publishes events
+    that stay received or retrying - and the caller still answers 2xx.
+    """
+    # Imported here: app.tasks imports this module.
+    from app import tasks
+
+    try:
+        # No publish retries: the caller is a request Stripe is waiting on.
+        tasks.process_stripe_event.apply_async(args=[event_id], retry=False)
+    except Exception:
+        logger.warning(
+            "Could not enqueue Stripe event %s; it stays stored and the sweeper will enqueue it",
+            event_id, exc_info=True,
+        )
+        return False
+    return True
+
+
+def retry_delay_seconds(attempts: int) -> int:
+    """Seconds to wait before retrying an event that has failed `attempts`
+    times: STRIPE_EVENT_RETRY_BASE_SECONDS, doubling each time, up to
+    STRIPE_EVENT_RETRY_MAX_SECONDS."""
+    return min(
+        settings.STRIPE_EVENT_RETRY_BASE_SECONDS * 2 ** (attempts - 1),
+        settings.STRIPE_EVENT_RETRY_MAX_SECONDS,
+    )
+
+
+@dataclass
+class EventOutcome:
+    """What one run of the worker did with an event. state is "processed"
+    (result says what it did), "skipped" (not ours to do: gone, locked by
+    another worker, already processed or failed), "retrying" (retry_in
+    seconds from now) or "failed" (out of retries)."""
+
+    state: str
+    result: Optional[dict] = None
+    retry_in: Optional[int] = None
+
+
+class _AfterCommit:
+    """Stands in for FastAPI's BackgroundTasks in the worker: what the
+    payment code queues (the customer's email) runs once the event is
+    committed. A failure then must not undo or retry an event that has been
+    applied."""
+
+    def __init__(self) -> None:
+        self._calls: list = []
+
+    def add_task(self, func, *args, **kwargs) -> None:
+        self._calls.append((func, args, kwargs))
+
+    def run(self, event_id: str) -> None:
+        for func, args, kwargs in self._calls:
+            try:
+                func(*args, **kwargs)
+            except Exception:
+                logger.exception(
+                    "Stripe event %s was applied, but its follow-up %s failed",
+                    event_id, getattr(func, "__name__", func),
+                )
+
+
+def _claim_event(db: Session, event_id: str) -> Optional[WebhookEvent]:
+    """The stored event, row-locked for the rest of the transaction.
+    SKIP LOCKED: an event another worker is applying right now is not
+    returned (None), so two workers given the same message apply it once -
+    the second leaves it to the first."""
+    return (
+        db.query(WebhookEvent)
+        .filter(WebhookEvent.event_id == event_id)
+        .with_for_update(skip_locked=True)
+        .first()
+    )
+
+
+def process_stored_event(db: Session, event_id: str) -> EventOutcome:
+    """
+    The body of the process_stripe_event task: apply a stored event.
+
+    The event row is locked (_claim_event), marked processed, and applied;
+    apply_event commits the mark together with the state changes it made
+    (and rolls both back on an error), so an event is never recorded as
+    processed without what it changed. An event that is not received or
+    retrying is left alone. Anything that stops the event from being
+    applied - an event that overtook its payment attempt
+    (PaymentAttemptNotRecorded) or any other error - is recorded and
+    answered with a retry (_record_failure).
+    """
+    # As the request sessions are (app/core/database.py): objects keep their
+    # values after a commit instead of being re-read, unlocked, for the
+    # customer's email. The payment helpers (_lock_order_and_reload) are
+    # written for it.
+    db.expire_on_commit = False
+    row = _claim_event(db, event_id)
+    if row is None or row.status not in (WEBHOOK_EVENT_RECEIVED, WEBHOOK_EVENT_RETRYING):
+        db.rollback()
+        return EventOutcome("skipped")
+    after_commit = _AfterCommit()
+    try:
+        data = json.loads(row.payload).get("data")
+        row.status = WEBHOOK_EVENT_PROCESSED
+        row.processed_at = datetime.utcnow()
+        result = apply_event(db, row.event_type, data, after_commit)
+        db.commit()
+    except Exception as error:
+        db.rollback()
+        return _record_failure(db, event_id, error)
+    after_commit.run(event_id)
+    return EventOutcome("processed", result)
+
+
+def _record_failure(db: Session, event_id: str, error: Exception) -> EventOutcome:
+    """Count a failed attempt in a new transaction (the failed one was rolled
+    back, event and state changes together): retrying with a backoff, or
+    failed once STRIPE_EVENT_MAX_RETRIES retries are used up."""
+    row = db.query(WebhookEvent).filter(WebhookEvent.event_id == event_id).with_for_update().one()
+    if row.status == WEBHOOK_EVENT_PROCESSED:
+        # The error came after the commit that applied the event: it is
+        # done, and retrying would apply it twice.
+        db.rollback()
+        logger.error("Stripe event %s was applied, then raised: %r", event_id, error)
+        return EventOutcome("skipped")
+    row.attempts += 1
+    row.last_error = f"{type(error).__name__}: {error}"[:_LAST_ERROR_MAX_CHARS]
+    if row.attempts > settings.STRIPE_EVENT_MAX_RETRIES:
+        row.status = WEBHOOK_EVENT_FAILED
+        db.commit()
+        logger.error(
+            "Stripe event %s (%s) failed after %s attempts and is not retried any more; "
+            "replay it from the admin once the cause is fixed",
+            event_id, row.event_type, row.attempts, exc_info=error,
+        )
+        return EventOutcome("failed")
+    row.status = WEBHOOK_EVENT_RETRYING
+    db.commit()
+    logger.warning(
+        "Stripe event %s (%s) not applied (attempt %s), will retry: %r",
+        event_id, row.event_type, row.attempts, error,
+    )
+    return EventOutcome("retrying", retry_in=retry_delay_seconds(row.attempts))
+
+
+def enqueue_stuck_events(db: Session) -> int:
+    """
+    The sweeper: publish the events that are still received or retrying
+    STRIPE_EVENT_SWEEP_AFTER_MINUTES after they last changed - the message
+    to the worker was never published (the broker was down when the route
+    ran) or was lost. Oldest first, at most STRIPE_EVENT_SWEEP_BATCH. The
+    events are not locked while they are published (a worker given the
+    message would skip a locked row); each published event's updated_at is
+    set to now instead, so the next run leaves it for the worker. Stops at
+    the first event the broker refuses. Returns how many were published.
+    """
+    now = datetime.utcnow()
+    stuck = (
+        db.query(WebhookEvent.id, WebhookEvent.event_id)
+        .filter(
+            WebhookEvent.status.in_((WEBHOOK_EVENT_RECEIVED, WEBHOOK_EVENT_RETRYING)),
+            WebhookEvent.updated_at < now - timedelta(minutes=settings.STRIPE_EVENT_SWEEP_AFTER_MINUTES),
+        )
+        .order_by(WebhookEvent.updated_at, WebhookEvent.id)
+        .limit(settings.STRIPE_EVENT_SWEEP_BATCH)
+        .all()
+    )
+    published = []
+    for row_id, event_id in stuck:
+        if not enqueue_event(event_id):
+            break
+        published.append(row_id)
+    if published:
+        db.query(WebhookEvent).filter(
+            WebhookEvent.id.in_(published),
+            WebhookEvent.status.in_((WEBHOOK_EVENT_RECEIVED, WEBHOOK_EVENT_RETRYING)),
+        ).update({WebhookEvent.updated_at: now}, synchronize_session=False)
+    db.commit()
+    if published:
+        logger.info("Enqueued %s stuck Stripe event(s)", len(published))
+    return len(published)

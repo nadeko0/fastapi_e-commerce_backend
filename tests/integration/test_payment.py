@@ -32,6 +32,7 @@ from conftest import TestingSessionLocal
 from hypothesis import HealthCheck, given
 from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
+from stripe_event_support import deliver
 
 from app.core.config import settings
 from app.core.security import create_access_token, get_password_hash
@@ -274,10 +275,15 @@ ORDER_CURRENCY_REPORTED = "usd"
 
 
 def _post_webhook(client, body: bytes, signature: str):
-    return client.post(
-        WEBHOOK_URL,
-        content=body,
-        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    """Deliver an event: the route stores it, then the worker applies it
+    (see stripe_event_support.deliver)."""
+    return deliver(
+        client.post(
+            WEBHOOK_URL,
+            content=body,
+            headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+        ),
+        body,
     )
 
 

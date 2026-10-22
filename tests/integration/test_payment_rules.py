@@ -14,7 +14,6 @@ from test_payment import (
     ORDERS_PREFIX,
     TOKEN_DECLINE,
     TOKEN_REQUIRES_ACTION,
-    WEBHOOK_URL,
     _age_attempts,
     _create_admin,
     _create_verified_buyer_with_order,
@@ -341,8 +340,7 @@ def test_an_event_type_the_app_does_not_handle_changes_nothing(client, db_sessio
     body = json.dumps({"id": f"evt_{uuid.uuid4().hex[:24]}", "type": "charge.dispute.created",
                        "created": int(time.time()), "data": {"object": {"id": intent_id}}}).encode()
 
-    response = client.post(WEBHOOK_URL, content=body, headers={
-        "Stripe-Signature": _sign(body), "Content-Type": "application/json"})
+    response = _post_webhook(client, body, _sign(body))
 
     assert response.status_code == 200
     assert _get_order(db_session, setup["order"]["id"]).payment_status == "pending"

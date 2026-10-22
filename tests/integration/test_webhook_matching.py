@@ -7,8 +7,8 @@ stripe_webhook), and what happens to an event that matches none.
 - An event for one of our orders whose attempt has not stored its
   PaymentIntent/Checkout Session id yet (the event overtook the request
   that is still waiting on the provider's answer) is not lost: it is
-  answered 503 and not recorded, so Stripe redelivers it, and the
-  redelivery is applied once the id is stored.
+  stored and acknowledged, and not applied: the worker retries it with a
+  backoff and applies it once the id is stored.
 """
 import uuid
 
@@ -21,7 +21,9 @@ from payment_support import (
     reset_provider,
     use_production_sessions,
 )
+from stripe_event_support import run_event
 
+from app.models.payment import WebhookEvent
 from app.services.payment.stripe_provider import StripePaymentProvider
 
 
@@ -41,6 +43,12 @@ def outbox(monkeypatch):
 def shop(client, db_session, monkeypatch):
     use_production_sessions(monkeypatch)
     return Shop(client, db_session)
+
+
+def _event_state(shop, event_id):
+    shop.db.expire_all()
+    row = shop.db.query(WebhookEvent).filter_by(event_id=event_id).one()
+    return row.status, row.attempts
 
 
 def _succeeded(intent_id, order_id=None, amount=1999, event_id=None):
@@ -114,16 +122,19 @@ def test_an_event_that_overtakes_its_pay_request_is_retried_not_lost(
 
     paid = shop.pay(buyer, order["id"])
 
-    assert early["response"].status_code == 503, early["response"].text
+    # Stripe got its 200; the event is stored, and the worker could not
+    # apply it yet.
+    assert early["response"].status_code == 200, early["response"].text
+    assert early["response"].json()["data"] == {"status": "retrying"}
     obj, event_id = early["event"]
-    # /pay itself completed the payment meanwhile; the redelivery then
-    # finds the attempt and is applied (a no-op on an applied success).
+    # /pay itself completed the payment meanwhile; the worker's retry then
+    # finds the attempt and applies the event (a no-op on an applied success).
     assert paid.status_code == 200, paid.text
-    assert event_id not in shop.webhook_event_ids()
-    redelivery = shop.webhook("payment_intent.succeeded", obj, event_id=event_id)
-    assert redelivery.status_code == 200
-    assert redelivery.json()["data"] == {"status": "processed", "applied": True}
     assert event_id in shop.webhook_event_ids()
+    assert _event_state(shop, event_id) == ("retrying", 1)
+    retry = run_event(event_id)
+    assert retry == {"status": "processed", "applied": True}
+    assert _event_state(shop, event_id) == ("processed", 1)
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
     assert [(e[0], e[4]) for e in outbox.take()] == [("status_update", "paid")]
@@ -153,11 +164,13 @@ def test_a_checkout_event_that_overtakes_its_session_request_is_retried(
 
     assert shop.checkout_session(buyer, order["id"]).status_code == 200
 
-    assert early["response"].status_code == 503
+    assert early["response"].status_code == 200
+    assert early["response"].json()["data"] == {"status": "retrying"}
     assert order_state(shop, order["id"]) == ("new", "pending")
     obj, event_id = early["event"]
-    redelivery = shop.webhook("checkout.session.completed", obj, event_id=event_id)
-    assert redelivery.json()["data"] == {"status": "processed", "applied": True}
+    assert _event_state(shop, event_id) == ("retrying", 1)
+    retry = run_event(event_id)
+    assert retry == {"status": "processed", "applied": True}
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert shop.payments(order["id"])[0].payment_intent_id == "pi_from_session"
 
