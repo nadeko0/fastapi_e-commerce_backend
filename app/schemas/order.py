@@ -4,7 +4,7 @@ from enum import Enum
 from typing import List, Optional
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.config import settings
 
@@ -34,7 +34,8 @@ class OrderItemBase(BaseModel):
     quantity: int = Field(..., gt=0)
     price_at_time: Decimal = Field(..., ge=0, decimal_places=2)
 
-    @validator('price_at_time')
+    @field_validator('price_at_time')
+    @classmethod
     def validate_price(cls, v):
         return Decimal(str(v)).quantize(Decimal('0.01'))
 
@@ -59,7 +60,7 @@ class OrderItemResponse(OrderItemInDB):
     def populate_product_fields_from_relationship(cls, values):
         # app.models.order_items.OrderItem has no product_name/product_image
         # columns - only product_id and a `product` relationship. Every
-        # OrderResponse.from_orm(order) (create_order, get_order,
+        # OrderResponse.model_validate(order) (create_order, get_order,
         # update_order_status, and the order-listing endpoints) always
         # raised "product_name: Field required" / "product_image: Field
         # required" for any order that actually has items, i.e. always.
@@ -102,7 +103,8 @@ class OrderInDB(OrderBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-    @validator('total_amount')
+    @field_validator('total_amount')
+    @classmethod
     def validate_total(cls, v):
         return Decimal(str(v)).quantize(Decimal('0.01'))
 
@@ -155,7 +157,8 @@ class PaymentCreate(BaseModel):
     # the existing request shape backward compatible.
     payment_method_token: Optional[str] = None
 
-    @validator('amount')
+    @field_validator('amount')
+    @classmethod
     def validate_amount(cls, v):
         return Decimal(str(v)).quantize(Decimal('0.01'))
 
@@ -214,7 +217,8 @@ class CheckoutSessionCreate(BaseModel):
     # ("user@host") are refused outright rather than parsed: browsers and
     # urllib disagree on where the host of such a URL is
     # ("http://evil.example\@shop" is evil.example to a browser).
-    @validator('success_url', 'cancel_url')
+    @field_validator('success_url', 'cancel_url')
+    @classmethod
     def validate_redirect_on_frontend(cls, v):
         if v is None:
             return v
@@ -247,7 +251,8 @@ class RefundCreate(BaseModel):
         description="Amount to refund; omit for a full refund",
     )
 
-    @validator('amount')
+    @field_validator('amount')
+    @classmethod
     def validate_amount(cls, v):
         if v is None:
             return v

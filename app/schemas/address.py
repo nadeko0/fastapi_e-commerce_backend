@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AddressType(str, Enum):
@@ -34,20 +34,23 @@ class AddressBase(BaseModel):
     delivery_instructions: Optional[str] = Field(None, max_length=500)
     delivery_phone: Optional[str] = None
 
-    @validator('postal_code')
+    @field_validator('postal_code')
+    @classmethod
     def validate_postal_code(cls, v):
         v = ''.join(v.split())
         if not 3 <= len(v) <= 20:
             raise ValueError('Invalid postal code length')
         return v
 
-    @validator('country')
+    @field_validator('country')
+    @classmethod
     def validate_country(cls, v):
         if len(v) == 2:
             return v.upper()
         return v.title()
 
-    @validator('delivery_phone')
+    @field_validator('delivery_phone')
+    @classmethod
     def validate_delivery_phone(cls, v):
         return _validate_phone(v)
 
@@ -65,7 +68,8 @@ class AddressUpdate(BaseModel):
     delivery_instructions: Optional[str] = Field(None, max_length=500)
     delivery_phone: Optional[str] = None
 
-    @validator('street', 'city', 'state', 'postal_code', 'country', 'address_type', 'is_default')
+    @field_validator('street', 'city', 'state', 'postal_code', 'country', 'address_type', 'is_default')
+    @classmethod
     def reject_null(cls, v):
         """NOT NULL columns. delivery_instructions and delivery_phone are
         nullable: null clears them."""
@@ -73,7 +77,8 @@ class AddressUpdate(BaseModel):
             raise ValueError('may be omitted but cannot be null')
         return v
 
-    @validator('postal_code')
+    @field_validator('postal_code')
+    @classmethod
     def validate_postal_code(cls, v):
         if v is None:
             return v
@@ -82,7 +87,8 @@ class AddressUpdate(BaseModel):
             raise ValueError('Invalid postal code length')
         return v
 
-    @validator('country')
+    @field_validator('country')
+    @classmethod
     def validate_country(cls, v):
         if v is None:
             return v
@@ -91,7 +97,8 @@ class AddressUpdate(BaseModel):
             return v.upper()
         return v.title()
 
-    @validator('delivery_phone')
+    @field_validator('delivery_phone')
+    @classmethod
     def validate_delivery_phone(cls, v):
         return _validate_phone(v)
 

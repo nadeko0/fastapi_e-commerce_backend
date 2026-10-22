@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CategoryBase(BaseModel):
@@ -13,7 +13,8 @@ class CategoryCreate(CategoryBase):
     """Schema for creating a new category"""
     metadata: Optional[Dict] = Field(default_factory=dict)
 
-    @validator('parent_id')
+    @field_validator('parent_id')
+    @classmethod
     def validate_parent_id(cls, v):
         # parent_id can be None for root categories
         if v is not None and v <= 0:
@@ -27,7 +28,8 @@ class CategoryUpdate(BaseModel):
     parent_id: Optional[int] = None
     metadata: Optional[Dict] = None
 
-    @validator('parent_id')
+    @field_validator('parent_id')
+    @classmethod
     def validate_parent_id(cls, v):
         if v is not None and v <= 0:
             raise ValueError('parent_id must be a positive integer')
@@ -44,7 +46,8 @@ class CategoryInDB(CategoryBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-    @validator('metadata', pre=True)
+    @field_validator('metadata', mode="before")
+    @classmethod
     def coerce_missing_metadata(cls, v):
         # app.models.category.Category has no `metadata` column. Every
         # SQLAlchemy declarative model exposes its own class-level
