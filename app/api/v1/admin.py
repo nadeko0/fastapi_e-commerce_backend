@@ -2,8 +2,9 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi import status as http_status
+from fastapi.concurrency import run_in_threadpool
 from pydantic import Field
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
@@ -37,7 +38,10 @@ from app.schemas.product import (
     ProductVariantResponse,
     ProductVariantUpdate,
 )
+from app.services.payment import PaymentProvider, get_payment_provider
+from app.services.reconciliation import open_discrepancies, reconcile_payments
 from app.services.redis import RedisService
+from app.tasks import check_payment_reconciliation
 
 logger = logging.getLogger(__name__)
 
@@ -606,3 +610,79 @@ async def update_product_variant(
     db.refresh(db_variant)
 
     return APIResponse.success_response(ProductVariantResponse.from_orm(db_variant))
+
+
+# -- Payment reconciliation ----------------------------------------------------------
+
+@router.get(
+    "/reconciliation/discrepancies",
+    response_model=APIResponse[dict],
+    responses={403: {"description": "Admin privileges required"}},
+)
+async def list_reconciliation_discrepancies(
+    order_id: Optional[int] = None,
+    pagination: PaginationParams = Depends(),
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """The differences the payment reconciliation found between our payments
+    and the provider's and that still stand, oldest first (admin only):
+    which payment, what kind of difference, what each side says, and since
+    when. Optionally those of one order."""
+    rows, total = open_discrepancies(
+        db, page=pagination.page, size=pagination.size, order_id=order_id
+    )
+    return APIResponse.success_response({
+        "items": [
+            {
+                "id": d.id,
+                "order_id": p.order_id,
+                "payment_id": p.id,
+                "transaction_id": p.payment_intent_id,
+                "kind": d.kind,
+                "subject": d.subject,
+                "ours": d.ours,
+                "theirs": d.theirs,
+                "detected_at": d.detected_at,
+                "last_seen_at": d.last_seen_at,
+            }
+            for d, p in rows
+        ],
+        "total": total,
+        "page": pagination.page,
+        "size": pagination.size,
+        "has_more": total > pagination.page * pagination.size,
+    })
+
+
+@router.post(
+    "/reconciliation/run",
+    response_model=APIResponse[dict],
+    responses={
+        202: {"description": "The full run is queued (no order_id)"},
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Order not found"},
+    },
+)
+async def run_reconciliation(
+    response: Response,
+    order_id: Optional[int] = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+    provider: PaymentProvider = Depends(get_payment_provider),
+):
+    """Reconcile now (admin only). With order_id: every payment of that order,
+    whatever its age, and the outcome in the response. Without: the same run
+    as the daily one, queued for the worker (202), because it makes up to
+    two provider calls per payment."""
+    if order_id is None:
+        check_payment_reconciliation.delay()
+        response.status_code = http_status.HTTP_202_ACCEPTED
+        return APIResponse.success_response({"queued": True})
+    if not db.query(Order.id).filter(Order.id == order_id).first():
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+    result = await run_in_threadpool(reconcile_payments, db, provider, order_id=order_id)
+    return APIResponse.success_response(result.as_dict())
