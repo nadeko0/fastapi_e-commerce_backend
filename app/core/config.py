@@ -401,6 +401,24 @@ class Settings(BaseSettings):
     # or a Checkout Session the customer walked away from, does not keep
     # the order from being paid.
     PAYMENT_ATTEMPT_STALE_AFTER_MINUTES: int = Field(5, ge=1)
+    # Stripe events are stored by the webhook route and applied by the
+    # process_stripe_event Celery task (app/services/stripe_events.py). An
+    # event that could not be applied (an error, or it overtook its payment
+    # attempt) is retried after STRIPE_EVENT_RETRY_BASE_SECONDS, doubling
+    # each time up to STRIPE_EVENT_RETRY_MAX_SECONDS (kept below the broker's
+    # visibility_timeout, 1 hour, which re-delivers a longer-delayed task),
+    # at most STRIPE_EVENT_MAX_RETRIES times; then it is "failed" and waits
+    # for an admin's replay.
+    STRIPE_EVENT_MAX_RETRIES: int = Field(10, ge=0)
+    STRIPE_EVENT_RETRY_BASE_SECONDS: int = Field(30, ge=1)
+    STRIPE_EVENT_RETRY_MAX_SECONDS: int = Field(900, ge=1, le=3000)
+    # The sweeper (every 5 minutes) enqueues the events still "received" or
+    # "retrying" that have not changed for this long - their task message was
+    # lost (broker down when the route enqueued, worker killed). Longer than
+    # STRIPE_EVENT_RETRY_MAX_SECONDS, so it never races a retry still
+    # waiting for its backoff. At most STRIPE_EVENT_SWEEP_BATCH per run.
+    STRIPE_EVENT_SWEEP_AFTER_MINUTES: int = Field(20, ge=1)
+    STRIPE_EVENT_SWEEP_BATCH: int = Field(200, ge=1)
 
     # Daily reconciliation of our payments against the provider's
     # (app/services/reconciliation.py). It looks at payments created in the
