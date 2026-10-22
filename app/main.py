@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,8 +33,28 @@ logger.info("Configuring FastAPI middleware, CORS, and rate limiting")
 # three answer 404 (with openapi_url None, FastAPI serves no docs at all).
 _docs_published = settings.ENVIRONMENT != "production"
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Nothing to do at startup. Everything after the yield runs when the
+    # server shuts down (lifespan replaces the deprecated on_event
+    # "shutdown" handler; same work, same order).
+    yield
+    logger.info("FastAPI shutdown event triggered")
+    cleanup()
+    # Not in cleanup(): disposing the async engine has to be awaited.
+    await async_engine.dispose()
+    # The async Redis client (rate limiter, auth dependencies) belongs to
+    # this worker's event loop, which is the loop this handler runs on.
+    try:
+        await close_async_redis()
+        logger.info("Async Redis connections closed successfully")
+    except Exception as e:
+        logger.error(f"Error closing async Redis connections: {e}")
+
+
 logger.info("Initializing FastAPI application with rate limiting")
 app = FastAPI(
+    lifespan=lifespan,
     title=settings.PROJECT_NAME,
     description="E-commerce backend API with FastAPI",
     version=settings.VERSION,
@@ -118,8 +139,8 @@ def cleanup():
 # installs signal handlers for both signals and performs a graceful
 # shutdown - it stops accepting new connections, lets in-flight requests
 # finish (up to its graceful-shutdown timeout), *then* runs the ASGI
-# lifespan "shutdown" phase, which is what triggers the shutdown_event
-# below. Registering our own signal.signal() handlers here previously
+# lifespan "shutdown" phase, which is what runs the lifespan
+# handler above. Registering our own signal.signal() handlers here previously
 # raced with that: our handler called sys.exit(0) as soon as cleanup()
 # returned, with no regard for requests still in flight, and could run
 # before or instead of uvicorn's own handler depending on import timing.
@@ -132,21 +153,6 @@ app.include_router(cart.router, prefix=settings.API_V1_STR)
 app.include_router(admin.router, prefix=settings.API_V1_STR)
 app.include_router(legal.router, prefix=settings.API_V1_STR)
 
-
-@app.on_event("shutdown")
-async def shutdown_event():
-
-    logger.info("FastAPI shutdown event triggered")
-    cleanup()
-    # Not in cleanup(): disposing the async engine has to be awaited.
-    await async_engine.dispose()
-    # The async Redis client (rate limiter, auth dependencies) belongs to
-    # this worker's event loop, which is the loop this handler runs on.
-    try:
-        await close_async_redis()
-        logger.info("Async Redis connections closed successfully")
-    except Exception as e:
-        logger.error(f"Error closing async Redis connections: {e}")
 
 async def _database_is_up() -> bool:
     # Through the async session factory, looked up on the module at call
