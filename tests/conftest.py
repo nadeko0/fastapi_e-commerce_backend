@@ -105,6 +105,9 @@ _DB_SENSITIVE_FILES = (
     "test_registration_and_verification.py",
     "test_db_pool_concurrency.py",
     "test_admin_orders.py",
+    "test_admin_webhook_events.py",
+    "test_stripe_event*.py",
+    "test_reconciliation*.py",
     "test_postgres_*.py",
 )
 
