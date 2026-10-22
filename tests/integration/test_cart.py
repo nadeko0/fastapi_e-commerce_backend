@@ -1653,7 +1653,7 @@ def _store_old_format_cart(fake_redis, user_id, lines):
         "updated_at": (now - timedelta(days=2)).isoformat(),
         "expires_at": (now + timedelta(days=5)).isoformat(),
     }
-    fake_redis.setex(f"{CART_KEY_PREFIX}{user_id}", 5 * 24 * 3600, json.dumps(payload))
+    fake_redis.set(f"{CART_KEY_PREFIX}{user_id}", json.dumps(payload), ex=5 * 24 * 3600)
 
 
 def test_old_format_cart_loads_and_is_priced_live(client, db_session, fake_redis):

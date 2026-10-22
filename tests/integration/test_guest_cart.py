@@ -1168,7 +1168,7 @@ def _store_cart_as_written_today(fake_redis, user_id, product_id, quantity, pric
         '"created_at": "2026-10-09T08:15:30.123456", "updated_at": "2026-10-09T08:15:30.123456", '
         '"expires_at": "2026-11-08T08:15:30.123456"}'
     ) % (user_id, product_id, product_id, quantity, price)
-    fake_redis.setex(f"{CART_KEY_PREFIX}{user_id}", 20 * 24 * 3600, payload)
+    fake_redis.set(f"{CART_KEY_PREFIX}{user_id}", payload, ex=20 * 24 * 3600)
 
 
 def test_an_account_cart_stored_in_the_current_format_still_loads(browser, db_session, fake_redis):
