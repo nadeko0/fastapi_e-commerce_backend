@@ -10,6 +10,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.core.clock import as_utc, utc_now
 from app.core.database import get_db
 from app.core.security import get_current_admin_user
 from app.models.category import Category
@@ -52,6 +53,13 @@ from app.services.stripe_events import enqueue_event
 from app.tasks import check_payment_reconciliation
 
 logger = logging.getLogger(__name__)
+
+
+def _request_datetime(value: datetime, name: str) -> datetime:
+    if value.tzinfo is None:
+        logger.debug("%s has no UTC offset, taking it as UTC", name)
+    return as_utc(value)
+
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 @router.post(
@@ -184,7 +192,7 @@ async def update_product(
     for field, value in update_data.items():
         setattr(db_product, field, value)
 
-    db_product.updated_at = datetime.utcnow()
+    db_product.updated_at = utc_now()
     db.commit()
     db.refresh(db_product)
 
@@ -229,7 +237,7 @@ async def delete_product(
     if db.query(OrderItem).filter(OrderItem.product_id == product_id).count():
 
         db_product.is_active = False
-        db_product.updated_at = datetime.utcnow()
+        db_product.updated_at = utc_now()
         db.commit()
     else:
 
@@ -318,10 +326,13 @@ async def list_orders(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Invalid payment status. Valid values are: {', '.join([s.value for s in PaymentStatus])}"
             )
+    # A date without an offset is taken to be UTC (as clients always sent
+    # them); one with an offset is converted. Either way the comparison is
+    # between instants.
     if start_date:
-        query = query.filter(Order.created_at >= start_date)
+        query = query.filter(Order.created_at >= _request_datetime(start_date, "start_date"))
     if end_date:
-        query = query.filter(Order.created_at <= end_date)
+        query = query.filter(Order.created_at <= _request_datetime(end_date, "end_date"))
 
     # Apply sorting. AdminOrderListParams' pattern has already answered 422
     # for anything but a whitelisted field_asc/field_desc, so both lookups
@@ -370,7 +381,7 @@ async def get_statistics(
         return APIResponse.success_response(cached_stats)
 
 
-    now = datetime.utcnow()
+    now = utc_now()
     if period == "24h":
         start_date = now - timedelta(hours=24)
     elif period == "7d":
@@ -610,7 +621,7 @@ async def update_product_variant(
     for field, value in update_data.items():
         setattr(db_variant, field, value)
 
-    db_variant.updated_at = datetime.utcnow()
+    db_variant.updated_at = utc_now()
     # Same read-then-write race as create_product_variant above: the
     # "sku" != db_variant.sku pre-check can be stale by the time this
     # commits if a concurrent request claimed the same SKU in between.

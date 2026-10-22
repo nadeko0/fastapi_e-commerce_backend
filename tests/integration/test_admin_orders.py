@@ -1,7 +1,7 @@
 """Admin order management: the cross-customer order list (filters, sorting,
 pagination), the statistics endpoint, status transitions and refunds as
 the admin performs them."""
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -11,6 +11,7 @@ from hypothesis import settings as settings_hypothesis
 from hypothesis import strategies as st
 from test_payment import _with_idempotency_key
 
+from app.core.clock import utc_now
 from app.core.security import get_password_hash
 from app.models.address import Address
 from app.models.category import Category
@@ -23,7 +24,7 @@ from app.models.user import User
 
 ADMIN = "/api/v1/admin"
 ORDERS = "/api/v1/orders"
-NOW = datetime(2026, 10, 20, 12, 0, 0)
+NOW = datetime(2026, 10, 20, 12, 0, 0, tzinfo=UTC)
 
 
 def _make_user(db_session, email, role=UserRole.CLIENT):
@@ -82,7 +83,7 @@ def _order(
     order = Order(
         user_id=user.id, shipping_address_id=address.id, total_amount=Decimal(total),
         status=status, payment_status=payment_status,
-        created_at=created_at or datetime.utcnow(),
+        created_at=created_at or utc_now(),
     )
     db_session.add(order)
     db_session.commit()
@@ -183,8 +184,9 @@ def test_admin_order_list_date_range_is_inclusive_on_both_ends(client, db_sessio
     response = client.get(
         f"{ADMIN}/orders",
         params={
-            "start_date": (NOW - timedelta(days=2)).isoformat(),
-            "end_date": NOW.isoformat(),
+            # No offset: taken as UTC, as clients always sent it.
+            "start_date": (NOW - timedelta(days=2)).replace(tzinfo=None).isoformat(),
+            "end_date": NOW.replace(tzinfo=None).isoformat(),
         },
         headers=_admin_headers(client, db_session),
     )
@@ -192,6 +194,25 @@ def test_admin_order_list_date_range_is_inclusive_on_both_ends(client, db_sessio
     ids = _ids(response)
     assert sorted(ids) == sorted([first.id, middle.id, last.id])
     assert before.id not in ids and after.id not in ids
+
+
+def test_admin_order_list_date_range_converts_an_offset_to_utc(client, db_session):
+    customer = _customer(db_session)
+    kathmandu = timezone(timedelta(hours=5, minutes=45))
+    inside = _order(db_session, customer, created_at=NOW)
+    outside = _order(db_session, customer, created_at=NOW + timedelta(seconds=1))
+
+    response = client.get(
+        f"{ADMIN}/orders",
+        params={
+            "start_date": (NOW - timedelta(days=1)).astimezone(kathmandu).isoformat(),
+            "end_date": NOW.astimezone(kathmandu).isoformat(),
+        },
+        headers=_admin_headers(client, db_session),
+    )
+
+    assert _ids(response) == [inside.id]
+    assert outside.id not in _ids(response)
 
 
 # --- Listing: sorting and pagination ----------------------------------------

@@ -12,7 +12,7 @@ Every cancellation path (admin, customer, expiry) goes through the same
 restock code, under a lock on the order row, and only from a state that
 can still be cancelled, so stock is returned exactly once.
 """
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from conftest import TestingSessionLocal, engine
@@ -31,6 +31,7 @@ from test_orders import (
 )
 
 from app import tasks
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.order import Order
 from app.models.payment import Payment
@@ -104,7 +105,7 @@ def _pay(client, token, order):
 
 def _age(db_session, order_id, minutes):
     order = db_session.get(Order, order_id)
-    order.created_at = datetime.utcnow() - timedelta(minutes=minutes)
+    order.created_at = utc_now() - timedelta(minutes=minutes)
     db_session.commit()
 
 

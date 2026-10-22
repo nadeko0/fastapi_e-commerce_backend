@@ -12,7 +12,7 @@ imported from there.
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Optional
 
 from sqlalchemy.exc import IntegrityError
@@ -29,6 +29,7 @@ from app.api.v1.orders import (
     _reported_charge_matches_order,
     _settle_refunds,
 )
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.order import Order
 from app.models.payment import (
@@ -72,7 +73,7 @@ def _attempt_still_storing_its_id(db: Session, object_data: dict) -> bool:
         return False
     if not 0 < order_id < 2 ** 31:
         return False
-    started_after = datetime.utcnow() - timedelta(
+    started_after = utc_now() - timedelta(
         minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
     )
     return db.query(Payment.id).filter(
@@ -139,14 +140,14 @@ def _apply_dispute_event(db: Session, object_data: dict) -> dict:
     dispute.status = status
     is_closed = status in DISPUTE_CLOSED_STATUSES
     if is_closed:
-        dispute.closed_at = datetime.utcnow()
+        dispute.closed_at = utc_now()
     logger.warning(
         "Dispute %s of payment %s (order %s) is %s%s",
         dispute_id, payment_row.id, order.id, status,
         "" if is_closed else ": order on hold, needs review",
     )
     _settle_refunds(db, order, payment_row)
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     db.commit()
     if is_closed:
         return {"status": "processed", "applied": True}
@@ -197,7 +198,7 @@ def _apply_refund_event(db: Session, event_type: str, object_data: dict) -> dict
     for refund_object in refund_objects:
         flagged = _apply_refund_object(db, payment_row, refund_object) or flagged
     _settle_refunds(db, order, payment_row)
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     db.commit()
     if flagged:
         return {"status": "processed", "applied": True, "requires_manual_review": True}
@@ -541,7 +542,7 @@ def process_stored_event(db: Session, event_id: str) -> EventOutcome:
     try:
         data = json.loads(row.payload).get("data")
         row.status = WEBHOOK_EVENT_PROCESSED
-        row.processed_at = datetime.utcnow()
+        row.processed_at = utc_now()
         result = apply_event(db, row.event_type, data, after_commit)
         db.commit()
     except Exception as error:
@@ -593,7 +594,7 @@ def enqueue_stuck_events(db: Session) -> int:
     set to now instead, so the next run leaves it for the worker. Stops at
     the first event the broker refuses. Returns how many were published.
     """
-    now = datetime.utcnow()
+    now = utc_now()
     stuck = (
         db.query(WebhookEvent.id, WebhookEvent.event_id)
         .filter(

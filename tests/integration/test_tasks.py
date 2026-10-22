@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -11,6 +11,7 @@ from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 
 from app import tasks
+from app.core.clock import utc_now
 from app.core.security import get_password_hash
 from app.models.address import Address
 from app.models.category import Category
@@ -686,7 +687,7 @@ def test_low_stock_alert_lists_every_low_product_in_one_email(
 
 # --- update_product_stats ------------------------------------------------------
 
-STATS_NOW = datetime(2026, 10, 20, 12, 0, 0)
+STATS_NOW = datetime(2026, 10, 20, 12, 0, 0, tzinfo=UTC)
 
 
 def _stats_fixture(db_session):
@@ -797,7 +798,7 @@ def test_update_product_stats_keeps_the_top_twenty(db_session, tasks_db, fake_re
     many = _products(db_session, [10] * 22)
     for qty, product in enumerate(many, start=1):
         _stats_order(db_session, user, address, [(product, qty, "1.00")],
-                     status="confirmed", payment_status="paid", created_at=datetime.utcnow())
+                     status="confirmed", payment_status="paid", created_at=utc_now())
 
     tasks.update_product_stats()
 

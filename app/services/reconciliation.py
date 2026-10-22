@@ -37,6 +37,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.payment import Payment
 from app.models.payment_discrepancy import (
@@ -256,7 +257,7 @@ def reconcile_payments(
     """Reconcile the payments of the window (see the RECONCILIATION_*
     settings), or every payment of `order_id` whatever its age. Stripe
     errors for one payment are counted and the run goes on with the next."""
-    now = now or datetime.utcnow()
+    now = now or utc_now()
     query = db.query(Payment.id)
     if order_id is not None:
         query = query.filter(Payment.order_id == order_id)

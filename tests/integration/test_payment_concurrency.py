@@ -207,14 +207,15 @@ def test_cancellation_reads_the_order_only_with_a_row_lock(client, db_session, p
 def test_expiry_locks_each_order_and_skips_those_already_locked(
     client, db_session, postgres_sql, tasks_db
 ):
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     from app import tasks
+    from app.core.clock import utc_now
     from app.core.config import settings
 
     setup = _create_verified_buyer_with_order(client, db_session)
     db_order = db_session.get(Order, setup["order"]["id"])
-    db_order.created_at = datetime.utcnow() - timedelta(
+    db_order.created_at = utc_now() - timedelta(
         minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES + 1
     )
     db_session.commit()

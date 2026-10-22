@@ -9,7 +9,7 @@ admin route by test_admin.py.)
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from payment_support import (
@@ -24,6 +24,7 @@ from stripe_event_support import published_ids, run_event
 
 import app.services.stripe_events as stripe_events
 from app import tasks
+from app.core.clock import utc_now
 from app.models.payment import WebhookEvent
 
 ADMIN_EVENTS = "/api/v1/admin/webhook-events"
@@ -49,7 +50,7 @@ def admin(shop):
 
 def _store(shop, status, minutes_ago=0, event_type="payment_intent.succeeded", **fields):
     event_id = f"evt_{uuid.uuid4().hex[:24]}"
-    when = datetime.utcnow() - timedelta(minutes=minutes_ago)
+    when = utc_now() - timedelta(minutes=minutes_ago)
     shop.db.add(WebhookEvent(
         event_id=event_id, event_type=event_type, status=status,
         payload=json.dumps({"id": event_id, "type": event_type,
@@ -151,7 +152,7 @@ def test_replay_resets_a_failed_event_and_hands_it_to_the_worker(shop, admin):
     assert (row.status, row.attempts) == ("received", 0)
     assert row.processed_at is None
     assert row.last_error == "boom"
-    assert row.updated_at > datetime.utcnow() - timedelta(minutes=1)
+    assert row.updated_at > utc_now() - timedelta(minutes=1)
     assert published_ids().count(event_id) == 1
 
 

@@ -7,6 +7,7 @@ from hypothesis import settings as settings_hypothesis
 from hypothesis import strategies as st
 from sqlalchemy import event
 
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.models.address import Address
@@ -22,7 +23,7 @@ def _make_deletion_requested_user(db_session, email, days_since_request):
         privacy_policy_accepted=True,
         is_active=False,
         data_deletion_requested=True,
-        data_deletion_date=datetime.utcnow() - timedelta(days=days_since_request),
+        data_deletion_date=utc_now() - timedelta(days=days_since_request),
     )
     db_session.add(user)
     db_session.commit()

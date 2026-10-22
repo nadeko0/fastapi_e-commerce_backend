@@ -1,11 +1,8 @@
-from datetime import datetime
-
 from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
     Column,
-    DateTime,
     Index,
     Integer,
     String,
@@ -13,6 +10,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from app.core.clock import UTCDateTime, utc_now
 from app.core.config import settings
 from app.models.base import Base
 from app.models.enums import UserRole, create_string_enum
@@ -29,27 +27,27 @@ class User(Base):
     role = Column(create_string_enum(UserRole, "role"), nullable=False, server_default="client")
     is_active = Column(Boolean, nullable=False, default=True)
     is_email_verified = Column(Boolean, nullable=False, default=False)
-    email_verification_date = Column(DateTime)
+    email_verification_date = Column(UTCDateTime)
 
     # Essential GDPR Fields
     gdpr_consent = Column(Boolean, nullable=False, default=False)
-    gdpr_consent_date = Column(DateTime)
+    gdpr_consent_date = Column(UTCDateTime)
     privacy_policy_accepted = Column(Boolean, nullable=False, default=False)
-    privacy_policy_accepted_date = Column(DateTime)
+    privacy_policy_accepted_date = Column(UTCDateTime)
     marketing_consent = Column(Boolean, nullable=False, default=False)
-    marketing_consent_date = Column(DateTime)
+    marketing_consent_date = Column(UTCDateTime)
     data_deletion_requested = Column(Boolean, nullable=False, default=False)
-    data_deletion_date = Column(DateTime)
+    data_deletion_date = Column(UTCDateTime)
     data_retention_period = Column(Integer, nullable=False, default=settings.USER_DATA_RETENTION_DAYS)
     # Callable defaults - see app/models/category.py's `path` column comment:
     # a literal [] would be one list object shared (and mutated together)
     # across every User row that doesn't set this column explicitly.
     consent_history = Column(JSON, nullable=False, default=list)
     data_export_requests = Column(JSON, nullable=False, default=list)
-    last_login = Column(DateTime)
-    last_activity_date = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    last_login = Column(UTCDateTime)
+    last_activity_date = Column(UTCDateTime, default=utc_now, onupdate=utc_now)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     addresses = relationship("Address", back_populates="user", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")

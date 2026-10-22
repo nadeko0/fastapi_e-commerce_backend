@@ -1,9 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.api import deps
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.security import get_current_active_user, verify_password_async
 from app.models.user import User
@@ -188,7 +189,7 @@ def get_privacy_policy():
     """
     Retrieve the current privacy policy.
     """
-    current_time = datetime.utcnow()
+    current_time = utc_now()
     return APIResponse.success_response(LegalDocument(
         content=PRIVACY_POLICY.format(
             company_name=settings.PROJECT_NAME,
@@ -210,7 +211,7 @@ def get_terms_of_service():
     """
     Retrieve the current terms of service.
     """
-    current_time = datetime.utcnow()
+    current_time = utc_now()
     return APIResponse.success_response(LegalDocument(
         content=TERMS_OF_SERVICE.format(
             company_name=settings.PROJECT_NAME,
@@ -230,7 +231,7 @@ def get_cookie_policy():
     """
     Retrieve the current cookie policy.
     """
-    current_time = datetime.utcnow()
+    current_time = utc_now()
     return APIResponse.success_response(LegalDocument(
         content=COOKIE_POLICY.format(
             company_name=settings.PROJECT_NAME,
@@ -300,7 +301,7 @@ async def update_user_consent(
     return APIResponse.success_response(ConsentUpdateResponse(
         status="success",
         updated_consents=updated_consents,
-        timestamp=datetime.utcnow()
+        timestamp=utc_now()
     ))
 
 @router.post(
@@ -351,7 +352,7 @@ async def request_personal_data(
     return APIResponse.success_response(DataRequestResponse(
         request_id=request_id,
         status="processing",
-        estimated_completion_time=datetime.utcnow() + timedelta(hours=24)
+        estimated_completion_time=utc_now() + timedelta(hours=24)
     ))
 
 @router.get("/consent-status", response_model=APIResponse[UserConsent])

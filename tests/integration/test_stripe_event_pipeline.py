@@ -19,7 +19,7 @@ published and runs the task body when a test asks for it.
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,6 +40,7 @@ from stripe_event_support import published_ids, retries, run_event
 
 import app.services.stripe_events as stripe_events
 from app import tasks
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.main import app
 from app.models.payment import WebhookEvent
@@ -121,7 +122,7 @@ def _new_id():
 
 def _backdate(shop, event_id, minutes):
     row = _event_row(shop, event_id)
-    row.updated_at = datetime.utcnow() - timedelta(minutes=minutes)
+    row.updated_at = utc_now() - timedelta(minutes=minutes)
     shop.db.commit()
 
 
@@ -640,8 +641,8 @@ def _stored(shop, status, minutes_old, event_type="payment_intent.created"):
     shop.db.add(WebhookEvent(
         event_id=event_id, event_type=event_type, status=status,
         payload=json.dumps({"id": event_id, "type": event_type, "data": {"object": {}}}),
-        created_at=datetime.utcnow() - timedelta(minutes=minutes_old),
-        updated_at=datetime.utcnow() - timedelta(minutes=minutes_old)))
+        created_at=utc_now() - timedelta(minutes=minutes_old),
+        updated_at=utc_now() - timedelta(minutes=minutes_old)))
     shop.db.commit()
     return event_id
 

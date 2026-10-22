@@ -3,7 +3,7 @@
 and tests/integration/test_cart.py; these check that the rules hold for any
 mix of lines, prices, variants and availability."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -12,6 +12,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from app.core.clock import utc_now
 from app.schemas.common import Cart, CartItem, CartResponse
 
 _MONEY = st.decimals(min_value=0, max_value=Decimal("9999.99"), places=2, allow_nan=False)
@@ -29,7 +30,7 @@ _LINE = st.tuples(
 
 
 def _build(lines):
-    cart = Cart(user_id=1, expires_at=datetime.utcnow() + timedelta(days=1))
+    cart = Cart(user_id=1, expires_at=utc_now() + timedelta(days=1))
     products, variants, expected = {}, {}, Decimal("0.00")
     for index, (product_id, quantity, price, product_on_sale, variant) in enumerate(lines):
         if product_id in products:
@@ -84,7 +85,7 @@ def test_a_price_change_is_reported_exactly_when_the_price_differs(lines, new_pr
 
 @given(st.lists(st.integers(min_value=1, max_value=20), min_size=1, max_size=20))
 def test_adding_the_same_line_again_adds_up_its_quantity(quantities):
-    cart = Cart(user_id=1, expires_at=datetime.utcnow() + timedelta(days=1))
+    cart = Cart(user_id=1, expires_at=utc_now() + timedelta(days=1))
     for quantity in quantities:
         cart.add_item(7, quantity, price=Decimal("1.00"))
         cart.add_item(7, quantity, price=Decimal("1.00"), variant_id=3)

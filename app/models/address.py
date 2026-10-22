@@ -1,10 +1,7 @@
-from datetime import datetime
-
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -12,6 +9,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from app.core.clock import UTCDateTime, utc_now
 from app.models.base import Base
 from app.models.enums import AddressType, create_string_enum
 
@@ -32,8 +30,8 @@ class Address(Base):
     is_default = Column(Boolean, nullable=False, default=False)
     delivery_phone = Column(String)
     delivery_instructions = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
 
     user = relationship("User", back_populates="addresses")

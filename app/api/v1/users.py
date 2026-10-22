@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.api.v1.cart import merge_guest_cart_on_login
+from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import check_login_attempt, clear_login_failures
@@ -117,7 +118,7 @@ async def register_user(
     are registered (login and password reset already take care not to).
     For an existing account nothing is created or changed; its owner gets
     a "you already have an account" email instead of the welcome one."""
-    now = datetime.utcnow()
+    now = utc_now()
     client_ip = request.client.host if request.client else None
     client_ua = request.headers.get("user-agent")
     # Hashed in both cases, before the database is asked, so that the
@@ -226,7 +227,7 @@ async def verify_email(
         })
 
     user.is_email_verified = True
-    user.email_verification_date = datetime.utcnow()
+    user.email_verification_date = utc_now()
     db.commit()
 
     return APIResponse.success_response({
@@ -355,7 +356,7 @@ async def login(
     await clear_login_failures(form_data.username, request)
 
     db.query(User).filter(User.id == user_id).update(
-        {User.last_login: datetime.utcnow()}
+        {User.last_login: utc_now()}
     )
     db.commit()
 
@@ -497,7 +498,7 @@ async def update_consent(
     user = db.query(User).filter(User.id == current_user.id).first()
 
     setattr(user, flag_column, granted)
-    setattr(user, date_column, datetime.utcnow())
+    setattr(user, date_column, utc_now())
 
     # Add to consent history (Art. 7(1): controller must be able to
     # demonstrate consent was given). Shape matches
@@ -510,7 +511,7 @@ async def update_consent(
     user.consent_history = user.consent_history + [{
         "type": consent_type.value,
         "granted": granted,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utc_now().isoformat(),
         "ip_address": request.client.host if request.client else None,
         "user_agent": request.headers.get("user-agent"),
     }]
@@ -535,14 +536,14 @@ async def export_user_data(
         ConsentHistory(
             type=entry["type"],
             granted=entry["granted"],
-            timestamp=datetime.fromisoformat(entry["timestamp"]),
+            timestamp=as_utc(datetime.fromisoformat(entry["timestamp"])),
             ip_address=entry.get("ip_address"),
             user_agent=entry.get("user_agent"),
         )
         for entry in current_user.consent_history
     ]
 
-    now = datetime.utcnow()
+    now = utc_now()
     export_metadata = GDPRExport(
         request_id=f"export_{current_user.id}_{now.timestamp()}",
         request_date=now,
@@ -645,7 +646,7 @@ async def delete_user_data(
     user = db.query(User).filter(User.id == current_user.id).first()
     user.is_active = False
     user.data_deletion_requested = True
-    user.data_deletion_date = datetime.utcnow()
+    user.data_deletion_date = utc_now()
     db.commit()
 
     logger.info(f"Scheduling hard delete for user {user.id} after 1 day")

@@ -1,9 +1,10 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
 
+from app.core.clock import utc_now
 from app.schemas.user import GDPRExport
 from app.services import email as email_module
 from app.services.email import smtp_provider as smtp_provider_module
@@ -40,7 +41,7 @@ def _order(status="new", with_items=True):
         status=SimpleNamespace(value=status),
         total_amount="19.98",
         currency="USD",  # every Order and OrderResponse carries one
-        created_at=datetime.utcnow(),
+        created_at=utc_now(),
         items=[_order_item()] if with_items else [],
     )
 
@@ -99,7 +100,7 @@ def test_send_order_status_update_email_accepts_plain_string_status(monkeypatch)
         status="confirmed",  # plain str, as a real Order.status is
         total_amount="19.98",
         currency="USD",  # every Order and OrderResponse carries one
-        created_at=datetime.utcnow(),
+        created_at=utc_now(),
     )
 
     result = email_module.send_order_status_update_email("buyer@example.com", order)
@@ -191,8 +192,8 @@ def test_send_gdpr_export_email(monkeypatch):
     calls = _no_real_smtp(monkeypatch)
     export_data = GDPRExport(
         request_id="export_1_123",
-        request_date=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(hours=24),
+        request_date=utc_now(),
+        expires_at=utc_now() + timedelta(hours=24),
         status="completed",
     )
 

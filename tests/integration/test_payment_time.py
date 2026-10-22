@@ -1,5 +1,5 @@
 """
-Time in the payment chain. The app stores naive UTC (datetime.utcnow) and
+Time in the payment chain. The app stores aware UTC (app.core.clock.utc_now) and
 must not depend on the machine's local time zone anywhere: order and
 attempt timestamps, the in-flight window of a payment attempt
 (PAYMENT_ATTEMPT_STALE_AFTER_MINUTES), the webhook signature's timestamp
@@ -19,11 +19,9 @@ Two checks:
 """
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import freezegun.api
-import freezegun.config
 import pytest
 from freezegun import freeze_time
 from payment_support import (
@@ -36,8 +34,10 @@ from payment_support import (
 )
 from sqlalchemy import event
 from sqlalchemy.orm import Session
+from time_support import local_zone
 
 from app import tasks
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.services.payment.stripe_provider import StripePaymentProvider
 
@@ -81,30 +81,9 @@ def _fresh_provider():
     reset_provider()
 
 
-def _local_zone(monkeypatch, hours):
-    """Inside freeze_time(..., tz_offset=hours): make the local zone `hours`
-    from UTC the way a machine in that zone has it. freezegun shifts naive
-    datetime.now() by tz_offset but also, wrongly, an aware
-    datetime.now(timezone.utc) (which PyJWT uses to check tokens), and its
-    time.localtime() follows time.timezone, not tz_offset. Both are put
-    right here: aware times stay UTC, local ones are shifted."""
-    real_now = freezegun.api.FakeDatetime.now.__func__
-
-    def _now(cls, tz=None):
-        if tz is None:
-            return real_now(cls)
-        return real_now(cls, tz) - cls._tz_offset()
-
-    monkeypatch.setattr(freezegun.api.FakeDatetime, "now", classmethod(_now))
-    monkeypatch.setattr(time, "timezone", -hours * 3600)
-    # freezegun answers the real time to any call made under a "threading"
-    # frame, which is every request TestClient serves: frozen everywhere.
-    monkeypatch.setattr(freezegun.config.settings, "default_ignore_list", [])
-
-
 @pytest.fixture
 def _row_clocks_follow_freezegun():
-    """Columns default to datetime.utcnow (created_at, updated_at). SQLAlchemy
+    """Columns default to utc_now (created_at, updated_at). SQLAlchemy
     holds that function object, and its compiled statements keep it, where
     freezegun cannot reach it (it patches the names modules look up): rows
     would be stamped with the real clock. Every flush stamps them here
@@ -112,12 +91,12 @@ def _row_clocks_follow_freezegun():
     def _stamp(session, _context, _instances):
         for obj in session.new:
             if hasattr(obj, "created_at") and obj.created_at is None:
-                obj.created_at = datetime.utcnow()
+                obj.created_at = utc_now()
             if hasattr(obj, "updated_at") and obj.updated_at is None:
-                obj.updated_at = datetime.utcnow()
+                obj.updated_at = utc_now()
         for obj in session.dirty:
             if hasattr(obj, "updated_at") and session.is_modified(obj):
-                obj.updated_at = datetime.utcnow()
+                obj.updated_at = utc_now()
 
     event.listen(Session, "before_flush", _stamp)
     yield
@@ -143,7 +122,7 @@ def test_the_payment_chain_reads_no_local_time(module):
 
 
 def _instant(text):
-    return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+    return datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
 
 
 @pytest.mark.parametrize("offset", LOCAL_OFFSETS)
@@ -152,10 +131,10 @@ def test_payment_windows_hold_to_the_minute_across_awkward_instants(
     shop, tasks_db, monkeypatch, instant, _why, offset
 ):
     start = _instant(instant)
-    _local_zone(monkeypatch, offset)
+    local_zone(monkeypatch, offset)
     with freeze_time(start, tz_offset=offset) as clock:
         # The zone really is `offset` hours away, for local readings only.
-        assert datetime.now() - datetime.utcnow() == timedelta(hours=offset)
+        assert datetime.now() - utc_now().replace(tzinfo=None) == timedelta(hours=offset)
         assert time.localtime().tm_hour == (start + timedelta(hours=offset)).hour
         product = shop.product(price="10.00", stock=5)
         buyer = shop.buyer()
@@ -183,7 +162,7 @@ def test_payment_windows_hold_to_the_minute_across_awkward_instants(
         # just outside it is refused - on the frozen UTC clock.
         now = start + stale - timedelta(seconds=1)
         tolerance = settings.STRIPE_WEBHOOK_TOLERANCE_SECONDS
-        signed_at = int((now - datetime(1970, 1, 1)).total_seconds())
+        signed_at = int((now - datetime(1970, 1, 1, tzinfo=UTC)).total_seconds())
         too_old = shop.webhook("payment_intent.succeeded", _intent(attempt),
                                timestamp=signed_at - tolerance - 1)
         assert too_old.status_code == 400

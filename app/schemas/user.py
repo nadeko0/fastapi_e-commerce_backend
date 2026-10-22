@@ -5,6 +5,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, validator
 
+from app.core.clock import utc_now
+
 
 class UserRole(str, Enum):
     CLIENT = "client"
@@ -198,7 +200,7 @@ class GDPRExportData(BaseModel):
     addresses: List["AddressResponse"]
     orders: List["OrderResponse"]
     export_metadata: GDPRExport
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=utc_now)
 
     class Config:
         json_schema_extra = {

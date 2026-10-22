@@ -4,8 +4,8 @@ only: an order is expired when it was placed more than
 UNPAID_ORDER_EXPIRE_MINUTES ago by the UTC clock, whatever the machine's
 local zone, and at instants where local time misbehaves - midnight UTC,
 month and year ends, a leap day, the daylight saving changes of Europe and
-the US. Order.created_at is written with datetime.utcnow() and compared
-with a cutoff computed the same way, both naive UTC.
+the US. Order.created_at is written with utc_now() and compared
+with a cutoff computed the same way, both aware UTC.
 
 freezegun's tz_offset moves the frozen local time (datetime.now,
 time.localtime) without moving UTC, so each case runs with the local zone
@@ -13,11 +13,12 @@ at a range of offsets; a computation that used local time anywhere would
 expire the wrong orders under at least one of them.
 """
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from freezegun import freeze_time
+from time_support import local_zone
 
 from app import tasks
 from app.core.config import settings
@@ -29,15 +30,15 @@ from app.models.product import Product
 from app.models.user import User
 
 AWKWARD_INSTANTS = {
-    "midnight UTC": datetime(2026, 10, 22, 0, 0, 0),
-    "end of a 31-day month": datetime(2026, 10, 31, 23, 59, 59),
-    "start of a month": datetime(2026, 11, 1, 0, 10, 0),
-    "new year": datetime(2027, 1, 1, 0, 0, 0),
-    "leap day": datetime(2028, 2, 29, 0, 15, 0),
-    "EU summer time begins": datetime(2026, 3, 29, 1, 0, 0),
-    "EU summer time ends": datetime(2026, 10, 25, 1, 0, 0),
-    "US daylight time begins": datetime(2026, 3, 8, 7, 0, 0),
-    "US daylight time ends": datetime(2026, 11, 1, 6, 0, 0),
+    "midnight UTC": datetime(2026, 10, 22, 0, 0, 0, tzinfo=UTC),
+    "end of a 31-day month": datetime(2026, 10, 31, 23, 59, 59, tzinfo=UTC),
+    "start of a month": datetime(2026, 11, 1, 0, 10, 0, tzinfo=UTC),
+    "new year": datetime(2027, 1, 1, 0, 0, 0, tzinfo=UTC),
+    "leap day": datetime(2028, 2, 29, 0, 15, 0, tzinfo=UTC),
+    "EU summer time begins": datetime(2026, 3, 29, 1, 0, 0, tzinfo=UTC),
+    "EU summer time ends": datetime(2026, 10, 25, 1, 0, 0, tzinfo=UTC),
+    "US daylight time begins": datetime(2026, 3, 8, 7, 0, 0, tzinfo=UTC),
+    "US daylight time ends": datetime(2026, 11, 1, 6, 0, 0, tzinfo=UTC),
 }
 LOCAL_OFFSETS = [-12, -5, 0, 1, 5.5, 14]
 
@@ -76,7 +77,9 @@ def _order(db, created_at, stock_left=5, quantity=2):
 
 @pytest.mark.parametrize("instant", list(AWKWARD_INSTANTS), ids=list(AWKWARD_INSTANTS))
 @pytest.mark.parametrize("offset", LOCAL_OFFSETS)
-def test_only_orders_older_than_the_window_by_utc_expire(db_session, _sent, instant, offset):
+def test_only_orders_older_than_the_window_by_utc_expire(
+    db_session, _sent, monkeypatch, instant, offset
+):
     now = AWKWARD_INSTANTS[instant]
     window = timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES)
     expired, expired_product = _order(db_session, now - window - timedelta(seconds=1))
@@ -86,6 +89,7 @@ def test_only_orders_older_than_the_window_by_utc_expire(db_session, _sent, inst
     hour_older, _ = _order(db_session, now - window - timedelta(hours=1))
     hour_younger, _ = _order(db_session, now - window + timedelta(hours=1))
 
+    local_zone(monkeypatch, offset)
     with freeze_time(now, tz_offset=offset):
         cancelled = tasks.expire_unpaid_orders(db_session)
 
@@ -99,7 +103,7 @@ def test_only_orders_older_than_the_window_by_utc_expire(db_session, _sent, inst
     assert db_session.get(Product, expired_product).stock_quantity == 5 + 2
 
 
-def test_the_local_zone_does_not_move_the_cutoff(db_session):
+def test_the_local_zone_does_not_move_the_cutoff(db_session, monkeypatch):
     # The same order, the same UTC instant, the local zone 14 hours apart:
     # the same answer.
     now = AWKWARD_INSTANTS["EU summer time ends"]
@@ -107,8 +111,10 @@ def test_the_local_zone_does_not_move_the_cutoff(db_session):
     order_id, _ = _order(db_session, now - window + timedelta(minutes=10))
 
     for offset in (-12, 2, 14):
+        local_zone(monkeypatch, offset)
         with freeze_time(now, tz_offset=offset):
             assert tasks.expire_unpaid_orders(db_session) == 0
+    local_zone(monkeypatch, -12)
     with freeze_time(now + timedelta(minutes=11), tz_offset=-12):
         assert tasks.expire_unpaid_orders(db_session) == 1
 

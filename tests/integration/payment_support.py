@@ -14,7 +14,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -23,6 +23,7 @@ from sqlalchemy.orm import sessionmaker
 from stripe_event_support import deliver
 
 from app.api.deps import get_db as deps_get_db
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.database import get_db as database_get_db
 from app.core.security import create_access_token, get_password_hash
@@ -223,7 +224,7 @@ class Shop:
         from app import tasks
 
         for order_id in order_ids:
-            self.db.get(Order, order_id).created_at = datetime.utcnow() - timedelta(
+            self.db.get(Order, order_id).created_at = utc_now() - timedelta(
                 minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES + 1)
         self.db.commit()
         return tasks.cancel_expired_unpaid_orders()

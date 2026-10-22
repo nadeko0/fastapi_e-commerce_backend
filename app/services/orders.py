@@ -8,10 +8,10 @@ importing FastAPI routes, and so there is exactly one restock path: admin
 cancellation, a customer cancelling their own unpaid order, and the expiry
 of unpaid orders all go through cancel_order_and_restock.
 """
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.core.clock import utc_now
 from app.models.order import Order
 from app.models.product import Product, ProductVariant
 from app.schemas.order import OrderStatus, PaymentStatus
@@ -59,7 +59,7 @@ def cancel_order_and_restock(db: Session, order: Order) -> bool:
         return False
 
     order.status = OrderStatus.CANCELLED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     # Relative UPDATEs (stock = stock + n), not read-modify-write on the ORM
     # objects: concurrent checkouts decrement the same rows.
     for item in order.items:

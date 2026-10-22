@@ -92,7 +92,7 @@ def test_login_records_when_it_happened(client, db_session):
     with freeze_time("2026-03-01 08:00:00"):
         assert _login(client).status_code == 200
 
-    assert _user(db_session).last_login.isoformat() == "2026-03-01T08:00:00"
+    assert _user(db_session).last_login.isoformat() == "2026-03-01T08:00:00+00:00"
 
 
 @pytest.mark.parametrize("form", [{"username": EMAIL}, {"password": PASSWORD}, {}])
