@@ -48,6 +48,8 @@ filterwarnings = [
     # exception: both categories have to be errors for the guard to bite.
     "error::ResourceWarning",
     "error::pytest.PytestUnraisableExceptionWarning",
+    # Pydantic V1-style API (from_orm, .dict(), @validator, class Config) is gone; keep it gone.
+    "error::pydantic.warnings.PydanticDeprecatedSince20",
 ]
 markers = [
     "db_sensitive: outcome depends on the database (locks, constraints, indexes, migrations); applied by file name in tests/conftest.py, run on PostgreSQL in CI",
