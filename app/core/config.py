@@ -402,6 +402,21 @@ class Settings(BaseSettings):
     # the order from being paid.
     PAYMENT_ATTEMPT_STALE_AFTER_MINUTES: int = Field(5, ge=1)
 
+    # Daily reconciliation of our payments against the provider's
+    # (app/services/reconciliation.py). It looks at payments created in the
+    # last RECONCILIATION_WINDOW_DAYS days, except those younger than
+    # RECONCILIATION_MIN_AGE_MINUTES (an attempt still being paid or
+    # confirmed by webhook is not a difference yet). At most
+    # RECONCILIATION_MAX_PAYMENTS are checked per run (newest first), two
+    # provider calls each, so a run stays inside the Celery time limit and
+    # the provider's rate limit; the run stops early after
+    # RECONCILIATION_MAX_CONSECUTIVE_ERRORS provider failures in a row
+    # (the provider is down or rate limiting us; the next run tries again).
+    RECONCILIATION_WINDOW_DAYS: int = Field(7, ge=1)
+    RECONCILIATION_MIN_AGE_MINUTES: int = Field(60, ge=0)
+    RECONCILIATION_MAX_PAYMENTS: int = Field(200, ge=1)
+    RECONCILIATION_MAX_CONSECUTIVE_ERRORS: int = Field(5, ge=1)
+
     @validator("FRONTEND_URL")
     def validate_frontend_url(cls, v: str) -> str:
         parts = urlsplit(v)

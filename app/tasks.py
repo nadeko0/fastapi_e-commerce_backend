@@ -4,6 +4,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from celery import Celery
+from celery.schedules import crontab
 from sqlalchemy import String, cast, create_engine, func, literal
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload, selectinload, sessionmaker
@@ -27,6 +28,8 @@ from app.services.orders import (
     cancel_order_and_restock,
     is_unpaid_and_new,
 )
+from app.services.payment import get_payment_provider
+from app.services.reconciliation import reconcile_payments
 from app.services.redis import RedisService
 
 
@@ -410,6 +413,17 @@ def cancel_expired_unpaid_orders() -> int:
         return expire_unpaid_orders(db)
 
 @celery.task(
+    name="check_payment_reconciliation",
+    queue="stats",
+)
+def check_payment_reconciliation(order_id: int | None = None) -> dict:
+    """Compare our payments with the provider's and record the differences
+    (app/services/reconciliation.py). Daily from beat; an admin can queue
+    it, or run it for one order, through POST /admin/reconciliation/run."""
+    with task_session() as db:
+        return reconcile_payments(db, get_payment_provider(), order_id=order_id).as_dict()
+
+@celery.task(
     name="update_product_stats",
     queue="stats",
 )
@@ -503,5 +517,11 @@ celery.conf.beat_schedule = {
     'cancel-expired-unpaid-orders': {
         'task': 'cancel_expired_unpaid_orders',
         'schedule': timedelta(minutes=5),
+    },
+    # Once a day, at a quiet hour, so a lost webhook or a Dashboard refund is
+    # found by the next morning.
+    'check-payment-reconciliation': {
+        'task': 'check_payment_reconciliation',
+        'schedule': crontab(hour=3, minute=15),
     },
 }
