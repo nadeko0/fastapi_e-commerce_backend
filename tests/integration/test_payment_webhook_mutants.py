@@ -20,12 +20,12 @@ from payment_support import (
     use_production_sessions,
 )
 
-from app.api.v1.orders import _attempt_still_storing_its_id, _object_id
 from app.core.config import settings
 from app.models.payment import Payment
 from app.models.payment_ledger import PaymentDispute, PaymentRefund
+from app.services.stripe_events import _attempt_still_storing_its_id, _object_id
 
-ORDERS_LOGGER = "app.api.v1.orders"
+ORDERS_LOGGER = "app.services.stripe_events"
 PROCESSED = {"status": "processed", "applied": True}
 PROCESSED_FLAGGED = {"status": "processed", "applied": True, "requires_manual_review": True}
 
@@ -328,7 +328,7 @@ def test_an_attempt_exactly_at_the_stale_limit_does_not(db_session, monkeypatch)
         def utcnow(cls):
             return now
 
-    monkeypatch.setattr("app.api.v1.orders.datetime", Frozen)
+    monkeypatch.setattr("app.services.stripe_events.datetime", Frozen)
     limit = now - timedelta(minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES)
     _attempt(db_session, 41, created_at=limit)
     assert _attempt_still_storing_its_id(db_session, _event(41)) is False

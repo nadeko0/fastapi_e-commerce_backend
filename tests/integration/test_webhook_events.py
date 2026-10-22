@@ -17,7 +17,7 @@ from payment_support import (
 )
 from sqlalchemy.exc import OperationalError
 
-import app.api.v1.orders as orders_module
+import app.services.stripe_events as stripe_events_module
 from app.main import app
 
 
@@ -57,7 +57,7 @@ def test_an_event_whose_processing_failed_is_applied_when_stripe_redelivers_it(
     # the order would expire unpaid.
     buyer, order, payment = _awaiting_3ds(shop)
     outbox.take()
-    real_apply = orders_module._apply_payment_success
+    real_apply = stripe_events_module._apply_payment_success
     failures = []
 
     def _fails_once(*args, **kwargs):
@@ -66,7 +66,7 @@ def test_an_event_whose_processing_failed_is_applied_when_stripe_redelivers_it(
             raise OperationalError("UPDATE orders ...", {}, Exception("connection lost"))
         return real_apply(*args, **kwargs)
 
-    monkeypatch.setattr(orders_module, "_apply_payment_success", _fails_once)
+    monkeypatch.setattr(stripe_events_module, "_apply_payment_success", _fails_once)
     event_id = "evt_redelivered_after_a_failure"
 
     # As a server answers an unhandled error: 500, not an exception.
