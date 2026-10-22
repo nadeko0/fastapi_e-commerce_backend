@@ -148,11 +148,37 @@ def test_trusted_proxies_forms(value, expected):
 
 
 def test_cors_origins_must_be_urls():
-    assert [str(o) for o in _settings(BACKEND_CORS_ORIGINS="http://a.example,https://b.example").BACKEND_CORS_ORIGINS] == [
-        "http://a.example/", "https://b.example/",
+    assert _settings(BACKEND_CORS_ORIGINS="http://a.example,https://b.example").BACKEND_CORS_ORIGINS == [
+        "http://a.example", "https://b.example",
     ]
     with pytest.raises(ValidationError):
         _settings(BACKEND_CORS_ORIGINS="not a url")
+    with pytest.raises(ValidationError):
+        _settings(BACKEND_CORS_ORIGINS="ftp://a.example")
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("https://a.example/", ["https://a.example"]),
+        ("HTTPS://A.Example", ["https://a.example"]),
+        ("https://a.example:443", ["https://a.example"]),
+        ("http://localhost:3000/", ["http://localhost:3000"]),
+        ('["http://localhost:3000/", "https://b.example:8443"]',
+         ["http://localhost:3000", "https://b.example:8443"]),
+    ],
+)
+def test_cors_origins_are_normalized_to_the_origin_form(value, expected):
+    assert _settings(BACKEND_CORS_ORIGINS=value).BACKEND_CORS_ORIGINS == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["https://a.example/app", "https://a.example?x=1", "https://a.example/#f"],
+)
+def test_cors_origin_with_a_path_query_or_fragment_is_refused(value):
+    with pytest.raises(ValidationError, match="origin"):
+        _settings(BACKEND_CORS_ORIGINS=value)
 
 
 def test_version_comes_from_the_package_not_the_environment():

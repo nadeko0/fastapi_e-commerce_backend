@@ -91,7 +91,7 @@ async def add_security_headers(request, call_next):
 logger.debug(f"Configuring CORS with origins: {settings.BACKEND_CORS_ORIGINS}")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
