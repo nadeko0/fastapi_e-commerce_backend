@@ -308,7 +308,7 @@ def test_get_cart_fails_open_on_connection_error(monkeypatch):
 
 def test_update_cart_fails_open_on_connection_error(monkeypatch):
     redis = _service()
-    _break(monkeypatch, redis, "setex")
+    _break(monkeypatch, redis, "set")
     cart = Cart(
         user_id=1,
         items={},
@@ -329,7 +329,7 @@ def test_delete_cart_fails_open_on_connection_error(monkeypatch):
 
 def test_add_to_blacklist_fails_open_on_connection_error(monkeypatch):
     redis = _service()
-    _break(monkeypatch, redis, "setex")
+    _break(monkeypatch, redis, "set")
 
     assert redis.add_to_blacklist("tok", 3600) is False
 
@@ -346,14 +346,14 @@ def test_is_blacklisted_fails_closed_on_connection_error(monkeypatch):
 
 def test_cache_product_fails_open_on_connection_error(monkeypatch):
     redis = _service()
-    _break(monkeypatch, redis, "setex")
+    _break(monkeypatch, redis, "set")
 
     assert redis.cache_product(1, {"id": 1}) is False
 
 
 def test_cache_category_tree_fails_open_on_connection_error(monkeypatch):
     redis = _service()
-    _break(monkeypatch, redis, "setex")
+    _break(monkeypatch, redis, "set")
     tree = CategoryTreeResponse(tree=[], total_categories=0, max_depth=0)
 
     assert redis.cache_category_tree(tree) is False
@@ -375,7 +375,7 @@ def test_get_cached_product_fails_open_on_connection_error(monkeypatch):
 
 def test_create_session_fails_open_on_connection_error(monkeypatch):
     redis = _service()
-    _break(monkeypatch, redis, "setex")
+    _break(monkeypatch, redis, "set")
 
     assert redis.create_session(1, {"role": "client"}) == ""
 
@@ -505,7 +505,7 @@ def test_generic_get_fails_open_on_connection_error(monkeypatch):
 
 def test_generic_setex_fails_open_on_connection_error(monkeypatch):
     redis = _service()
-    _break(monkeypatch, redis, "setex")
+    _break(monkeypatch, redis, "set")
 
     assert redis.setex("custom:key", 60, {"a": 1}) is False
 
@@ -555,7 +555,7 @@ def test_cache_category_tree_deletes_key_when_setex_reports_failure(monkeypatch)
     redis = _service()
     tree = CategoryTreeResponse(tree=[], total_categories=0, max_depth=0)
     redis._redis.set("category:tree", "stale-value")
-    monkeypatch.setattr(redis._redis, "setex", lambda *a, **k: False)
+    monkeypatch.setattr(redis._redis, "set", lambda *a, **k: False)
 
     result = redis.cache_category_tree(tree)
 

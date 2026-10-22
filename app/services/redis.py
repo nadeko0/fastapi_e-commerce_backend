@@ -190,10 +190,10 @@ class RedisService:
             cart_key = self._get_cart_key(cart.user_id)
             ttl = self._cart_ttl()
             cart.expires_at = datetime.utcnow() + ttl
-            return self._redis.setex(
+            return self._redis.set(
                 cart_key,
-                ttl,
-                self._serialize(cart)
+                self._serialize(cart),
+                ex=ttl,
             )
         except RedisError as e:
             self._handle_redis_error(f"update_cart: {str(e)}")
@@ -301,7 +301,7 @@ class RedisService:
             if owner.is_guest and not cart.items:
                 pipe.delete(cart_key)
             else:
-                pipe.setex(cart_key, ttl, self._serialize(cart))
+                pipe.set(cart_key, self._serialize(cart), ex=ttl)
             outcome['cart'] = cart
 
         try:
@@ -471,7 +471,7 @@ class RedisService:
             ttl = self._cart_ttl(account)
             cart.expires_at = datetime.utcnow() + ttl
             pipe.multi()
-            pipe.setex(account_key, ttl, self._serialize(cart))
+            pipe.set(account_key, self._serialize(cart), ex=ttl)
             pipe.delete(guest_key)
 
         try:
@@ -516,7 +516,7 @@ class RedisService:
             ttl = self._cart_ttl(owner)
             cart.updated_at = datetime.utcnow()
             cart.expires_at = cart.updated_at + ttl
-            pipe.setex(cart_key, ttl, self._serialize(cart))
+            pipe.set(cart_key, self._serialize(cart), ex=ttl)
 
         try:
             self._redis.transaction(_txn, cart_key)
@@ -531,7 +531,7 @@ class RedisService:
     def add_to_blacklist(self, token_id: str, expires_in: int) -> bool:
         try:
             key = f"blacklist:{token_id}"
-            return self._redis.setex(key, expires_in, "1")
+            return self._redis.set(key, "1", ex=expires_in)
         except RedisError as e:
             self._handle_redis_error(f"add_to_blacklist: {str(e)}")
             return False
@@ -582,7 +582,7 @@ class RedisService:
         try:
             key = f"refresh_active:{jti}"
             value = json.dumps({"user_id": user_id, "family": family_id})
-            self._redis.setex(key, ttl_seconds, value)
+            self._redis.set(key, value, ex=ttl_seconds)
             family_key = f"refresh_family:{family_id}"
             self._redis.sadd(family_key, jti)
             self._redis.expire(family_key, ttl_seconds)
@@ -654,10 +654,10 @@ class RedisService:
     def cache_product(self, product_id: int, data: Dict) -> bool:
         try:
             key = f"product:{product_id}"
-            return self._redis.setex(
+            return self._redis.set(
                 key,
-                timedelta(hours=1),  # 1 hour cache as per requirements
-                self._serialize(data)
+                self._serialize(data),
+                ex=timedelta(hours=1),  # 1 hour cache as per requirements
             )
         except RedisError as e:
             self._handle_redis_error(f"cache_product: {str(e)}")
@@ -667,10 +667,10 @@ class RedisService:
         try:
             serialized = self._serialize(tree_data)
 
-            result = self._redis.setex(
+            result = self._redis.set(
                 "category:tree",
-                timedelta(hours=settings.REDIS_PRODUCT_CACHE_TTL_HOURS),
-                serialized
+                serialized,
+                ex=timedelta(hours=settings.REDIS_PRODUCT_CACHE_TTL_HOURS),
             )
 
             if not result:
@@ -714,10 +714,10 @@ class RedisService:
     def create_session(self, user_id: int, session_data: Dict) -> str:
         try:
             session_id = f"session:{user_id}:{datetime.utcnow().timestamp()}"
-            self._redis.setex(
+            self._redis.set(
                 session_id,
-                timedelta(hours=24),
-                self._serialize(session_data)
+                self._serialize(session_data),
+                ex=timedelta(hours=24),
             )
             return session_id
         except RedisError as e:
@@ -770,7 +770,7 @@ class RedisService:
 
     def setex(self, key: str, seconds: int, value: Any) -> bool:
         try:
-            return self._redis.setex(key, seconds, self._serialize(value))
+            return self._redis.set(key, self._serialize(value), ex=seconds)
         except RedisError as e:
             self._handle_redis_error(f"setex: {str(e)}")
             return False

@@ -957,15 +957,15 @@ def test_signing_out_everywhere_that_cannot_move_the_watermark_says_so(
     client, monkeypatch, fake_redis, valid_registration_payload
 ):
     tokens = _login_tokens(client, valid_registration_payload)
-    real_setex = fake_redis.setex
+    real_set = fake_redis.set
 
-    def setex_fails_for_the_watermark(name, *args, **kwargs):
+    def set_fails_for_the_watermark(name, *args, **kwargs):
         if str(name).startswith("pwd_changed:"):
             raise RedisConnectionError("Redis is down")
-        return real_setex(name, *args, **kwargs)
+        return real_set(name, *args, **kwargs)
 
     with monkeypatch.context() as outage:
-        outage.setattr(fake_redis, "setex", setex_fails_for_the_watermark)
+        outage.setattr(fake_redis, "set", set_fails_for_the_watermark)
         response = client.post(
             f"{API_PREFIX}/logout", headers={"Authorization": f"Bearer {tokens['access_token']}"}
         )
@@ -1153,7 +1153,7 @@ def test_password_reset_that_cannot_revoke_old_tokens_changes_nothing(
     old_access = _login_tokens(client, valid_registration_payload)["access_token"]
     token = _reset_token_for(email)
     with monkeypatch.context() as outage:
-        _redis_command_fails(outage, fake_redis, "setex")
+        _redis_command_fails(outage, fake_redis, "set")
         response = _reset(client, token, "NewStr0ngPass")
 
     assert response.status_code == 503
@@ -1172,7 +1172,7 @@ def test_logout_that_cannot_blacklist_the_token_says_so(
     tokens = _login_tokens(client, valid_registration_payload)
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
     with monkeypatch.context() as outage:
-        _redis_command_fails(outage, fake_redis, "setex")
+        _redis_command_fails(outage, fake_redis, "set")
         response = client.post(
             f"{API_PREFIX}/logout", json={"refresh_token": tokens["refresh_token"]}, headers=headers
         )
