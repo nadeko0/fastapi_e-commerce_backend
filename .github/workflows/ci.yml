@@ -59,7 +59,7 @@ jobs:
       - name: Payment layer coverage gate (100% lines and branches)
         run: >-
           uv run coverage report --fail-under=100
-          --include="app/api/v1/orders.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py"
+          --include="app/api/v1/orders.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py,app/services/stripe_events.py,app/services/reconciliation.py,app/models/payment_discrepancy.py,app/schemas/webhook_event.py"
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
@@ -115,10 +115,14 @@ jobs:
           tests/integration/test_disputes.py
           tests/integration/test_webhook*.py
           tests/integration/test_tasks*.py
+          tests/integration/test_stripe_event*.py
+          tests/integration/test_reconciliation*.py
+          tests/integration/test_admin_webhook_events.py
           tests/unit/test_payment*.py
           tests/unit/test_order*.py
           tests/unit/test_money*.py
           tests/unit/test_webhook*.py
+          tests/unit/test_reconciliation*.py
 
   test-postgres:
     # The main test job runs on a temporary SQLite database. Production is
