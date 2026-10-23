@@ -66,7 +66,10 @@ def build_redis_broker_url(
 celery = Celery(
     'ecommerce_tasks',
     broker=build_redis_broker_url(
-        settings.REDIS_HOST, settings.REDIS_PORT, settings.REDIS_DB, settings.REDIS_PASSWORD
+        settings.REDIS_HOST,
+        settings.REDIS_PORT,
+        settings.REDIS_DB,
+        settings.REDIS_PASSWORD.get_secret_value() if settings.REDIS_PASSWORD is not None else None,
     ),
 )
 
@@ -134,14 +137,14 @@ celery.conf.update(
 # idle-in-transaction (still stuck 38+ minutes later) because this engine
 # had no timeout protection at all.
 engine = create_engine(
-    settings.DATABASE_URI,
+    settings.DATABASE_URI.get_secret_value(),
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_timeout=settings.DB_POOL_TIMEOUT,
     pool_pre_ping=settings.DB_POOL_PRE_PING,
     pool_recycle=settings.DB_POOL_RECYCLE,
     echo=settings.SQL_DEBUG,
-    connect_args=_build_connect_args(settings.DATABASE_URI),
+    connect_args=_build_connect_args(settings.DATABASE_URI.get_secret_value()),
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

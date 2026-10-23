@@ -128,9 +128,9 @@ def test_pool_sizes_are_halved_in_development_with_a_floor_of_five(environment, 
 
 def test_database_uri_is_assembled_unless_given():
     assembled = _settings(POSTGRES_USER="u", POSTGRES_PASSWORD="p", POSTGRES_SERVER="h", POSTGRES_DB="d")
-    assert assembled.DATABASE_URI == "postgresql+psycopg://u:p@h/d"
+    assert assembled.DATABASE_URI.get_secret_value() == "postgresql+psycopg://u:p@h/d"
     given = _settings(DATABASE_URI="postgresql+psycopg://other@elsewhere/db")
-    assert given.DATABASE_URI == "postgresql+psycopg://other@elsewhere/db"
+    assert given.DATABASE_URI.get_secret_value() == "postgresql+psycopg://other@elsewhere/db"
 
 
 @pytest.mark.parametrize(

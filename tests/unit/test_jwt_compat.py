@@ -9,6 +9,7 @@ dependency any more and is not needed to run these tests.
 import time
 
 import jwt
+from pydantic import SecretStr
 
 from app.core.config import settings
 from app.core.security import (
@@ -45,7 +46,7 @@ def test_an_access_token_issued_by_python_jose_still_authenticates(
         privacy_policy_accepted=True,
     ))
     db_session.commit()
-    monkeypatch.setattr(settings, "JWT_SECRET_KEY", LEGACY_SECRET)
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", SecretStr(LEGACY_SECRET))
     assert jwt.decode(LEGACY_ACCESS_TOKEN, LEGACY_SECRET, algorithms=["HS256"]) == (
         LEGACY_ACCESS_CLAIMS
     )
@@ -65,7 +66,7 @@ def test_a_reset_token_issued_by_python_jose_still_decodes_but_is_no_longer_hono
     # are now bound to the password hash they were issued against, which
     # makes them single-use, and one without that binding could be replayed
     # for its whole lifetime. A fresh reset email is the way forward.
-    monkeypatch.setattr(settings, "JWT_SECRET_KEY", LEGACY_SECRET)
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", SecretStr(LEGACY_SECRET))
 
     claims = jwt.decode(LEGACY_RESET_TOKEN, LEGACY_SECRET, algorithms=["HS256"])
     assert claims["sub"] == "legacy@example.com"
@@ -84,7 +85,7 @@ def test_logout_still_revokes_the_family_of_an_expired_refresh_token(fake_redis)
     # an option the library did not understand would make this a silent no-op.
     expired = jwt.encode(
         {"exp": int(time.time()) - 60, "sub": "42", "type": "refresh", "jti": "j1", "family": "f1"},
-        settings.JWT_SECRET_KEY,
+        settings.JWT_SECRET_KEY.get_secret_value(),
         algorithm=settings.JWT_ALGORITHM,
     )
     fake_redis.sadd("refresh_family:f1", "j1")

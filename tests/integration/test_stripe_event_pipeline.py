@@ -209,7 +209,7 @@ def test_a_bad_signature_stores_and_publishes_nothing(shop):
 
 def test_a_signed_body_that_is_not_json_is_refused_and_stores_nothing(shop):
     body = b"this is not json"
-    signature = StripePaymentProvider.sign_payload(body, settings.STRIPE_WEBHOOK_SECRET)
+    signature = StripePaymentProvider.sign_payload(body, settings.STRIPE_WEBHOOK_SECRET.get_secret_value())
     before = shop.db.query(WebhookEvent).count()
 
     response = shop.client.post(

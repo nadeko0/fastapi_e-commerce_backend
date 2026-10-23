@@ -2,6 +2,7 @@ import asyncio
 
 import fakeredis
 import pytest
+from pydantic import SecretStr
 from redis.asyncio import BlockingConnectionPool
 
 import app.services.redis_async as redis_async
@@ -102,7 +103,7 @@ def test_get_async_redis_outside_an_event_loop_is_an_error():
 def test_real_client_uses_the_same_connection_settings_as_the_sync_pool(monkeypatch):
     # The real factory, not the fake one the fixture installs. Building a
     # client opens no connection, so nothing here reaches a real Redis.
-    monkeypatch.setattr(settings, "REDIS_PASSWORD", "s3cret")
+    monkeypatch.setattr(settings, "REDIS_PASSWORD", SecretStr("s3cret"))
 
     async def scenario():
         client = _real_create_client()

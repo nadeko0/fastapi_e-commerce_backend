@@ -137,7 +137,7 @@ def test_token_blacklisted_through_the_async_client_is_seen_by_the_sync_service(
 def _sign(claims, key=None, algorithm=None):
     return jwt.encode(
         claims,
-        security.settings.JWT_SECRET_KEY if key is None else key,
+        security.settings.JWT_SECRET_KEY.get_secret_value() if key is None else key,
         algorithm=algorithm or security.settings.JWT_ALGORITHM,
     )
 

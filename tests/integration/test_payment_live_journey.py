@@ -115,7 +115,7 @@ def _deliver(shop, event_type, obj):
     body = json.dumps({"id": f"evt_{uuid.uuid4().hex[:24]}", "object": "event",
                        "type": event_type, "created": int(time.time()),
                        "data": {"object": obj}}).encode()
-    signature = StripePaymentProvider.sign_payload(body, settings.STRIPE_WEBHOOK_SECRET)
+    signature = StripePaymentProvider.sign_payload(body, settings.STRIPE_WEBHOOK_SECRET.get_secret_value())
     return deliver(shop.client.post("/api/v1/orders/webhooks/stripe", content=body,
                                     headers={"Stripe-Signature": signature,
                                              "Content-Type": "application/json"}), body)

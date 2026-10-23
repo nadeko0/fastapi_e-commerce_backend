@@ -70,7 +70,9 @@ def _create_client() -> Redis:
         host=settings.REDIS_HOST,
         port=settings.REDIS_PORT,
         db=settings.REDIS_DB,
-        password=settings.REDIS_PASSWORD,
+        password=(
+            settings.REDIS_PASSWORD.get_secret_value() if settings.REDIS_PASSWORD is not None else None
+        ),
         decode_responses=True,
         max_connections=settings.REDIS_POOL_SIZE,
         timeout=settings.REDIS_POOL_TIMEOUT,

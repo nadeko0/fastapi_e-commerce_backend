@@ -26,7 +26,7 @@ class SmtpEmailProvider(EmailProvider):
         self.smtp_host = settings.SMTP_HOST
         self.smtp_port = settings.SMTP_PORT
         self.smtp_user = settings.SMTP_USER
-        self.smtp_password = settings.SMTP_PASSWORD
+        self.smtp_password = settings.SMTP_PASSWORD.get_secret_value()
         self.smtp_timeout = settings.SMTP_TIMEOUT_SECONDS
         self.from_email = settings.EMAILS_FROM_EMAIL
         self.from_name = settings.EMAILS_FROM_NAME
