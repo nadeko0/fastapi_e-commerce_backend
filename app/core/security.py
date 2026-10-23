@@ -150,6 +150,18 @@ def user_id_from_subject(subject: object) -> Optional[int]:
     user_id = int(subject)
     return user_id if user_id <= _MAX_USER_ID else None
 
+# Claims each kind of token always carries, required on decode: PyJWT checks
+# `exp` only when it is present, so a signed token without it would never
+# expire. A token missing one is refused like any invalid token. `iat` is not
+# required: tokens issued before it was added still verify, and
+# is_token_superseded treats a missing one as older than any watermark.
+ACCESS_TOKEN_REQUIRED_CLAIMS = ["exp", "sub", "type"]
+# type, jti and family are checked by rotate_refresh_token itself, each with its
+# own refusal message, which must not change.
+REFRESH_TOKEN_REQUIRED_CLAIMS = ["exp", "sub"]
+RESET_TOKEN_REQUIRED_CLAIMS = ["exp", "sub", "type", "pwd"]
+VERIFY_TOKEN_REQUIRED_CLAIMS = ["exp", "sub", "type"]
+
 # `iat` is a NumericDate with sub-second precision (RFC 7519 allows a
 # fractional one): the epoch seconds as a float, compared against the
 # per-user watermark (invalidate_tokens_issued_before_now), which has the
@@ -248,7 +260,8 @@ async def get_current_user(
         payload = jwt.decode(
             token,
             settings.JWT_SECRET_KEY.get_secret_value(),
-            algorithms=[settings.JWT_ALGORITHM]
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": ACCESS_TOKEN_REQUIRED_CLAIMS},
         )
         user_id = user_id_from_subject(payload.get("sub"))
         token_type: str = payload.get("type")
@@ -376,7 +389,12 @@ async def issue_refresh_token(user_id: Union[str, int], family: Optional[str] = 
     later be validated, rotated, and reuse-detected. `family` is passed when
     rotating an existing chain (login omits it, which starts a new chain)."""
     token = create_refresh_token(user_id, family=family)
-    payload = jwt.decode(token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
+    payload = jwt.decode(
+        token,
+        settings.JWT_SECRET_KEY.get_secret_value(),
+        algorithms=[settings.JWT_ALGORITHM],
+        options={"require": REFRESH_TOKEN_REQUIRED_CLAIMS},
+    )
     ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     await async_redis_service.register_refresh_token(payload["jti"], user_id, payload["family"], ttl_seconds)
     return token
@@ -396,7 +414,12 @@ async def rotate_refresh_token(token: str, db: AsyncSession) -> Tuple[str, str]:
     re-login instead of silently issuing more tokens on a compromised chain.
     """
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY.get_secret_value(),
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": REFRESH_TOKEN_REQUIRED_CLAIMS},
+        )
     except jwt.PyJWTError:
         raise RefreshTokenError("Could not validate refresh token")
 
@@ -441,7 +464,7 @@ async def revoke_refresh_token(token: str) -> bool:
             token,
             settings.JWT_SECRET_KEY.get_secret_value(),
             algorithms=[settings.JWT_ALGORITHM],
-            options={"verify_exp": False},
+            options={"verify_exp": False, "require": ["exp", "family"]},
         )
     except jwt.PyJWTError:
         return True
@@ -459,7 +482,7 @@ async def blacklist_token(token: str, expires_in: int) -> bool:
             token,
             settings.JWT_SECRET_KEY.get_secret_value(),
             algorithms=[settings.JWT_ALGORITHM],
-            options={"verify_exp": False},
+            options={"verify_exp": False, "require": ["exp"]},
         )
     except jwt.PyJWTError:
         return False
@@ -498,7 +521,12 @@ async def logout(access_token: str, refresh_token: Optional[str] = None) -> None
     RevocationUnavailable if any of it could not be recorded."""
     payload = {}
     try:
-        payload = jwt.decode(access_token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            access_token,
+            settings.JWT_SECRET_KEY.get_secret_value(),
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": ACCESS_TOKEN_REQUIRED_CLAIMS},
+        )
         # time.time(), not a naive UTC datetime's timestamp(): the latter reads a
         # naive UTC value as local time and is off by the host's UTC offset.
         expires_in = max(int(payload["exp"] - time.time()), 1)
@@ -569,7 +597,12 @@ def verify_password_reset_token(token: str) -> Optional[PasswordResetClaims]:
     it is still good for the account is PasswordResetClaims.matches, which
     needs the account's current hash."""
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY.get_secret_value(),
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": RESET_TOKEN_REQUIRED_CLAIMS},
+        )
     except jwt.PyJWTError:
         return None
     email = payload.get("sub")
@@ -586,7 +619,12 @@ def generate_email_verification_token(email: str) -> str:
 
 def verify_email_token(token: str) -> Optional[str]:
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY.get_secret_value(),
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": VERIFY_TOKEN_REQUIRED_CLAIMS},
+        )
         if payload["type"] != "verify_email":
             return None
         return payload["sub"]

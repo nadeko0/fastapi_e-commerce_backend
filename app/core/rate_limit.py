@@ -54,7 +54,7 @@ from redis.exceptions import RedisError
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS, HTTP_503_SERVICE_UNAVAILABLE
 
 from app.core.config import RATE_LIMIT_PATTERN, settings
-from app.core.security import user_id_from_subject
+from app.core.security import ACCESS_TOKEN_REQUIRED_CLAIMS, user_id_from_subject
 from app.services.redis_async import get_async_redis
 
 logger = logging.getLogger(__name__)
@@ -182,7 +182,10 @@ def user_id_from_token(request: Request) -> Optional[str]:
         return None
     try:
         payload = jwt.decode(
-            token.strip(), settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM]
+            token.strip(),
+            settings.JWT_SECRET_KEY.get_secret_value(),
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": ACCESS_TOKEN_REQUIRED_CLAIMS},
         )
     except jwt.PyJWTError:  # malformed, expired, or signed with another key
         return None
