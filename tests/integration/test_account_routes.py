@@ -277,3 +277,23 @@ def test_another_address_still_reaches_the_protected_routes():
     elsewhere = TestClient(app, client=("198.51.100.9", 50000))
     _register(elsewhere)
     assert elsewhere.get(f"{USERS}/me", headers=_auth(elsewhere)).status_code == 200
+
+
+def test_a_country_that_outgrows_the_limit_when_title_cased_is_422_without_echoing_it(client):
+    """'ß'.title() is 'Ss': the cased value is one character longer than the
+    100 the create schema checked, so building the response from the stored
+    row raises a ValidationError. That 422 goes through the same sanitiser
+    as request validation (app/core/errors.py): no `input`, no raw `ctx`."""
+    headers = _auth(client)
+    country = "ß" * 100
+
+    response = client.post(f"{USERS}/addresses", json=_address(country=country), headers=headers)
+
+    assert response.status_code == 422
+    assert country not in response.text
+    detail = response.json()["detail"]
+    assert detail["message"] == "Invalid address data"
+    assert detail["errors"]
+    for error in detail["errors"]:
+        assert "input" not in error
+        assert set(error) <= {"type", "loc", "msg", "ctx", "url"}

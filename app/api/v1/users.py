@@ -14,6 +14,7 @@ from app.api.v1.cart import merge_guest_cart_on_login_async
 from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.core.database import get_async_db
+from app.core.errors import sanitized_errors
 from app.core.rate_limit import check_login_attempt, clear_login_failures
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
@@ -816,7 +817,7 @@ async def create_address(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "message": "Invalid address data",
-                "errors": e.errors()
+                "errors": sanitized_errors(e.errors())
             }
         )
     except IntegrityError:
@@ -1113,81 +1114,72 @@ async def reset_password(
 ):
     """Reset a user's password using a valid reset token."""
 
-    try:
-        claims = verify_password_reset_token(token)
-        if not claims:
-            raise _invalid_reset_token()
-        email = claims.email
+    claims = verify_password_reset_token(token)
+    if not claims:
+        raise _invalid_reset_token()
+    email = claims.email
 
-        user = await _user_by_email(db, email)
-        user_id = user.id if user else None
-        old_hashed_password = user.hashed_password if user else None
+    user = await _user_by_email(db, email)
+    user_id = user.id if user else None
+    old_hashed_password = user.hashed_password if user else None
 
-        # Same reasoning as login(): release the connection before the
-        # CPU-bound bcrypt hash, not after, so the queueing delay of the
-        # hash cannot hold it. See the comment in login(). Before the
-        # refusals below as well: a refused request would otherwise keep its
-        # connection until dependency teardown.
-        await db.close()
+    # Same reasoning as login(): release the connection before the
+    # CPU-bound bcrypt hash, not after, so the queueing delay of the
+    # hash cannot hold it. See the comment in login(). Before the
+    # refusals below as well: a refused request would otherwise keep its
+    # connection until dependency teardown.
+    await db.close()
 
-        if user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-        # The token is single-use: it is only good while the password is
-        # the one it was issued against (see PasswordResetClaims in
-        # app/core/security.py).
-        if not claims.matches(old_hashed_password):
-            raise _invalid_reset_token()
-
-        new_hashed_password = await get_password_hash_async(new_password.new_password)
-
-        # Invalidate any token issued before this reset so a token held by
-        # an attacker (the reason the user is resetting) stops working
-        # immediately instead of remaining valid until it expires. Before
-        # the password changes, and refused if it cannot be recorded: this
-        # used to run afterwards with its result ignored, so a Redis outage
-        # answered "reset successfully" while every old token kept working.
-        # Now nothing has changed when it fails, and the same link can be
-        # used again once Redis is back. After the bcrypt hash rather than
-        # before it, so that a login with the old password during the hash
-        # does not mint a token newer than the watermark.
-        if not await invalidate_tokens_issued_before_now(user_id):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Password reset is temporarily unavailable, please retry"
-            )
-
-        # Only if the password is still the one the token was checked
-        # against: two requests presenting the same token both pass that
-        # check above, and only the first to get here may use it.
-        result = await db.execute(
-            update(User)
-            .where(User.id == user_id, User.hashed_password == old_hashed_password)
-            .values(hashed_password=new_hashed_password)
-            .execution_options(synchronize_session=False)
-        )
-        updated = result.rowcount
-        await db.commit()
-        if updated != 1:
-            raise _invalid_reset_token()
-
-        # The way out of a login refused for too many failed attempts: the
-        # new password starts with a clean record - the email's own count
-        # and its count at this address (other addresses' counts are their
-        # failures, and lock only them). After the commit, so no database
-        # connection is held across it.
-        await clear_login_failures(email, request)
-
-        return APIResponse.success_response({
-            "message": "Password has been reset successfully"
-        })
-    except ValidationError as e:
+    if user_id is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "message": "Invalid password format",
-                "errors": e.errors()
-            }
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
         )
+    # The token is single-use: it is only good while the password is
+    # the one it was issued against (see PasswordResetClaims in
+    # app/core/security.py).
+    if not claims.matches(old_hashed_password):
+        raise _invalid_reset_token()
+
+    new_hashed_password = await get_password_hash_async(new_password.new_password)
+
+    # Invalidate any token issued before this reset so a token held by
+    # an attacker (the reason the user is resetting) stops working
+    # immediately instead of remaining valid until it expires. Before
+    # the password changes, and refused if it cannot be recorded: this
+    # used to run afterwards with its result ignored, so a Redis outage
+    # answered "reset successfully" while every old token kept working.
+    # Now nothing has changed when it fails, and the same link can be
+    # used again once Redis is back. After the bcrypt hash rather than
+    # before it, so that a login with the old password during the hash
+    # does not mint a token newer than the watermark.
+    if not await invalidate_tokens_issued_before_now(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Password reset is temporarily unavailable, please retry"
+        )
+
+    # Only if the password is still the one the token was checked
+    # against: two requests presenting the same token both pass that
+    # check above, and only the first to get here may use it.
+    result = await db.execute(
+        update(User)
+        .where(User.id == user_id, User.hashed_password == old_hashed_password)
+        .values(hashed_password=new_hashed_password)
+        .execution_options(synchronize_session=False)
+    )
+    updated = result.rowcount
+    await db.commit()
+    if updated != 1:
+        raise _invalid_reset_token()
+
+    # The way out of a login refused for too many failed attempts: the
+    # new password starts with a clean record - the email's own count
+    # and its count at this address (other addresses' counts are their
+    # failures, and lock only them). After the commit, so no database
+    # connection is held across it.
+    await clear_login_failures(email, request)
+
+    return APIResponse.success_response({
+        "message": "Password has been reset successfully"
+    })
