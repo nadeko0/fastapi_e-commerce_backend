@@ -773,15 +773,15 @@ def _guard_no_attempt_in_flight(
     started_after = utc_now() - timedelta(
         minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
     )
-    query = db.query(Payment.id).filter(
+    query = select(Payment.id).where(
         Payment.order_id == order.id,
         Payment.status.in_(_IN_FLIGHT_PAYMENT_STATUSES),
         Payment.created_at > started_after,
     )
     if except_payment_id is not None:
-        query = query.filter(Payment.id != except_payment_id)
-    in_flight = query.first()
-    if in_flight:
+        query = query.where(Payment.id != except_payment_id)
+    in_flight = db.scalars(query.limit(1)).first()
+    if in_flight is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -1534,7 +1534,9 @@ def _record_refund(
     has already failed. The caller holds the order's lock
     (_lock_order_and_reload) and commits.
     """
-    refund_row = db.query(PaymentRefund).filter(PaymentRefund.refund_id == refund_id).first()
+    refund_row = db.scalars(
+        select(PaymentRefund).where(PaymentRefund.refund_id == refund_id).limit(1)
+    ).first()
     if refund_row is not None:
         return refund_row
     refund_row = PaymentRefund(
@@ -1568,15 +1570,19 @@ def _settle_refunds(db: Session, order: Order, payment_row: Payment) -> None:
     db.flush()
     # A lost dispute returned the whole disputed charge to the customer
     # through their bank: nothing of it is left to refund.
-    if db.query(PaymentDispute.id).filter(
-        PaymentDispute.payment_id == payment_row.id, PaymentDispute.status == "lost",
-    ).first():
+    if db.scalars(
+        select(PaymentDispute.id)
+        .where(PaymentDispute.payment_id == payment_row.id, PaymentDispute.status == "lost")
+        .limit(1)
+    ).first() is not None:
         order.payment_status = PaymentStatus.REFUNDED
         return
-    not_completed = db.query(func.coalesce(func.sum(PaymentRefund.amount), 0)).filter(
-        PaymentRefund.payment_id == payment_row.id,
-        PaymentRefund.status.notin_(("succeeded", *_REFUND_STATUSES_NOT_RETURNED)),
-    ).scalar()
+    not_completed = db.scalar(
+        select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+            PaymentRefund.payment_id == payment_row.id,
+            PaymentRefund.status.notin_(("succeeded", *_REFUND_STATUSES_NOT_RETURNED)),
+        )
+    )
     returned = payment_row.amount_refunded - not_completed
     order.payment_status = (
         PaymentStatus.REFUNDED if returned >= payment_row.amount else PaymentStatus.PAID
@@ -1586,13 +1592,17 @@ def _settle_refunds(db: Session, order: Order, payment_row: Payment) -> None:
 def _has_open_dispute(db: Session, order_id: int, payment_id: int | None = None) -> bool:
     """Whether a charge of the order (or the given one) is disputed and the
     dispute has not closed."""
-    query = db.query(PaymentDispute.id).join(Payment).filter(
-        Payment.order_id == order_id,
-        PaymentDispute.status.notin_(DISPUTE_CLOSED_STATUSES),
+    query = (
+        select(PaymentDispute.id)
+        .join(Payment)
+        .where(
+            Payment.order_id == order_id,
+            PaymentDispute.status.notin_(DISPUTE_CLOSED_STATUSES),
+        )
     )
     if payment_id is not None:
-        query = query.filter(PaymentDispute.payment_id == payment_id)
-    return query.first() is not None
+        query = query.where(PaymentDispute.payment_id == payment_id)
+    return db.scalars(query.limit(1)).first() is not None
 
 
 @router.post(

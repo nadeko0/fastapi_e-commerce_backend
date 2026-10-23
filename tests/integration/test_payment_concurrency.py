@@ -201,7 +201,7 @@ def test_expiry_locks_each_order_and_skips_those_already_locked(
     # (nothing to lock yet) or the reload of attributes the task's session
     # (tasks_db: the suite's sessions, which expire on commit) does after
     # each commit to address the email.
-    full_rows = [s for s in _order_reads(postgres_sql) if "orders.status AS" in s]
+    full_rows = [s for s in _order_reads(postgres_sql) if "orders.status," in s]
     assert full_rows and all("FOR UPDATE SKIP LOCKED" in s for s in full_rows), full_rows
 
 

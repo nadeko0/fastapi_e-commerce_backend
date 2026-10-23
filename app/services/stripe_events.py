@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -76,12 +77,16 @@ def _attempt_still_storing_its_id(db: Session, object_data: dict) -> bool:
     started_after = utc_now() - timedelta(
         minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
     )
-    return db.query(Payment.id).filter(
-        Payment.order_id == order_id,
-        Payment.status.in_(("processing", "unknown")),
-        Payment.checkout_session_id.is_(None),
-        Payment.payment_intent_id.like(f"{_PENDING_INTENT_ID_PREFIX}%"),
-        Payment.created_at > started_after,
+    return db.scalars(
+        select(Payment.id)
+        .where(
+            Payment.order_id == order_id,
+            Payment.status.in_(("processing", "unknown")),
+            Payment.checkout_session_id.is_(None),
+            Payment.payment_intent_id.like(f"{_PENDING_INTENT_ID_PREFIX}%"),
+            Payment.created_at > started_after,
+        )
+        .limit(1)
     ).first() is not None
 
 
@@ -112,7 +117,9 @@ def _apply_dispute_event(db: Session, object_data: dict) -> dict:
     status = object_data.get("status")
     payment_intent_id = _object_id(object_data.get("payment_intent"))
     payment_row = (
-        db.query(Payment).filter(Payment.payment_intent_id == payment_intent_id).first()
+        db.scalars(
+            select(Payment).where(Payment.payment_intent_id == payment_intent_id).limit(1)
+        ).first()
         if payment_intent_id
         else None
     )
@@ -120,9 +127,13 @@ def _apply_dispute_event(db: Session, object_data: dict) -> dict:
         db.commit()
         return {"status": "processed", "applied": False}
 
-    order = db.query(Order).filter(Order.id == payment_row.order_id).with_for_update().first()
+    order = db.scalars(
+        select(Order).where(Order.id == payment_row.order_id).with_for_update().limit(1)
+    ).first()
     db.refresh(payment_row)
-    dispute = db.query(PaymentDispute).filter(PaymentDispute.dispute_id == dispute_id).first()
+    dispute = db.scalars(
+        select(PaymentDispute).where(PaymentDispute.dispute_id == dispute_id).limit(1)
+    ).first()
     if dispute is not None and dispute.status in DISPUTE_CLOSED_STATUSES:
         db.commit()
         return {"status": "processed", "applied": False}
@@ -184,7 +195,9 @@ def _apply_refund_event(db: Session, event_type: str, object_data: dict) -> dict
         refund_objects = [object_data]
     payment_intent_id = _object_id(object_data.get("payment_intent"))
     payment_row = (
-        db.query(Payment).filter(Payment.payment_intent_id == payment_intent_id).first()
+        db.scalars(
+            select(Payment).where(Payment.payment_intent_id == payment_intent_id).limit(1)
+        ).first()
         if payment_intent_id
         else None
     )
@@ -192,7 +205,9 @@ def _apply_refund_event(db: Session, event_type: str, object_data: dict) -> dict
         db.commit()
         return {"status": "processed", "applied": False}
 
-    order = db.query(Order).filter(Order.id == payment_row.order_id).with_for_update().first()
+    order = db.scalars(
+        select(Order).where(Order.id == payment_row.order_id).with_for_update().limit(1)
+    ).first()
     db.refresh(payment_row)
     flagged = False
     for refund_object in refund_objects:
@@ -221,7 +236,9 @@ def _apply_refund_object(db: Session, payment_row: Payment, refund_object: dict)
     status = refund_object.get("status")
     if not isinstance(refund_id, str) or not isinstance(status, str):
         return False
-    refund_row = db.query(PaymentRefund).filter(PaymentRefund.refund_id == refund_id).first()
+    refund_row = db.scalars(
+        select(PaymentRefund).where(PaymentRefund.refund_id == refund_id).limit(1)
+    ).first()
     if refund_row is None:
         # A refund this app has not recorded: made in the Stripe Dashboard
         # (or by another integration), or one of ours whose event overtook
@@ -280,14 +297,18 @@ def apply_event(db: Session, event_type: str, event_data: Any, background_tasks)
         # it cannot be used to find the Payment row at all event types
         # (e.g. checkout.session.expired never gets one).
         payment_row = (
-            db.query(Payment).filter(Payment.checkout_session_id == object_data.get("id")).first()
+            db.scalars(
+                select(Payment).where(Payment.checkout_session_id == object_data.get("id")).limit(1)
+            ).first()
             if object_data.get("id")
             else None
         )
     else:
         payment_intent_id = object_data.get("id")
         payment_row = (
-            db.query(Payment).filter(Payment.payment_intent_id == payment_intent_id).first()
+            db.scalars(
+            select(Payment).where(Payment.payment_intent_id == payment_intent_id).limit(1)
+        ).first()
             if payment_intent_id
             else None
         )
@@ -316,7 +337,9 @@ def apply_event(db: Session, event_type: str, event_data: Any, background_tasks)
     # commit), and the attempt re-read under the lock: a concurrent /pay or
     # another event for the same order waits instead of deciding on the
     # same state. See _lock_order_and_reload.
-    order = db.query(Order).filter(Order.id == payment_row.order_id).with_for_update().first()
+    order = db.scalars(
+        select(Order).where(Order.id == payment_row.order_id).with_for_update().limit(1)
+    ).first()
     db.refresh(payment_row)
 
     if event_type == "payment_intent.succeeded":
@@ -508,12 +531,12 @@ def _claim_event(db: Session, event_id: str) -> WebhookEvent | None:
     SKIP LOCKED: an event another worker is applying right now is not
     returned (None), so two workers given the same message apply it once -
     the second leaves it to the first."""
-    return (
-        db.query(WebhookEvent)
-        .filter(WebhookEvent.event_id == event_id)
+    return db.scalars(
+        select(WebhookEvent)
+        .where(WebhookEvent.event_id == event_id)
         .with_for_update(skip_locked=True)
-        .first()
-    )
+        .limit(1)
+    ).first()
 
 
 def process_stored_event(db: Session, event_id: str) -> EventOutcome:
@@ -556,7 +579,9 @@ def _record_failure(db: Session, event_id: str, error: Exception) -> EventOutcom
     """Count a failed attempt in a new transaction (the failed one was rolled
     back, event and state changes together): retrying with a backoff, or
     failed once STRIPE_EVENT_MAX_RETRIES retries are used up."""
-    row = db.query(WebhookEvent).filter(WebhookEvent.event_id == event_id).with_for_update().one()
+    row = db.scalars(
+        select(WebhookEvent).where(WebhookEvent.event_id == event_id).with_for_update()
+    ).one()
     if row.status == WEBHOOK_EVENT_PROCESSED:
         # The error came after the commit that applied the event: it is
         # done, and retrying would apply it twice.
@@ -595,26 +620,30 @@ def enqueue_stuck_events(db: Session) -> int:
     the first event the broker refuses. Returns how many were published.
     """
     now = utc_now()
-    stuck = (
-        db.query(WebhookEvent.id, WebhookEvent.event_id)
-        .filter(
+    stuck = db.execute(
+        select(WebhookEvent.id, WebhookEvent.event_id)
+        .where(
             WebhookEvent.status.in_((WEBHOOK_EVENT_RECEIVED, WEBHOOK_EVENT_RETRYING)),
             WebhookEvent.updated_at < now - timedelta(minutes=settings.STRIPE_EVENT_SWEEP_AFTER_MINUTES),
         )
         .order_by(WebhookEvent.updated_at, WebhookEvent.id)
         .limit(settings.STRIPE_EVENT_SWEEP_BATCH)
-        .all()
-    )
+    ).all()
     published = []
     for row_id, event_id in stuck:
         if not enqueue_event(event_id):
             break
         published.append(row_id)
     if published:
-        db.query(WebhookEvent).filter(
-            WebhookEvent.id.in_(published),
-            WebhookEvent.status.in_((WEBHOOK_EVENT_RECEIVED, WEBHOOK_EVENT_RETRYING)),
-        ).update({WebhookEvent.updated_at: now}, synchronize_session=False)
+        db.execute(
+            update(WebhookEvent)
+            .where(
+                WebhookEvent.id.in_(published),
+                WebhookEvent.status.in_((WEBHOOK_EVENT_RECEIVED, WEBHOOK_EVENT_RETRYING)),
+            )
+            .values({WebhookEvent.updated_at: now})
+            .execution_options(synchronize_session=False)
+        )
     db.commit()
     if published:
         logger.info("Enqueued %s stuck Stripe event(s)", len(published))

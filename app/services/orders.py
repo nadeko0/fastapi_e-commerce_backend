@@ -9,6 +9,7 @@ cancellation, a customer cancelling their own unpaid order, and the expiry
 of unpaid orders all go through cancel_order_and_restock.
 """
 
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now
@@ -59,10 +60,15 @@ def lock_stock_rows(db: Session, lines) -> None:
     """
     product_ids = sorted({product_id for product_id, variant_id in lines if variant_id is None})
     variant_ids = sorted({variant_id for _, variant_id in lines if variant_id is not None})
-    db.query(Product.id).filter(Product.id.in_(product_ids)).order_by(Product.id).with_for_update().all()
-    db.query(ProductVariant.id).filter(
-        ProductVariant.id.in_(variant_ids)
-    ).order_by(ProductVariant.id).with_for_update().all()
+    db.execute(
+        select(Product.id).where(Product.id.in_(product_ids)).order_by(Product.id).with_for_update()
+    ).all()
+    db.execute(
+        select(ProductVariant.id)
+        .where(ProductVariant.id.in_(variant_ids))
+        .order_by(ProductVariant.id)
+        .with_for_update()
+    ).all()
 
 
 def cancel_order_and_restock(db: Session, order: Order) -> bool:
@@ -91,13 +97,17 @@ def cancel_order_and_restock(db: Session, order: Order) -> bool:
     lock_stock_rows(db, [(item.product_id, item.variant_id) for item in order.items])
     for item in order.items:
         if item.variant_id is not None:
-            db.query(ProductVariant).filter(ProductVariant.id == item.variant_id).update(
-                {ProductVariant.stock_quantity: ProductVariant.stock_quantity + item.quantity},
-                synchronize_session=False,
+            db.execute(
+                update(ProductVariant)
+                .where(ProductVariant.id == item.variant_id)
+                .values({ProductVariant.stock_quantity: ProductVariant.stock_quantity + item.quantity})
+                .execution_options(synchronize_session=False)
             )
         else:
-            db.query(Product).filter(Product.id == item.product_id).update(
-                {Product.stock_quantity: Product.stock_quantity + item.quantity},
-                synchronize_session=False,
+            db.execute(
+                update(Product)
+                .where(Product.id == item.product_id)
+                .values({Product.stock_quantity: Product.stock_quantity + item.quantity})
+                .execution_options(synchronize_session=False)
             )
     return True
