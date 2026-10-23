@@ -170,8 +170,10 @@ class PasswordReset(BaseModel):
     def normalise_email(cls, v):
         return normalize_email(v) if isinstance(v, str) else v
 
-class PasswordUpdate(BaseModel):
-    current_password: str
+class PasswordResetConfirm(BaseModel):
+    """Body of the reset-by-token route: the token proves the right to set
+    a password, so only the new one is sent. Extra fields (an old client
+    still sending current_password) are ignored, the Pydantic default."""
     new_password: str = Field(..., min_length=8, pattern=r"^[A-Za-z\d@$!%*#?&]{8,}$")
 
     @field_validator('new_password')
@@ -185,6 +187,9 @@ class PasswordUpdate(BaseModel):
         if len(v.encode('utf-8')) > 72:
             raise ValueError('Password must be at most 72 bytes long')
         return v
+
+class PasswordUpdate(PasswordResetConfirm):
+    current_password: str
 
 class GDPRExport(BaseModel):
     """Schema for GDPR data export metadata"""

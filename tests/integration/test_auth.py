@@ -368,6 +368,60 @@ def test_verify_email_twice_reports_already_verified(client, valid_registration_
     assert response.json()["data"]["message"] == "Email already verified"
 
 
+def test_password_reset_needs_only_new_password(client, valid_registration_payload):
+    # A user who forgot the password cannot send the current one.
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    reset_token = _reset_token_for(valid_registration_payload["email"])
+
+    response = client.post(
+        f"{API_PREFIX}/password/reset/{reset_token}",
+        json={"new_password": "NewStr0ngPass"},
+    )
+
+    assert response.status_code == 200
+    login = client.post(
+        f"{API_PREFIX}/login",
+        data={"username": valid_registration_payload["email"], "password": "NewStr0ngPass"},
+    )
+    assert login.status_code == 200
+
+
+def test_password_reset_still_accepts_and_ignores_current_password(
+    client, valid_registration_payload
+):
+    # Clients written against the old contract keep working: the extra
+    # field is ignored, whatever its value.
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    reset_token = _reset_token_for(valid_registration_payload["email"])
+
+    response = client.post(
+        f"{API_PREFIX}/password/reset/{reset_token}",
+        json={"current_password": "wrong-on-purpose", "new_password": "NewStr0ngPass"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_password_reset_weak_new_password_is_422_with_or_without_current_password(
+    client, valid_registration_payload
+):
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    reset_token = _reset_token_for(valid_registration_payload["email"])
+    url = f"{API_PREFIX}/password/reset/{reset_token}"
+
+    for body in (
+        {"new_password": "short1"},
+        {"new_password": "onlyletters"},
+        {"new_password": "12345678"},
+        {"current_password": "x", "new_password": "onlyletters"},
+    ):
+        response = client.post(url, json=body)
+        assert response.status_code == 422, body
+        assert response.json()["detail"][0]["loc"][:2] == ["body", "new_password"]
+
+    assert client.post(url, json={}).status_code == 422
+
+
 def test_password_reset_flow_allows_login_with_new_password(client, valid_registration_payload):
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
     reset_token = _reset_token_for(valid_registration_payload["email"])

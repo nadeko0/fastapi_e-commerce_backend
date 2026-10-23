@@ -68,7 +68,7 @@ from app.schemas.user import (
     GDPRExportData,
     LogoutRequest,
     PasswordReset,
-    PasswordUpdate,
+    PasswordResetConfirm,
     RefreshTokenRequest,
     Token,
     UserCreate,
@@ -1115,7 +1115,7 @@ async def validate_reset_token(
 )
 async def reset_password(
     token: str,
-    new_password: PasswordUpdate,
+    new_password: PasswordResetConfirm,
     request: Request,
     db: DbSession,
 ):
