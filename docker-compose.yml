@@ -66,6 +66,12 @@ services:
       context: .
       dockerfile: Dockerfile
     command: ["celery", "-A", "app.tasks", "worker", "--loglevel=info"]
+    # `docker stop` sends SIGTERM, a Celery warm shutdown: running tasks
+    # finish. After stop_grace_period (default 10 s) Docker sends SIGKILL,
+    # and a task killed mid-run is redelivered only after the broker's
+    # visibility_timeout (1 h, acks_late). task_time_limit is 300 s, so wait
+    # 330 s (hard limit plus margin).
+    stop_grace_period: 330s
     env_file:
       - .env
     # The unprivileged role (docker/postgres/initdb/10-app-role.sh), not
