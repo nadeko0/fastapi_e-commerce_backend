@@ -462,9 +462,9 @@ async def add_to_cart(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Not enough stock available"
-        )
+        ) from None
     except CartFullError as error:
-        raise _cart_full(error)
+        raise _cart_full(error) from None
 
     cart = _cart_or_503(cart)
     _sync_guest_cart_cookie(response, owner, cart)
@@ -509,12 +509,12 @@ async def update_cart_item(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Item not in cart"
-        )
+        ) from None
     except InsufficientStockError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Not enough stock available"
-        )
+        ) from None
 
     cart = _cart_or_503(cart)
     _sync_guest_cart_cookie(response, owner, cart)
@@ -548,7 +548,7 @@ async def remove_from_cart(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Item not in cart"
-        )
+        ) from None
 
     cart = _cart_or_503(cart)
     _sync_guest_cart_cookie(response, owner, cart)

@@ -282,7 +282,7 @@ class AsyncRedisService:
         try:
             return await self._atomic_mutate_cart(user_id, mutator, must_exist=True)
         except CartNotFoundError:
-            raise ItemNotInCartError(product_id)
+            raise ItemNotInCartError(product_id) from None
 
     async def remove_from_cart_atomic(
         self, user_id: CartOwnerRef, product_id: int, variant_id: int | None = None
@@ -292,7 +292,7 @@ class AsyncRedisService:
                 user_id, codec.remove_item_mutator(product_id, variant_id), must_exist=True
             )
         except CartNotFoundError:
-            raise ItemNotInCartError(product_id)
+            raise ItemNotInCartError(product_id) from None
 
     async def clear_cart_atomic(self, user_id: CartOwnerRef) -> Cart | None:
         try:

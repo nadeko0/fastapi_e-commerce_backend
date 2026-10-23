@@ -380,7 +380,7 @@ async def check_login_attempt(email: str, request: Request) -> None:
                 "retry_after": LOGIN_UNAVAILABLE_RETRY_AFTER,
             },
             headers={"Retry-After": str(LOGIN_UNAVAILABLE_RETRY_AFTER)},
-        )
+        ) from e
     if retry_after:
         raise too_many_requests("Too many failed login attempts", retry_after)
 

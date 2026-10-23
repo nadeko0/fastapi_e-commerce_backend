@@ -659,7 +659,7 @@ class StripePaymentProvider(PaymentProvider):
         try:
             timestamp = int(timestamp_raw)
         except ValueError:
-            raise SignatureVerificationError("Invalid timestamp in signature header", sig_header)
+            raise SignatureVerificationError("Invalid timestamp in signature header", sig_header) from None
 
         expected = self.sign_payload(payload, webhook_secret, timestamp=timestamp).split(
             ",v1="

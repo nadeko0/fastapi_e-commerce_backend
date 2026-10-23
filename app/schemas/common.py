@@ -158,7 +158,7 @@ class CartItem(BaseModel):
             # More digits than a price can have (1E+40, say). Raised as
             # a validation error so a stored cart holding one is handled
             # like any other unreadable cart instead of as a 500.
-            raise ValueError("not a valid price")
+            raise ValueError("not a valid price") from None
 
 
 CART_LINE_PRODUCT_UNAVAILABLE = "product_unavailable"

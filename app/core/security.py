@@ -271,7 +271,7 @@ async def get_current_user(
             raise credentials_exception
 
     except jwt.PyJWTError:
-        raise credentials_exception
+        raise credentials_exception from None
 
     if await is_token_blacklisted(_blacklist_id(token, payload)):
         raise credentials_exception
@@ -421,7 +421,7 @@ async def rotate_refresh_token(token: str, db: AsyncSession) -> tuple[str, str]:
             options={"require": REFRESH_TOKEN_REQUIRED_CLAIMS},
         )
     except jwt.PyJWTError:
-        raise RefreshTokenError("Could not validate refresh token")
+        raise RefreshTokenError("Could not validate refresh token") from None
 
     if payload.get("type") != "refresh":
         raise RefreshTokenError("Not a refresh token")
