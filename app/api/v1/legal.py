@@ -1,9 +1,9 @@
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api import deps
+from app.core import database
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.security import get_current_active_user, verify_password_async
@@ -246,19 +246,19 @@ def get_cookie_policy():
         last_updated=current_time
     ))
 
-def _load_user(db: Session, user_id: int) -> User:
-    """Load the authenticated user in this route's own session.
+async def _load_user(db: AsyncSession, user_id: int) -> User:
+    """Load the authenticated user in this route's session.
 
-    current_user (from get_current_active_user) is a detached snapshot: it
-    belongs to no session, so changing it and committing `db` persists
-    nothing. These routes used to get away with exactly that, because the
-    auth dependency resolved through the same deps.get_db as they do and
-    FastAPI's per-request dependency cache handed both the same session.
-    Auth now loads the user through its own AsyncSession, so a route that
-    changes the user has to load the row itself - the same pattern as
-    update_consent / delete_user_data in app/api/v1/users.py.
+    current_user (from get_current_active_user) is a detached snapshot:
+    get_current_user expunges it, so changing it and committing `db`
+    persists nothing. The routes depend on database.get_async_db, the very
+    callable get_current_user uses, so FastAPI's per-request dependency cache
+    hands both the same AsyncSession (idle at route start): loading the row
+    here attaches it to that session, and the service's commit stores the
+    change. Same pattern as update_consent / delete_user_data in
+    app/api/v1/users.py.
     """
-    user = db.query(User).filter(User.id == user_id).first()
+    user = await db.get(User, user_id)
     if user is None:
         # Authenticated a moment ago, gone now (hard-deleted in between).
         raise HTTPException(status_code=404, detail="User not found")
@@ -269,7 +269,7 @@ def _load_user(db: Session, user_id: int) -> User:
 async def update_user_consent(
     consent_update: ConsentUpdate,
     request: Request,
-    db: Session = Depends(deps.get_db),
+    db: AsyncSession = Depends(database.get_async_db),
     current_user = Depends(get_current_active_user)
 ):
     """
@@ -283,10 +283,10 @@ async def update_user_consent(
     The endpoint also maintains a complete history of consent changes.
     """
     gdpr_service = GDPRService(db)
-    updated_consents = gdpr_service.update_user_consent(
+    updated_consents = await gdpr_service.update_user_consent(
         # Loaded through `db`: the service mutates this object and commits
         # `db` (see _load_user).
-        user=_load_user(db, current_user.id),
+        user=await _load_user(db, current_user.id),
         consent_update=consent_update,
         # request.client can be None (e.g. some ASGI transports/test
         # clients don't set it) - every other endpoint in this codebase that
@@ -314,7 +314,7 @@ async def update_user_consent(
 )
 async def request_personal_data(
     request_data: DataRequest,
-    db: Session = Depends(deps.get_db),
+    db: AsyncSession = Depends(database.get_async_db),
     current_user = Depends(get_current_active_user)
 ):
     """
@@ -345,7 +345,7 @@ async def request_personal_data(
         # Deactivates the user and commits `db`, so it needs the row loaded
         # through `db` (see _load_user).
         request_id = await gdpr_service.process_data_deletion(
-            _load_user(db, current_user.id)
+            await _load_user(db, current_user.id)
         )
     else:
         raise HTTPException(
@@ -361,7 +361,6 @@ async def request_personal_data(
 
 @router.get("/consent-status", response_model=APIResponse[UserConsent])
 async def get_consent_status(
-    db: Session = Depends(deps.get_db),
     current_user = Depends(get_current_active_user)
 ):
     """
@@ -372,18 +371,17 @@ async def get_consent_status(
     * Timestamps of consent changes
     * Complete consent history
     """
-    gdpr_service = GDPRService(db)
+    gdpr_service = GDPRService()
     return APIResponse.success_response(UserConsent(**gdpr_service.get_consent_status(current_user)))
 
 @router.get("/data-retention", response_model=APIResponse[dict])
 async def check_data_retention(
-    db: Session = Depends(deps.get_db),
     current_user = Depends(get_current_active_user)
 ):
     """
     Check if user data is within the retention period.
     """
-    gdpr_service = GDPRService(db)
+    gdpr_service = GDPRService()
     is_valid = gdpr_service.validate_retention_period(current_user)
     return APIResponse.success_response({
         "within_retention_period": is_valid,

@@ -1,14 +1,15 @@
 """One session dependency, one behaviour on a database error.
 
 The legal router used to depend on app.api.deps.get_db, which only closed the
-session, while every other sync route used app.core.database.get_db, which
-rolls back and answers a generic 500 without the SQL. A database error in a
-legal route therefore escaped as an unhandled exception, and deps.get_db hid
-a failing SessionLocal() behind an UnboundLocalError.
+session, while every other route used the rolling-back dependency with the
+generic 500. A database error in a legal route therefore escaped as an
+unhandled exception, and deps.get_db hid a failing SessionLocal() behind an
+UnboundLocalError. The legal routes now depend on database.get_async_db,
+which rolls back and answers a generic 500 without the SQL; deps.get_db
+still exists and keeps its UnboundLocalError test.
 """
 
 import pytest
-from conftest import TestingSessionLocal
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
@@ -39,19 +40,7 @@ def test_get_db_reports_the_real_error_when_the_session_cannot_be_created(monkey
         next(dependency)
 
 
-@pytest.fixture
-def real_db_dependencies(monkeypatch):
-    """Run the real session dependencies (conftest overrides them) against
-    the test database."""
-    monkeypatch.setattr(deps, "SessionLocal", TestingSessionLocal)
-    monkeypatch.setattr(database_module, "SessionLocal", TestingSessionLocal)
-    for dependency in (deps.get_db, database_module.get_db):
-        monkeypatch.delitem(app.dependency_overrides, dependency, raising=False)
-
-
-def test_database_error_in_a_legal_route_answers_like_any_other_sync_route(
-    client, real_db_dependencies, monkeypatch
-):
+def test_database_error_in_a_legal_route_answers_like_any_other_async_route(client, monkeypatch):
     payload = {
         "email": "legal.user@example.com",
         "password": "Str0ngPass1",
@@ -66,7 +55,10 @@ def test_database_error_in_a_legal_route_answers_like_any_other_sync_route(
         data={"username": payload["email"], "password": payload["password"]},
     ).json()["data"]["access_token"]
 
-    monkeypatch.setattr("app.api.v1.legal._load_user", _db_error)
+    async def failing_load_user(*_args, **_kwargs):
+        _db_error()
+
+    monkeypatch.setattr("app.api.v1.legal._load_user", failing_load_user)
     with TestClient(app, raise_server_exceptions=False) as lenient:
         legal = lenient.post(
             f"{LEGAL_PREFIX}/consent",
@@ -75,11 +67,11 @@ def test_database_error_in_a_legal_route_answers_like_any_other_sync_route(
             headers={"Authorization": f"Bearer {token}"},
         )
 
-    # The reference: a route on app.core.database.get_db failing the same way.
+    # The reference: a route on database.get_async_db failing the same way.
     reference_app = FastAPI()
 
     @reference_app.get("/reference")
-    def reference(db=Depends(database_module.get_db)):
+    async def reference(db=Depends(database_module.get_async_db)):
         _db_error()
 
     with TestClient(reference_app, raise_server_exceptions=False) as lenient:

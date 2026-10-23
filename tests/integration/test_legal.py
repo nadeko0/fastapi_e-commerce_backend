@@ -305,13 +305,12 @@ def test_data_request_rejects_blacklisted_token(client):
 # --- Regression: the routes that change the user must persist the change ----
 #
 # POST /legal/consent and POST /legal/data-request (deletion) mutate the
-# user. They used to mutate current_user itself and commit their own `db`,
-# which only worked because the auth dependency happened to resolve through
-# the same deps.get_db and so shared that session. Auth now loads the user
-# through its own AsyncSession and returns a detached object, so these
-# routes load the row in their own session. The tests below check what is
-# actually stored, through a separate session and through later requests -
-# the response alone would look right even if nothing had been saved.
+# user. current_user is a detached snapshot (get_current_user expunges it),
+# so these routes load the row again in the session they share with the auth
+# dependency (both depend on database.get_async_db) and commit that session.
+# The tests below check what is actually stored, through a separate session
+# and through later requests - the response alone would look right even if
+# nothing had been saved.
 
 
 def _stored_user(db_session, email="legal.user@example.com"):
@@ -432,11 +431,16 @@ def test_data_request_export_leaves_the_account_untouched(client, db_session, mo
 
 def test_consent_update_for_a_user_deleted_mid_request_is_a_404(client, db_session, monkeypatch):
     # Authenticated, then gone before the route loads the row itself (the
-    # route's lookup is the only Query.first() of the request).
-    import sqlalchemy.orm
+    # route's lookup is the only AsyncSession.get() of the request; auth
+    # reads the user with a select).
+    from sqlalchemy.ext.asyncio import AsyncSession
 
     token = _register_and_login(client, _valid_registration_payload())
-    monkeypatch.setattr(sqlalchemy.orm.Query, "first", lambda self: None)
+
+    async def _gone(self, *args, **kwargs):
+        return None
+
+    monkeypatch.setattr(AsyncSession, "get", _gone)
 
     response = client.post(
         f"{LEGAL_PREFIX}/consent",
