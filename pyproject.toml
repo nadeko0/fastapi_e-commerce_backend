@@ -35,7 +35,14 @@ dev = [
     "httpx2>=2.13.1",
 ]
 
-[tool.pytest.ini_options]
+[tool.pytest]
+minversion = "9.0"
+# Not `strict = true`: it also enables strict_parametrization_ids, which
+# rejects duplicate generated ids in test_redis_parity.py and test_catalog_money.py.
+strict_config = true
+strict_markers = true
+strict_xfail = true
+addopts = ["-ra"]
 testpaths = ["tests"]
 pythonpath = ["."]
 filterwarnings = [
