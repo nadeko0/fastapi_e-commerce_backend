@@ -87,7 +87,7 @@ def cart_ttl(user_id: CartOwnerRef | None = None) -> timedelta:
 
 def serialize(data: Any) -> str:
     if isinstance(data, (Cart, CartItem)) or hasattr(data, 'model_dump'):
-        return json.dumps(data.model_dump(mode='json'), default=str)
+        return data.model_dump_json()
     return json.dumps(data, default=str)
 
 
