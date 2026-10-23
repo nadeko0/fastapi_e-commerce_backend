@@ -71,11 +71,16 @@ def test_every_foreign_key_column_has_an_index():
     assert unindexed == []
 
 
-def test_there_is_one_head_and_it_follows_the_previous_one():
+def test_there_is_one_head_and_the_migration_follows_the_previous_one():
     config = Config(str(ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(ROOT / "migrations"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == [REVISION]
+    # A later migration may follow this one: it need not be the head, but the
+    # history must stay linear and this revision must be part of it.
+    (head,) = script.get_heads()
+    assert REVISION in {r.revision for r in script.iterate_revisions(head, "base")}
+    assert script.get_revision(REVISION).down_revision == "ada27dd39537"
+    assert _migration().revision == REVISION
     assert _migration().down_revision == "ada27dd39537"
 
 
