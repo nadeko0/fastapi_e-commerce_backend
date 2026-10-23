@@ -1152,7 +1152,7 @@ def test_admin_create_variant_rejects_invalid_fields(client, db_session, payload
     assert db_session.query(ProductVariant).count() == 0
 
 
-def test_admin_variant_price_override_is_rounded_to_cents(client, db_session):
+def test_admin_variant_price_override_with_a_fraction_of_a_cent_is_422(client, db_session):
     admin = _make_admin(db_session)
     admin_token = _login_as(client, admin.email, "AdminPass1")
     category = _make_category(db_session)
@@ -1164,7 +1164,9 @@ def test_admin_variant_price_override_is_rounded_to_cents(client, db_session):
         headers=_auth_headers(admin_token),
     )
 
-    assert response.json()["data"]["price_override"] == "10.00"
+    # Rounded to 10.00 before; a fraction of a cent is refused, not rounded away.
+    assert response.status_code == 422
+    assert db_session.query(ProductVariant).count() == 0
 
 
 def test_admin_update_variant_to_a_sku_another_variant_holds_is_409(client, db_session):
