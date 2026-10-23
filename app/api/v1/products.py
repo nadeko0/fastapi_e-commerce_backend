@@ -17,7 +17,7 @@ from app.schemas.category import (
     CategoryTreeNode,
     CategoryTreeResponse,
 )
-from app.schemas.common import APIResponse, PaginationParams
+from app.schemas.common import APIResponse, Int32, PaginationParams
 from app.schemas.product import (
     ProductFilter,
     ProductListResponse,
@@ -94,7 +94,7 @@ _product_filter.__signature__ = inspect.signature(ProductFilter)
 @router.get("/categories", response_model=APIResponse[CategoryListResponse])
 async def list_categories(
     pagination: PaginationParams = Depends(),
-    parent_id: Optional[int] = None,
+    parent_id: Optional[Int32] = None,
     db: AsyncSession = Depends(get_async_db),
 ):
     """List categories, optionally filtered by parent, with pagination."""
@@ -172,7 +172,7 @@ async def get_category_tree(
     responses={404: {"description": "Category not found"}},
 )
 async def get_category(
-    category_id: int,
+    category_id: Int32,
     db: AsyncSession = Depends(get_async_db),
 ):
     """Retrieve a single category by ID."""
@@ -298,7 +298,7 @@ async def search_products(
     responses={404: {"description": "Product not found"}},
 )
 async def get_product(
-    product_id: int,
+    product_id: Int32,
     db: AsyncSession = Depends(get_async_db),
     redis: RedisService = Depends(),
 ):

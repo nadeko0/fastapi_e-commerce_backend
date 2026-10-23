@@ -21,12 +21,14 @@ from app.schemas.common import (
     CART_LINE_INSUFFICIENT_STOCK,
     CART_LINE_PRODUCT_UNAVAILABLE,
     CART_LINE_VARIANT_UNAVAILABLE,
+    INT32_MAX,
     APIResponse,
     Cart,
     CartPriceChange,
     CartResponse,
     CartValidationIssue,
     CartValidationResponse,
+    Int32,
     cart_unit_price,
     resolve_cart_line,
 )
@@ -389,11 +391,11 @@ async def get_user_cart(
 async def add_to_cart(
     request: Request,
     response: Response,
-    product_id: int,
+    product_id: Int32,
     # ge=1: 0 or a negative quantity was accepted, and could take a line to
     # zero or below - which made the whole stored cart unreadable.
-    quantity: int = Query(1, ge=1),
-    variant_id: Optional[int] = None,
+    quantity: int = Query(1, ge=1, le=INT32_MAX),
+    variant_id: Optional[Int32] = None,
     owner: CartOwner = Depends(get_cart_owner),
     db: AsyncSession = Depends(get_async_db),
     redis: RedisService = Depends(),
@@ -474,9 +476,9 @@ async def add_to_cart(
 )
 async def update_cart_item(
     response: Response,
-    product_id: int,
-    quantity: int = Query(..., ge=1),
-    variant_id: Optional[int] = None,
+    product_id: Int32,
+    quantity: int = Query(..., ge=1, le=INT32_MAX),
+    variant_id: Optional[Int32] = None,
     owner: CartOwner = Depends(get_cart_owner),
     db: AsyncSession = Depends(get_async_db),
     redis: RedisService = Depends(),
@@ -523,8 +525,8 @@ async def update_cart_item(
 )
 async def remove_from_cart(
     response: Response,
-    product_id: int,
-    variant_id: Optional[int] = None,
+    product_id: Int32,
+    variant_id: Optional[Int32] = None,
     owner: CartOwner = Depends(get_cart_owner),
     db: AsyncSession = Depends(get_async_db),
     redis: RedisService = Depends(),

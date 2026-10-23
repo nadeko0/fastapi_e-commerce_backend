@@ -28,7 +28,7 @@ from app.schemas.category import (
     CategoryCreate,
     CategoryResponse,
 )
-from app.schemas.common import APIResponse, PaginationParams
+from app.schemas.common import APIResponse, Int32, PaginationParams
 from app.schemas.order import (
     OrderListResponse,
     OrderResponse,
@@ -161,7 +161,7 @@ async def create_product(
     },
 )
 async def update_product(
-    product_id: int,
+    product_id: Int32,
     product: ProductUpdate,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
@@ -219,7 +219,7 @@ async def update_product(
     },
 )
 async def delete_product(
-    product_id: int,
+    product_id: Int32,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
     redis: RedisService = Depends(),
@@ -525,7 +525,7 @@ def _commit_variant(db: Session, sku: Optional[str], variant_id: Optional[int] =
     },
 )
 async def create_product_variant(
-    product_id: int,
+    product_id: Int32,
     variant: ProductVariantCreate,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
@@ -562,7 +562,7 @@ async def create_product_variant(
     },
 )
 async def list_product_variants(
-    product_id: int,
+    product_id: Int32,
     # Every route on this router needs it: this one used to answer anyone,
     # inactive variants, SKUs and exact stock levels included.
     current_user: User = Depends(get_current_admin_user),
@@ -595,8 +595,8 @@ async def list_product_variants(
     },
 )
 async def update_product_variant(
-    product_id: int,
-    variant_id: int,
+    product_id: Int32,
+    variant_id: Int32,
     variant: ProductVariantUpdate,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
@@ -644,7 +644,7 @@ async def update_product_variant(
     responses={403: {"description": "Admin privileges required"}},
 )
 async def list_reconciliation_discrepancies(
-    order_id: Optional[int] = None,
+    order_id: Optional[Int32] = None,
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
@@ -691,7 +691,7 @@ async def list_reconciliation_discrepancies(
 )
 async def run_reconciliation(
     response: Response,
-    order_id: Optional[int] = None,
+    order_id: Optional[Int32] = None,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_payment_provider),

@@ -13,6 +13,8 @@ from pydantic import (
     field_validator,
 )
 
+from app.schemas.common import Int32, Int32Max
+
 # An image URL is validated as an HttpUrl but kept as the plain string: it
 # is stored in a string-array column and returned as that string. Without
 # the serializer, Pydantic sees a str where the field's schema says HttpUrl
@@ -37,8 +39,8 @@ class ProductBase(BaseModel):
     name: str = Field(..., min_length=3, max_length=200)
     description: str = Field(..., min_length=10)
     price: Decimal = Field(..., ge=0)
-    stock_quantity: int = Field(..., ge=0)
-    category_id: int
+    stock_quantity: Int32Max = Field(..., ge=0)
+    category_id: Int32
     images: List[ImageUrl] = Field(default_factory=list)
     characteristics: Dict[str, ProductCharacteristic] = Field(default_factory=dict)
 
@@ -64,8 +66,8 @@ class ProductUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=3, max_length=200)
     description: Optional[str] = Field(None, min_length=10)
     price: Optional[Decimal] = Field(None, ge=0)
-    stock_quantity: Optional[int] = Field(None, ge=0)
-    category_id: Optional[int] = None
+    stock_quantity: Optional[Int32Max] = Field(None, ge=0)
+    category_id: Optional[Int32] = None
     images: Optional[List[ImageUrl]] = None
     characteristics: Optional[Dict[str, ProductCharacteristic]] = None
 
@@ -119,7 +121,7 @@ class ProductListResponse(BaseModel):
 
 class ProductFilter(BaseModel):
     """Schema for product filtering"""
-    category_id: Optional[int] = None
+    category_id: Optional[Int32] = None
     min_price: Optional[Decimal] = Field(None, ge=0)
     max_price: Optional[Decimal] = Field(None, ge=0)
     in_stock: Optional[bool] = None
@@ -127,7 +129,7 @@ class ProductFilter(BaseModel):
     # Bounded like ProductSearch.query: a search term, not a document.
     search_query: Optional[str] = Field(None, max_length=100)
     sort_by: Optional[str] = Field(None, pattern="^(name|price|created_at)_(asc|desc)$")
-    page: int = Field(1, ge=1)
+    page: Int32Max = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
 
     @field_validator('max_price')
@@ -141,8 +143,8 @@ class ProductFilter(BaseModel):
 class ProductSearch(BaseModel):
     """Schema for product search"""
     query: str = Field(..., min_length=3, max_length=100)
-    category_id: Optional[int] = None
-    page: int = Field(1, ge=1)
+    category_id: Optional[Int32] = None
+    page: Int32Max = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
 
 
@@ -156,7 +158,7 @@ class ProductVariantBase(BaseModel):
     sku: str = Field(..., min_length=1, max_length=100)
     attributes: Dict[str, Any] = Field(default_factory=dict)
     price_override: Optional[Decimal] = Field(None, ge=0)
-    stock_quantity: int = Field(0, ge=0)
+    stock_quantity: Int32Max = Field(0, ge=0)
     is_active: bool = True
 
     @field_validator('price_override')
@@ -174,7 +176,7 @@ class ProductVariantUpdate(BaseModel):
     sku: Optional[str] = Field(None, min_length=1, max_length=100)
     attributes: Optional[Dict[str, Any]] = None
     price_override: Optional[Decimal] = Field(None, ge=0)
-    stock_quantity: Optional[int] = Field(None, ge=0)
+    stock_quantity: Optional[Int32Max] = Field(None, ge=0)
     is_active: Optional[bool] = None
 
     @field_validator('sku', 'attributes', 'stock_quantity', 'is_active')

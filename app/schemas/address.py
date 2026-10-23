@@ -5,6 +5,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.common import Int32
+
 
 class AddressType(str, Enum):
     HOME = "home"
@@ -121,4 +123,4 @@ class AddressListResponse(BaseModel):
 
 class SetDefaultAddress(BaseModel):
     """Schema for setting an address as default"""
-    address_id: int = Field(..., description="ID of the address to set as default")
+    address_id: Int32 = Field(..., description="ID of the address to set as default")
