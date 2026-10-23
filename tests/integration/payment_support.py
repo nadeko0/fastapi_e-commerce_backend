@@ -18,16 +18,11 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
 
-from conftest import engine
-from sqlalchemy.orm import sessionmaker
 from stripe_event_support import deliver
 
-from app.api.deps import get_db as deps_get_db
 from app.core.clock import utc_now
 from app.core.config import settings
-from app.core.database import get_db as database_get_db
 from app.core.security import create_access_token, get_password_hash
-from app.main import app
 from app.models.address import Address
 from app.models.category import Category
 from app.models.order import Order
@@ -315,28 +310,6 @@ def payment_rows(shop: Shop, order_id):
 def order_state(shop: Shop, order_id):
     order = shop.order(order_id)
     return _value(order.status), _value(order.payment_status)
-
-
-_ProductionLikeSession = sessionmaker(
-    autocommit=False, autoflush=False, expire_on_commit=False, bind=engine
-)
-
-
-def _production_like_get_db():
-    db = _ProductionLikeSession()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def use_production_sessions(monkeypatch) -> None:
-    """Give the routes sessions configured like the app's own
-    (app/core/database.py: expire_on_commit=False). The suite's default
-    sessions reload every object after a commit, which hides a value read
-    before a provider call and written back after it."""
-    monkeypatch.setitem(app.dependency_overrides, database_get_db, _production_like_get_db)
-    monkeypatch.setitem(app.dependency_overrides, deps_get_db, _production_like_get_db)
 
 
 def reset_provider() -> None:

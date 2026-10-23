@@ -30,7 +30,6 @@ from payment_support import (
     order_state,
     payment_rows,
     reset_provider,
-    use_production_sessions,
 )
 from sqlalchemy import event
 from sqlalchemy.orm import Session
@@ -105,7 +104,6 @@ def _row_clocks_follow_freezegun():
 
 @pytest.fixture
 def shop(client, db_session, monkeypatch, _row_clocks_follow_freezegun):
-    use_production_sessions(monkeypatch)
     for name in ("send_order_confirmation_email", "send_order_status_update_email",
                  "send_order_cancellation_email"):
         monkeypatch.setattr(f"app.api.v1.orders.{name}", lambda *a, **k: True)

@@ -61,8 +61,6 @@ from sqlalchemy.pool import NullPool, StaticPool
 import app.core.database as database_module
 import app.models  # noqa: F401 registers all tables on Base
 import app.services.redis_async as redis_async_module
-from app.api.deps import get_db as deps_get_db
-from app.core.database import get_db as database_get_db
 from app.main import app
 from app.models.base import Base
 from app.services.redis import RedisService
@@ -216,20 +214,6 @@ database_module.AsyncSessionLocal = async_sessionmaker(
 )
 
 
-def _override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-# The app has two separate get_db implementations (app.core.database and
-# app.api.deps) used inconsistently across routers; both must be overridden.
-app.dependency_overrides[database_get_db] = _override_get_db
-app.dependency_overrides[deps_get_db] = _override_get_db
-
-
 # Which tables a test wrote to. A test usually touches a handful of the ~25
 # tables, and cleaning only those keeps the per-test cost small. Writes are
 # noticed where every statement of every engine passes (the sync engine, the
@@ -351,9 +335,8 @@ def fake_redis(monkeypatch):
 def _session_local_is_the_test_database(monkeypatch):
     """app.core.database.SessionLocal (what session_scope() opens, e.g. for
     reconcile_payments run in a worker thread) is built from the production
-    DATABASE_URI. Point it at the test database, like the dependency
-    overrides do for get_db and the factory swap does for AsyncSessionLocal;
-    otherwise code that opens its own sync session would reach (or fail to
+    DATABASE_URI. Point it at the test database, like the factory swap does
+    for AsyncSessionLocal; otherwise code that opens its own sync session would reach (or fail to
     reach) a real database."""
     monkeypatch.setattr(database_module, "SessionLocal", TestingSessionLocal)
 
@@ -390,10 +373,9 @@ def db_session():
 @pytest.fixture
 def tasks_db(monkeypatch):
     """app/tasks.py builds its own SessionLocal bound to settings.DATABASE_URI
-    (real Postgres) and calls next(get_db()) inside each Celery task body -
-    it never goes through app.core.database.get_db/app.api.deps.get_db, so
-    the dependency_overrides above don't reach it. Point its SessionLocal at
-    the same in-memory SQLite engine the rest of the suite uses instead."""
+    (real Postgres) and opens its own session inside each Celery task body,
+    so the AsyncSessionLocal swap above does not reach it. Point its
+    SessionLocal at the same in-memory SQLite engine the rest of the suite uses instead."""
     monkeypatch.setattr("app.tasks.SessionLocal", TestingSessionLocal)
 
 

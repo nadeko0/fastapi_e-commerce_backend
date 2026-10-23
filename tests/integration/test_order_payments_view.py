@@ -6,7 +6,7 @@ success for a cancelled order, a refund that failed after it was
 recorded). Nothing else in the API shows these.
 """
 import pytest
-from payment_support import PAY_DECLINED, Shop, reset_provider, use_production_sessions
+from payment_support import PAY_DECLINED, Shop, reset_provider
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +18,6 @@ def _fresh_provider():
 
 @pytest.fixture
 def shop(client, db_session, monkeypatch):
-    use_production_sessions(monkeypatch)
     return Shop(client, db_session)
 
 
