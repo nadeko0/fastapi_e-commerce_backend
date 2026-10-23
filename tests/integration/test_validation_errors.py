@@ -96,10 +96,10 @@ def test_missing_field_422_does_not_echo_the_body(client):
 
 
 def test_password_reset_422_does_not_echo_new_password(client):
-    # current_password missing, new_password too weak: both are refused.
+    # new_password is on the blocklist (no composition rules since 3.3.0): refused.
     _assert_same_but_input(
         client, "POST", f"{USERS}/password/reset/sometoken",
-        secret="NoDigitsHere", json={"new_password": "NoDigitsHere"},
+        secret="qwertyuiop", json={"new_password": "qwertyuiop"},
     )
 
 
