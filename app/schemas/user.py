@@ -194,6 +194,13 @@ class PasswordReset(BaseModel):
     def normalise_email(cls, v):
         return normalize_email(v) if isinstance(v, str) else v
 
+class TokenBody(BaseModel):
+    """Body of the routes that take an emailed token (email verification,
+    reset-token check): the successors of the GET routes that carried it in
+    the URL, where it ends up in access logs, browser history and Referer."""
+    token: str = Field(..., min_length=1)
+
+
 class PasswordResetConfirm(BaseModel):
     """Body of the reset-by-token route: the token proves the right to set
     a password, so only the new one is sent. Extra fields (an old client

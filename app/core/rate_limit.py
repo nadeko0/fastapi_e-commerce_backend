@@ -79,6 +79,8 @@ _ROUTE_LIMITS = {
     ("GET", "/users/password/reset/{token}"): "RATE_LIMIT_AUTH",
     ("POST", "/users/password/reset/{token}"): "RATE_LIMIT_AUTH",
     ("GET", "/users/verify-email/{token}"): "RATE_LIMIT_AUTH",
+    ("POST", "/users/verify-email"): "RATE_LIMIT_AUTH",
+    ("POST", "/users/password/reset-token/validate"): "RATE_LIMIT_AUTH",
     ("POST", "/users/verify-email/resend"): "RATE_LIMIT_AUTH",
     ("POST", "/orders"): "RATE_LIMIT_CHECKOUT",
     ("POST", "/orders/{order_id}/pay"): "RATE_LIMIT_CHECKOUT",

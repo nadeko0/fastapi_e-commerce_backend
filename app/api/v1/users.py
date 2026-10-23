@@ -75,6 +75,7 @@ from app.schemas.user import (
     PasswordResetConfirm,
     RefreshTokenRequest,
     Token,
+    TokenBody,
     UserCreate,
     UserResponse,
     UserUpdate,
@@ -219,8 +220,34 @@ async def verify_email(
     token: str,
     db: DbSession,
 ):
-    """Confirm a user's email address using a verification token."""
+    """Confirm a user's email address using a verification token.
 
+    Deprecated: the token is in the URL. Use `POST /users/verify-email` with
+    the token in the body."""
+
+    return await _confirm_email(token, db)
+
+
+@router.post(
+    "/verify-email",
+    response_model=APIResponse[dict],
+    responses={
+        400: {"description": "Invalid or expired verification token"},
+        404: {"description": "User not found"},
+    },
+)
+async def verify_email_by_body(
+    payload: TokenBody,
+    db: DbSession,
+):
+    """Confirm a user's email address using a verification token sent in the
+    body (the successor of `GET /users/verify-email/{token}`; same effect and
+    responses)."""
+
+    return await _confirm_email(payload.token, db)
+
+
+async def _confirm_email(token: str, db: AsyncSession):
     email = verify_email_token(token)
     if not email:
         raise HTTPException(
@@ -1126,8 +1153,34 @@ async def validate_reset_token(
     token: str,
     db: DbSession,
 ):
-    """Check whether a password reset token is still valid."""
+    """Check whether a password reset token is still valid.
 
+    Deprecated: the token is in the URL. Use
+    `POST /users/password/reset-token/validate` with the token in the body."""
+
+    return await _check_reset_token(token, db)
+
+
+@router.post(
+    "/password/reset-token/validate",
+    response_model=APIResponse[dict],
+    responses={
+        400: {"description": "Invalid or expired reset token"},
+        404: {"description": "User not found"},
+    },
+)
+async def validate_reset_token_by_body(
+    payload: TokenBody,
+    db: DbSession,
+):
+    """Check whether a password reset token, sent in the body, is still valid
+    (the successor of `GET /users/password/reset/{token}`; same effect and
+    responses). It changes nothing."""
+
+    return await _check_reset_token(payload.token, db)
+
+
+async def _check_reset_token(token: str, db: AsyncSession):
     claims = verify_password_reset_token(token)
     if not claims:
         raise _invalid_reset_token()
