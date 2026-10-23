@@ -8,10 +8,12 @@ from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.core import database
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.database import get_db
@@ -63,6 +65,17 @@ from app.services.redis import RedisService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/orders", tags=["orders"])
+
+# Everything OrderResponse reads off an order: its address, its lines, and
+# each line's product and variant (variant_sku). On an AsyncSession a lazy
+# load raises MissingGreenlet, so every query whose result is serialized
+# carries these options.
+_ORDER_RESPONSE_LOADS = (
+    joinedload(Order.shipping_address),
+    selectinload(Order.items).joinedload(OrderItem.product),
+    selectinload(Order.items).joinedload(OrderItem.variant),
+)
+
 
 @router.post(
     "",
@@ -299,21 +312,19 @@ async def create_order(
 async def get_order(
     order_id: Int32,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """Retrieve a single order belonging to the current user."""
 
     # Eager-load shipping_address and items->product: OrderResponse
     # serializes both, so without this each access is a separate lazy-load
-    # query.
-    order = db.query(Order).options(
-        joinedload(Order.shipping_address),
-        selectinload(Order.items).joinedload(OrderItem.product),
-        selectinload(Order.items).joinedload(OrderItem.variant),
-    ).filter(
-        Order.id == order_id,
-        Order.user_id == current_user.id
-    ).first()
+    # query (and on an AsyncSession a lazy load is an error, not a query).
+    order = (await db.execute(
+        select(Order).options(*_ORDER_RESPONSE_LOADS).where(
+            Order.id == order_id,
+            Order.user_id == current_user.id,
+        ).limit(1)
+    )).scalars().first()
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1391,7 +1402,7 @@ async def refund_payment(
 async def list_order_payments(
     order_id: Int32,
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """Every payment attempt of an order, oldest first, with its refunds and
     disputes (admin only). Amounts are in major units, as everywhere in the
@@ -1399,20 +1410,28 @@ async def list_order_payments(
     for a cancelled order or for the wrong amount) or on a refund (one that
     failed after it was recorded) marks what a person has to reconcile; an
     open dispute (closed_at null) holds the order."""
-    order = db.query(Order).filter(Order.id == order_id).first()
+    order = (await db.execute(
+        select(Order).where(Order.id == order_id).limit(1)
+    )).scalars().first()
     if not order:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
-    payments = db.query(Payment).filter(Payment.order_id == order.id).order_by(Payment.id).all()
+    payments = (await db.execute(
+        select(Payment).where(Payment.order_id == order.id).order_by(Payment.id)
+    )).scalars().all()
     payment_ids = [p.id for p in payments]
-    refunds = db.query(PaymentRefund).filter(
-        PaymentRefund.payment_id.in_(payment_ids)
-    ).order_by(PaymentRefund.id).all()
-    disputes = db.query(PaymentDispute).filter(
-        PaymentDispute.payment_id.in_(payment_ids)
-    ).order_by(PaymentDispute.id).all()
+    refunds = (await db.execute(
+        select(PaymentRefund).where(
+            PaymentRefund.payment_id.in_(payment_ids)
+        ).order_by(PaymentRefund.id)
+    )).scalars().all()
+    disputes = (await db.execute(
+        select(PaymentDispute).where(
+            PaymentDispute.payment_id.in_(payment_ids)
+        ).order_by(PaymentDispute.id)
+    )).scalars().all()
     return APIResponse.success_response([
         {
             "id": p.id,
@@ -1538,7 +1557,7 @@ def _has_open_dispute(db: Session, order_id: int, payment_id: Optional[int] = No
 )
 async def stripe_webhook(
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
     provider: PaymentProvider = Depends(get_payment_provider),
     stripe_signature: Optional[str] = Header(default=None, alias="Stripe-Signature"),
 ):
@@ -1595,8 +1614,11 @@ async def stripe_webhook(
     # payment helpers.
     from app.services import stripe_events
 
-    stored = stripe_events.store_event(
-        db,
+    # store_event is the one sync implementation (the Celery side uses the
+    # same module); it runs on the async connection through run_sync, and
+    # is looked up on the module so a test can replace it.
+    stored = await db.run_sync(
+        stripe_events.store_event,
         event.id,
         event.type,
         json.dumps(
@@ -1605,7 +1627,8 @@ async def stripe_webhook(
     )
     if not stored:
         return APIResponse.success_response({"status": "already_processed"})
-    stripe_events.enqueue_event(event.id)
+    # Publishing to the broker is blocking network IO (apply_async).
+    await run_in_threadpool(stripe_events.enqueue_event, event.id)
     return APIResponse.success_response({"status": "received"})
 
 
