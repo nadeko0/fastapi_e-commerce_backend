@@ -32,6 +32,8 @@ def _production(**overrides):
     values = {
         "ENVIRONMENT": "production",
         "PAYMENT_PROVIDER": "stripe",
+        # conftest lowers the cost to 4; a deployment must run at 12 or more.
+        "BCRYPT_ROUNDS": 12,
         "STRIPE_SECRET_KEY": REAL_LOOKING_SECRET_KEY,
         "STRIPE_WEBHOOK_SECRET": REAL_LOOKING_WEBHOOK_SECRET,
         "FRONTEND_URL": "https://shop.example",

@@ -72,6 +72,7 @@ RATE_LIMIT_PATTERN = r"^([1-9]\d*)/(?:([1-9]\d*) ?)?(second|minute|hour|day)s?$"
 # Secrets are checked (Settings.check_deployment_settings) everywhere but here: on a
 # developer's machine and in the test suite the .env.example placeholders
 # are fine.
+_BCRYPT_MIN_ROUNDS_DEPLOYED = 12
 _UNDEPLOYED_ENVIRONMENTS = frozenset({"development", "test"})
 # An HMAC key at least as long as the hash it keys (RFC 7518 3.2). 64 bytes,
 # what .env.example's `openssl rand -hex 32` produces, satisfies all three.
@@ -162,7 +163,8 @@ class Settings(BaseSettings):
     # that security margin and pay real wall-clock cost for it (~400ms per
     # hash at 12 rounds) - tests/conftest.py overrides this via
     # BCRYPT_ROUNDS=4 to keep the suite fast without weakening production.
-    BCRYPT_ROUNDS: int = 12
+    # bcrypt accepts 4 to 31; a deployment must not go below 12.
+    BCRYPT_ROUNDS: int = Field(12, ge=4, le=31)
     # How many bcrypt operations one worker process runs at the same time
     # (the rest wait their turn without blocking anything else). Unset keeps
     # the built-in default of 4 x CPU count per worker - see
@@ -523,6 +525,12 @@ class Settings(BaseSettings):
         problems = []
         if self.LOG_LEVEL == "DEBUG":
             problems.append("LOG_LEVEL must not be DEBUG outside development and test")
+        # Tests lower the cost to 4 for speed; a deployment with that cost would
+        # store password hashes that are cheap to brute-force.
+        if self.BCRYPT_ROUNDS < _BCRYPT_MIN_ROUNDS_DEPLOYED:
+            problems.append(
+                f"BCRYPT_ROUNDS must be at least {_BCRYPT_MIN_ROUNDS_DEPLOYED} outside development and test"
+            )
         # The mock provider marks every order paid without taking any money.
         if self.PAYMENT_PROVIDER != "stripe":
             problems.append("PAYMENT_PROVIDER must be 'stripe' outside development and test")

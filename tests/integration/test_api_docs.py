@@ -29,6 +29,8 @@ _PRODUCTION_ENV = {
     "SMTP_PASSWORD": "an-smtp-app-password",
     "STRIPE_WEBHOOK_SECRET": "whsec_" + "w" * 32,
     "PAYMENT_PROVIDER": "stripe",
+    # conftest lowers the cost to 4; a deployment must run at 12 or more.
+    "BCRYPT_ROUNDS": "12",
     "FRONTEND_URL": "https://shop.example",
     "PUBLIC_BASE_URL": "https://api.shop.example",
     "STRIPE_SECRET_KEY": "stripe-secret-key-for-tests-not-a-real-key",
