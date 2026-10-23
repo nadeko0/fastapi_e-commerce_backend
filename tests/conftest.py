@@ -59,7 +59,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, StaticPool
 
 import app.core.database as database_module
-import app.models  # noqa: F401 registers all tables on Base
+import app.models  # registers all tables on Base
 import app.services.redis_async as redis_async_module
 from app.main import app
 from app.models.base import Base

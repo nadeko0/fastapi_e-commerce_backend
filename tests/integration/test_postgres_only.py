@@ -9,6 +9,7 @@ Alembic migrations run forward, back to nothing and forward again.
 They are skipped unless TEST_DATABASE_URL points at a server (see
 tests/conftest.py); CI's test-postgres job runs them.
 """
+import contextlib
 import os
 import subprocess
 import sys
@@ -158,10 +159,8 @@ def _run_holding_after_first_stock_update(actions):
         thread = threading.get_ident()
         if statement.startswith("UPDATE products SET stock_quantity") and thread not in seen:
             seen.add(thread)
-            try:
+            with contextlib.suppress(threading.BrokenBarrierError):
                 meeting.wait(timeout=3)
-            except threading.BrokenBarrierError:
-                pass
 
     def run(index):
         # A client of its own per request: the routes are async defs on a

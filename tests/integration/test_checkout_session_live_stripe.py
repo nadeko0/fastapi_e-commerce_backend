@@ -109,7 +109,8 @@ class TestCreateCheckoutSession:
         # success_url/cancel_url are mandatory params for
         # stripe.checkout.Session.create in `payment` mode - Stripe itself
         # rejects their absence, not just our own pre-validation.
-        with pytest.raises(Exception):
+        # B017: a live-Stripe test; the exact exception type is not pinned here.
+        with pytest.raises(Exception):  # noqa: B017
             provider.create_checkout_session(
                 amount=500,
                 currency="usd",

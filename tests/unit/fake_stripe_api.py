@@ -16,6 +16,7 @@ from https://docs.stripe.com/api/refunds/object. Where the documentation
 gives an error class but no error code, the code is left out (None), and
 the contract tests assert only what is documented.
 """
+import contextlib
 import copy
 import time
 import uuid
@@ -259,10 +260,9 @@ class FakeStripeAPI:
         if outcome is None:
             self._succeed(intent)
         else:
-            try:
+            # A decline is reported to the integration by webhook, not by a call.
+            with contextlib.suppress(stripe_error.CardError):
                 self._decline(intent, *outcome)
-            except stripe_error.CardError:
-                pass  # reported to the integration by webhook, not by a call
 
     @staticmethod
     def _succeed(intent):

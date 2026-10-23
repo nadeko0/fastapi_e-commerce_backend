@@ -61,7 +61,7 @@ def _assert_same_but_input(client, method, url, secret=None, **kwargs):
         assert secret in theirs.text  # the default really does echo it
     mine, default = ours.json()["detail"], theirs.json()["detail"]
     assert len(mine) == len(default) > 0
-    for got, want in zip(mine, default):
+    for got, want in zip(mine, default, strict=True):
         for key in ("type", "loc", "msg"):
             assert got[key] == want[key]
         assert set(got) <= {"type", "loc", "msg", "ctx", "url"}

@@ -41,9 +41,11 @@ def database():
 
 
 def _upgrade(engine):
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            _migration().upgrade()
+    with (
+        engine.begin() as connection,
+        Operations.context(MigrationContext.configure(connection)),
+    ):
+        _migration().upgrade()
 
 
 def test_the_migration_builds_the_table_of_the_model(database):
@@ -63,9 +65,11 @@ def test_the_migration_builds_the_table_of_the_model(database):
 def test_the_migration_can_be_undone(database):
     _upgrade(database)
 
-    with database.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            _migration().downgrade()
+    with (
+        database.begin() as connection,
+        Operations.context(MigrationContext.configure(connection)),
+    ):
+        _migration().downgrade()
 
     assert TABLE not in inspect(database).get_table_names()
 

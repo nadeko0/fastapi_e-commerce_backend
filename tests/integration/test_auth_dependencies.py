@@ -514,9 +514,9 @@ def test_reading_a_relationship_off_current_user_fails_loudly(client):
     user, _, _ = _resolve_current_user(token)
 
     with pytest.raises(DetachedInstanceError):
-        user.addresses
+        _ = user.addresses
     with pytest.raises(DetachedInstanceError):
-        user.orders
+        _ = user.orders
 
 
 def test_changing_current_user_persists_nothing(client, db_session):

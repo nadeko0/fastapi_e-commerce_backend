@@ -21,7 +21,7 @@ def _category(db, name, parent=None):
         name=name,
         parent_id=parent.id if parent else None,
         level=parent.level + 1 if parent else 0,
-        path=(parent.path + [parent.id]) if parent else [],
+        path=[*parent.path, parent.id] if parent else [],
     )
     db.add(category)
     db.commit()
