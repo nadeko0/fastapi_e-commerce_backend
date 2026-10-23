@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
@@ -10,7 +10,6 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1 import admin, cart, legal, orders, products, users
-from app.api.v1.cart import guest_cart_cookie_name
 from app.core import database
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
@@ -20,6 +19,7 @@ from app.core.forwarded import ForwardedClientMiddleware
 from app.core.logging_config import setup_logging
 from app.core.overload import InFlightLimitMiddleware
 from app.core.rate_limit import rate_limit
+from app.core.security_headers import SecurityHeadersMiddleware, server_error_handler
 from app.services.redis import RedisService
 from app.services.redis_async import close_async_redis, get_async_redis
 
@@ -79,47 +79,9 @@ register_error_handlers(app)
 # Registered before everything else, so it is the innermost middleware: the
 # 413 then passes back out through the security-headers and CORS layers like
 # any other response. Nothing outside it reads the body (the rate limiter is
-# a route dependency, not a middleware), and the in-flight limiter is still
-# outermost, so a request that is shed never gets this far.
+# a route dependency, not a middleware), and the in-flight limiter sits
+# outside it, so a request that is shed never gets this far.
 app.add_middleware(BodySizeLimitMiddleware, limit=settings.MAX_REQUEST_BODY_BYTES)
-
-# Responses of these prefixes carry tokens, personal data or a payment
-# client_secret: no cache may keep them (RFC 9111 section 5.2.2.5). So does
-# every response to a request that is authenticated (Authorization header)
-# or is a guest's own (guest-cart cookie), wherever it is routed.
-_NO_STORE_PREFIXES = tuple(
-    f"{settings.API_V1_STR}/{name}" for name in ("users", "orders", "cart", "admin")
-)
-
-
-def _needs_no_store(request: Request) -> bool:
-    path = request.url.path
-    if any(path == p or path.startswith(p + "/") for p in _NO_STORE_PREFIXES):
-        return True
-    return (
-        "authorization" in request.headers
-        or guest_cart_cookie_name() in request.cookies
-    )
-
-
-logger.debug("Adding security headers middleware")
-@app.middleware("http")
-async def add_security_headers(request, call_next):
-    response = await call_next(request)
-    if "cache-control" not in response.headers and _needs_no_store(request):
-        response.headers["Cache-Control"] = "no-store"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self';"
-        "img-src 'self' data: https:;"
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
-        "font-src 'self' https://cdn.jsdelivr.net;"
-    )
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=()"
-    return response
 
 logger.debug(f"Configuring CORS with origins: {settings.BACKEND_CORS_ORIGINS}")
 app.add_middleware(
@@ -134,11 +96,17 @@ app.add_middleware(
 # however the server was started (app/core/forwarded.py).
 app.add_middleware(ForwardedClientMiddleware)
 
-# Added last so it is the outermost layer: a request that is going to be
+# Outside everything but the security headers: a request that is going to be
 # shed should cost nothing - no rate-limit Redis call, no CORS handling.
 if settings.MAX_IN_FLIGHT_REQUESTS:
     logger.info(f"Limiting in-flight requests to {settings.MAX_IN_FLIGHT_REQUESTS} per worker")
     app.add_middleware(InFlightLimitMiddleware, limit=settings.MAX_IN_FLIGHT_REQUESTS)
+
+# Security headers on every response, the shed 503 and the 500 for an
+# unhandled exception included (app/core/security_headers.py). Added after
+# the in-flight limit so it is the outermost user middleware.
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_exception_handler(Exception, server_error_handler)
 
 
 logger.info("Initializing service connections")

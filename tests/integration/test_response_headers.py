@@ -211,3 +211,85 @@ def test_every_401_the_app_sends_carries_a_challenge(client):
     for response in responses:
         assert response.status_code == 401, response.text
         assert response.headers["www-authenticate"].startswith(BEARER)
+
+
+# --- security headers on responses the middleware stack does not see ---------
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from starlette.applications import Starlette  # noqa: E402
+from starlette.responses import PlainTextResponse  # noqa: E402
+from starlette.routing import Route  # noqa: E402
+
+from app.core.overload import InFlightLimitMiddleware  # noqa: E402
+from app.main import app  # noqa: E402
+
+SECURITY_HEADERS = (
+    "strict-transport-security",
+    "x-content-type-options",
+    "x-frame-options",
+    "content-security-policy",
+    "permissions-policy",
+)
+
+
+@pytest.fixture
+def exploding_route():
+    @app.get("/_explode")
+    def explode():
+        raise RuntimeError("boom")
+
+    try:
+        yield "/_explode"
+    finally:
+        app.router.routes.pop()
+
+
+def test_unhandled_exception_500_carries_the_security_headers(client, exploding_route):
+    # ServerErrorMiddleware answers this 500 outside every user middleware.
+    with TestClient(app, raise_server_exceptions=False) as lenient:
+        response = lenient.get(exploding_route)
+        normal = lenient.get("/health")
+
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
+    assert response.headers["content-type"].startswith("text/plain")
+    for name in SECURITY_HEADERS:
+        assert response.headers[name] == normal.headers[name]
+
+
+def test_500_on_a_private_route_is_no_store_too(client):
+    @app.get(f"{USERS}/_explode")
+    def explode():
+        raise RuntimeError("boom")
+
+    try:
+        with TestClient(app, raise_server_exceptions=False) as lenient:
+            response = lenient.get(f"{USERS}/_explode")
+    finally:
+        app.router.routes.pop()
+
+    assert response.status_code == 500
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_the_headers_layer_is_outside_the_in_flight_limit(client):
+    from app.core.security_headers import SecurityHeadersMiddleware
+
+    # The shed 503 is sent by InFlightLimitMiddleware, so the headers layer
+    # has to wrap it: the outermost user middleware.
+    assert app.user_middleware[0].cls is SecurityHeadersMiddleware
+
+    async def index(request):
+        return PlainTextResponse("ok")
+
+    inner = Starlette(routes=[Route("/", index)])
+
+    stack = SecurityHeadersMiddleware(InFlightLimitMiddleware(inner, limit=0))
+    with TestClient(stack) as probe:
+        response = probe.get("/")
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    for name in SECURITY_HEADERS:
+        assert name in response.headers
