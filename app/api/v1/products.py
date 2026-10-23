@@ -12,6 +12,7 @@ from sqlalchemy.orm import joinedload
 from app.core.dependencies import Cache, DbSession
 from app.core.etag import IfNoneMatch, etag_for, if_none_match_hits
 from app.core.openapi import DocumentedRoute
+from app.core.sorting import order_clauses
 from app.models.category import Category
 from app.models.product import Product
 from app.schemas.category import (
@@ -20,7 +21,7 @@ from app.schemas.category import (
     CategoryTreeNode,
     CategoryTreeResponse,
 )
-from app.schemas.common import APIResponse, Int32, PaginationParams
+from app.schemas.common import APIResponse, Int32, sortable_pagination
 from app.schemas.product import (
     ProductFilter,
     ProductListResponse,
@@ -127,13 +128,22 @@ _product_filter.__signature__ = _filter_signature.replace(parameters=[
 ])
 
 
+CATEGORY_SORT_COLUMNS = {"id": Category.id, "name": Category.name, "created_at": Category.created_at}
+CategoryListParams = sortable_pagination("CategoryListParams", tuple(CATEGORY_SORT_COLUMNS))
+
+
 @router.get("/categories", response_model=APIResponse[CategoryListResponse])
 async def list_categories(
-    pagination: Annotated[PaginationParams, Depends()],
+    pagination: Annotated[CategoryListParams, Depends()],
     db: DbSession,
     parent_id: Int32 | None = None,
 ):
-    """List categories, optionally filtered by parent, with pagination."""
+    """List categories, optionally filtered by parent, with pagination.
+
+    sort_by (id, name, created_at) and sort_order (asc, desc) sort the list, ties
+    broken by id in the same direction; without sort_by, or with another value,
+    the order is by id.
+    """
 
     stmt = select(Category)
     if parent_id is not None:
@@ -142,7 +152,9 @@ async def list_categories(
     total = await _count(db, stmt)
     # The id last: LIMIT/OFFSET pages only fit together in a unique order.
     categories = (await db.scalars(
-        stmt.order_by(Category.id).offset((pagination.page - 1) * pagination.size).limit(pagination.size)
+        stmt.order_by(*order_clauses(
+            pagination.sort_by, pagination.sort_order, CATEGORY_SORT_COLUMNS, Category.id, [Category.id]
+        )).offset((pagination.page - 1) * pagination.size).limit(pagination.size)
     )).all()
 
     return APIResponse.success_response(CategoryListResponse(

@@ -46,6 +46,7 @@ from app.core.security import (
 from app.core.security import (
     logout as logout_tokens,
 )
+from app.core.sorting import order_clauses
 from app.models.address import Address
 from app.models.order import Order
 from app.models.order_items import OrderItem
@@ -60,7 +61,7 @@ from app.schemas.address import (
 from app.schemas.common import (
     APIResponse,
     Int32,
-    PaginationParams,
+    sortable_pagination,
 )
 from app.schemas.order import OrderResponse
 from app.schemas.user import (
@@ -746,9 +747,15 @@ async def update_current_user(
             detail="Failed to update profile"
         ) from e
 
+ADDRESS_SORT_COLUMNS = {"id": Address.id, "created_at": Address.created_at}
+AddressListParams = sortable_pagination("AddressListParams", tuple(ADDRESS_SORT_COLUMNS))
+ORDER_SORT_COLUMNS = {"id": Order.id, "created_at": Order.created_at, "total_amount": Order.total_amount}
+UserOrderListParams = sortable_pagination("UserOrderListParams", tuple(ORDER_SORT_COLUMNS))
+
+
 @router.get("/addresses", response_model=APIResponse[AddressListResponse])
 async def list_addresses(
-    pagination: Annotated[PaginationParams, Query()],
+    pagination: Annotated[AddressListParams, Query()],
     current_user: CurrentUser,
     db: DbSession,
 ):
@@ -767,7 +774,9 @@ async def list_addresses(
             Address.user_id == current_user.id,
             Address.is_active
         )
-        .order_by(Address.id)
+        .order_by(*order_clauses(
+            pagination.sort_by, pagination.sort_order, ADDRESS_SORT_COLUMNS, Address.id, [Address.id]
+        ))
         .offset((pagination.page - 1) * pagination.size)
         .limit(pagination.size)
     )).scalars().all()
@@ -1041,7 +1050,7 @@ async def set_default_address(
 
 @router.get("/orders", response_model=APIResponse[List[OrderResponse]])  # noqa: UP006 - List, not list: the repr names the OpenAPI schema (contract)
 async def get_user_orders(
-    pagination: Annotated[PaginationParams, Query()],
+    pagination: Annotated[UserOrderListParams, Query()],
     current_user: CurrentUser,
     db: DbSession,
 ):
@@ -1059,7 +1068,10 @@ async def get_user_orders(
             selectinload(Order.items).joinedload(OrderItem.variant),
         )
         .where(Order.user_id == current_user.id)
-        .order_by(Order.created_at.desc(), Order.id.desc())
+        .order_by(*order_clauses(
+            pagination.sort_by, pagination.sort_order, ORDER_SORT_COLUMNS, Order.id,
+            [Order.created_at.desc(), Order.id.desc()],
+        ))
         .offset((pagination.page - 1) * pagination.size)
         .limit(pagination.size)
     )).scalars().all()

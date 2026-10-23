@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, DbSession, Provider
 from app.core.etag import IfMatch, etag_for, require_if_match
 from app.core.openapi import FORBIDDEN, UNAUTHORIZED, DocumentedRoute
+from app.core.sorting import order_clauses
 from app.models.category import Category
 from app.models.order import Order
 from app.models.order_items import OrderItem
@@ -27,12 +28,13 @@ from app.models.payment import (
     WEBHOOK_EVENT_STATUSES,
     WebhookEvent,
 )
+from app.models.payment_discrepancy import PaymentDiscrepancy
 from app.models.product import Product, ProductVariant
 from app.schemas.category import (
     CategoryCreate,
     CategoryResponse,
 )
-from app.schemas.common import APIResponse, Int32, PaginationParams
+from app.schemas.common import APIResponse, Int32, PaginationParams, sortable_pagination
 from app.schemas.order import (
     OrderListResponse,
     OrderResponse,
@@ -771,13 +773,28 @@ async def update_product_variant(
 
 # -- Payment reconciliation ----------------------------------------------------------
 
+DISCREPANCY_SORT_COLUMNS = {
+    "id": PaymentDiscrepancy.id,
+    "detected_at": PaymentDiscrepancy.detected_at,
+    "last_seen_at": PaymentDiscrepancy.last_seen_at,
+    "kind": PaymentDiscrepancy.kind,
+}
+DiscrepancyListParams = sortable_pagination("DiscrepancyListParams", tuple(DISCREPANCY_SORT_COLUMNS))
+WEBHOOK_EVENT_SORT_COLUMNS = {
+    "id": WebhookEvent.id,
+    "created_at": WebhookEvent.created_at,
+    "status": WebhookEvent.status,
+}
+WebhookEventListParams = sortable_pagination("WebhookEventListParams", tuple(WEBHOOK_EVENT_SORT_COLUMNS))
+
+
 @router.get(
     "/reconciliation/discrepancies",
     response_model=APIResponse[dict],
     responses={403: {"description": "Admin privileges required"}},
 )
 async def list_reconciliation_discrepancies(
-    pagination: Annotated[PaginationParams, Depends()],
+    pagination: Annotated[DiscrepancyListParams, Depends()],
     current_user: AdminUser,
     db: DbSession,
     order_id: Int32 | None = None,
@@ -785,9 +802,18 @@ async def list_reconciliation_discrepancies(
     """The differences the payment reconciliation found between our payments
     and the provider's and that still stand, oldest first (admin only):
     which payment, what kind of difference, what each side says, and since
-    when. Optionally those of one order."""
+    when. Optionally those of one order.
+
+    sort_by (id, detected_at, last_seen_at, kind) and sort_order (asc, desc) sort
+    the list, ties broken by id in the same direction; without sort_by, or with
+    another value, the order is oldest first.
+    """
     rows, total = await db.run_sync(
-        open_discrepancies, page=pagination.page, size=pagination.size, order_id=order_id
+        open_discrepancies, page=pagination.page, size=pagination.size, order_id=order_id,
+        order_by=order_clauses(
+            pagination.sort_by, pagination.sort_order, DISCREPANCY_SORT_COLUMNS,
+            PaymentDiscrepancy.id, [PaymentDiscrepancy.detected_at, PaymentDiscrepancy.id],
+        ),
     )
     return APIResponse.success_response({
         "items": [
@@ -873,7 +899,7 @@ async def run_reconciliation(
     },
 )
 async def list_webhook_events(
-    pagination: Annotated[PaginationParams, Depends()],
+    pagination: Annotated[WebhookEventListParams, Depends()],
     current_user: AdminUser,
     db: DbSession,
     # Named "status" for the public API/query param; see list_orders above.
@@ -884,6 +910,10 @@ async def list_webhook_events(
     by status (received, processing, processed, retrying, failed). Without
     the payload: it is the provider's raw object. A "failed" event ran out
     of retries and can be replayed.
+
+    sort_by (id, created_at, status) and sort_order (asc, desc) sort the list, ties
+    broken by id in the same direction; without sort_by, or with another value,
+    the order is newest first.
     """
     filters = []
     if status:
@@ -899,7 +929,10 @@ async def list_webhook_events(
         await db.execute(
             select(WebhookEvent)
             .where(*filters)
-            .order_by(WebhookEvent.created_at.desc(), WebhookEvent.id.desc())
+            .order_by(*order_clauses(
+                pagination.sort_by, pagination.sort_order, WEBHOOK_EVENT_SORT_COLUMNS,
+                WebhookEvent.id, [WebhookEvent.created_at.desc(), WebhookEvent.id.desc()],
+            ))
             .offset((pagination.page - 1) * pagination.size)
             .limit(pagination.size)
         )

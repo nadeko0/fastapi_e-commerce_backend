@@ -31,8 +31,10 @@ rows written and committed afterwards. A webhook landing in between shows as
 a difference until the next run finds it gone.
 """
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -315,7 +317,8 @@ def reconcile_payments(
 
 
 def open_discrepancies(
-    db: Session, *, page: int, size: int, order_id: int | None = None
+    db: Session, *, page: int, size: int, order_id: int | None = None,
+    order_by: Sequence[Any] | None = None,
 ) -> tuple[list[tuple[PaymentDiscrepancy, Payment]], int]:
     """A page of the unresolved discrepancies, oldest first, each with its
     payment, and how many there are in all."""
@@ -328,7 +331,7 @@ def open_discrepancies(
         query = query.where(Payment.order_id == order_id)
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     rows = db.execute(
-        query.order_by(PaymentDiscrepancy.detected_at, PaymentDiscrepancy.id)
+        query.order_by(*(order_by or (PaymentDiscrepancy.detected_at, PaymentDiscrepancy.id)))
         .offset((page - 1) * size)
         .limit(size)
     ).all()

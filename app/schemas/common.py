@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -10,7 +10,7 @@ from typing import (
     TypeVar,
 )
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from app.core.clock import UTCDatetime, utc_now
 from app.core.config import settings
@@ -124,6 +124,22 @@ class PaginationParams(BaseModel):
     size: int = Field(20, ge=1, le=100)
     sort_by: str | None = None
     sort_order: str | None = Field(None, pattern="^(asc|desc)$")
+
+def sortable_pagination(name: str, fields: Sequence[str]) -> type[PaginationParams]:
+    """PaginationParams whose sort_by / sort_order document the fields one
+    endpoint sorts by (see app.core.sorting). A value outside `fields` is
+    ignored and the default order applies; it is not an error."""
+    listed = ", ".join(fields)
+    return create_model(
+        name,
+        __base__=PaginationParams,
+        sort_by=(str | None, Field(None, description=(
+            f"Field to sort by: one of {listed}. Without it, or with any other "
+            "value, the default order of the list applies (not an error)."))),
+        sort_order=(str | None, Field(None, pattern="^(asc|desc)$", description=(
+            "asc (the default) or desc; used with sort_by. Ties are broken by id "
+            "in the same direction."))),
+    )
 
 def cart_item_key(product_id: int, variant_id: int | None = None) -> str:
     """The Cart.items dict key for a given product/variant combination.
