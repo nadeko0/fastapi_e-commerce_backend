@@ -16,7 +16,7 @@ from app.core import database
 from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, DbSession, Provider
-from app.core.etag import IfMatch, etag_for, require_if_match
+from app.core.etag import IfMatch, IfNoneMatch, etag_for, if_none_match_hits, require_if_match
 from app.core.openapi import FORBIDDEN, UNAUTHORIZED, DocumentedRoute
 from app.core.sorting import order_clauses
 from app.models.category import Category
@@ -683,6 +683,50 @@ async def list_product_variants(
         items=[ProductVariantResponse.model_validate(v) for v in variants],
         total=len(variants),
     ))
+
+@router.get(
+    "/products/{product_id}/variants/{variant_id}",
+    response_model=APIResponse[ProductVariantResponse],
+    responses={
+        304: {"description": "Not modified: If-None-Match matches the variant's current ETag"},
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Product or variant not found"},
+    },
+)
+async def get_product_variant(
+    product_id: Int32,
+    variant_id: Int32,
+    current_user: AdminUser,
+    db: DbSession,
+    response: Response,
+    if_none_match: IfNoneMatch = None,
+):
+    """Retrieve one variant of a product.
+
+    The ETag is computed exactly as on PUT/PATCH (hash of the
+    ProductVariantResponse JSON), so it can be sent back as If-Match.
+    """
+
+    await _get_product_or_404(db, product_id)
+
+    db_variant = (await db.execute(
+        select(ProductVariant)
+        .where(ProductVariant.id == variant_id, ProductVariant.product_id == product_id)
+        .limit(1)
+    )).scalars().first()
+    if not db_variant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Variant not found"
+        )
+
+    result = ProductVariantResponse.model_validate(db_variant)
+    etag = etag_for(result)
+    if if_none_match_hits(if_none_match, etag):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+    response.headers["ETag"] = etag
+    return APIResponse.success_response(result)
+
 
 # PATCH shares the PUT handler: same schema, checks, side effects, response.
 @router.patch(
