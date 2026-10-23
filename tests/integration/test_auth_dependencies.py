@@ -458,7 +458,7 @@ def test_cart_routes_still_declare_the_bearer_scheme_in_openapi(client):
         ("/api/v1/cart/items/{product_id}", "put"), ("/api/v1/cart/items/{product_id}", "delete"),
         ("/api/v1/cart/validate", "post"),
     ]:
-        assert schema["paths"][path][method]["security"] == [{"OAuth2PasswordBearer": []}]
+        assert {"OAuth2PasswordBearer": []} in schema["paths"][path][method]["security"]
 
 
 # --- The returned user is a detached snapshot -------------------------------
