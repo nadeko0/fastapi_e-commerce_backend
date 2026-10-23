@@ -227,6 +227,58 @@ def test_a_connection_failure_becomes_a_timeout_with_stripes_message(live, monke
     assert caught.value.code == "api_connection_error"
 
 
+_UNAVAILABLE = [
+    stripe_error.RateLimitError,
+    stripe_error.APIError,
+    stripe_error.AuthenticationError,
+    stripe_error.PermissionError,
+    stripe_error.StripeError,
+]
+
+
+@pytest.mark.parametrize("error_class", _UNAVAILABLE)
+@pytest.mark.parametrize("name", list(_CALLS))
+def test_any_other_stripe_error_is_a_provider_timeout_not_a_500(
+    live, monkeypatch, name, error_class
+):
+    # Rate limit, a 5xx, a refused key: none says whether the request was
+    # carried out, so each is the same "outcome unknown" as a dropped
+    # connection and reaches the routes as PaymentProviderTimeoutError (503)
+    # instead of escaping as a StripeError (500) that leaves the attempt
+    # in flight.
+    call, owner, method, _, _ = _CALLS[name]
+    monkeypatch.setattr(owner, method, _raising(error_class("stripe words", headers=HEADERS)))
+
+    with pytest.raises(PaymentProviderTimeoutError) as caught:
+        call(live)
+
+    assert caught.value.message == "stripe words"
+
+
+@pytest.mark.parametrize("error_class", [
+    stripe_error.AuthenticationError, stripe_error.PermissionError])
+def test_a_refused_api_key_is_logged_as_critical(live, monkeypatch, caplog, error_class):
+    monkeypatch.setattr(stripe.PaymentIntent, "create", _raising(error_class("bad key", headers=HEADERS)))
+
+    with caplog.at_level("CRITICAL", logger=live_module.logger.name):
+        with pytest.raises(PaymentProviderTimeoutError):
+            _create_intent(live)
+
+    assert [r.levelname for r in caplog.records] == ["CRITICAL"]
+    assert error_class.__name__ in caplog.records[0].getMessage()
+
+
+def test_a_rate_limit_is_not_logged_as_critical(live, monkeypatch, caplog):
+    monkeypatch.setattr(stripe.PaymentIntent, "create",
+                        _raising(stripe_error.RateLimitError("slow down", headers=HEADERS)))
+
+    with caplog.at_level("CRITICAL", logger=live_module.logger.name):
+        with pytest.raises(PaymentProviderTimeoutError):
+            _create_intent(live)
+
+    assert caplog.records == []
+
+
 @pytest.mark.parametrize("name", _IDEMPOTENT)
 def test_an_idempotency_conflict_keeps_stripes_message(live, monkeypatch, name):
     call, owner, method, _, _ = _CALLS[name]
