@@ -18,7 +18,9 @@ import uuid
 
 import pytest
 from conftest import TEST_DATABASE_URL, TestingSessionLocal, engine, requires_postgres
-from sqlalchemy import create_engine, inspect, text
+from fastapi.testclient import TestClient
+from payment_support import Shop
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from test_check_constraints import _migration as _check_constraints_migration
@@ -31,6 +33,7 @@ from test_payment import (
     _payment_payload,
 )
 
+from app.main import app
 from app.models.base import Base
 from app.models.user import User
 from app.services.payment.stripe_provider import StripePaymentProvider
@@ -137,6 +140,96 @@ def test_two_concurrent_payments_for_one_order_charge_it_once(client, db_session
     assert order.payment_status == "paid"
     succeeded = [p for p in _get_payments(db_session, order_id) if p.status == "succeeded"]
     assert len(succeeded) == 1
+
+
+# -- Stock rows are locked in one order --------------------------------------
+
+def _run_holding_after_first_stock_update(actions):
+    """Run the callables in threads of their own, each held right after its
+    first stock UPDATE until the others have reached the same point (or 3
+    seconds have passed, which is what happens when the rows are locked in
+    one order: the second one is then still waiting for the first one's
+    lock). Returns their results by index."""
+    meeting = threading.Barrier(len(actions))
+    seen = set()
+    results = {}
+
+    def hold(connection, cursor, statement, *rest):
+        thread = threading.get_ident()
+        if statement.startswith("UPDATE products SET stock_quantity") and thread not in seen:
+            seen.add(thread)
+            try:
+                meeting.wait(timeout=3)
+            except threading.BrokenBarrierError:
+                pass
+
+    def run(index):
+        # A client of its own per request: the routes are async defs on a
+        # synchronous session, so requests through one client run one after
+        # the other on its event loop and could never overlap.
+        with TestClient(app) as own_client:
+            results[index] = actions[index](own_client)
+
+    event.listen(engine, "after_cursor_execute", hold)
+    try:
+        threads = [threading.Thread(target=run, args=(i,)) for i in range(len(actions))]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+    finally:
+        event.remove(engine, "after_cursor_execute", hold)
+    assert not any(thread.is_alive() for thread in threads)
+    return results
+
+
+def _cart_with(shop, buyer, products):
+    for product in products:
+        assert shop.add_to_cart(buyer, product).status_code == 200
+
+
+def test_orders_with_the_same_products_in_opposite_order_do_not_deadlock(client, db_session):
+    # Two checkouts whose carts hold the same two products in opposite
+    # order. Each is held, right after its first stock UPDATE, until the
+    # other has reached the same point: unsorted, each then owns one row and
+    # waits for the other's (SQLSTATE 40P01, PostgreSQL aborts one, a 500).
+    shop = Shop(client, db_session)
+    first, second = shop.product(stock=5, name="A"), shop.product(stock=5, name="B")
+    buyers = [shop.buyer(), shop.buyer()]
+    _cart_with(shop, buyers[0], (first, second))
+    _cart_with(shop, buyers[1], (second, first))
+
+    results = _run_holding_after_first_stock_update([
+        lambda c: Shop(c, db_session).place_order(buyers[0]),
+        lambda c: Shop(c, db_session).place_order(buyers[1]),
+    ])
+
+    assert [results[i].status_code for i in range(2)] == [200, 200], [r.text for r in results.values()]
+    assert shop.stock(first) == 3 and shop.stock(second) == 3
+
+
+@pytest.mark.parametrize("checkout_first_then_second", [True, False])
+def test_a_cancellation_and_an_order_with_the_same_products_in_opposite_order_do_not_deadlock(
+    client, db_session, checkout_first_then_second
+):
+    # The restock of a cancelled order against a checkout of the same two
+    # products, the cart in either order: whichever order the restock reads
+    # the lines in, one of the two is the opposite one.
+    shop = Shop(client, db_session)
+    first, second = shop.product(stock=5, name="A"), shop.product(stock=5, name="B")
+    seller, buyer = shop.buyer(), shop.buyer()
+    _cart_with(shop, seller, (first, second))
+    order_id = shop.place_order(seller).json()["data"]["id"]
+    _cart_with(shop, buyer, (first, second) if checkout_first_then_second else (second, first))
+
+    results = _run_holding_after_first_stock_update([
+        lambda c: Shop(c, db_session).cancel(seller, order_id),
+        lambda c: Shop(c, db_session).place_order(buyer),
+    ])
+
+    assert [results[i].status_code for i in range(2)] == [200, 200], [r.text for r in results.values()]
+    # 5 - 1 (first order) + 1 (cancelled) - 1 (second order)
+    assert shop.stock(first) == 4 and shop.stock(second) == 4
 
 
 # -- Constraints enforced by the database ------------------------------------

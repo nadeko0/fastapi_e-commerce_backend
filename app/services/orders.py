@@ -40,6 +40,31 @@ def is_unpaid_and_new(order: Order) -> bool:
     return order.status == OrderStatus.NEW and order.payment_status in UNPAID_PAYMENT_STATUSES
 
 
+def lock_stock_rows(db: Session, lines) -> None:
+    """
+    Take the row locks of every stock row the `lines` (pairs of product id
+    and variant id, or None) are about to change, in one fixed order: the
+    products by id, then the variants by id. Two transactions that change
+    the same rows in different orders (carts {A, B} and {B, A}) would
+    otherwise each hold one row and wait for the other's, and PostgreSQL
+    aborts one of them with a deadlock (SQLSTATE 40P01). PostgreSQL docs,
+    "Explicit Locking", Deadlocks: "the best defense against deadlocks is
+    generally to avoid them by being certain that all applications using a
+    database acquire locks on multiple objects in a consistent order."
+
+    A variant line changes the variant's own stock only, a plain line the
+    product's. Call it before the first stock UPDATE of the transaction;
+    the UPDATEs themselves may then run in any order. SQLite ignores the
+    lock, and with it the order.
+    """
+    product_ids = sorted({product_id for product_id, variant_id in lines if variant_id is None})
+    variant_ids = sorted({variant_id for _, variant_id in lines if variant_id is not None})
+    db.query(Product.id).filter(Product.id.in_(product_ids)).order_by(Product.id).with_for_update().all()
+    db.query(ProductVariant.id).filter(
+        ProductVariant.id.in_(variant_ids)
+    ).order_by(ProductVariant.id).with_for_update().all()
+
+
 def cancel_order_and_restock(db: Session, order: Order) -> bool:
     """
     Move `order` to cancelled and put every line's quantity back into the
@@ -61,7 +86,9 @@ def cancel_order_and_restock(db: Session, order: Order) -> bool:
     order.status = OrderStatus.CANCELLED
     order.updated_at = utc_now()
     # Relative UPDATEs (stock = stock + n), not read-modify-write on the ORM
-    # objects: concurrent checkouts decrement the same rows.
+    # objects: concurrent checkouts decrement the same rows. The rows are
+    # locked in the order create_order locks them first.
+    lock_stock_rows(db, [(item.product_id, item.variant_id) for item in order.items])
     for item in order.items:
         if item.variant_id is not None:
             db.query(ProductVariant).filter(ProductVariant.id == item.variant_id).update(

@@ -44,6 +44,7 @@ from app.services.orders import (
     cancel_order_and_restock,
     is_unpaid_and_new,
     is_valid_status_transition,
+    lock_stock_rows,
 )
 from app.services.payment import (
     PaymentProvider,
@@ -183,6 +184,12 @@ async def create_order(
         # addresses mid-request); re-raised rather than mistaken for a
         # replay if that ever changes.
         raise  # pragma: no cover
+
+    # Every stock row the lines below change is locked up front, in one
+    # order, so that checkouts and cancellations touching the same products
+    # in different orders cannot deadlock. The loop stays in cart order: the
+    # line reported as short, and the totals, are the same as before.
+    lock_stock_rows(db, [(item.product_id, item.variant_id) for item in cart.items.values()])
 
     total_amount = Decimal('0.00')
     for item in cart.items.values():
