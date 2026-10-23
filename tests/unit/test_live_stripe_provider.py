@@ -483,3 +483,82 @@ def test_webhook_signed_with_another_secret_or_too_long_ago_is_rejected(provider
             payload, _signed(payload, timestamp=int(time.time()) - 3600), WEBHOOK_SECRET,
             tolerance_seconds=300,
         )
+
+
+# -- HTTP client: explicit timeout and retries -----------------------------------
+
+@pytest.fixture
+def fresh_http_client(monkeypatch):
+    """No client installed by an earlier test, and the SDK's global state put
+    back afterwards."""
+    import app.services.payment.live_stripe_provider as live_module
+
+    monkeypatch.setattr(live_module, "_http_client", None)
+    monkeypatch.setattr(live_module, "_http_client_settings", None)
+    monkeypatch.setattr(stripe, "default_http_client", None)
+    monkeypatch.setattr(stripe, "max_network_retries", stripe.max_network_retries)
+
+
+def test_the_stripe_client_is_built_with_the_configured_timeout_and_retries(
+    fresh_http_client, monkeypatch
+):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "STRIPE_CONNECT_TIMEOUT_SECONDS", 3.5)
+    monkeypatch.setattr(settings, "STRIPE_READ_TIMEOUT_SECONDS", 12.0)
+    monkeypatch.setattr(settings, "STRIPE_MAX_NETWORK_RETRIES", 1)
+
+    LiveStripePaymentProvider(api_key=API_KEY)
+
+    assert isinstance(stripe.default_http_client, stripe.RequestsClient)
+    assert stripe.default_http_client._timeout == (3.5, 12.0)
+    assert stripe.max_network_retries == 1
+
+
+def test_the_default_timeout_is_far_below_the_sdks_80_seconds(fresh_http_client):
+    LiveStripePaymentProvider(api_key=API_KEY)
+
+    connect, read = stripe.default_http_client._timeout
+    assert (connect, read) == (5.0, 20.0)
+    assert stripe.max_network_retries == 2
+
+
+def test_providers_share_one_client_and_a_settings_change_builds_a_new_one(
+    fresh_http_client, monkeypatch
+):
+    from app.core.config import settings
+
+    LiveStripePaymentProvider(api_key=API_KEY)
+    first = stripe.default_http_client
+    LiveStripePaymentProvider(api_key=API_KEY)
+    assert stripe.default_http_client is first
+
+    monkeypatch.setattr(settings, "STRIPE_READ_TIMEOUT_SECONDS", 7.0)
+    LiveStripePaymentProvider(api_key=API_KEY)
+    assert stripe.default_http_client is not first
+    assert stripe.default_http_client._timeout == (5.0, 7.0)
+
+    # Something else replaced the SDK's client: ours is put back.
+    stripe.default_http_client = None
+    LiveStripePaymentProvider(api_key=API_KEY)
+    assert stripe.default_http_client._timeout == (5.0, 7.0)
+
+
+def test_a_call_through_the_sdk_uses_the_configured_timeout(fresh_http_client, monkeypatch):
+    # The SDK's own request path (not a stub of it): the requests session is
+    # called with the (connect, read) pair.
+    seen = {}
+
+    class _Session:
+        def request(self, method, url, **kwargs):
+            seen.update(kwargs)
+            raise __import__("requests").exceptions.ConnectTimeout("slow")
+
+    provider = LiveStripePaymentProvider(api_key=API_KEY)
+    monkeypatch.setattr(stripe, "max_network_retries", 0)
+    monkeypatch.setattr(stripe.default_http_client, "_session", _Session())
+
+    with pytest.raises(PaymentProviderTimeoutError):
+        provider.retrieve_payment_intent("pi_1")
+
+    assert seen["timeout"] == (5.0, 20.0)
