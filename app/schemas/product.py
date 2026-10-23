@@ -13,7 +13,7 @@ from pydantic import (
     field_validator,
 )
 
-from app.schemas.common import Int32, Int32Max
+from app.schemas.common import Int32, Int32Max, StoreCurrency
 from app.schemas.order import NonNegativeMoney
 
 # An image URL is validated as an HttpUrl but kept as the plain string: it
@@ -94,6 +94,7 @@ class ProductInDB(ProductBase):
 
 class ProductResponse(ProductInDB):
     category_name: str
+    currency: StoreCurrency
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -175,6 +176,7 @@ class ProductVariantUpdate(BaseModel):
 
 class ProductVariantResponse(ProductVariantBase):
     id: int
+    currency: StoreCurrency
     product_id: int
     created_at: datetime
     updated_at: datetime

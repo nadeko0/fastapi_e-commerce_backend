@@ -13,6 +13,7 @@ from typing import (
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.clock import UTCDatetime, utc_now
+from app.core.config import settings
 
 # ITU-T E.164: "+", a country code whose first digit is 1-9, at most 15 digits
 # in all (here also at least 5, as before). Applied to input schemas only.
@@ -31,6 +32,24 @@ Int32 = Annotated[int, Field(ge=-INT32_MAX - 1, le=INT32_MAX)]
 Int32Max = Annotated[int, Field(le=INT32_MAX)]
 
 _ZERO = Decimal("0.00")
+
+
+def store_currency() -> str:
+    """The ISO 4217 code of the amounts a catalog, cart or statistics response
+    carries (settings.STORE_CURRENCY), read when the response is built so a
+    body without the field (a cache entry written before it existed) gets it."""
+    return settings.STORE_CURRENCY
+
+
+# A "currency" sibling of the amounts in a response (Zalando guideline 173).
+StoreCurrency = Annotated[
+    str,
+    Field(
+        default_factory=store_currency,
+        pattern=r"^[A-Z]{3}$",
+        description="ISO 4217 currency code of the amounts in this object.",
+    ),
+]
 _CENT = Decimal("0.01")
 
 
@@ -225,6 +244,7 @@ class CartResponseItem(BaseModel):
     unavailable_reason: Literal["product_unavailable", "variant_unavailable"] | None = None
     # Current catalog price; None for an unavailable line.
     unit_price: Decimal | None = None
+    currency: StoreCurrency
     line_total: Decimal | None = None
     # The price shown when the line was added, and whether the current one
     # differs from it. Information for the customer, never an error.
@@ -238,6 +258,7 @@ class CartResponse(BaseModel):
     items: list[CartResponseItem] = Field(default_factory=list)
     # Sum of line_total over the available lines.
     total_amount: Decimal = Field(default=_ZERO)
+    currency: StoreCurrency
     # Number of lines, unavailable ones included.
     items_count: int = Field(default=0)
     last_modified: datetime
@@ -312,6 +333,7 @@ class CartPriceChange(BaseModel):
     variant_id: int | None = None
     price_when_added: Decimal
     current_price: Decimal
+    currency: StoreCurrency
 
 
 class CartValidationResponse(BaseModel):

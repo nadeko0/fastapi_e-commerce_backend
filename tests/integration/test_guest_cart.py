@@ -216,6 +216,7 @@ def test_guest_cart_is_priced_live_like_an_account_cart(browser, db_session):
         "variant_id": None,
         "price_when_added": "9.99",
         "current_price": "12.50",
+        "currency": "USD",
     }]
 
 

@@ -14,6 +14,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.api.merge_patch import PATCH_DESCRIPTION, merge_patch_body
 from app.core import database
 from app.core.clock import as_utc, utc_now
+from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, DbSession, Provider
 from app.core.etag import IfMatch, etag_for, require_if_match
 from app.models.category import Category
@@ -447,6 +448,10 @@ async def get_statistics(
     cache_key = f"admin_stats_{period}"
     cached_stats = await redis.get(cache_key)
     if cached_stats:
+        # Written before the field existed? Add it (the cache lives 5 minutes).
+        cached_stats.setdefault("currency", settings.STORE_CURRENCY)
+        for entry in cached_stats.get("popular_products", []):
+            entry.setdefault("currency", settings.STORE_CURRENCY)
         return APIResponse.success_response(cached_stats)
 
 
@@ -468,6 +473,7 @@ async def get_statistics(
 
     stats = {
         "period": period,
+        "currency": settings.STORE_CURRENCY,
         "order_count": await db.scalar(select(func.count()).select_from(Order).where(*paid_in_period)),
         "total_revenue": float(
             await db.scalar(select(func.sum(Order.total_amount)).where(*paid_in_period)) or 0
@@ -501,7 +507,8 @@ async def get_statistics(
             "id": p.id,
             "name": p.name,
             "total_quantity": p.total_quantity,
-            "total_revenue": float(p.total_revenue)
+            "total_revenue": float(p.total_revenue),
+            "currency": settings.STORE_CURRENCY,
         }
         for p in popular_products
     ]
