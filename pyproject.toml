@@ -33,6 +33,7 @@ dev = [
     "aiosqlite",
     "lupa",
     "httpx2>=2.13.1",
+    "pytest-xdist==3.8.0",
 ]
 
 [tool.pytest]
@@ -62,6 +63,7 @@ filterwarnings = [
     "error::fastapi.exceptions.FastAPIDeprecationWarning",
 ]
 markers = [
+    "timing_sensitive: asserts on elapsed time or event-loop latency; run alone, not beside other xdist workers (-m timing_sensitive)",
     "db_sensitive: outcome depends on the database (locks, constraints, indexes, migrations); applied by file name in tests/conftest.py, run on PostgreSQL in CI",
 ]
 

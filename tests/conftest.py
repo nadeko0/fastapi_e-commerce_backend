@@ -47,6 +47,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import uuid
 
 import fakeredis
@@ -113,8 +114,22 @@ _DB_SENSITIVE_FILES = (
 )
 
 
+# Tests that measure elapsed time against a threshold (a heartbeat gap on the
+# event loop, bcrypt calls that must overlap, a burst that must finish in N
+# seconds). CPU contention from other xdist workers would make them flaky, so
+# a parallel run deselects them (-m "not timing_sensitive") and a second,
+# single-process run executes them alone: see README/CI for the two commands.
+_TIMING_SENSITIVE_FILES = ("test_no_blocking_on_loop.py", "test_db_pool_concurrency.py")
+_TIMING_SENSITIVE_TESTS = (
+    "test_verify_password_async_offloads_to_threadpool_without_blocking_event_loop",
+    "test_get_password_hash_async_offloads_to_threadpool_without_blocking_event_loop",
+)
+
+
 def pytest_collection_modifyitems(items):
     for item in items:
+        if item.path.name in _TIMING_SENSITIVE_FILES or item.originalname in _TIMING_SENSITIVE_TESTS:
+            item.add_marker(pytest.mark.timing_sensitive)
         if any(fnmatch.fnmatch(item.path.name, pattern) for pattern in _DB_SENSITIVE_FILES):
             item.add_marker(pytest.mark.db_sensitive)
 
@@ -225,70 +240,102 @@ _WRITE = re.compile(
     r'^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:ONLY\s+)?(?:"?\w+"?\.)?"?(\w+)"?', re.I
 )
 _READ = re.compile(r"^\s*\(?\s*(?:SELECT|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|SET|SHOW)\b", re.I)
-_dirty_tables: set[str] = set()
+# This file is imported twice (pytest's own "conftest" and, by the tests that do
+# `from tests.conftest import ...`, "tests.conftest"), and each copy registers
+# the listener below. The state lives in one object both share.
+_state = sys.modules.setdefault("_tests_db_state", types.SimpleNamespace(dirty=set(), schema_changed=False))
+_dirty_tables: set[str] = _state.dirty
+# SQLite only: a test that ran DDL (a trigger, an index, a dropped table) has
+# changed the schema itself, which DELETE cannot undo; the next test starts
+# from a rebuilt schema, as every test used to.
+_DDL = re.compile(r"^\s*(?:CREATE|DROP|ALTER)\b", re.I)
 
-if IS_POSTGRES:
-    # Child tables first, so DELETE never meets a foreign key still pointing at it.
-    _TABLES_CHILDREN_FIRST = [t for t in reversed(Base.metadata.sorted_tables)]
-    _ALL_TABLES = {t.name for t in _TABLES_CHILDREN_FIRST}
+# Child tables first, so DELETE never meets a foreign key still pointing at it.
+_TABLES_CHILDREN_FIRST = [t for t in reversed(Base.metadata.sorted_tables)]
+_ALL_TABLES = {t.name for t in _TABLES_CHILDREN_FIRST}
 
-    @event.listens_for(Engine, "before_cursor_execute")
-    def _note_writes(conn, cursor, statement, parameters, context, executemany):
-        match = _WRITE.match(statement)
-        if match:
-            _dirty_tables.add(match.group(1))
-        elif not _READ.match(statement):
-            _dirty_tables.update(_ALL_TABLES)
 
-    def _clean_dirty_tables():
-        # DELETE plus a sequence reset, not TRUNCATE ... RESTART IDENTITY:
-        # TRUNCATE swaps the table's files and costs ~35 ms for two tables on
-        # a Windows server against ~3 ms for DELETE of the few rows a test
-        # leaves (and it takes ACCESS EXCLUSIVE locks). setval(..., false)
-        # makes the next id 1 again, as in the fresh SQLite tables of the
-        # default run; it also undoes ids burnt by rolled-back inserts. A table
-        # no test wrote to is empty already, so no foreign-key closure is
-        # needed.
-        statements = []
-        for table in _TABLES_CHILDREN_FIRST:
-            if table.name not in _dirty_tables:
-                continue
-            statements.append(f'DELETE FROM "{table.name}"')
-            pk = list(table.primary_key.columns)
-            if len(pk) == 1 and pk[0].type.python_type is int:
-                statements.append(
-                    f"SELECT setval(pg_get_serial_sequence('\"{table.name}\"', '{pk[0].name}'), 1, false)"
-                )
-        if statements:
+@event.listens_for(Engine, "before_cursor_execute")
+def _note_writes(conn, cursor, statement, parameters, context, executemany):
+    if _DDL.match(statement):
+        _state.schema_changed = True
+    match = _WRITE.match(statement)
+    if match:
+        _dirty_tables.add(match.group(1))
+    elif not _READ.match(statement):
+        _dirty_tables.update(_ALL_TABLES)
+
+
+def _clean_dirty_tables():
+    if not IS_POSTGRES:
+        # SQLite: the tables have no AUTOINCREMENT (no sqlite_sequence), so a
+        # table emptied by DELETE hands out id 1 again, as a fresh one does.
+        # Nothing else survives a DELETE; the schema was built once at import.
+        if _state.schema_changed:
+            Base.metadata.drop_all(bind=engine)
+            Base.metadata.create_all(bind=engine)
+            _state.schema_changed = False
+            _dirty_tables.clear()
+        elif _dirty_tables:
             with engine.begin() as connection:
-                connection.execute(text("SET LOCAL lock_timeout = '10s'"))
-                connection.exec_driver_sql("; ".join(statements))
-        _dirty_tables.clear()
+                for table in _TABLES_CHILDREN_FIRST:
+                    if table.name in _dirty_tables:
+                        connection.exec_driver_sql(f'DELETE FROM "{table.name}"')
+            _dirty_tables.clear()
+        return
+    # DELETE plus a sequence reset, not TRUNCATE ... RESTART IDENTITY:
+    # TRUNCATE swaps the table's files and costs ~35 ms for two tables on
+    # a Windows server against ~3 ms for DELETE of the few rows a test
+    # leaves (and it takes ACCESS EXCLUSIVE locks). setval(..., false)
+    # makes the next id 1 again, as in the fresh SQLite tables of the
+    # default run; it also undoes ids burnt by rolled-back inserts. A table
+    # no test wrote to is empty already, so no foreign-key closure is
+    # needed.
+    statements = []
+    for table in _TABLES_CHILDREN_FIRST:
+        if table.name not in _dirty_tables:
+            continue
+        statements.append(f'DELETE FROM "{table.name}"')
+        pk = list(table.primary_key.columns)
+        if len(pk) == 1 and pk[0].type.python_type is int:
+            statements.append(
+                f"SELECT setval(pg_get_serial_sequence('\"{table.name}\"', '{pk[0].name}'), 1, false)"
+            )
+    if statements:
+        with engine.begin() as connection:
+            connection.execute(text("SET LOCAL lock_timeout = '10s'"))
+            connection.exec_driver_sql("; ".join(statements))
+    _dirty_tables.clear()
+
+
+if not IS_POSTGRES:
+    # The schema is built once per process (one per xdist worker, each with
+    # its own file) and the tables a test wrote to are emptied before the next
+    # one, as on PostgreSQL. It used to be create_all + drop_all around every
+    # test: ~160 s of the ~11 minute run.
+    Base.metadata.create_all(bind=engine)
+    _dirty_tables.clear()
+    _state.schema_changed = False
 
 
 @pytest.fixture(autouse=True)
 def _reset_database():
-    if IS_POSTGRES:
-        # Isolation on Postgres: the schema is built once per session (above)
-        # and the tables the previous test wrote to are emptied before this
-        # one runs. The usual faster pattern, one outer transaction per test
-        # with the Session joined to it through SAVEPOINTs and rolled back at
-        # the end, does not fit this suite: the app and the tests use several
-        # independent connections at once (the sync engine, the async engine
-        # with a new connection per request, Celery tasks' own SessionLocal,
-        # tests that open a second session on purpose), the code under test
-        # commits for real, and the concurrency tests need those commits to be
-        # visible to other connections. One outer transaction would hide
-        # exactly what they are meant to show. Cleaning before the test (not
-        # after) means a previous test that died halfway leaves nothing
-        # behind either. lock_timeout turns a session a test forgot to close
-        # (it would hold row locks) into an error instead of a hung run.
-        _clean_dirty_tables()
-        yield
-        return
-    Base.metadata.create_all(bind=engine)
+    # Isolation: the schema is built once per process (above)
+    # and the tables the previous test wrote to are emptied before this
+    # one runs. The usual faster pattern, one outer transaction per test
+    # with the Session joined to it through SAVEPOINTs and rolled back at
+    # the end, does not fit this suite: the app and the tests use several
+    # independent connections at once (the sync engine, the async engine
+    # with a new connection per request, Celery tasks' own SessionLocal,
+    # tests that open a second session on purpose), the code under test
+    # commits for real, and the concurrency tests need those commits to be
+    # visible to other connections. One outer transaction would hide
+    # exactly what they are meant to show. Cleaning before the test (not
+    # after) means a previous test that died halfway leaves nothing
+    # behind either. lock_timeout turns a session a test forgot to close
+    # (it would hold row locks) into an error instead of a hung run.
+    _clean_dirty_tables()
     yield
-    Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture(autouse=True)
