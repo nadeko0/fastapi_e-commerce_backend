@@ -110,7 +110,7 @@ async def create_order(
     shipping_address_id: Int32,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
     # Required, not optional. Placing an order is the one request in this API
     # that must never be applied twice, and the client is the only party that
@@ -345,7 +345,7 @@ async def create_order(
 async def get_order(
     order_id: Int32,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """Retrieve a single order belonging to the current user."""
 
@@ -384,7 +384,7 @@ async def update_order_status(
     status: OrderStatus,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_admin_user),  # Admin only
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """Transition an order to a new status (admin only)."""
 
@@ -455,7 +455,7 @@ async def cancel_own_order(
     order_id: Int32,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """Cancel one of the current user's own orders that has not been paid,
     returning its items to stock.
@@ -870,7 +870,7 @@ async def process_payment(
     payment: PaymentCreate,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     provider: PaymentProvider = Depends(get_payment_provider),
     # Required, as on POST /orders and for the same reason. While it was
     # optional, two requests without it that arrived together (a double
@@ -1158,7 +1158,7 @@ async def create_checkout_session(
     background_tasks: BackgroundTasks,
     payload: Optional[CheckoutSessionCreate] = None,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     provider: PaymentProvider = Depends(get_payment_provider),
     # Required like /pay's: two sessions created for one order without a
     # key can both be completed, and both charge the customer.
@@ -1302,7 +1302,7 @@ async def refund_payment(
     order_id: Int32,
     refund_request: RefundCreate,
     current_user: User = Depends(get_current_admin_user),  # Refunds are a support/admin action
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     provider: PaymentProvider = Depends(get_payment_provider),
     # Required like /pay's: without a key, a retried or double-clicked
     # partial refund was a second refund, the money returned twice.
@@ -1454,7 +1454,7 @@ async def refund_payment(
 async def list_order_payments(
     order_id: Int32,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """Every payment attempt of an order, oldest first, with its refunds and
     disputes (admin only). Amounts are in major units, as everywhere in the
@@ -1609,7 +1609,7 @@ def _has_open_dispute(db: Session, order_id: int, payment_id: Optional[int] = No
 )
 async def stripe_webhook(
     request: Request,
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     provider: PaymentProvider = Depends(get_payment_provider),
     stripe_signature: Optional[str] = Header(default=None, alias="Stripe-Signature"),
 ):

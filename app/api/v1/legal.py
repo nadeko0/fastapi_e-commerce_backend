@@ -269,7 +269,7 @@ async def _load_user(db: AsyncSession, user_id: int) -> User:
 async def update_user_consent(
     consent_update: ConsentUpdate,
     request: Request,
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     current_user = Depends(get_current_active_user)
 ):
     """
@@ -314,7 +314,7 @@ async def update_user_consent(
 )
 async def request_personal_data(
     request_data: DataRequest,
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     current_user = Depends(get_current_active_user)
 ):
     """

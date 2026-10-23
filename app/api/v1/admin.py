@@ -74,7 +74,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 async def create_category(
     category: CategoryCreate,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Create a new category, optionally nested under a parent category."""
@@ -117,7 +117,7 @@ async def create_category(
 async def create_product(
     product: ProductCreate,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Create a new product under an existing category."""
@@ -176,7 +176,7 @@ async def update_product(
     product_id: Int32,
     product: ProductUpdate,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Update fields on an existing product."""
@@ -243,7 +243,7 @@ async def update_product(
 async def delete_product(
     product_id: Int32,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Delete a product, or soft-delete (deactivate) it if it has existing orders."""
@@ -318,7 +318,7 @@ async def list_orders(
     end_date: Optional[datetime] = None,
     pagination: AdminOrderListParams = Depends(),
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """List orders across all users, with filtering, sorting, and pagination."""
 
@@ -410,7 +410,7 @@ async def list_orders(
 async def get_statistics(
     period: str = Query("24h", pattern="^(24h|7d|30d)$"),
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Retrieve order/revenue statistics and popular products for a time period."""
@@ -564,7 +564,7 @@ async def create_product_variant(
     product_id: Int32,
     variant: ProductVariantCreate,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """Create a new variant (e.g. a size/color combination) under a product."""
 
@@ -602,7 +602,7 @@ async def list_product_variants(
     # Every route on this router needs it: this one used to answer anyone,
     # inactive variants, SKUs and exact stock levels included.
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """List all variants belonging to a product."""
 
@@ -636,7 +636,7 @@ async def update_product_variant(
     variant_id: Int32,
     variant: ProductVariantUpdate,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """Update fields on an existing variant of a product."""
 
@@ -690,7 +690,7 @@ async def list_reconciliation_discrepancies(
     order_id: Optional[Int32] = None,
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """The differences the payment reconciliation found between our payments
     and the provider's and that still stand, oldest first (admin only):
@@ -736,7 +736,7 @@ async def run_reconciliation(
     response: Response,
     order_id: Optional[Int32] = None,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
     provider: PaymentProvider = Depends(get_payment_provider),
 ):
     """Reconcile now (admin only). With order_id: every payment of that order,
@@ -786,7 +786,7 @@ async def list_webhook_events(
     status: Optional[str] = None,
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """
     List the Stripe webhook events the app stored, newest first, optionally
@@ -834,7 +834,7 @@ async def list_webhook_events(
 async def replay_webhook_event(
     event_id: str,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db),
+    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """
     Send a failed Stripe event through the worker again (after the cause of

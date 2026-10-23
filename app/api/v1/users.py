@@ -114,7 +114,7 @@ REGISTRATION_RECEIVED = (
 async def register_user(
     user_in: UserCreate,
     request: Request,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     background_tasks: BackgroundTasks = None,
 ):
     """Register a new user account and queue a welcome/verification email.
@@ -207,7 +207,7 @@ async def register_user(
 )
 async def verify_email(
     token: str,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Confirm a user's email address using a verification token."""
 
@@ -282,7 +282,7 @@ async def login(
     request: Request,
     response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Authenticate with email/password and receive access and refresh tokens.
@@ -383,7 +383,7 @@ async def login(
 )
 async def refresh_access_token(
     refresh_in: RefreshTokenRequest,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Exchange a refresh token for a new access token, rotating the refresh
     token in the process. Does not require a valid (or even present) access
@@ -464,7 +464,7 @@ async def update_consent(
     granted: bool,
     request: Request,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Update the current user's consent for a given consent type."""
 
@@ -523,7 +523,7 @@ async def update_consent(
 )
 async def export_user_data(
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     background_tasks: BackgroundTasks = None,
 ):
     """Export the current user's personal data, consents, addresses, and orders (GDPR)."""
@@ -622,7 +622,7 @@ async def export_user_data(
 async def delete_user_data(
     deletion: GDPRDelete,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Request deletion of the current user's account and data (GDPR)."""
 
@@ -672,7 +672,7 @@ async def get_current_user_data(
 async def update_current_user(
     user_in: UserUpdate,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Update fields on the current authenticated user's profile."""
 
@@ -725,7 +725,7 @@ async def update_current_user(
 async def list_addresses(
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """List the current user's active addresses, paginated."""
 
@@ -766,7 +766,7 @@ async def list_addresses(
 async def create_address(
     address_in: AddressCreate,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Add a new address for the current user."""
 
@@ -839,7 +839,7 @@ async def update_address(
     address_id: Int32,
     address_in: AddressUpdate,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Update fields on one of the current user's addresses."""
 
@@ -899,7 +899,7 @@ async def update_address(
 async def delete_address(
     address_id: Int32,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Deactivate one of the current user's addresses."""
 
@@ -956,7 +956,7 @@ async def delete_address(
 async def set_default_address(
     default_address: SetDefaultAddress,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Mark one of the current user's addresses as the default shipping address."""
 
@@ -1006,7 +1006,7 @@ async def set_default_address(
 async def get_user_orders(
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """List the current user's orders, most recent first, paginated."""
 
@@ -1039,7 +1039,7 @@ def _invalid_reset_token() -> HTTPException:
 @router.post("/password/reset", response_model=APIResponse[dict])
 async def request_password_reset(
     reset_request: PasswordReset,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     background_tasks: BackgroundTasks = None,
 ):
     """Request a password reset email; always succeeds to avoid leaking registered emails."""
@@ -1071,7 +1071,7 @@ async def request_password_reset(
 )
 async def validate_reset_token(
     token: str,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Check whether a password reset token is still valid."""
 
@@ -1110,7 +1110,7 @@ async def reset_password(
     token: str,
     new_password: PasswordUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Reset a user's password using a valid reset token."""
 

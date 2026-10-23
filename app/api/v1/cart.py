@@ -369,7 +369,7 @@ async def get_cart(
 @router.get("", response_model=APIResponse[CartResponse])
 async def get_user_cart(
     cart: Cart = Depends(get_cart),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Retrieve the caller's cart, priced from the catalog as it is now:
     the account's cart with an `Authorization` header, the guest cart named
@@ -398,7 +398,7 @@ async def add_to_cart(
     quantity: int = Query(1, ge=1, le=INT32_MAX),
     variant_id: Optional[Int32] = None,
     owner: CartOwner = Depends(get_cart_owner),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Add a product (optionally, a specific variant) to the caller's cart,
@@ -481,7 +481,7 @@ async def update_cart_item(
     quantity: int = Query(..., ge=1, le=INT32_MAX),
     variant_id: Optional[Int32] = None,
     owner: CartOwner = Depends(get_cart_owner),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Update the quantity of an item already in the caller's cart."""
@@ -529,7 +529,7 @@ async def remove_from_cart(
     product_id: Int32,
     variant_id: Optional[Int32] = None,
     owner: CartOwner = Depends(get_cart_owner),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Remove an item from the caller's cart. This is also how a line
@@ -558,7 +558,7 @@ async def remove_from_cart(
 async def clear_cart(
     response: Response,
     owner: CartOwner = Depends(get_cart_owner),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Remove all items from the caller's cart. For a guest this also ends
@@ -573,7 +573,7 @@ async def clear_cart(
 @router.post("/validate", response_model=APIResponse[CartValidationResponse])
 async def validate_cart(
     cart: Cart = Depends(get_cart),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Check whether the caller's cart can be ordered right now. A guest
     can validate a cart, but has to log in to order it (`POST /orders`).
