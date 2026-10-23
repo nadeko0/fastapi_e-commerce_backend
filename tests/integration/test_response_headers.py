@@ -183,6 +183,7 @@ def test_missing_token_keeps_the_bare_challenge(client):
     for response in (
         client.get(f"{USERS}/me"),
         client.get(f"{USERS}/me", headers={"Authorization": "Basic abc"}),
+        client.get(f"{USERS}/me", headers={"Authorization": "Bearer"}),
         client.get(f"{ADMIN}/orders"),
     ):
         assert response.status_code == 401
