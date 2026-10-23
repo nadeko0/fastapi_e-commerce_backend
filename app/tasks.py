@@ -113,6 +113,10 @@ celery.conf.update(
         # for its answer: a broker that does not answer must fail fast (the
         # event is stored and the sweeper publishes it), not hang the request.
         'socket_connect_timeout': 5,
+        # kombu's default is None (no limit): a broker that accepts the
+        # connection and then never answers would hang the publisher just
+        # the same. Well above the 1 s BRPOP poll the worker uses.
+        'socket_timeout': 10,
     },
     task_time_limit=300,
     task_soft_time_limit=240,
