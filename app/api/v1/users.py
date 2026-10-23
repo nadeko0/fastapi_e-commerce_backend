@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
+from app.api.merge_patch import PATCH_DESCRIPTION, merge_patch_body
 from app.api.v1.cart import merge_guest_cart_on_login_async
 from app.core.clock import as_utc, utc_now
 from app.core.config import settings
@@ -670,6 +671,19 @@ async def get_current_user_data(
 
     return APIResponse.success_response(UserResponse.model_validate(current_user))
 
+# PATCH shares the PUT handler: same schema, checks, side effects, response.
+@router.patch(
+    "/me",
+    response_model=APIResponse[UserResponse],
+    summary="Patch Current User",
+    description=PATCH_DESCRIPTION,
+    openapi_extra=merge_patch_body("UserUpdate"),
+    responses={
+        400: {"description": "No fields to update"},
+        404: {"description": "User not found"},
+        500: {"description": "Failed to update profile"},
+    },
+)
 @router.put(
     "/me",
     response_model=APIResponse[UserResponse],
@@ -837,6 +851,18 @@ async def create_address(
             detail="This address already exists for the current user"
         ) from e
 
+# PATCH shares the PUT handler: same schema, checks, side effects, response.
+@router.patch(
+    "/addresses/{address_id}",
+    response_model=APIResponse[AddressResponse],
+    summary="Patch Address",
+    description=PATCH_DESCRIPTION,
+    openapi_extra=merge_patch_body("AddressUpdate"),
+    responses={
+        400: {"description": "Address is not active"},
+        404: {"description": "Address not found"},
+    },
+)
 @router.put(
     "/addresses/{address_id}",
     response_model=APIResponse[AddressResponse],

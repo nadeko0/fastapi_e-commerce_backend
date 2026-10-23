@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
+from app.api.merge_patch import PATCH_DESCRIPTION, merge_patch_body
 from app.core import database
 from app.core.clock import as_utc, utc_now
 from app.core.dependencies import AdminUser, Cache, DbSession, Provider
@@ -162,6 +163,18 @@ async def create_product(
     response = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
     return APIResponse.success_response(response)
 
+# PATCH shares the PUT handler: same schema, checks, side effects, response.
+@router.patch(
+    "/products/{product_id}",
+    response_model=APIResponse[ProductResponse],
+    summary="Patch Product",
+    description=PATCH_DESCRIPTION,
+    openapi_extra=merge_patch_body("ProductUpdate"),
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Product or category not found"},
+    },
+)
 @router.put(
     "/products/{product_id}",
     response_model=APIResponse[ProductResponse],
@@ -637,6 +650,20 @@ async def list_product_variants(
         total=len(variants),
     ))
 
+# PATCH shares the PUT handler: same schema, checks, side effects, response.
+@router.patch(
+    "/products/{product_id}/variants/{variant_id}",
+    response_model=APIResponse[ProductVariantResponse],
+    summary="Patch Product Variant",
+    description=PATCH_DESCRIPTION,
+    openapi_extra=merge_patch_body("ProductVariantUpdate"),
+    responses={
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Product or variant not found"},
+        409: {"description": "SKU already in use"},
+        422: {"description": "Invalid variant data"},
+    },
+)
 @router.put(
     "/products/{product_id}/variants/{variant_id}",
     response_model=APIResponse[ProductVariantResponse],
