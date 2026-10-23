@@ -83,6 +83,11 @@ celery.conf.update(
     worker_prefetch_multiplier=1,
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    # With late acks a task that is still running when the broker connection
+    # drops can no longer be acknowledged and the broker redelivers it, so it
+    # would run twice, possibly in parallel. True cancels the stale run; the
+    # redelivered copy is the one that counts. This is the default in Celery 6.0.
+    worker_cancel_long_running_tasks_on_connection_loss=True,
     task_default_queue='default',
     task_queues={
         'default': {},
