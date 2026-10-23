@@ -340,9 +340,14 @@ async def list_orders(
     if pagination.sort_by:
         field, order = pagination.sort_by.rsplit('_', 1)
         column = ORDER_SORT_COLUMNS[field]
-        query = query.order_by(desc(column) if order == 'desc' else column)
+        # The id breaks ties in the direction of the sort (a page boundary
+        # inside a run of equal values must not repeat or skip an order).
+        if order == 'desc':
+            query = query.order_by(desc(column), Order.id.desc())
+        else:
+            query = query.order_by(column, Order.id)
     else:
-        query = query.order_by(Order.created_at.desc())
+        query = query.order_by(Order.created_at.desc(), Order.id.desc())
 
     total = query.count()
     orders = (

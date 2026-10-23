@@ -104,8 +104,9 @@ async def list_categories(
         stmt = stmt.where(Category.parent_id == parent_id)
 
     total = await _count(db, stmt)
+    # The id last: LIMIT/OFFSET pages only fit together in a unique order.
     categories = (await db.scalars(
-        stmt.offset((pagination.page - 1) * pagination.size).limit(pagination.size)
+        stmt.order_by(Category.id).offset((pagination.page - 1) * pagination.size).limit(pagination.size)
     )).all()
 
     return APIResponse.success_response(CategoryListResponse(
@@ -237,7 +238,14 @@ async def list_products(
         # the same reason.
         field, order = filter_params.sort_by.rsplit('_', 1)
         column = getattr(Product, field)
-        stmt = stmt.order_by(column.desc() if order == 'desc' else column.asc())
+        # The id breaks ties in the direction of the sort, so that rows
+        # sharing a price or a name keep one place from page to page.
+        if order == 'desc':
+            stmt = stmt.order_by(column.desc(), Product.id.desc())
+        else:
+            stmt = stmt.order_by(column.asc(), Product.id.asc())
+    else:
+        stmt = stmt.order_by(Product.id)
 
     total = await _count(db, stmt)
     products = (await db.scalars(
@@ -273,7 +281,7 @@ async def search_products(
 
     total = await _count(db, stmt)
     products = (await db.scalars(
-        stmt.offset((search.page - 1) * search.size).limit(search.size)
+        stmt.order_by(Product.id).offset((search.page - 1) * search.size).limit(search.size)
     )).all()
 
     return APIResponse.success_response(ProductListResponse(
