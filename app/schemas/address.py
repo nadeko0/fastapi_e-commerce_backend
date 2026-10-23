@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import AddressType
-from app.schemas.common import Int32
+from app.schemas.common import E164_PHONE_PATTERN, Int32
 
 
 # Mirrors app.schemas.user.UserBase's phone validation exactly - both
@@ -18,6 +18,17 @@ def _validate_phone(v: str | None) -> str | None:
     if not 5 <= len(phone) <= 15:
         raise ValueError('Invalid phone number length')
     return f"+{phone}"
+
+
+def _validate_input_phone(v: str | None) -> str | None:
+    """Input schemas only: the normalised number must also be ITU-T E.164.
+    The response schemas keep _validate_phone so a number stored before this
+    rule (for example "+0000000") still reads."""
+    v = _validate_phone(v)
+    if v and not re.fullmatch(E164_PHONE_PATTERN, v):
+        raise ValueError('Invalid phone number format')
+    return v
+
 
 class AddressBase(BaseModel):
     street: str = Field(..., min_length=5, max_length=255)
@@ -51,7 +62,10 @@ class AddressBase(BaseModel):
         return _validate_phone(v)
 
 class AddressCreate(AddressBase):
-    pass
+    @field_validator('delivery_phone')
+    @classmethod
+    def validate_delivery_phone(cls, v):
+        return _validate_input_phone(v)
 
 class AddressUpdate(BaseModel):
     street: str | None = Field(None, min_length=5, max_length=255)
@@ -96,7 +110,7 @@ class AddressUpdate(BaseModel):
     @field_validator('delivery_phone')
     @classmethod
     def validate_delivery_phone(cls, v):
-        return _validate_phone(v)
+        return _validate_input_phone(v)
 
 class AddressResponse(AddressBase):
     id: int

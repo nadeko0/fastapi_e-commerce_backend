@@ -93,13 +93,15 @@ def test_a_client_cannot_register_itself_as_an_admin(client, db_session):
         {"full_name": "x" * 101},
         {"phone": "12345"},
         {"phone": "+12"},
+        {"phone": "+0000000"},
+        {"phone": "+1234567890123456"},
         {"email": "not-an-email"},
         {"gdpr_consent": False},
         {"privacy_policy_accepted": False},
         {"password": "short1"},
     ],
     ids=[
-        "name-too-short", "name-too-long", "phone-without-plus", "phone-too-short",
+        "name-too-short", "name-too-long", "phone-without-plus", "phone-too-short", "phone-leading-zero", "phone-over-15-digits",
         "bad-email", "no-gdpr-consent", "no-privacy-policy", "short-password",
     ],
 )
