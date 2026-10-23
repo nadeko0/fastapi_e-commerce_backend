@@ -355,8 +355,10 @@ def test_admin_stats_popular_products_sum_quantity_and_revenue(client, db_sessio
     popular = _stats(client, _admin_headers(client, db_session), "24h")["popular_products"]
 
     assert popular == [
-        {"id": gadget.id, "name": "Gadget", "total_quantity": 5, "total_revenue": 15.0},
-        {"id": widget.id, "name": "Widget", "total_quantity": 3, "total_revenue": 32.0},
+        {"id": gadget.id, "name": "Gadget", "total_quantity": 5, "total_revenue": 15.0,
+         "currency": "USD"},
+        {"id": widget.id, "name": "Widget", "total_quantity": 3, "total_revenue": 32.0,
+         "currency": "USD"},
     ]
 
 
