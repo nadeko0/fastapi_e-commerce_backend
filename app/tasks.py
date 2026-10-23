@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from celery import Celery
 from celery.schedules import crontab
-from sqlalchemy import String, cast, create_engine, func, literal
+from sqlalchemy import String, cast, create_engine, func, literal, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload, selectinload, sessionmaker
 
@@ -213,15 +213,14 @@ def send_order_confirmation(order_id: int) -> None:
     # the very error autoretry_for retries - left the marker set, the retry
     # skipped the send, and the customer never got the email.
     with task_session() as db:
-        order = (
-            db.query(Order)
+        order = db.scalars(
+            select(Order)
             .options(
                 joinedload(Order.user),
                 selectinload(Order.items).joinedload(OrderItem.product),
             )
-            .filter(Order.id == order_id)
-            .first()
-        )
+            .where(Order.id == order_id)
+        ).first()
         if not order:
             return
         if not RedisService().mark_once(
@@ -246,12 +245,9 @@ def send_order_status_update(order_id: int) -> None:
         # joinedload(Order.user): the recipient's address must be read before
         # the marker below is claimed, not lazily after it (see
         # send_order_confirmation above for what a failed read did then).
-        order = (
-            db.query(Order)
-            .options(joinedload(Order.user))
-            .filter(Order.id == order_id)
-            .first()
-        )
+        order = db.scalars(
+            select(Order).options(joinedload(Order.user)).where(Order.id == order_id)
+        ).first()
         if not order:
             return
         # Keyed by status (not just order_id): unlike the one-shot confirmation
@@ -323,7 +319,7 @@ def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> i
     anonymised_email = (
         literal("deleted-user-") + cast(User.id, String) + literal("@deleted.invalid")
     )
-    pending = db.query(User).options(selectinload(User.addresses)).filter(
+    pending = select(User).options(selectinload(User.addresses)).where(
         User.is_active == False,  # noqa: E712 - `not User.is_active` evaluates in
         # Python immediately instead of building a SQL clause and silently
         # produces an always-false filter; explicit `== False` is required.
@@ -338,7 +334,7 @@ def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> i
         # Keyset pagination on id, not just "the next unscrubbed rows": a
         # row that somehow stayed unscrubbed is not picked up again, so the
         # loop always ends.
-        accounts = pending.filter(User.id > last_id).limit(batch_size).all()
+        accounts = db.scalars(pending.where(User.id > last_id).limit(batch_size)).all()
         if not accounts:
             break
         for account in accounts:
@@ -406,23 +402,22 @@ def expire_unpaid_orders(db) -> int:
     against a session without Celery, like purge_expired_deletion_requests.
     """
     cutoff = utc_now() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES)
-    candidates = [
-        order_id for (order_id,) in db.query(Order.id).filter(
-            Order.status == OrderStatus.NEW,
-            Order.payment_status.in_([s.value for s in UNPAID_PAYMENT_STATUSES]),
-            Order.created_at < cutoff,
-        ).all()
-    ]
+    candidates = list(
+        db.scalars(
+            select(Order.id).where(
+                Order.status == OrderStatus.NEW,
+                Order.payment_status.in_([s.value for s in UNPAID_PAYMENT_STATUSES]),
+                Order.created_at < cutoff,
+            )
+        )
+    )
     db.commit()
 
     cancelled = 0
     for order_id in candidates:
-        order = (
-            db.query(Order)
-            .filter(Order.id == order_id)
-            .with_for_update(skip_locked=True)
-            .first()
-        )
+        order = db.scalars(
+            select(Order).where(Order.id == order_id).with_for_update(skip_locked=True)
+        ).first()
         if order is None or not is_unpaid_and_new(order) or order.created_at >= cutoff:
             db.rollback()
             continue
@@ -501,16 +496,17 @@ def update_product_stats() -> None:
     redis = RedisService()
 
     with task_session() as db:
-        popular_products = (
-            db.query(
+        popular_products = db.execute(
+            select(
                 Product.id,
                 Product.name,
                 func.sum(OrderItem.quantity).label('total_quantity'),
                 func.sum(OrderItem.quantity * OrderItem.price_at_time).label('total_revenue')
             )
+            .select_from(Product)
             .join(OrderItem)
             .join(Order)
-            .filter(
+            .where(
                 Order.created_at >= utc_now() - timedelta(days=30),
                 Order.status != OrderStatus.CANCELLED,
                 Order.payment_status == PaymentStatus.PAID
@@ -518,8 +514,7 @@ def update_product_stats() -> None:
             .group_by(Product.id)
             .order_by(func.sum(OrderItem.quantity).desc())
             .limit(20)
-            .all()
-        )
+        ).all()
 
     stats = {
         "popular_products": [
@@ -546,14 +541,12 @@ def update_product_stats() -> None:
 )
 def check_low_stock(threshold: int = 5) -> None:
     with task_session() as db:
-        low_stock_products = (
-            db.query(Product)
-            .filter(
+        low_stock_products = db.scalars(
+            select(Product).where(
                 Product.is_active,
                 Product.stock_quantity <= threshold,
             )
-            .all()
-        )
+        ).all()
 
         # Loaded: end the transaction before the SMTP call.
         db.expunge_all()

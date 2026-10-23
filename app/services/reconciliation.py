@@ -34,6 +34,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now
@@ -207,7 +208,9 @@ def record(
     Returns (opened, resolved): rows created or reopened, rows closed."""
     rows = {
         (d.kind, d.subject): d
-        for d in db.query(PaymentDiscrepancy).filter(PaymentDiscrepancy.payment_id == payment_id)
+        for d in db.scalars(
+            select(PaymentDiscrepancy).where(PaymentDiscrepancy.payment_id == payment_id)
+        )
     }
     opened = resolved = 0
     seen = set()
@@ -260,17 +263,17 @@ def reconcile_payments(
     settings), or every payment of `order_id` whatever its age. Stripe
     errors for one payment are counted and the run goes on with the next."""
     now = now or utc_now()
-    query = db.query(Payment.id)
+    query = select(Payment.id)
     if order_id is not None:
-        query = query.filter(Payment.order_id == order_id)
+        query = query.where(Payment.order_id == order_id)
     else:
-        query = query.filter(
+        query = query.where(
             Payment.created_at >= now - timedelta(days=settings.RECONCILIATION_WINDOW_DAYS),
             Payment.created_at <= now - timedelta(minutes=settings.RECONCILIATION_MIN_AGE_MINUTES),
         )
     # One more than the cap, to know whether the cap cut anything off.
     limit = settings.RECONCILIATION_MAX_PAYMENTS
-    ids = [row.id for row in query.order_by(Payment.id.desc()).limit(limit + 1)]
+    ids = list(db.scalars(query.order_by(Payment.id.desc()).limit(limit + 1)))
 
     result = ReconciliationResult(truncated=len(ids) > limit)
     if result.truncated:
@@ -317,17 +320,16 @@ def open_discrepancies(
     """A page of the unresolved discrepancies, oldest first, each with its
     payment, and how many there are in all."""
     query = (
-        db.query(PaymentDiscrepancy, Payment)
+        select(PaymentDiscrepancy, Payment)
         .join(Payment, Payment.id == PaymentDiscrepancy.payment_id)
-        .filter(PaymentDiscrepancy.resolved_at.is_(None))
+        .where(PaymentDiscrepancy.resolved_at.is_(None))
     )
     if order_id is not None:
-        query = query.filter(Payment.order_id == order_id)
-    total = query.count()
-    rows = (
+        query = query.where(Payment.order_id == order_id)
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    rows = db.execute(
         query.order_by(PaymentDiscrepancy.detected_at, PaymentDiscrepancy.id)
         .offset((page - 1) * size)
         .limit(size)
-        .all()
-    )
+    ).all()
     return rows, total
