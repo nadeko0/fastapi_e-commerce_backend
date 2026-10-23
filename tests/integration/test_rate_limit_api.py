@@ -17,6 +17,7 @@ from sqlalchemy.pool import StaticPool
 import app.core.rate_limit as rate_limit
 import app.main as main_module
 from app.core.config import settings
+from app.core.probes import PROBE_PATHS
 from app.core.rate_limit import _EXEMPT, _ROUTE_LIMITS, parse_rate
 from app.core.security import generate_password_reset_token
 from app.main import app
@@ -77,7 +78,9 @@ def test_every_route_named_in_the_limiter_exists():
     # its exemption) if its entry here were left behind.
     paths = app.openapi()["paths"]
     for method, template in list(_ROUTE_LIMITS) + list(_EXEMPT):
-        full_path = template if template == "/health" else f"{API}{template}"
+        if method == "HEAD":
+            continue  # the probes serve HEAD but keep it out of the schema
+        full_path = template if template in PROBE_PATHS else f"{API}{template}"
         assert method.lower() in paths.get(full_path, {}), (method, template)
     for setting in set(_ROUTE_LIMITS.values()):
         assert parse_rate(getattr(settings, setting))

@@ -22,6 +22,8 @@ def _build(limit: int):
         raise RuntimeError("handler blew up")
 
     @app.get("/health")
+    @app.get("/livez")
+    @app.get("/readyz")
     async def health():
         return {"status": "healthy"}
 
@@ -50,11 +52,12 @@ def test_request_over_the_limit_gets_503_with_retry_after():
     assert middleware.in_flight == 2
 
 
-def test_health_is_never_shed():
+@pytest.mark.parametrize("path", ["/health", "/livez", "/readyz"])
+def test_probes_are_never_shed(path):
     middleware, client = _build(limit=1)
     middleware.in_flight = 1
 
-    assert client.get("/health").status_code == 200
+    assert client.get(path).status_code == 200
     assert client.get("/work").status_code == 503
 
 
