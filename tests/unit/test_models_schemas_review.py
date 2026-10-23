@@ -157,17 +157,17 @@ class TestLegalSchemaConfig:
     def test_json_schema_extra_example_is_applied(self):
         # Previously `class Config: schema_extra = {...}` (the Pydantic v1
         # key) was silently ignored under Pydantic v2 - the documented
-        # "example" never made it into the generated schema.
+        # "examples" never made it into the generated schema.
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             schema = ConsentUpdate.model_json_schema()
-        assert schema.get("example") == {
+        assert schema.get("examples") == [{
             "marketing_consent": True,
             "privacy_policy_accepted": True,
-        }
+        }]
 
     def test_legal_document_schema_extra_is_applied(self):
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             schema = LegalDocument.model_json_schema()
-        assert schema["example"]["version"] == "1.0"
+        assert schema["examples"][0]["version"] == "1.0"
