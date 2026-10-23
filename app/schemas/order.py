@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.config import settings
+from app.schemas.common import Int32
 
 
 class OrderStatus(str, Enum):
@@ -139,7 +140,7 @@ ORDER_AMOUNT_DECIMAL_PLACES = 2
 
 class PaymentCreate(BaseModel):
     """Schema for payment processing"""
-    order_id: int
+    order_id: Int32
     payment_method: str = Field(..., pattern="^(stripe|paypal)$")
     amount: Decimal = Field(
         ..., max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES

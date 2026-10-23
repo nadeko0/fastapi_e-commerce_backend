@@ -3,11 +3,13 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.common import Int32
+
 
 class CategoryBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
     description: Optional[str] = None
-    parent_id: Optional[int] = None
+    parent_id: Optional[Int32] = None
 
 class CategoryCreate(CategoryBase):
     """Schema for creating a new category"""
@@ -25,7 +27,7 @@ class CategoryUpdate(BaseModel):
     """Schema for updating an existing category"""
     name: Optional[str] = Field(None, min_length=2, max_length=100)
     description: Optional[str] = None
-    parent_id: Optional[int] = None
+    parent_id: Optional[Int32] = None
     metadata: Optional[Dict] = None
 
     @field_validator('parent_id')

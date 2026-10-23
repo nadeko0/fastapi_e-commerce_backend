@@ -47,6 +47,7 @@ from app.schemas.address import (
 )
 from app.schemas.common import (
     APIResponse,
+    Int32,
     PaginationParams,
 )
 from app.schemas.order import OrderResponse
@@ -834,7 +835,7 @@ async def create_address(
     },
 )
 async def update_address(
-    address_id: int,
+    address_id: Int32,
     address_in: AddressUpdate,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -891,7 +892,7 @@ async def update_address(
     },
 )
 async def delete_address(
-    address_id: int,
+    address_id: Int32,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):

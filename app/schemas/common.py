@@ -1,11 +1,35 @@
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum
-from typing import Any, Dict, Generic, List, Literal, Mapping, Optional, Tuple, TypeVar, Union
+from typing import (
+    Annotated,
+    Any,
+    Dict,
+    Generic,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.clock import UTCDatetime, utc_now
+
+# What an INTEGER column holds (32-bit on PostgreSQL; SQLite takes 64-bit but
+# refuses a Python int beyond that). An id, a quantity or a page number
+# outside it cannot match or be stored, and reaching the driver it answered
+# 500 ("integer out of range"); declared on the parameter or field it is a
+# 422 like any other bad value.
+INT32_MAX = 2_147_483_647
+Int32 = Annotated[int, Field(ge=-INT32_MAX - 1, le=INT32_MAX)]
+# For a field that sets its own lower bound (ge=0, ge=1): only the upper one.
+# Two Field(ge=...) on one field do not combine reliably: the lower bound
+# of the field went missing.
+Int32Max = Annotated[int, Field(le=INT32_MAX)]
 
 _ZERO = Decimal("0.00")
 _CENT = Decimal("0.01")
@@ -77,7 +101,8 @@ class APIResponse(BaseModel, Generic[DataT]):
 
 class PaginationParams(BaseModel):
     """Common pagination parameters"""
-    page: int = Field(1, ge=1)
+    # offset = (page - 1) * size stays far inside a bigint
+    page: Int32Max = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
     sort_by: Optional[str] = None
     sort_order: Optional[str] = Field(None, pattern="^(asc|desc)$")

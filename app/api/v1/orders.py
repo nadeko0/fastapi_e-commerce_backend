@@ -23,7 +23,7 @@ from app.models.payment import Payment
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, PaymentRefund
 from app.models.product import Product, ProductVariant
 from app.models.user import User
-from app.schemas.common import APIResponse
+from app.schemas.common import APIResponse, Int32
 from app.schemas.order import (
     CheckoutSessionCreate,
     CheckoutSessionResponse,
@@ -75,7 +75,7 @@ router = APIRouter(prefix="/orders", tags=["orders"])
     },
 )
 async def create_order(
-    shipping_address_id: int,
+    shipping_address_id: Int32,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -297,7 +297,7 @@ async def create_order(
     responses={404: {"description": "Order not found"}},
 )
 async def get_order(
-    order_id: int,
+    order_id: Int32,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
@@ -331,7 +331,7 @@ async def get_order(
     },
 )
 async def update_order_status(
-    order_id: int,
+    order_id: Int32,
     # Named "status" for the public API/query param, but that shadows the
     # `status` module (fastapi.status) imported above within this function
     # body - HTTPException below must use the http_status alias instead,
@@ -407,7 +407,7 @@ async def update_order_status(
     },
 )
 async def cancel_own_order(
-    order_id: int,
+    order_id: Int32,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -811,7 +811,7 @@ _MANUAL_REVIEW_RESPONSE = {"status": "processed", "applied": False, "requires_ma
     },
 )
 async def process_payment(
-    order_id: int,
+    order_id: Int32,
     payment: PaymentCreate,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
@@ -1093,7 +1093,7 @@ async def process_payment(
     },
 )
 async def create_checkout_session(
-    order_id: int,
+    order_id: Int32,
     background_tasks: BackgroundTasks,
     payload: Optional[CheckoutSessionCreate] = None,
     current_user: User = Depends(get_current_active_user),
@@ -1239,7 +1239,7 @@ async def create_checkout_session(
     },
 )
 async def refund_payment(
-    order_id: int,
+    order_id: Int32,
     refund_request: RefundCreate,
     current_user: User = Depends(get_current_admin_user),  # Refunds are a support/admin action
     db: Session = Depends(get_db),
@@ -1389,7 +1389,7 @@ async def refund_payment(
     },
 )
 async def list_order_payments(
-    order_id: int,
+    order_id: Int32,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
