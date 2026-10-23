@@ -106,4 +106,9 @@ async def server_error_handler(request: Request, exc: Exception) -> Response:
     sent, so server logs and the test client see it as before."""
     response = PlainTextResponse("Internal Server Error", status_code=500)
     apply_security_headers(response.headers, request.scope)
+    # ServerErrorMiddleware is outside RequestContextMiddleware, which has
+    # already left; its id is on the scope.
+    request_id = request.scope.get("state", {}).get("request_id")
+    if request_id:
+        response.headers["X-Request-ID"] = request_id
     return response

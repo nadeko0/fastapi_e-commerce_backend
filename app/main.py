@@ -19,6 +19,7 @@ from app.core.forwarded import ForwardedClientMiddleware
 from app.core.logging_config import setup_logging
 from app.core.overload import InFlightLimitMiddleware
 from app.core.rate_limit import rate_limit
+from app.core.request_context import RequestContextMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware, server_error_handler
 from app.services.redis import RedisService
 from app.services.redis_async import close_async_redis, get_async_redis
@@ -94,7 +95,7 @@ app.add_middleware(
     # a browser client can back off. Starlette: credentials and "*" do not mix.
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
-    expose_headers=["Retry-After"],
+    expose_headers=["Retry-After", "X-Request-ID"],
 )
 
 # X-Forwarded-For -> request.client, by TRUSTED_PROXIES and nothing else,
@@ -107,10 +108,17 @@ if settings.MAX_IN_FLIGHT_REQUESTS:
     logger.info(f"Limiting in-flight requests to {settings.MAX_IN_FLIGHT_REQUESTS} per worker")
     app.add_middleware(InFlightLimitMiddleware, limit=settings.MAX_IN_FLIGHT_REQUESTS)
 
+# Request id + traceparent, just inside the security headers and outside the
+# in-flight limit: the shed 503, the 404 and the 413 carry X-Request-ID and
+# every log record has the ids (app/core/request_context.py). The 500 gets
+# it in server_error_handler.
+app.add_middleware(RequestContextMiddleware)
+
 # Security headers on every response, the shed 503 and the 500 for an
 # unhandled exception included (app/core/security_headers.py). Added after
 # the in-flight limit so it is the outermost user middleware.
 app.add_middleware(SecurityHeadersMiddleware)
+
 app.add_exception_handler(Exception, server_error_handler)
 
 
