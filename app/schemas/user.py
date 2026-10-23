@@ -2,9 +2,10 @@ import re
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.core.clock import utc_now
+from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password, normalize_password
 from app.models.enums import UserRole
 from app.schemas.common import E164_PHONE_PATTERN
 
@@ -15,6 +16,22 @@ class ConsentType(str, Enum):
     COOKIES = "cookies"
     PRIVACY_POLICY = "privacy_policy"
 
+
+
+def validate_new_password(v: str) -> str:
+    """Rules for a password being set (registration, reset); never login.
+    Returns the NFC form, which is what gets hashed."""
+    v = normalize_password(v)
+    if len(v) < 8:
+        raise ValueError('Password must be at least 8 characters long')
+    # bcrypt hard-limits inputs to 72 bytes and raises instead of
+    # truncating; reject oversized passwords here with a clean 422
+    # rather than letting that surface as a 500 from the hasher.
+    if len(v.encode('utf-8')) > 72:
+        raise ValueError('Password must be at most 72 bytes long')
+    if is_blocked_password(v):
+        raise ValueError(BLOCKED_MESSAGE)
+    return v
 
 
 def normalize_email(email: str) -> str:
@@ -59,7 +76,9 @@ class UserCreate(UserBase):
     # pattern so a number stored before the E.164 rule still reads.
     phone: str | None = Field(None, pattern=E164_PHONE_PATTERN, description="International phone number (5-15 digits)")
 
-    password: str = Field(..., min_length=8, pattern=r"^[A-Za-z\d@$!%*#?&]{8,}$")
+    # No character-set or composition rule (NIST SP 800-63B-4 3.1.1.2); the
+    # length floor is unchanged. Rules live in app.core.passwords.
+    password: str = Field(..., min_length=8, description="At least 8 characters, any characters including spaces and Unicode; at most 72 bytes in UTF-8; not a commonly used password")
 
     @field_validator('email', mode="before")
     @classmethod
@@ -69,17 +88,14 @@ class UserCreate(UserBase):
     @field_validator('password')
     @classmethod
     def validate_password_strength(cls, v):
-        """Validate password contains both letters and numbers"""
-        if not any(c.isalpha() for c in v):
-            raise ValueError('Password must contain at least one letter')
-        if not any(c.isdigit() for c in v):
-            raise ValueError('Password must contain at least one number')
-        # bcrypt hard-limits inputs to 72 bytes and raises instead of
-        # truncating; reject oversized passwords here with a clean 422
-        # rather than letting that surface as a 500 from the hasher.
-        if len(v.encode('utf-8')) > 72:
-            raise ValueError('Password must be at most 72 bytes long')
-        return v
+        return validate_new_password(v)
+
+    @model_validator(mode="after")
+    def password_not_derived_from_email(self):
+        if is_blocked_password(self.password, self.email):
+            raise ValueError(BLOCKED_MESSAGE)
+        return self
+
     gdpr_consent: bool = Field(..., description="GDPR consent is required")
     privacy_policy_accepted: bool = Field(..., description="Privacy policy must be accepted")
     marketing_consent: bool | None = Field(default=False)
@@ -174,19 +190,12 @@ class PasswordResetConfirm(BaseModel):
     """Body of the reset-by-token route: the token proves the right to set
     a password, so only the new one is sent. Extra fields (an old client
     still sending current_password) are ignored, the Pydantic default."""
-    new_password: str = Field(..., min_length=8, pattern=r"^[A-Za-z\d@$!%*#?&]{8,}$")
+    new_password: str = Field(..., min_length=8)
 
     @field_validator('new_password')
     @classmethod
     def validate_new_password_strength(cls, v):
-        """Validate new password contains both letters and numbers"""
-        if not any(c.isalpha() for c in v):
-            raise ValueError('Password must contain at least one letter')
-        if not any(c.isdigit() for c in v):
-            raise ValueError('Password must contain at least one number')
-        if len(v.encode('utf-8')) > 72:
-            raise ValueError('Password must be at most 72 bytes long')
-        return v
+        return validate_new_password(v)
 
 class PasswordUpdate(PasswordResetConfirm):
     current_password: str

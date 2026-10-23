@@ -24,6 +24,7 @@ from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.core.dependencies import BearerToken, Cache, CurrentUser, DbSession
 from app.core.errors import sanitized_errors
+from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password
 from app.core.rate_limit import check_login_attempt, clear_login_failures
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
@@ -1147,6 +1148,12 @@ async def reset_password(
     # app/core/security.py).
     if not claims.matches(old_hashed_password):
         raise _invalid_reset_token()
+
+    if is_blocked_password(new_password.new_password, email):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=BLOCKED_MESSAGE,
+        )
 
     new_hashed_password = await get_password_hash_async(new_password.new_password)
 

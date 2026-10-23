@@ -29,8 +29,8 @@ def _valid_address():
 # --- Registration validation edge cases -----------------------------------
 
 
-def test_register_rejects_weak_password_without_digit(client, valid_registration_payload):
-    valid_registration_payload["password"] = "OnlyLetters"
+def test_register_rejects_blocklisted_password(client, valid_registration_payload):
+    valid_registration_payload["password"] = "qwertyuiop"
 
     response = client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
 
