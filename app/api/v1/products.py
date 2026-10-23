@@ -1,7 +1,7 @@
 import inspect
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import Select, func, or_, select
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.dependencies import Cache, DbSession
+from app.core.etag import IfNoneMatch, etag_for, if_none_match_hits
 from app.models.category import Category
 from app.models.product import Product
 from app.schemas.category import (
@@ -293,18 +294,39 @@ async def search_products(
 @router.get(
     "/products/{product_id}",
     response_model=APIResponse[ProductResponse],
-    responses={404: {"description": "Product not found"}},
+    responses={
+        304: {"description": "Not modified: If-None-Match matches the current ETag"},
+        404: {"description": "Product not found"},
+    },
 )
 async def get_product(
     product_id: Int32,
     db: DbSession,
     redis: Cache,
+    response: Response,
+    if_none_match: IfNoneMatch = None,
 ):
-    """Retrieve a single product by ID."""
+    """Retrieve a single product by ID.
+
+    The ETag is a hash of the ProductResponse JSON, so the database path and
+    the Redis copy of the same representation carry the same tag.
+    """
+
+    def _conditional(representation: ProductResponse):
+        etag = etag_for(representation)
+        if if_none_match_hits(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
+        return None
 
     cached_product = await redis.get_cached_product(product_id)
     if cached_product:
-        return APIResponse.success_response(cached_product)
+        try:
+            cached_representation = ProductResponse.model_validate(cached_product)
+        except ValidationError:
+            cached_representation = None  # unreadable cache entry: rebuild below
+        if cached_representation is not None:
+            return _conditional(cached_representation) or APIResponse.success_response(cached_product)
 
     product = (await db.scalars(
         select(Product).options(joinedload(Product.category)).where(
@@ -318,9 +340,8 @@ async def get_product(
             detail="Product not found"
         )
 
-    response = _to_product_response(product)
+    representation = _to_product_response(product)
 
+    await redis.cache_product(product_id, representation.model_dump())
 
-    await redis.cache_product(product_id, response.model_dump())
-
-    return APIResponse.success_response(response)
+    return _conditional(representation) or APIResponse.success_response(representation)

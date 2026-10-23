@@ -90,8 +90,8 @@ app.add_middleware(
     # Starlette, listed for the reader. Retry-After (429, 503) is exposed so
     # a browser client can back off. Starlette: credentials and "*" do not mix.
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
-    expose_headers=["Retry-After", "X-Request-ID", "RateLimit", "RateLimit-Policy"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "If-None-Match"],
+    expose_headers=["Retry-After", "X-Request-ID", "RateLimit", "RateLimit-Policy", "ETag"],
 )
 
 # X-Forwarded-For -> request.client, by TRUSTED_PROXIES and nothing else,
