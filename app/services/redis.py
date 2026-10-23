@@ -9,8 +9,6 @@ from app.core.clock import utc_now
 if TYPE_CHECKING:
     from app.schemas.category import CategoryTreeResponse
 
-from pydantic import ValidationError
-
 # RedisError (not just ConnectionError) is caught throughout this file: every
 # public method below is meant to fail open/degrade gracefully rather than
 # raise out to its caller (cart/product/session endpoints), but ConnectionError
@@ -26,47 +24,20 @@ from app.schemas.cart import (
     CartOwnerRef,
     as_cart_owner,
 )
-from app.schemas.common import Cart, CartItem, cart_item_key
+from app.schemas.common import Cart
+
+# The Redis-free rules (serialization, TTLs, the cart mutations, the errors
+# they raise) live in redis_codec and are shared with AsyncRedisService. The
+# errors are re-exported here: callers import them from this module.
+from app.services import redis_codec as codec
+from app.services.redis_codec import (  # noqa: F401
+    CartFullError,
+    CartNotFoundError,
+    InsufficientStockError,
+    ItemNotInCartError,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class InsufficientStockError(Exception):
-    """Raised by an atomic cart mutation when it would leave the item's
-    cart quantity above the available stock."""
-
-    def __init__(self, available: int, requested: int):
-        self.available = available
-        self.requested = requested
-        super().__init__(
-            f"Not enough stock: requested {requested}, available {available}"
-        )
-
-
-class ItemNotInCartError(Exception):
-    """Raised by an atomic cart mutation (update/remove) when the target
-    product isn't present in the cart at the moment the mutation runs."""
-
-    def __init__(self, product_id: int):
-        self.product_id = product_id
-        super().__init__(f"Item not in cart: {product_id}")
-
-
-class CartNotFoundError(Exception):
-    """Raised by an atomic cart mutation that was told not to create a cart
-    (must_exist) when there is none stored under the owner's key. Nothing
-    is written."""
-
-
-class CartFullError(Exception):
-    """Raised by add_to_cart_atomic when the add would be a new line in a
-    cart that already holds settings.CART_MAX_LINES of them. Nothing is
-    written."""
-
-    def __init__(self, max_lines: int):
-        self.max_lines = max_lines
-        super().__init__(f"Cart cannot hold more than {max_lines} lines")
-
 
 class RedisService:
     _instance = None
@@ -108,75 +79,19 @@ class RedisService:
         return as_cart_owner(user_id).key
 
     def _cart_ttl(self, user_id: Optional[CartOwnerRef] = None) -> timedelta:
-        # Read from settings on every call rather than cached in a module
-        # constant: the key's TTL and Cart.expires_at both come from here,
-        # so they cannot drift apart again (a hard-coded 7 used to be what
-        # was applied, whatever REDIS_CART_TTL_DAYS said). A guest's cart
-        # has its own setting; with no owner given it is an account's.
-        if user_id is not None and as_cart_owner(user_id).is_guest:
-            return timedelta(days=settings.REDIS_GUEST_CART_TTL_DAYS)
-        return timedelta(days=settings.REDIS_CART_TTL_DAYS)
+        return codec.cart_ttl(user_id)
 
     def _serialize(self, data: Any) -> str:
-        if isinstance(data, (Cart, CartItem)) or hasattr(data, 'model_dump'):
-            return json.dumps(data.model_dump(mode='json'), default=str)
-        return json.dumps(data, default=str)
+        return codec.serialize(data)
 
     def _deserialize(self, data: str, model_class=None) -> Any:
-        if not data:
-            return None
-
-        try:
-            parsed = json.loads(data)
-            if model_class:
-
-                if model_class.__name__ == 'Cart':
-                    if 'items' not in parsed:
-                        parsed['items'] = {}
-                    elif not isinstance(parsed['items'], dict):
-
-                        items_dict = {}
-                        for item in parsed['items']:
-                            items_dict[str(item['product_id'])] = item
-                        parsed['items'] = items_dict
-
-
-                    if 'expires_at' not in parsed:
-                        parsed['expires_at'] = (utc_now() + self._cart_ttl()).isoformat()
-
-
-                if model_class.__name__ == 'CategoryTreeResponse':
-                    if isinstance(parsed, str):
-                        parsed = {'tree': [], 'total_categories': 0, 'max_depth': 0}
-                    elif not isinstance(parsed, dict):
-                        parsed = parsed.model_dump() if hasattr(parsed, 'model_dump') else {'tree': [], 'total_categories': 0, 'max_depth': 0}
-                return model_class.model_validate(parsed)
-            return parsed
-        except (json.JSONDecodeError, AttributeError, TypeError, KeyError, ValidationError) as e:
-            # Logged via the app's logger (not print()) so this actually
-            # reaches the JSON log pipeline in production instead of being
-            # lost/interleaved on stdout - matches the reasoning in
-            # app/services/email/smtp_provider.py's module docstring. Only
-            # the exception string is logged, never the raw stored payload,
-            # to avoid leaking cart/session contents into logs.
-            logger.warning(f"Deserialization error: {str(e)}")
-            return None
+        return codec.deserialize(data, model_class)
 
     def _handle_redis_error(self, operation: str) -> None:
-        logger.error(f"Redis operation failed: {operation}")
-
+        codec.log_redis_error(operation)
 
     def _load_cart(self, owner: CartOwner, cart_data: Optional[str]) -> Optional[Cart]:
-        """The Cart stored as `cart_data` under `owner`'s key, or None when
-        there is none or it cannot be read. A value that names another
-        owner than its key does (an account cart must carry that account's
-        user_id, a guest cart none) is unreadable like any other value that
-        is not this owner's cart."""
-        cart = self._deserialize(cart_data, Cart) if cart_data else None
-        if cart is not None and cart.user_id != owner.user_id:
-            logger.warning("Stored cart does not belong to the key it was read from")
-            return None
-        return cart
+        return codec.load_cart(owner, cart_data)
 
     def get_cart(self, user_id: CartOwnerRef) -> Optional[Cart]:
         owner = as_cart_owner(user_id)
@@ -243,22 +158,10 @@ class RedisService:
     def empty_cart(self, user_id: CartOwnerRef) -> Cart:
         """A new, empty Cart for this owner, held in memory only - nothing
         is written to Redis until a mutation stores it."""
-        owner = as_cart_owner(user_id)
-        now = utc_now()
-        return Cart(
-            user_id=owner.user_id,
-            items={},
-            created_at=now,
-            updated_at=now,
-            expires_at=now + self._cart_ttl(owner),
-        )
+        return codec.empty_cart(user_id)
 
     def _load_or_create_cart(self, user_id: CartOwnerRef, cart_data: Optional[str]) -> Cart:
-        owner = as_cart_owner(user_id)
-        cart = self._load_cart(owner, cart_data)
-        if cart is not None:
-            return cart
-        return self.empty_cart(owner)
+        return codec.load_or_create_cart(user_id, cart_data)
 
     def _atomic_mutate_cart(
         self, user_id: CartOwnerRef, mutator, must_exist: bool = False
@@ -293,19 +196,12 @@ class RedisService:
 
         def _txn(pipe):
             cart_data = pipe.get(cart_key)
-            if must_exist and not cart_data:
-                raise CartNotFoundError()
-            cart = self._load_or_create_cart(owner, cart_data)
-            mutator(cart)
-            # This write re-arms the key's TTL, so expires_at moves with it;
-            # it used to keep the value from the day the cart was created.
-            ttl = self._cart_ttl(owner)
-            cart.expires_at = utc_now() + ttl
+            write, cart = codec.plan_cart_mutation(owner, cart_data, mutator, must_exist)
             pipe.multi()
-            if owner.is_guest and not cart.items:
+            if write.cart is None:
                 pipe.delete(cart_key)
             else:
-                pipe.set(cart_key, self._serialize(cart), ex=ttl)
+                pipe.set(cart_key, self._serialize(write.cart), ex=write.ttl)
             outcome['cart'] = cart
 
         try:
@@ -344,26 +240,10 @@ class RedisService:
         `must_exist`, CartNotFoundError if no cart is stored for the owner
         (see _atomic_mutate_cart).
         """
-        def _mutator(cart: Cart) -> None:
-            str_id = cart_item_key(product_id, variant_id)
-            # More of a line already in the cart is always allowed; only a
-            # new line counts against the cap. A cart that somehow holds
-            # more than the cap still loads and can be reduced.
-            if str_id not in cart.items and len(cart.items) >= settings.CART_MAX_LINES:
-                raise CartFullError(settings.CART_MAX_LINES)
-            current_quantity = cart.items[str_id].quantity if str_id in cart.items else 0
-            if stock_quantity < current_quantity + quantity:
-                raise InsufficientStockError(stock_quantity, current_quantity + quantity)
-            cart.add_item(
-                product_id=product_id,
-                quantity=quantity,
-                price=price,
-                name=name,
-                image=image,
-                variant_id=variant_id,
-            )
-
-        return self._atomic_mutate_cart(user_id, _mutator, must_exist=must_exist)
+        mutator = codec.add_mutator(
+            product_id, quantity, price, name, image, stock_quantity, variant_id
+        )
+        return self._atomic_mutate_cart(user_id, mutator, must_exist=must_exist)
 
     def update_cart_quantity_atomic(
         self,
@@ -379,18 +259,11 @@ class RedisService:
         InsufficientStockError if quantity exceeds stock_quantity (nothing
         written in either case).
         """
-        def _mutator(cart: Cart) -> None:
-            str_id = cart_item_key(product_id, variant_id)
-            if str_id not in cart.items:
-                raise ItemNotInCartError(product_id)
-            if stock_quantity < quantity:
-                raise InsufficientStockError(stock_quantity, quantity)
-            cart.update_quantity(product_id, quantity, variant_id=variant_id)
-
+        mutator = codec.update_quantity_mutator(product_id, quantity, stock_quantity, variant_id)
         # No cart is no line to update: must_exist says so without first
         # storing an empty cart (which is all the difference it makes).
         try:
-            return self._atomic_mutate_cart(user_id, _mutator, must_exist=True)
+            return self._atomic_mutate_cart(user_id, mutator, must_exist=True)
         except CartNotFoundError:
             raise ItemNotInCartError(product_id)
 
@@ -402,14 +275,10 @@ class RedisService:
         Raises ItemNotInCartError if the item isn't in the cart (nothing
         written).
         """
-        def _mutator(cart: Cart) -> None:
-            str_id = cart_item_key(product_id, variant_id)
-            if str_id not in cart.items:
-                raise ItemNotInCartError(product_id)
-            cart.remove_item(product_id, variant_id=variant_id)
-
         try:
-            return self._atomic_mutate_cart(user_id, _mutator, must_exist=True)
+            return self._atomic_mutate_cart(
+                user_id, codec.remove_item_mutator(product_id, variant_id), must_exist=True
+            )
         except CartNotFoundError:
             raise ItemNotInCartError(product_id)
 
@@ -417,11 +286,8 @@ class RedisService:
         """Atomically remove all items from the cart. A cart that does not
         exist is already clear: an empty one is returned and none is
         stored."""
-        def _mutator(cart: Cart) -> None:
-            cart.clear()
-
         try:
-            return self._atomic_mutate_cart(user_id, _mutator, must_exist=True)
+            return self._atomic_mutate_cart(user_id, codec.clear_mutator, must_exist=True)
         except CartNotFoundError:
             return self.empty_cart(user_id)
 
@@ -455,27 +321,18 @@ class RedisService:
         guest_key, account_key = guest.key, account.key
 
         def _txn(pipe):
-            guest_data = pipe.get(guest_key)
-            guest_cart = self._load_cart(guest, guest_data)
-            if guest_cart is None:
+            action, guest_cart = codec.plan_guest_merge_read(guest, pipe.get(guest_key))
+            if action == "nothing":
                 # Nothing stored, or nothing readable: nothing is written.
                 pipe.multi()
                 return
-            if not guest_cart.items:
+            if action == "delete_guest":
                 pipe.multi()
                 pipe.delete(guest_key)
                 return
-            cart = self._load_or_create_cart(account, pipe.get(account_key))
-            left_out = cart.merge(guest_cart, settings.CART_MAX_LINES)
-            if left_out:
-                logger.warning(
-                    "Guest cart merge: %d line(s) did not fit in the cart of user %s (limit %d)",
-                    left_out, user_id, settings.CART_MAX_LINES,
-                )
-            ttl = self._cart_ttl(account)
-            cart.expires_at = utc_now() + ttl
+            write = codec.plan_merge_into_account(account, user_id, guest_cart, pipe.get(account_key))
             pipe.multi()
-            pipe.set(account_key, self._serialize(cart), ex=ttl)
+            pipe.set(account_key, self._serialize(write.cart), ex=write.ttl)
             pipe.delete(guest_key)
 
         try:
@@ -502,25 +359,12 @@ class RedisService:
         cart_key = owner.key
 
         def _txn(pipe):
-            cart_data = pipe.get(cart_key)
-            cart = self._load_cart(owner, cart_data)
-            if cart is not None:
-                for str_id, ordered_item in ordered.items.items():
-                    line = cart.items.get(str_id)
-                    if line is None:
-                        continue
-                    if line.quantity <= ordered_item.quantity:
-                        del cart.items[str_id]
-                    else:
-                        line.quantity -= ordered_item.quantity
+            write = codec.plan_remove_ordered(owner, pipe.get(cart_key), ordered)
             pipe.multi()
-            if cart is None or not cart.items:
+            if write.cart is None:
                 pipe.delete(cart_key)
                 return
-            ttl = self._cart_ttl(owner)
-            cart.updated_at = utc_now()
-            cart.expires_at = cart.updated_at + ttl
-            pipe.set(cart_key, self._serialize(cart), ex=ttl)
+            pipe.set(cart_key, self._serialize(write.cart), ex=write.ttl)
 
         try:
             self._redis.transaction(_txn, cart_key)
@@ -661,7 +505,7 @@ class RedisService:
             return self._redis.set(
                 key,
                 self._serialize(data),
-                ex=timedelta(hours=1),  # 1 hour cache as per requirements
+                ex=codec.PRODUCT_CACHE_TTL,  # 1 hour cache as per requirements
             )
         except RedisError as e:
             self._handle_redis_error(f"cache_product: {str(e)}")
