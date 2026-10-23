@@ -71,9 +71,9 @@ def _assert_same_but_input(client, method, url, secret=None, **kwargs):
 def test_weak_password_422_does_not_echo_it(client):
     response = _assert_same_but_input(
         client, "POST", f"{USERS}/register",
-        secret="OnlyLettersNoDigits", json=_register_payload(password="OnlyLettersNoDigits"),
+        secret="qwertyuiop", json=_register_payload(password="qwertyuiop"),
     )
-    assert "at least one number" in response.text
+    assert "too common" in response.text
 
 
 def test_short_password_422_keeps_constraint_context(client):
@@ -125,7 +125,7 @@ def test_malformed_json_422_does_not_echo_it(client):
 
 def test_ctx_never_carries_a_submitted_value(client):
     # a value_error's ctx holds the exception object; its text is in `msg`
-    response = client.post(f"{USERS}/register", json=_register_payload(password="OnlyLettersNoDigits"))
+    response = client.post(f"{USERS}/register", json=_register_payload(password="qwertyuiop"))
     for error in response.json()["detail"]:
-        assert "OnlyLettersNoDigits" not in json.dumps(error)
+        assert "qwertyuiop" not in json.dumps(error)
         assert "error" not in error.get("ctx", {})

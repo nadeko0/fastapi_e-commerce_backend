@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.database import DbSession
+from app.core.passwords import normalize_password
 from app.models.user import User, UserRole
 from app.services.redis_async import AsyncRedisService, is_token_blacklisted, is_token_superseded
 
@@ -45,19 +46,29 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/logi
 # never match: it is simply a wrong password.
 BCRYPT_MAX_PASSWORD_BYTES = 72
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    password = plain_password.encode("utf-8")
+def _checkpw(password_text: str, hashed_password: str) -> bool:
+    password = password_text.encode("utf-8")
     if len(password) > BCRYPT_MAX_PASSWORD_BYTES:
         # Still pay for one bcrypt check (of the first 72 bytes) before
         # answering False, so a too-long password takes as long as any other
-        # wrong one and the response time does not reveal the length check.
+        # wrong one and does not reveal the limit.
         bcrypt.checkpw(password[:BCRYPT_MAX_PASSWORD_BYTES], hashed_password.encode("utf-8"))
         return False
     return bcrypt.checkpw(password, hashed_password.encode("utf-8"))
 
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # New hashes are made from the NFC form of the password (NIST SP 800-63B-4
+    # 3.1.1.2). Hashes made before that were made from the input as typed, so
+    # when the NFC form does not match, try the input as given. For ASCII
+    # (and any already-NFC) input both are the same string and bcrypt runs once.
+    normalised = normalize_password(plain_password)
+    if _checkpw(normalised, hashed_password):
+        return True
+    return normalised != plain_password and _checkpw(plain_password, hashed_password)
+
 def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(
-        password.encode("utf-8"), bcrypt.gensalt(rounds=settings.BCRYPT_ROUNDS)
+        normalize_password(password).encode("utf-8"), bcrypt.gensalt(rounds=settings.BCRYPT_ROUNDS)
     ).decode("utf-8")
 
 # Precomputed once at import time so a login attempt for a nonexistent email
