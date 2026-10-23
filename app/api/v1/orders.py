@@ -94,6 +94,7 @@ async def _order_by_idempotency_key(
 
 @router.post(
     "",
+    deprecated=True,
     response_model=APIResponse[OrderResponse],
     responses={
         400: {"description": "Cart is empty, profile incomplete, or a cart item is out of stock"},
@@ -372,6 +373,7 @@ async def get_order(
 
 @router.put(
     "/{order_id}/status",
+    deprecated=True,
     response_model=APIResponse[OrderResponse],
     responses={
         400: {"description": "Invalid status transition"},

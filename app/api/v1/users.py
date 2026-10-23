@@ -208,6 +208,7 @@ async def register_user(
 
 @router.get(
     "/verify-email/{token}",
+    deprecated=True,
     response_model=APIResponse[dict],
     responses={
         400: {"description": "Invalid or expired verification token"},
@@ -465,6 +466,7 @@ _CONSENT_COLUMNS = {
 
 @router.post(
     "/consent",
+    deprecated=True,
     response_model=APIResponse[UserResponse],
     responses={
         400: {
@@ -532,6 +534,7 @@ async def update_consent(
 
 @router.get(
     "/data/export",
+    deprecated=True,
     response_model=APIResponse[GDPRExportData],
     responses={400: {"description": "Too much data for an inline export (GDPR_EXPORT_MAX_RECORDS)"}},
 )
@@ -629,6 +632,7 @@ async def export_user_data(
 
 @router.post(
     "/data/delete",
+    deprecated=True,
     response_model=APIResponse[dict],
     responses={401: {"description": "Incorrect password"}},
 )
@@ -1111,6 +1115,7 @@ async def request_password_reset(
 
 @router.get(
     "/password/reset/{token}",
+    deprecated=True,
     response_model=APIResponse[dict],
     responses={
         400: {"description": "Invalid or expired reset token"},
