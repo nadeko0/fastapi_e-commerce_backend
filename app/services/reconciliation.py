@@ -79,6 +79,9 @@ _EXPECTED_INTENT_STATUS: Dict[str, Set[PaymentIntentStatus]] = {
         _S.REQUIRES_PAYMENT_METHOD, _S.REQUIRES_CONFIRMATION, _S.REQUIRES_ACTION, _S.CANCELED,
     },
     "processing": {_S.PROCESSING, _S.REQUIRES_CONFIRMATION},
+    # A /pay request that timed out: the provider may have got no further
+    # than creating the intent, or may have confirmed it.
+    "unknown": {_S.PROCESSING, _S.REQUIRES_CONFIRMATION},
     "requires_action": {_S.REQUIRES_ACTION},
 }
 
