@@ -34,12 +34,18 @@ def _without_input(error: dict) -> dict:
     return clean
 
 
+def sanitized_errors(errors: list[dict]) -> list[dict]:
+    """`errors()` of a RequestValidationError or a pydantic ValidationError,
+    without `input` and with `ctx` cut down to the constraint values."""
+    return jsonable_encoder([_without_input(e) for e in errors])
+
+
 async def request_validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     return JSONResponse(
         status_code=422,
-        content={"detail": jsonable_encoder([_without_input(e) for e in exc.errors()])},
+        content={"detail": sanitized_errors(exc.errors())},
     )
 
 
