@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     # loggers keep their own levels. DEBUG is refused outside development
     # and test: it would put request detail in logs that outlive the request.
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    # JSON lines always go to stdout (Twelve-Factor XI). This rotating file is
+    # the 3.x compatibility copy; empty disables it. Relative to the working
+    # directory. The default changes to empty in 4.0.0.
+    LOG_FILE: str = "logs/app.log"
 
     HOST: str = "0.0.0.0"
     PORT: int = 8000

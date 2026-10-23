@@ -1,6 +1,6 @@
 """No personal data in the logs.
 
-Logs go to a rotating file in a volume (app/core/logging_config.py), are
+Logs go to stdout and, optionally, a rotating file (app/core/logging_config.py), are
 kept with no retention period of their own and are not scrubbed when an
 account is erased. So they carry user ids, never emails, names, phone
 numbers or the values of profile fields.

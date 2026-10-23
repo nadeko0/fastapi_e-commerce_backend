@@ -12,6 +12,9 @@ os.environ.setdefault("POSTGRES_DB", "test")
 # to production would otherwise make Settings refuse to load (placeholder
 # secrets, the mock payment provider), and the results would depend on it.
 os.environ.setdefault("ENVIRONMENT", "development")
+# The suite never writes the real logs/ directory (importing app.main sets up
+# logging); tests of the file handler pass their own path.
+os.environ.setdefault("LOG_FILE", "")
 os.environ.setdefault("REDIS_HOST", "localhost")
 # Nothing listens on port 1. Tests use a fake Redis; one that slips past it
 # must fail here exactly as in CI (which has no Redis), not quietly use a

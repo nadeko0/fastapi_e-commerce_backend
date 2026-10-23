@@ -1,14 +1,12 @@
 import json
 import logging
+import sys
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from app.core.config import settings
 from app.core.request_context import get_request_context
-
-log_dir = Path("logs")
-log_dir.mkdir(exist_ok=True)
 
 # Standard LogRecord attributes, used to detect caller-supplied `extra={...}`
 # fields so they can be folded into the JSON output rather than dropped.
@@ -59,18 +57,28 @@ class JSONFormatter(logging.Formatter):
 def setup_logging(config=settings):
     formatter = JSONFormatter()
 
-    file_handler = RotatingFileHandler(
-        filename=log_dir / "app.log",
-        maxBytes=100 * 1024 * 1024,
-        backupCount=5,
-        encoding='utf-8'
-    )
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.INFO)
+    # Twelve-Factor XI: the event stream goes, unbuffered, to stdout and the
+    # execution environment routes it (`docker logs`, a log shipper).
+    # StreamHandler flushes after every record. One handler, no second
+    # console handler: a record is written to stdout once.
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
 
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.WARNING)
+    handlers: list[logging.Handler] = [stream_handler]
+    log_file = config.LOG_FILE.strip()
+    if log_file:
+        # Kept for 3.x compatibility; an empty LOG_FILE leaves stdout alone.
+        path = Path(log_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            filename=path,
+            maxBytes=100 * 1024 * 1024,
+            backupCount=5,
+            encoding='utf-8'
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.INFO)
+        handlers.append(file_handler)
 
     root_logger = logging.getLogger()
     # Third-party loggers (sqlalchemy.engine, uvicorn.access, httpx...) inherit
@@ -80,14 +88,19 @@ def setup_logging(config=settings):
     root_logger.setLevel(logging.INFO if config.ENVIRONMENT == "development" else logging.WARNING)
     logging.getLogger("app").setLevel(config.LOG_LEVEL)
 
-    root_logger.handlers = []
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
+    # A second call (reload, tests) must not leak the previous file handle.
+    for old in root_logger.handlers[:]:
+        root_logger.removeHandler(old)
+        old.close()
+    for handler in handlers:
+        root_logger.addHandler(handler)
 
     startup_logger = logging.getLogger(__name__)
     startup_logger.info(
         f"Starting application in {config.ENVIRONMENT} environment "
         f"(Version: {config.VERSION})"
     )
-    startup_logger.info(f"Log directory: {log_dir.absolute()}")
-    startup_logger.info("Logging system initialized with file rotation (100MB max, 5 backups)")
+    if log_file:
+        startup_logger.info(f"Log file: {Path(log_file).absolute()} (rotation: 100MB max, 5 backups)")
+    else:
+        startup_logger.info("Log file disabled (LOG_FILE is empty); logging to stdout only")
