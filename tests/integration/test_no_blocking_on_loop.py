@@ -55,8 +55,6 @@ from app.services.redis import RedisService
 # One router per line, a blank line between: every router task deletes its
 # own line, and the diff of two tasks never touches the same hunk.
 PENDING_ROUTERS = {
-    "users",
-
     "orders",
 
 }
@@ -415,13 +413,34 @@ ADMIN = RouteGroup(
     ],
 )
 
+
+# The account routes of a logged-in user: profile, address list, order list,
+# a consent update, and a login (a form post: bcrypt runs in the threadpool,
+# so the loop stays free; the password is the one make_user_headers sets).
+# No refresh: a refresh token is single-use, and the passes run at once.
+USERS = RouteGroup(
+    seed=lambda db_session: {},
+    headers=lambda db_session: make_user_headers(db_session, "users-load@example.com")[0],
+    requests=lambda ids: [
+        ("GET", "/api/v1/users/me"),
+        ("GET", "/api/v1/users/addresses"),
+        ("GET", "/api/v1/users/orders"),
+        ("POST", "/api/v1/users/consent?consent_type=marketing&granted=true"),
+        (
+            "POST",
+            "/api/v1/users/login",
+            {"data": {"username": "users-load@example.com", "password": "Str0ngPass"}},
+        ),
+    ],
+)
+
 # group name -> (router that must be migrated for it to run, scenario).
 # A router task fills in the scenario of its router (None = not written
 # yet, which fails the test as soon as the router leaves PENDING_ROUTERS).
 ROUTE_GROUPS: Dict[str, Tuple[Optional[str], Optional[RouteGroup]]] = {
     "catalog_reads": (None, CATALOG_READS),
     "products": ("products", PRODUCT_CACHE_READS),
-    "users": ("users", None),
+    "users": ("users", USERS),
     "orders": ("orders", None),
     "admin": ("admin", ADMIN),
     "legal": ("legal", LEGAL),

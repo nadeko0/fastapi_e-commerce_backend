@@ -37,7 +37,6 @@ from app.services.redis import (
     CartNotFoundError,
     InsufficientStockError,
     ItemNotInCartError,
-    RedisService,
 )
 from app.services.redis_async import AsyncRedisService, get_cache_service
 
@@ -185,28 +184,6 @@ def _sync_guest_cart_cookie(response: Response, owner: CartOwner, cart: Cart) ->
         _set_guest_cart_cookie(response, owner.guest_id)
     elif owner.guest_id is not None:
         _clear_guest_cart_cookie(response)
-
-
-def merge_guest_cart_on_login(
-    request: Request, response: Response, user_id: int, redis: RedisService
-) -> None:
-    """Synchronous twin of merge_guest_cart_on_login_async, kept only until
-    login (app/api/v1/users.py) is migrated to the async Redis service;
-    then it goes. Same rules, see the async one."""
-    name = guest_cart_cookie_name()
-    if name not in request.cookies:
-        return
-    guest_id = read_guest_cart_id(request)
-    if guest_id is not None:
-        try:
-            merged = redis.merge_guest_cart(guest_id, user_id)
-        except Exception:
-            logger.exception("Guest cart merge failed unexpectedly for user %s", user_id)
-            merged = False
-        if not merged:
-            logger.warning("Guest cart not merged at login of user %s; left for a later login", user_id)
-            return
-    _clear_guest_cart_cookie(response)
 
 
 async def merge_guest_cart_on_login_async(

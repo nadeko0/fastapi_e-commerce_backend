@@ -30,6 +30,7 @@ from app.models.user import User
 from app.schemas.cart import CART_KEY_PREFIX, GUEST_CART_KEY_PREFIX
 from app.schemas.common import Cart
 from app.services.redis import RedisService
+from app.services.redis_async import AsyncRedisService
 
 USERS_PREFIX = "/api/v1/users"
 CART_PREFIX = "/api/v1/cart"
@@ -581,7 +582,10 @@ def test_an_account_request_uses_the_account_cart_and_leaves_a_guest_cookie_alon
     _register(visitor)
     _add(visitor, guest_product.id, 2)
     guest_id = visitor.cookies.get(COOKIE)
-    monkeypatch.setattr(RedisService, "merge_guest_cart", lambda self, guest_id, user_id: False)
+    async def _not_merged(self, guest_id, user_id):
+        return False
+
+    monkeypatch.setattr(AsyncRedisService, "merge_guest_cart", _not_merged)
     token = _login(visitor).json()["data"]["access_token"]
     headers = _auth_headers(token)
 
@@ -961,11 +965,11 @@ def test_redis_failing_during_the_merge_does_not_fail_the_login(
     stored_guest = fake_redis.get(guest_key)
     stored_account = fake_redis.get(f"{CART_KEY_PREFIX}{user_id}")
 
-    def _raise(*args, **kwargs):
+    async def _raise(*args, **kwargs):
         raise RedisConnectionError("connection lost")
 
     with monkeypatch.context() as broken:
-        broken.setattr(RedisService()._redis, "transaction", _raise)
+        broken.setattr(fakeredis.FakeAsyncRedis, "transaction", _raise)
         response = _login(visitor, "owner@example.com")
 
     # Logged in, with working tokens.
@@ -998,10 +1002,10 @@ def test_an_unexpected_error_in_the_merge_does_not_fail_the_login_either(
     _register(visitor)
     _add(visitor, product.id, 2)
 
-    def _boom(self, guest_id, user_id):
+    async def _boom(self, guest_id, user_id):
         raise RuntimeError("not a Redis error")
 
-    monkeypatch.setattr(RedisService, "merge_guest_cart", _boom)
+    monkeypatch.setattr(AsyncRedisService, "merge_guest_cart", _boom)
 
     response = _login(visitor)
 

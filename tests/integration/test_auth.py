@@ -3,6 +3,7 @@ import threading
 import time
 from datetime import timedelta
 
+import fakeredis
 import jwt
 import pytest
 from conftest import TestingSessionLocal
@@ -957,15 +958,15 @@ def test_signing_out_everywhere_that_cannot_move_the_watermark_says_so(
     client, monkeypatch, fake_redis, valid_registration_payload
 ):
     tokens = _login_tokens(client, valid_registration_payload)
-    real_set = fake_redis.set
+    real_set = fakeredis.FakeAsyncRedis.set
 
-    def set_fails_for_the_watermark(name, *args, **kwargs):
+    async def set_fails_for_the_watermark(self, name, *args, **kwargs):
         if str(name).startswith("pwd_changed:"):
             raise RedisConnectionError("Redis is down")
-        return real_set(name, *args, **kwargs)
+        return await real_set(self, name, *args, **kwargs)
 
     with monkeypatch.context() as outage:
-        outage.setattr(fake_redis, "set", set_fails_for_the_watermark)
+        outage.setattr(fakeredis.FakeAsyncRedis, "set", set_fails_for_the_watermark)
         response = client.post(
             f"{API_PREFIX}/logout", headers={"Authorization": f"Bearer {tokens['access_token']}"}
         )
