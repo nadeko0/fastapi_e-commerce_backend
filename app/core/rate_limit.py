@@ -54,6 +54,7 @@ from redis.exceptions import RedisError
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS, HTTP_503_SERVICE_UNAVAILABLE
 
 from app.core.config import RATE_LIMIT_PATTERN, settings
+from app.core.probes import PROBE_PATHS
 from app.core.security import ACCESS_TOKEN_REQUIRED_CLAIMS, user_id_from_subject
 from app.services.redis_async import get_async_redis
 
@@ -82,8 +83,11 @@ _ROUTE_LIMITS = {
 
 # Never limited. The webhook is authenticated by Stripe's signature and
 # arrives in bursts from a few addresses; a health probe answered 429 would
-# get the container restarted.
-_EXEMPT = frozenset({("POST", "/orders/webhooks/stripe"), ("GET", "/health")})
+# get the container restarted. The probes answer HEAD too (app/core/probes.py).
+_EXEMPT = frozenset(
+    {("POST", "/orders/webhooks/stripe")}
+    | {(method, path) for method in ("GET", "HEAD") for path in PROBE_PATHS}
+)
 
 _UNIT_SECONDS = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
 

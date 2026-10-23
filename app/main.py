@@ -2,15 +2,11 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from redis.exceptions import RedisError
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1 import admin, cart, legal, orders, products, users
-from app.core import database
+from app.core import probes
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.database import async_engine, engine
@@ -22,7 +18,7 @@ from app.core.rate_limit import rate_limit
 from app.core.request_context import RequestContextMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware, server_error_handler
 from app.services.redis import RedisService
-from app.services.redis_async import close_async_redis, get_async_redis
+from app.services.redis_async import close_async_redis
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -168,38 +164,15 @@ app.include_router(admin.router, prefix=settings.API_V1_STR)
 app.include_router(legal.router, prefix=settings.API_V1_STR)
 
 
-async def _database_is_up() -> bool:
-    # Through the async session factory, looked up on the module at call
-    # time (tests point it at their own database). The synchronous engine
-    # used here before blocked the event loop, and with it every other
-    # request on this worker, for the whole round trip.
-    try:
-        async with database.AsyncSessionLocal() as session:
-            await session.execute(text("SELECT 1"))
-    except SQLAlchemyError as e:
-        logger.error(f"Database health check failed: {e}")
-        return False
-    return True
-
-
-async def _redis_is_up() -> bool:
-    # The async client, for the same reason (app/services/redis_async.py).
-    try:
-        await get_async_redis().ping()
-    except RedisError as e:
-        logger.error(f"Redis health check failed: {e}")
-        return False
-    return True
-
-
+@app.head("/health", include_in_schema=False)
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
     """Liveness and readiness in one: 200 when the database and Redis both
     answer, 503 otherwise, which is what the Docker healthchecks look at.
     Public and not rate limited, so it says nothing about the deployment:
     no version, no environment, no error text."""
     logger.debug("Health check endpoint called")
-    database_up, redis_up = await asyncio.gather(_database_is_up(), _redis_is_up())
+    database_up, redis_up = await asyncio.gather(probes.database_is_up(), probes.redis_is_up())
     health_status = {
         "status": "healthy" if database_up and redis_up else "degraded",
         "services": {
@@ -210,7 +183,7 @@ async def health_check():
 
     status_code = 200 if health_status["status"] == "healthy" else 503
     logger.info(f"Health check completed with status: {health_status['status']}")
-    return JSONResponse(
-        content=health_status,
-        status_code=status_code
-    )
+    return probes.probe_response(request, health_status, status_code)
+
+
+app.include_router(probes.router)

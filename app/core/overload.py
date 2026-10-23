@@ -1,6 +1,8 @@
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.core.probes import PROBE_PATHS
+
 
 class InFlightLimitMiddleware:
     """Reject requests with 503 once too many are already being processed.
@@ -25,8 +27,9 @@ class InFlightLimitMiddleware:
     BaseHTTPMiddleware: it has to sit outside everything else and add no
     task or buffering of its own to the requests it lets through.
 
-    /health is exempt: an orchestrator that restarts the container because
-    its health probe got a 503 during a traffic peak would turn a brownout
+    The probe paths (/health, /livez, /readyz) are exempt: an orchestrator
+    that restarts the container because its health probe got a 503 during
+    a traffic peak would turn a brownout
     into an outage.
     """
 
@@ -38,7 +41,7 @@ class InFlightLimitMiddleware:
         self.in_flight = 0
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["path"] == "/health":
+        if scope["type"] != "http" or scope["path"] in PROBE_PATHS:
             await self.app(scope, receive, send)
             return
 
