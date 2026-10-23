@@ -8,7 +8,7 @@ from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -60,7 +60,7 @@ from app.services.payment.exceptions import (
     SignatureVerificationError,
 )
 from app.services.payment.types import PaymentIntentStatus
-from app.services.redis import RedisService
+from app.services.redis_async import AsyncRedisService, get_cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,26 @@ _ORDER_RESPONSE_LOADS = (
 )
 
 
+async def _load_order_for_response(db: AsyncSession, order_id: int) -> Order:
+    """The order with everything OrderResponse reads, loaded afresh."""
+    return (await db.execute(
+        select(Order).options(*_ORDER_RESPONSE_LOADS).where(Order.id == order_id).limit(1)
+        .execution_options(populate_existing=True)
+    )).scalars().one()
+
+
+async def _order_by_idempotency_key(
+    db: AsyncSession, user_id: int, idempotency_key: str
+) -> Optional[Order]:
+    """The user's order created under this Idempotency-Key, if any."""
+    return (await db.execute(
+        select(Order).options(*_ORDER_RESPONSE_LOADS).where(
+            Order.user_id == user_id,
+            Order.idempotency_key == idempotency_key,
+        ).limit(1)
+    )).scalars().first()
+
+
 @router.post(
     "",
     response_model=APIResponse[OrderResponse],
@@ -91,8 +111,8 @@ async def create_order(
     shipping_address_id: Int32,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-    redis: RedisService = Depends(),
+    db: AsyncSession = Depends(database.get_async_db),
+    redis: AsyncRedisService = Depends(get_cache_service),
     # Required, not optional. Placing an order is the one request in this API
     # that must never be applied twice, and the client is the only party that
     # knows whether two requests are one attempt retried or two purchases:
@@ -127,14 +147,11 @@ async def create_order(
     # A retried checkout request (e.g. client timeout + retry, double-click)
     # with the same key returns the order already created instead of
     # double-charging stock/placing a duplicate order.
-    existing = db.query(Order).filter(
-        Order.user_id == current_user.id,
-        Order.idempotency_key == idempotency_key,
-    ).first()
+    existing = await _order_by_idempotency_key(db, current_user.id, idempotency_key)
     if existing:
         return APIResponse.success_response(OrderResponse.model_validate(existing))
 
-    cart = redis.get_cart(current_user.id)
+    cart = await redis.get_cart(current_user.id)
     if not cart or not cart.items:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -148,11 +165,13 @@ async def create_order(
     # relationship. Only an active address: deleting one only deactivates
     # it (kept for the orders already shipped there), and a deleted
     # address used to be accepted here like any other.
-    address = db.query(Address).filter(
-        Address.id == shipping_address_id,
-        Address.user_id == current_user.id,
-        Address.is_active,
-    ).first()
+    address = (await db.execute(
+        select(Address).where(
+            Address.id == shipping_address_id,
+            Address.user_id == current_user.id,
+            Address.is_active,
+        ).limit(1)
+    )).scalars().first()
     if not address:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -183,13 +202,14 @@ async def create_order(
     # the commit below. Only the commit used to be guarded, so the loser of
     # that race answered 500 instead of the order the winner created.
     try:
-        db.flush()
+        await db.flush()
     except IntegrityError:
-        db.rollback()
-        existing = db.query(Order).filter(
-            Order.user_id == current_user.id,
-            Order.idempotency_key == idempotency_key,
-        ).first()
+        # The rollback expires every loaded object (expire_on_commit does not
+        # cover it), and an expired attribute cannot be read back on an
+        # AsyncSession: only current_user (detached, so not expired) and the
+        # header value are used below.
+        await db.rollback()
+        existing = await _order_by_idempotency_key(db, current_user.id, idempotency_key)
         if existing:
             return APIResponse.success_response(OrderResponse.model_validate(existing))
         # Only the key's unique index can fail a bare order INSERT (its
@@ -202,16 +222,20 @@ async def create_order(
     # order, so that checkouts and cancellations touching the same products
     # in different orders cannot deadlock. The loop stays in cart order: the
     # line reported as short, and the totals, are the same as before.
-    lock_stock_rows(db, [(item.product_id, item.variant_id) for item in cart.items.values()])
+    await db.run_sync(
+        lock_stock_rows, [(item.product_id, item.variant_id) for item in cart.items.values()]
+    )
 
     total_amount = Decimal('0.00')
     for item in cart.items.values():
-        product = db.query(Product).filter(Product.id == item.product_id).first()
+        product = (await db.execute(
+            select(Product).where(Product.id == item.product_id).limit(1)
+        )).scalars().first()
         # is_active is re-checked here, for product and variant alike, and
         # not only when the line is added: either can be withdrawn from
         # sale while it sits in a cart, and used to be ordered regardless.
         if not product or not product.is_active:
-            db.rollback()
+            await db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Product {item.product_id} not available in requested quantity"
@@ -219,12 +243,14 @@ async def create_order(
 
         variant = None
         if item.variant_id is not None:
-            variant = db.query(ProductVariant).filter(
-                ProductVariant.id == item.variant_id,
-                ProductVariant.product_id == item.product_id,
-            ).first()
+            variant = (await db.execute(
+                select(ProductVariant).where(
+                    ProductVariant.id == item.variant_id,
+                    ProductVariant.product_id == item.product_id,
+                ).limit(1)
+            )).scalars().first()
             if not variant or not variant.is_active:
-                db.rollback()
+                await db.rollback()
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Product {item.product_id} not available in requested quantity"
@@ -244,23 +270,25 @@ async def create_order(
         # A variant line decrements the variant's own stock_quantity, not
         # the parent Product's - the two are independent counters.
         if variant is not None:
-            updated_rows = db.query(ProductVariant).filter(
-                ProductVariant.id == variant.id,
-                ProductVariant.stock_quantity >= item.quantity,
-            ).update(
-                {ProductVariant.stock_quantity: ProductVariant.stock_quantity - item.quantity},
-                synchronize_session=False,
+            stock_update = await db.execute(
+                update(ProductVariant).where(
+                    ProductVariant.id == variant.id,
+                    ProductVariant.stock_quantity >= item.quantity,
+                ).values(
+                    stock_quantity=ProductVariant.stock_quantity - item.quantity
+                ).execution_options(synchronize_session=False)
             )
         else:
-            updated_rows = db.query(Product).filter(
-                Product.id == item.product_id,
-                Product.stock_quantity >= item.quantity,
-            ).update(
-                {Product.stock_quantity: Product.stock_quantity - item.quantity},
-                synchronize_session=False,
+            stock_update = await db.execute(
+                update(Product).where(
+                    Product.id == item.product_id,
+                    Product.stock_quantity >= item.quantity,
+                ).values(
+                    stock_quantity=Product.stock_quantity - item.quantity
+                ).execution_options(synchronize_session=False)
             )
-        if updated_rows == 0:
-            db.rollback()
+        if stock_update.rowcount == 0:
+            await db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Product {item.product_id} not available in requested quantity"
@@ -278,8 +306,14 @@ async def create_order(
         total_amount += price_at_time * item.quantity
 
     order.total_amount = total_amount
-    db.commit()
+    await db.commit()
 
+    # Read back with get_order's eager options: OrderResponse reads the
+    # address, the lines, their products and variants (and the columns the
+    # INSERT left to the database), none of which can be lazy-loaded on an
+    # AsyncSession. populate_existing refreshes the instance the session
+    # already holds.
+    order = await _load_order_for_response(db, order.id)
 
     # Take out of the cart only what this order was built from, not the
     # whole key: delete_cart() here also discarded anything added between
@@ -289,7 +323,7 @@ async def create_order(
     # this request carries the same Idempotency-Key and gets this order
     # back; a deliberate new checkout would order them again. Logged with
     # the order id so that case can be found.
-    if not redis.remove_ordered_items_atomic(current_user.id, cart):
+    if not await redis.remove_ordered_items_atomic(current_user.id, cart):
         logger.error(
             "Order %s committed but its items could not be removed from user %s's cart",
             order.id, current_user.id,
@@ -351,7 +385,7 @@ async def update_order_status(
     status: OrderStatus,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_admin_user),  # Admin only
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """Transition an order to a new status (admin only)."""
 
@@ -361,11 +395,12 @@ async def update_order_status(
     # nullable side of an outer join, which Postgres cannot lock) so that
     # two cancellations, or this and the unpaid-order expiry, cannot both
     # read the old status and both return the stock.
-    order = db.query(Order).options(
-        joinedload(Order.shipping_address),
-        selectinload(Order.items).joinedload(OrderItem.product),
-        selectinload(Order.items).joinedload(OrderItem.variant),
-    ).filter(Order.id == order_id).with_for_update(of=Order).first()
+    # order.user.email is read for the notification below: joined here, as a
+    # lazy load is not possible on an AsyncSession.
+    order = (await db.execute(
+        select(Order).options(*_ORDER_RESPONSE_LOADS, joinedload(Order.user))
+        .where(Order.id == order_id).with_for_update(of=Order).limit(1)
+    )).scalars().first()
     if not order:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -374,7 +409,7 @@ async def update_order_status(
 
     # An order whose payment is disputed is on hold: it is not moved on
     # (fulfilled) until the dispute closes. Cancelling it stays possible.
-    if status != OrderStatus.CANCELLED and _has_open_dispute(db, order.id):
+    if status != OrderStatus.CANCELLED and await db.run_sync(_has_open_dispute, order.id):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Order is on hold: a payment for it is disputed",
@@ -390,12 +425,12 @@ async def update_order_status(
     if status == OrderStatus.CANCELLED:
         # Releases the stock create_order took (the one restock path, shared
         # with the customer's own cancel and the unpaid-order expiry).
-        cancel_order_and_restock(db, order)
+        await db.run_sync(cancel_order_and_restock, order)
     else:
         order.status = status
         order.updated_at = utc_now()
 
-    db.commit()
+    await db.commit()
 
 
     # The transition was validated above and no status moves to itself, so
@@ -421,7 +456,7 @@ async def cancel_own_order(
     order_id: Int32,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """Cancel one of the current user's own orders that has not been paid,
     returning its items to stock.
@@ -434,14 +469,12 @@ async def cancel_own_order(
     placed (cancel_expired_unpaid_orders in app/tasks.py)."""
     # Locked like update_order_status's read, for the same reason; another
     # user's order is a 404, not a 403, as in get_order.
-    order = db.query(Order).options(
-        joinedload(Order.shipping_address),
-        selectinload(Order.items).joinedload(OrderItem.product),
-        selectinload(Order.items).joinedload(OrderItem.variant),
-    ).filter(
-        Order.id == order_id,
-        Order.user_id == current_user.id,
-    ).with_for_update(of=Order).first()
+    order = (await db.execute(
+        select(Order).options(*_ORDER_RESPONSE_LOADS).where(
+            Order.id == order_id,
+            Order.user_id == current_user.id,
+        ).with_for_update(of=Order).limit(1)
+    )).scalars().first()
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -454,8 +487,8 @@ async def cancel_own_order(
             detail="Only a new, unpaid order can be cancelled; contact support for a paid one"
         )
 
-    cancel_order_and_restock(db, order)
-    db.commit()
+    await db.run_sync(cancel_order_and_restock, order)
+    await db.commit()
 
     background_tasks.add_task(
         send_order_cancellation_email, current_user.email, OrderResponse.model_validate(order)

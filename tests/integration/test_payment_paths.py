@@ -40,7 +40,7 @@ from app.services.payment.exceptions import (
 )
 from app.services.payment.stripe_provider import StripePaymentProvider
 from app.services.payment.types import PaymentIntentStatus
-from app.services.redis import RedisService
+from app.services.redis_async import AsyncRedisService
 
 
 @pytest.fixture(autouse=True)
@@ -135,20 +135,20 @@ def test_order_racing_a_twin_with_the_same_key_returns_the_twins_order(
     buyer = shop.buyer()
     assert shop.add_to_cart(buyer, product, 2).status_code == 200
     key = new_key()
-    real_get_cart = RedisService.get_cart
+    real_get_cart = AsyncRedisService.get_cart
     twin = {}
 
-    def _twin_commits_first(self, user_id):
+    async def _twin_commits_first(self, user_id):
         if twin:
-            return real_get_cart(self, user_id)
+            return await real_get_cart(self, user_id)
         twin["id"] = _insert_from_another_session(Order(
             user_id=buyer.user_id, status="new", payment_status="pending",
             shipping_address_id=buyer.address_id, idempotency_key=key,
             total_amount=Decimal("15.00"), currency="USD",
         ))
-        return real_get_cart(self, user_id)
+        return await real_get_cart(self, user_id)
 
-    monkeypatch.setattr(RedisService, "get_cart", _twin_commits_first)
+    monkeypatch.setattr(AsyncRedisService, "get_cart", _twin_commits_first)
 
     response = shop.place_order(buyer, key=key)
 

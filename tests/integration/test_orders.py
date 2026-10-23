@@ -2,6 +2,7 @@ import threading
 import uuid
 from decimal import Decimal
 
+import fakeredis
 import pytest
 from redis import ConnectionError as RedisConnectionError
 
@@ -11,7 +12,7 @@ from app.models.enums import UserRole
 from app.models.order import Order
 from app.models.product import Product, ProductVariant
 from app.models.user import User
-from app.services.redis import RedisService
+from app.services.redis_async import AsyncRedisService
 
 USERS_PREFIX = "/api/v1/users"
 CART_PREFIX = "/api/v1/cart"
@@ -1040,19 +1041,19 @@ def test_create_order_keeps_items_added_to_the_cart_during_checkout(client, db_s
     added_late = _make_product(db_session, category.id, stock=10)
     _add_to_cart(client, token, ordered.id, 2)
 
-    real_get_cart = RedisService.get_cart
+    real_get_cart = AsyncRedisService.get_cart
 
-    def _get_cart_then_concurrent_add(self, user_id):
-        cart = real_get_cart(self, user_id)
-        self.add_to_cart_atomic(
+    async def _get_cart_then_concurrent_add(self, user_id):
+        cart = await real_get_cart(self, user_id)
+        await self.add_to_cart_atomic(
             user_id=user_id, product_id=added_late.id, quantity=3, price=Decimal("9.99"),
             name="Widget", image="", stock_quantity=10,
         )
         return cart
 
-    monkeypatch.setattr(RedisService, "get_cart", _get_cart_then_concurrent_add)
+    monkeypatch.setattr(AsyncRedisService, "get_cart", _get_cart_then_concurrent_add)
     response = _place_order(client, token, address_id)
-    monkeypatch.setattr(RedisService, "get_cart", real_get_cart)
+    monkeypatch.setattr(AsyncRedisService, "get_cart", real_get_cart)
 
     assert response.status_code == 200
     order_items = response.json()["data"]["items"]
@@ -1070,12 +1071,13 @@ def test_create_order_still_succeeds_when_the_cart_cannot_be_cleared(client, db_
     product = _make_product(db_session, category.id, stock=10)
     _add_to_cart(client, token, product.id, 2)
 
-    def _raise(*args, **kwargs):
+    # The routes use the async client; every one the test run hands out is a
+    # FakeAsyncRedis, so its class is what breaks.
+    async def _raise(*args, **kwargs):
         raise RedisConnectionError("connection lost")
 
-    redis = RedisService()
-    monkeypatch.setattr(redis._redis, "transaction", _raise)
-    monkeypatch.setattr(redis._redis, "delete", _raise)
+    monkeypatch.setattr(fakeredis.FakeAsyncRedis, "transaction", _raise)
+    monkeypatch.setattr(fakeredis.FakeAsyncRedis, "delete", _raise)
 
     response = _place_order(client, token, address_id)
 
