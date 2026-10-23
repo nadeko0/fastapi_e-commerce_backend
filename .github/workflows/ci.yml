@@ -177,9 +177,33 @@ jobs:
           EMAILS_FROM_NAME: CI
         run: uv run pytest tests/ -m "db_sensitive" -q -p no:cacheprovider -rs
 
+  audit:
+    # Fails the build when a package pinned in uv.lock has a known
+    # vulnerability (PyPI Advisory Database, via pip-audit). The requirements
+    # file is exported from the lock, with hashes, so pip-audit audits exactly
+    # the pinned versions and files (--require-hashes: no resolution, nothing
+    # installed). All dependency groups are included on purpose: the dev group
+    # runs in CI with the repository checked out, so it is part of the supply
+    # chain too. The project itself is not on PyPI and is left out.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Export the locked dependencies
+        run: >-
+          uv export --locked --all-groups --no-emit-project --no-header
+          --format requirements-txt --output-file "$RUNNER_TEMP/requirements-audit.txt"
+      - name: Audit locked dependencies for known vulnerabilities
+        run: >-
+          uvx pip-audit==2.10.1 --require-hashes --disable-pip
+          --progress-spinner off -r "$RUNNER_TEMP/requirements-audit.txt"
+
   docker-build:
     runs-on: ubuntu-latest
-    needs: [lint, test, test-timezones, test-postgres]
+    needs: [lint, audit, test, test-timezones, test-postgres]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image (no push)
