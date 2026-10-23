@@ -48,10 +48,8 @@ filterwarnings = [
     # exception: both categories have to be errors for the guard to bite.
     "error::ResourceWarning",
     "error::pytest.PytestUnraisableExceptionWarning",
-    # Pydantic V1-style API (from_orm, .dict(), @validator, class Config) is gone; keep it gone.
-    "error::pydantic.warnings.PydanticDeprecatedSince20",
-    # Every other Pydantic deprecation (PydanticDeprecatedSince26 ... 214, and any later one)
-    # derives from this base class.
+    # Every Pydantic deprecation: the V1-style API (from_orm, .dict(), @validator,
+    # class Config, PydanticDeprecatedSince20) and every later one derive from this base.
     "error::pydantic.warnings.PydanticDeprecationWarning",
     # FastAPI's own deprecations (a UserWarning subclass).
     "error::fastapi.exceptions.FastAPIDeprecationWarning",
