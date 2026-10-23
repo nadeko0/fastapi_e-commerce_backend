@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1 import admin, cart, legal, orders, products, users
 from app.core import database
+from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.database import async_engine, engine
 from app.core.forwarded import ForwardedClientMiddleware
@@ -70,6 +71,13 @@ app = FastAPI(
     # 500.)
     dependencies=[Depends(rate_limit)],
 )
+
+# Registered before everything else, so it is the innermost middleware: the
+# 413 then passes back out through the security-headers and CORS layers like
+# any other response. Nothing outside it reads the body (the rate limiter is
+# a route dependency, not a middleware), and the in-flight limiter is still
+# outermost, so a request that is shed never gets this far.
+app.add_middleware(BodySizeLimitMiddleware, limit=settings.MAX_REQUEST_BODY_BYTES)
 
 logger.debug("Adding security headers middleware")
 @app.middleware("http")
