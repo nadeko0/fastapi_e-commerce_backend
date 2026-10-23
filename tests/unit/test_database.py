@@ -10,7 +10,7 @@ import app.core.database as database_module
 
 @pytest.fixture
 def sqlite_session_factory(monkeypatch):
-    """Point app.core.database's session_scope/get_db at an isolated
+    """Point app.core.database's session_scope at an isolated
     in-memory SQLite engine so session_scope's commit/rollback/close paths
     can be exercised directly, without touching the real Postgres engine
     configured from settings.DATABASE_URI."""
@@ -23,15 +23,6 @@ def sqlite_session_factory(monkeypatch):
     monkeypatch.setattr(database_module, "SessionLocal", session_local)
     yield session_local
     engine.dispose()
-
-
-def test_get_db_yields_a_working_session(sqlite_session_factory):
-    gen = database_module.get_db()
-    session = next(gen)
-
-    assert session.execute(text("SELECT 1")).scalar() == 1
-
-    gen.close()
 
 
 def test_session_scope_commits_on_clean_exit(sqlite_session_factory):
@@ -57,7 +48,7 @@ def test_session_scope_rolls_back_and_raises_http_exception_on_db_error(
 
 @pytest.fixture
 def async_sqlite_session_factory(monkeypatch):
-    """Async counterpart of sqlite_session_factory: point get_async_db at an
+    """Point get_async_db at an
     isolated in-memory aiosqlite engine. StaticPool keeps the one in-memory
     connection alive across the separate sessions a test opens."""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

@@ -21,8 +21,8 @@ from decimal import Decimal
 
 import pytest
 
-# tests/conftest.py owns the single SQLAlchemy engine/sessionmaker the app's
-# get_db dependency is overridden to use (an in-memory SQLite DB shared for
+# tests/conftest.py owns the single SQLAlchemy engine/sessionmaker the
+# sync test sessions use (an in-memory SQLite DB shared for
 # the whole test run via StaticPool). Reusing it here - rather than creating
 # a second engine - is required to see the same data the API endpoints
 # committed; pytest's default "prepend" import mode puts tests/ on

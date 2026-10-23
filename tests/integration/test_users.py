@@ -89,7 +89,7 @@ def test_update_profile_returns_404_when_user_deleted_after_token_issued(
     # concurrent GDPR deletion) *between* get_current_active_user resolving
     # current_user (its own AsyncSession, a select() through
     # app.core.database.get_async_db) and this route's own re-query of the
-    # same user (a separate sync session, from app.core.database.get_db).
+    # same user (the same AsyncSession, through the dependency cache).
     # The auth dependency no longer goes through Query.first(), so the
     # route's re-query is the only such call in this request; simulate the
     # race deterministically by making it return None as if the row were

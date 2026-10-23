@@ -1,12 +1,12 @@
 import logging
 from contextlib import contextmanager
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator
 
 from fastapi import HTTPException, status
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 
@@ -132,20 +132,8 @@ def session_scope():
     finally:
         session.close()
 
-def get_db() -> Generator[Session, None, None]:
-    with session_scope() as session:
-        try:
-            yield session
-        except SQLAlchemyError as e:
-            logger.error("Database error in get_db", exc_info=e)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="A database error occurred"
-            )
-
-
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
-    # Async counterpart of get_db: commit on success, roll back and answer
+    # Commit on success, roll back and answer
     # with a generic 500 on a database error (never the raw SQLAlchemy
     # message - see session_scope above for why). `async with` closes the
     # session in this same task, including when the request is cancelled, so
