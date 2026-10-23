@@ -30,6 +30,7 @@ Relied on, and covered below:
 Where the two differ by design, the last section says how and why, and
 asserts each side.
 """
+import contextlib
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -89,10 +90,8 @@ def stripe(request, monkeypatch):
             # The mock's stand-in for authentication is a second confirm,
             # which raises for a card declined after authenticating; Stripe
             # reports that by webhook instead, so it is swallowed here.
-            try:
+            with contextlib.suppress(CardError):
                 provider.confirm_payment_intent(intent_id, return_url=RETURN_URL)
-            except CardError:
-                pass
 
         def go_offline():
             def unreachable(self):
@@ -447,7 +446,7 @@ def test_every_call_reports_an_unreachable_stripe_as_a_timeout(stripe):
         "retrieve session": lambda: p.retrieve_checkout_session(session.id),
         "expire session": lambda: p.expire_checkout_session(session.id),
     }
-    for name, call in calls.items():
+    for call in calls.values():
         with pytest.raises(PaymentProviderTimeoutError):
             call()
 

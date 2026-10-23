@@ -12,6 +12,8 @@ route mixing scopes would get two sessions, and a request-scoped generator
 cannot depend on a function-scoped one at all.
 """
 
+from typing import Annotated, Any
+
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -63,7 +65,7 @@ def _app(monkeypatch, events, fail_commit=False):
     throwaway = FastAPI()
 
     @throwaway.get("/write", response_class=response_class)
-    async def write(db=Depends(database_module.get_async_db, scope="function")):
+    async def write(db: Annotated[Any, Depends(database_module.get_async_db, scope="function")]):
         return {"ok": 1}
 
     return throwaway

@@ -260,9 +260,11 @@ def test_any_other_stripe_error_is_a_provider_timeout_not_a_500(
 def test_a_refused_api_key_is_logged_as_critical(live, monkeypatch, caplog, error_class):
     monkeypatch.setattr(stripe.PaymentIntent, "create", _raising(error_class("bad key", headers=HEADERS)))
 
-    with caplog.at_level("CRITICAL", logger=live_module.logger.name):
-        with pytest.raises(PaymentProviderTimeoutError):
-            _create_intent(live)
+    with (
+        caplog.at_level("CRITICAL", logger=live_module.logger.name),
+        pytest.raises(PaymentProviderTimeoutError),
+    ):
+        _create_intent(live)
 
     assert [r.levelname for r in caplog.records] == ["CRITICAL"]
     assert error_class.__name__ in caplog.records[0].getMessage()
@@ -272,9 +274,11 @@ def test_a_rate_limit_is_not_logged_as_critical(live, monkeypatch, caplog):
     monkeypatch.setattr(stripe.PaymentIntent, "create",
                         _raising(stripe_error.RateLimitError("slow down", headers=HEADERS)))
 
-    with caplog.at_level("CRITICAL", logger=live_module.logger.name):
-        with pytest.raises(PaymentProviderTimeoutError):
-            _create_intent(live)
+    with (
+        caplog.at_level("CRITICAL", logger=live_module.logger.name),
+        pytest.raises(PaymentProviderTimeoutError),
+    ):
+        _create_intent(live)
 
     assert caplog.records == []
 

@@ -218,7 +218,7 @@ def test_data_export_query_count_does_not_grow_with_the_number_of_orders(
     db_session.commit()
 
     def add_orders(count):
-        for n in range(count):
+        for _n in range(count):
             product = Product(
                 name=f"Widget {uuid.uuid4().hex[:6]}", description="A fine widget, long enough",
                 price=Decimal("9.99"), stock_quantity=10, images=[], characteristics={},

@@ -38,7 +38,7 @@ def _signature(body: bytes, secret: str, timestamp: int) -> str:
     return hmac.new(secret.encode(), f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
 
 
-def _header(body: bytes, secret: str = SECRET, timestamp: int = None) -> str:
+def _header(body: bytes, secret: str = SECRET, timestamp: int | None = None) -> str:
     timestamp = _epoch(NOW) if timestamp is None else timestamp
     return f"t={timestamp},v1={_signature(body, secret, timestamp)}"
 

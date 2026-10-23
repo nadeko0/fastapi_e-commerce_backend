@@ -1176,12 +1176,14 @@ def _store_cart_as_written_today(fake_redis, user_id, product_id, quantity, pric
     """The exact JSON an account cart has in Redis today: an integer
     user_id, a decimal-string price, no field this change introduces."""
     payload = (
-        '{"user_id": %d, "items": {"%d": {"product_id": %d, "variant_id": null, '
-        '"quantity": %d, "added_at": "2026-10-09T08:15:30.123456", "price_snapshot": "%s", '
+        f'{{"user_id": {user_id}, "items": {{"{product_id}": {{"product_id": {product_id}, '
+        f'"variant_id": null, "quantity": {quantity}, '
+        '"added_at": "2026-10-09T08:15:30.123456", '
+        f'"price_snapshot": "{price}", '
         '"name_snapshot": "Widget", "image_snapshot": "https://example.com/widget.png"}}, '
         '"created_at": "2026-10-09T08:15:30.123456", "updated_at": "2026-10-09T08:15:30.123456", '
         '"expires_at": "2026-11-08T08:15:30.123456"}'
-    ) % (user_id, product_id, product_id, quantity, price)
+    )
     fake_redis.set(f"{CART_KEY_PREFIX}{user_id}", payload, ex=20 * 24 * 3600)
 
 

@@ -68,9 +68,9 @@ def _stub_order_confirmation_email(monkeypatch):
 def _checkout_webhook_body(
     event_type: str,
     session_id: str,
-    payment_intent_id: str = None,
+    payment_intent_id: str | None = None,
     payment_status: str = "paid",
-    event_id: str = None,
+    event_id: str | None = None,
     amount_total: int = ORDER_AMOUNT_CENTS,
     currency: str = ORDER_CURRENCY_REPORTED,
 ) -> bytes:

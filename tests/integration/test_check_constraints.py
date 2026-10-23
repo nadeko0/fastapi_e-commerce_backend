@@ -156,9 +156,11 @@ def test_the_migration_refuses_to_run_over_rows_that_break_a_constraint(db_sessi
             db_session.execute(text("PRAGMA ignore_check_constraints = OFF"))
 
         connection = db_session.connection()
-        with Operations.context(MigrationContext.configure(connection)):
-            with pytest.raises(RuntimeError) as error:
-                _migration().upgrade()
+        with (
+            Operations.context(MigrationContext.configure(connection)),
+            pytest.raises(RuntimeError) as error,
+        ):
+            _migration().upgrade()
         message = str(error.value)
         assert "ck_product_stock_non_negative" in message and "products" in message
         assert "ck_payment_refunded_within_amount" in message

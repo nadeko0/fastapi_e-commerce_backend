@@ -373,7 +373,7 @@ def test_checkout_session_paid_by_a_delayed_method(shop, outbox, currency, outco
 
     shop.session_event(outcome, attempt)
 
-    assert order_state(shop, order["id"]) + (shop.payments(order["id"])[0].status,) == expected
+    assert (*order_state(shop, order["id"]), shop.payments(order["id"])[0].status) == expected
     assert shop.payments(order["id"])[0].payment_intent_id == "pi_async"
     assert len(_emails(outbox)) == (1 if expected[1] == "paid" else 0)
 

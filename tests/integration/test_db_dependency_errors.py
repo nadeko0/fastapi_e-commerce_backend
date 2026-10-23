@@ -8,6 +8,8 @@ which rolls back and answers a generic 500 without the SQL; app.api.deps.get_db
 is gone, and with it the test of its failing-SessionLocal() behaviour.
 """
 
+from typing import Annotated, Any
+
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
@@ -56,7 +58,7 @@ def test_database_error_in_a_legal_route_answers_like_any_other_async_route(clie
     reference_app = FastAPI()
 
     @reference_app.get("/reference")
-    async def reference(db=Depends(database_module.get_async_db)):
+    async def reference(db: Annotated[Any, Depends(database_module.get_async_db)]):
         _db_error()
 
     with TestClient(reference_app, raise_server_exceptions=False) as lenient:

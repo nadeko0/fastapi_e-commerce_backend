@@ -115,7 +115,7 @@ def _get_order(db_session, order_id: int) -> Order:
     return db_session.query(Order).filter(Order.id == order_id).first()
 
 
-def _age_attempts(db_session, order_id: int, minutes: int = None):
+def _age_attempts(db_session, order_id: int, minutes: int | None = None):
     """Move every payment attempt of the order `minutes` into the past; by
     default just past the point where an attempt still in flight stops
     blocking another one (PAYMENT_ATTEMPT_STALE_AFTER_MINUTES)."""
@@ -233,7 +233,7 @@ def _payment_payload(order, token=TOKEN_SUCCESS_DEFAULT, currency="USD"):
     }
 
 
-def _sign(body: bytes, secret: str = None, timestamp: int = None) -> str:
+def _sign(body: bytes, secret: str | None = None, timestamp: int | None = None) -> str:
     return StripePaymentProvider.sign_payload(
         body, secret or settings.STRIPE_WEBHOOK_SECRET.get_secret_value(), timestamp=timestamp
     )
@@ -242,9 +242,9 @@ def _sign(body: bytes, secret: str = None, timestamp: int = None) -> str:
 def _webhook_body(
     event_type: str,
     payment_intent_id: str,
-    event_id: str = None,
-    amount: int = None,
-    currency: str = None,
+    event_id: str | None = None,
+    amount: int | None = None,
+    currency: str | None = None,
 ) -> bytes:
     # amount/currency are what Stripe reports it actually charged (cents,
     # lowercase ISO code, as on a real PaymentIntent). A success event is
