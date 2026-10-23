@@ -209,6 +209,16 @@ def _url_origin(url: str) -> tuple | None:
     return scheme, parts.hostname.lower(), port or (443 if scheme == 'https' else 80)
 
 
+class OrderCreate(BaseModel):
+    """Body of POST /orders; the same field was a query parameter until 3.3.0."""
+    shipping_address_id: Int32
+
+
+class OrderStatusUpdate(BaseModel):
+    """Body of PUT /orders/{id}/status; the same field was a query parameter until 3.3.0."""
+    status: OrderStatus
+
+
 class CheckoutSessionCreate(BaseModel):
     """
     Optional overrides for creating a Stripe Checkout Session for an order

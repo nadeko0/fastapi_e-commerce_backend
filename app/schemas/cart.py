@@ -11,6 +11,29 @@
 import re
 import secrets
 from dataclasses import dataclass
+from typing import Annotated
+
+from pydantic import BaseModel, Field
+
+from app.schemas.common import INT32_MAX, Int32
+
+# Bodies of the cart item routes, which took the same fields as query
+# parameters until 3.3.0 (still accepted, deprecated). Same bounds as those
+# parameters: ge=1 because 0 or a negative quantity once made the stored
+# cart unreadable.
+CartQuantity = Annotated[int, Field(ge=1, le=INT32_MAX)]
+
+
+class CartItemAdd(BaseModel):
+    product_id: Int32
+    quantity: CartQuantity = 1
+    variant_id: Int32 | None = None
+
+
+class CartItemUpdate(BaseModel):
+    quantity: CartQuantity
+    variant_id: Int32 | None = None
+
 
 # An account's cart: "cart:{user_id}".
 CART_KEY_PREFIX = "cart:"

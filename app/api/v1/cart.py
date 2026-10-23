@@ -1,13 +1,14 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.dependencies import Cache, DbSession
 from app.core.openapi import DocumentedRoute
+from app.core.deprecation import QUERY_PARAMETER_DEPRECATED, body_or_query
 from app.core.rate_limit import (
     client_address,
     parse_rate,
@@ -17,7 +18,13 @@ from app.core.rate_limit import (
 from app.core.security import get_optional_active_user
 from app.models.product import Product, ProductVariant
 from app.models.user import User
-from app.schemas.cart import CartOwner, is_guest_cart_id, new_guest_cart_id
+from app.schemas.cart import (
+    CartItemAdd,
+    CartItemUpdate,
+    CartOwner,
+    is_guest_cart_id,
+    new_guest_cart_id,
+)
 from app.schemas.common import (
     CART_LINE_INSUFFICIENT_STOCK,
     CART_LINE_PRODUCT_UNAVAILABLE,
@@ -413,7 +420,6 @@ async def get_user_cart(
 
 @router.post(
     "/items",
-    deprecated=True,
     response_model=APIResponse[CartResponse],
     responses={
         400: {"description": "Not enough stock available, or the cart already holds the maximum number of different items"},
@@ -425,14 +431,19 @@ async def get_user_cart(
 async def add_to_cart(
     request: Request,
     response: Response,
-    product_id: Int32,
     owner: Owner,
     db: DbSession,
     redis: Cache,
+    # The fields go in the JSON body (CartItemAdd). The query parameters are
+    # what 3.3.0 and earlier took and are deprecated; sending both is a 422.
     # ge=1: 0 or a negative quantity was accepted, and could take a line to
     # zero or below - which made the whole stored cart unreadable.
-    quantity: Annotated[int, Query(ge=1, le=INT32_MAX)] = 1,
-    variant_id: Int32 | None = None,
+    body: Annotated[CartItemAdd | None, Body()] = None,
+    product_id: Annotated[Int32 | None, Query(deprecated=True, description=QUERY_PARAMETER_DEPRECATED)] = None,
+    quantity: Annotated[
+        int | None, Query(ge=1, le=INT32_MAX, deprecated=True, description=QUERY_PARAMETER_DEPRECATED)
+    ] = None,
+    variant_id: Annotated[Int32 | None, Query(deprecated=True, description=QUERY_PARAMETER_DEPRECATED)] = None,
 ):
     """Add a product (optionally, a specific variant) to the caller's cart,
     or increase its quantity. A given product_id+variant_id pair merges
@@ -440,7 +451,17 @@ async def add_to_cart(
 
     Without an `Authorization` header this is a guest's cart. The first
     successful add creates it and sets the guest cart cookie (HttpOnly);
-    the client only has to send cookies back."""
+    the client only has to send cookies back.
+
+    The fields (`product_id`, optional `quantity` (default 1) and `variant_id`)
+    go in the JSON body; the query parameters of the same names are deprecated."""
+
+    fields = body_or_query(
+        body, ("product_id",), product_id=product_id, quantity=quantity, variant_id=variant_id,
+    )
+    product_id = fields["product_id"]
+    quantity = 1 if fields["quantity"] is None else fields["quantity"]
+    variant_id = fields["variant_id"]
 
     product = await _get_active_product(db, product_id)
 
@@ -501,7 +522,6 @@ async def add_to_cart(
 
 @router.put(
     "/items/{product_id}",
-    deprecated=True,
     response_model=APIResponse[CartResponse],
     responses={
         400: {"description": "Not enough stock available"},
@@ -512,13 +532,23 @@ async def add_to_cart(
 async def update_cart_item(
     response: Response,
     product_id: Int32,
-    quantity: Annotated[int, Query(ge=1, le=INT32_MAX)],
     owner: Owner,
     db: DbSession,
     redis: Cache,
-    variant_id: Int32 | None = None,
+    body: Annotated[CartItemUpdate | None, Body()] = None,
+    quantity: Annotated[
+        int | None, Query(ge=1, le=INT32_MAX, deprecated=True, description=QUERY_PARAMETER_DEPRECATED)
+    ] = None,
+    variant_id: Annotated[Int32 | None, Query(deprecated=True, description=QUERY_PARAMETER_DEPRECATED)] = None,
 ):
-    """Update the quantity of an item already in the caller's cart."""
+    """Update the quantity of an item already in the caller's cart.
+
+    `quantity` (and optional `variant_id`) go in the JSON body; the query
+    parameters of the same names are deprecated."""
+
+    fields = body_or_query(body, ("quantity",), quantity=quantity, variant_id=variant_id)
+    quantity = fields["quantity"]
+    variant_id = fields["variant_id"]
 
     product = await _get_active_product(db, product_id)
 

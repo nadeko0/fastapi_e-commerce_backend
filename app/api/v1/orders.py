@@ -5,7 +5,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Annotated, List  # noqa: UP035 - see the UP006 noqa on response_model
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Body, Header, HTTPException, Query, Request, status
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select, update
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, CurrentUser, DbSession, Provider
+from app.core.deprecation import QUERY_PARAMETER_DEPRECATED, body_or_query
 from app.core.idempotency import ensure_same_request, request_fingerprint
 from app.core.openapi import DocumentedRoute
 from app.models.address import Address
@@ -28,8 +29,10 @@ from app.schemas.common import APIResponse, Int32
 from app.schemas.order import (
     CheckoutSessionCreate,
     CheckoutSessionResponse,
+    OrderCreate,
     OrderResponse,
     OrderStatus,
+    OrderStatusUpdate,
     PaymentCreate,
     PaymentResponse,
     PaymentStatus,
@@ -94,7 +97,6 @@ async def _order_by_idempotency_key(
 
 @router.post(
     "",
-    deprecated=True,
     response_model=APIResponse[OrderResponse],
     responses={
         400: {"description": "Cart is empty, profile incomplete, or a cart item is out of stock"},
@@ -104,7 +106,6 @@ async def _order_by_idempotency_key(
     },
 )
 async def create_order(
-    shipping_address_id: Int32,
     background_tasks: BackgroundTasks,
     current_user: CurrentUser,
     db: DbSession,
@@ -121,13 +122,26 @@ async def create_order(
         alias="Idempotency-Key", min_length=8, max_length=255,
         description="Unique per checkout attempt; resend the same value when retrying.",
     )],
+    # `shipping_address_id` goes in the JSON body; the query parameter is
+    # what 3.3.0 and earlier took and is deprecated (sending both is a 422).
+    body: Annotated[OrderCreate | None, Body()] = None,
+    shipping_address_id: Annotated[
+        Int32 | None, Query(deprecated=True, description=QUERY_PARAMETER_DEPRECATED)
+    ] = None,
 ):
     """Create an order from the current user's cart, decrementing stock atomically.
 
     Requires an `Idempotency-Key` header. Repeating a request with a key
     already used by this user returns the order created the first time;
     a key already used with a different `shipping_address_id` is answered 422.
+
+    `shipping_address_id` goes in the JSON body; the query parameter of the
+    same name is deprecated.
     """
+
+    shipping_address_id = body_or_query(
+        body, ("shipping_address_id",), shipping_address_id=shipping_address_id,
+    )["shipping_address_id"]
 
     if not current_user.is_email_verified:
         raise HTTPException(
@@ -373,7 +387,6 @@ async def get_order(
 
 @router.put(
     "/{order_id}/status",
-    deprecated=True,
     response_model=APIResponse[OrderResponse],
     responses={
         400: {"description": "Invalid status transition"},
@@ -388,12 +401,20 @@ async def update_order_status(
     # body - HTTPException below must use the http_status alias instead,
     # or status.HTTP_404_NOT_FOUND resolves against this OrderStatus value
     # and raises AttributeError instead of a proper 404/400 response.
-    status: OrderStatus,
     background_tasks: BackgroundTasks,
     current_user: AdminUser,  # Admin only
     db: DbSession,
+    body: Annotated[OrderStatusUpdate | None, Body()] = None,
+    status: Annotated[
+        OrderStatus | None, Query(deprecated=True, description=QUERY_PARAMETER_DEPRECATED)
+    ] = None,
 ):
-    """Transition an order to a new status (admin only)."""
+    """Transition an order to a new status (admin only).
+
+    `status` goes in the JSON body; the query parameter of the same name is
+    deprecated."""
+
+    status = body_or_query(body, ("status",), status=status)["status"]
 
     # See get_order above: OrderResponse.model_validate(order) below serializes
     # shipping_address and items->product, so eager-load both here too.

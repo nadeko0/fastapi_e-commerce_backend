@@ -19,10 +19,6 @@ CALLS = [
     ("GET", "/api/v1/users/data/export"),
     ("POST", "/api/v1/users/data/delete"),
     ("POST", "/api/v1/users/consent"),
-    ("POST", "/api/v1/orders"),
-    ("PUT", "/api/v1/orders/1/status"),
-    ("POST", "/api/v1/cart/items"),
-    ("PUT", "/api/v1/cart/items/1"),
 ]
 
 LINK_ITEM = re.compile(r'^<[^<>\s]+>; rel="(deprecation|successor-version)"(; type="text/html")?$')
@@ -54,8 +50,8 @@ def test_successor_version_link_where_a_replacement_exists(client):
     link = client.post("/api/v1/users/consent").headers["Link"]
     assert '</api/v1/legal/consent>; rel="successor-version"' in link
 
-    link = client.post("/api/v1/orders").headers["Link"]
-    assert "successor-version" not in link
+    link = client.get("/api/v1/users/verify-email/x").headers["Link"]
+    assert '</api/v1/users/verify-email>; rel="successor-version"' in link
 
 
 @pytest.mark.parametrize(
