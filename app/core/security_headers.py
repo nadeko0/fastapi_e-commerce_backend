@@ -15,6 +15,24 @@ _NO_STORE_PREFIXES = tuple(
 )
 
 
+# OWASP REST Security Cheat Sheet: a JSON API answers default-src 'none' and
+# frame-ancestors 'none'. Only the interactive docs pages (FastAPI serves
+# them, outside production only, see main.py) are HTML that loads Swagger UI
+# and ReDoc from cdn.jsdelivr.net and runs an inline script: they keep the
+# policy the app has always sent.
+_API_CSP = "default-src 'none'; frame-ancestors 'none'"
+_DOCS_CSP = (
+    "default-src 'self';"
+    "img-src 'self' data: https:;"
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
+    "font-src 'self' https://cdn.jsdelivr.net;"
+)
+_DOCS_PATHS = frozenset(
+    {f"{settings.API_V1_STR}/docs", "/redoc", "/docs/oauth2-redirect"}
+)
+
+
 def _needs_no_store(scope: Scope) -> bool:
     path = scope["path"]
     if any(path == p or path.startswith(p + "/") for p in _NO_STORE_PREFIXES):
@@ -29,15 +47,23 @@ def _needs_no_store(scope: Scope) -> bool:
 def apply_security_headers(headers: MutableHeaders, scope: Scope) -> None:
     if "cache-control" not in headers and _needs_no_store(scope):
         headers["Cache-Control"] = "no-store"
+    # Sent whatever the scheme the app sees: behind a TLS-terminating proxy
+    # the app sees http (and learns https only from X-Forwarded-Proto, which
+    # ForwardedClientMiddleware applies inside this layer and only for a
+    # trusted proxy), so a scheme check here would drop the header exactly
+    # where it matters. Browsers ignore it over http (RFC 6797 section 8.1).
     headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     headers["X-Content-Type-Options"] = "nosniff"
     headers["X-Frame-Options"] = "DENY"
+    # OWASP Secure Headers Project values; an API has no use for referrers,
+    # cross-origin no-cors embedding or a shared browsing-context group.
+    # (CORP only gates no-cors requests; CORS reads are governed by CORS.)
+    headers["Referrer-Policy"] = "no-referrer"
+    headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    # No X-XSS-Protection: deprecated, and it can create XSS (MDN, OWASP).
     headers["Content-Security-Policy"] = (
-        "default-src 'self';"
-        "img-src 'self' data: https:;"
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
-        "font-src 'self' https://cdn.jsdelivr.net;"
+        _DOCS_CSP if scope["path"] in _DOCS_PATHS else _API_CSP
     )
     headers["Permissions-Policy"] = "geolocation=(), microphone=()"
 

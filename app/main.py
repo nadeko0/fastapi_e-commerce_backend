@@ -88,8 +88,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # The methods the routes use and the request headers they read
+    # (Authorization, Idempotency-Key); Content-Type is always allowed by
+    # Starlette, listed for the reader. Retry-After (429, 503) is exposed so
+    # a browser client can back off. Starlette: credentials and "*" do not mix.
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+    expose_headers=["Retry-After"],
 )
 
 # X-Forwarded-For -> request.client, by TRUSTED_PROXIES and nothing else,
