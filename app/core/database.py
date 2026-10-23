@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 # connection before an await, FastAPI's own generator-dependency teardown
 # (fastapi.concurrency.contextmanager_in_threadpool) has no `finally` around
 # its yield - a cancellation delivered while a request is suspended anywhere
-# in that yielded region skips `cm.__exit__` (i.e. `session.close()` in
-# get_db) entirely, with no exception raised and nothing left to catch. That
+# in that yielded region skips `cm.__exit__` (i.e. `session.close()` of a
+# sync generator dependency) entirely, with no exception raised and nothing left to catch. That
 # is a property of FastAPI/anyio's cancellation model, not a bug in any one
 # route, so no amount of route-level "close before the await" patching can
 # make it impossible in general - only less likely by shrinking the window.
@@ -75,23 +75,16 @@ SessionLocal = sessionmaker(
     expire_on_commit=False
 )
 
-# The async engine, for routes that have been moved off the sync Session.
+# The async engine: every route runs on an AsyncSession (get_async_db), so
+# waiting for a connection or a query yields to the event loop instead of
+# blocking it.
 #
-# Every route used to be `async def` calling the sync Session above inline,
-# which runs each query on the event loop thread. Under load that does worse
-# than serialize requests: a request keeps its pooled connection until
-# get_db's teardown, the event loop is what dispatches that teardown, and so
-# once every connection belongs to a finished-but-not-yet-torn-down request
-# the next handler blocks the loop waiting for a connection that only the
-# loop could have returned. The server stops answering entirely until
-# pool_timeout fires. Measured and stack-dumped under locust - see README,
-# "Dependency refresh and load test". With an AsyncSession, waiting for a
-# connection (and for the query) yields to the loop instead of blocking it.
-#
-# Routes are being moved over one router at a time, so both engines exist
-# for now, each with its own pool: a worker can hold up to
-# 2 * (DB_POOL_SIZE + DB_MAX_OVERFLOW) Postgres connections until the sync
-# engine is only used by Celery (app/tasks.py), Alembic, and scripts.
+# The sync engine, SessionLocal and session_scope above are for code that
+# runs off the event loop and shares sync ORM code with Celery: today the
+# reconciliation thread in app/api/v1/admin.py (session_scope). Celery
+# (app/tasks.py) and Alembic (migrations/env.py) build their own engines. The
+# two pools here are separate, so a worker can hold up to
+# 2 * (DB_POOL_SIZE + DB_MAX_OVERFLOW) Postgres connections.
 #
 # psycopg 3 is the driver for both: `postgresql+psycopg://` selects its sync
 # or async mode depending on which create_*engine() is given the URL, so

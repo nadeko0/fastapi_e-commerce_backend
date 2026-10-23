@@ -40,6 +40,11 @@ from app.services.redis_codec import (  # noqa: F401
 logger = logging.getLogger(__name__)
 
 class RedisService:
+    """Synchronous Redis access, kept for Celery tasks (app/tasks.py) and
+    other code outside the event loop. Routes use AsyncRedisService
+    (app/services/redis_async.py), which shares the cart/cache logic through
+    app/services/redis_codec.py and writes the same keys."""
+
     _instance = None
     _pool = None
 
