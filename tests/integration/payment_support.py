@@ -240,7 +240,7 @@ class Shop:
             "data": {"object": obj},
         }).encode()
         signature = StripePaymentProvider.sign_payload(
-            body, settings.STRIPE_WEBHOOK_SECRET, timestamp=timestamp)
+            body, settings.STRIPE_WEBHOOK_SECRET.get_secret_value(), timestamp=timestamp)
         response = self.client.post(WEBHOOK, content=body,
                                     headers={"Stripe-Signature": signature,
                                              "Content-Type": "application/json"})

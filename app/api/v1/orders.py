@@ -1566,7 +1566,7 @@ async def stripe_webhook(
         event = provider.construct_webhook_event(
             payload,
             stripe_signature,
-            settings.STRIPE_WEBHOOK_SECRET,
+            settings.STRIPE_WEBHOOK_SECRET.get_secret_value(),
             tolerance_seconds=settings.STRIPE_WEBHOOK_TOLERANCE_SECONDS,
         )
     except SignatureVerificationError:

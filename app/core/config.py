@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 from pydantic import (
     AnyHttpUrl,
     Field,
+    SecretStr,
     TypeAdapter,
     ValidationInfo,
     field_validator,
@@ -149,7 +150,7 @@ class Settings(BaseSettings):
     def assemble_cors_origins(cls, v: str | List[str]) -> List[str]:
         return [_to_origin(item) for item in _split_comma_separated(v)]
 
-    JWT_SECRET_KEY: str
+    JWT_SECRET_KEY: SecretStr
     JWT_ALGORITHM: str = "HS256"
     # bcrypt cost factor. 12 (bcrypt's own default) is the deliberately slow,
     # brute-force-resistant setting production must use. Tests don't need
@@ -176,9 +177,10 @@ class Settings(BaseSettings):
 
     POSTGRES_SERVER: str
     POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
+    POSTGRES_PASSWORD: SecretStr
     POSTGRES_DB: str
-    DATABASE_URI: Optional[str] = None
+    # A SecretStr as a whole: the URL carries the database password.
+    DATABASE_URI: Optional[SecretStr] = None
     SQL_DEBUG: bool = False
 
     DB_POOL_SIZE: int = 10
@@ -207,11 +209,13 @@ class Settings(BaseSettings):
     def assemble_db_connection(cls, v: str | None, info: ValidationInfo) -> str:
         if isinstance(v, str):
             return v
-        return f"postgresql+psycopg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}/{info.data.get('POSTGRES_DB')}"
+        password = info.data.get("POSTGRES_PASSWORD")
+        password = password.get_secret_value() if password is not None else None
+        return f"postgresql+psycopg://{info.data.get('POSTGRES_USER')}:{password}@{info.data.get('POSTGRES_SERVER')}/{info.data.get('POSTGRES_DB')}"
 
     REDIS_HOST: str
     REDIS_PORT: int = 6379
-    REDIS_PASSWORD: Optional[str] = None
+    REDIS_PASSWORD: Optional[SecretStr] = None
     REDIS_DB: int = 0
     REDIS_POOL_SIZE: int = 50
     REDIS_POOL_TIMEOUT: int = 20
@@ -386,7 +390,7 @@ class Settings(BaseSettings):
     SMTP_HOST: str
     SMTP_PORT: int = 587
     SMTP_USER: str
-    SMTP_PASSWORD: str
+    SMTP_PASSWORD: SecretStr
     SMTP_TIMEOUT_SECONDS: int = 10
     EMAILS_FROM_EMAIL: str
     EMAILS_FROM_NAME: str
@@ -409,8 +413,8 @@ class Settings(BaseSettings):
     # only ever sent webhooks signed by the tests, and refused in
     # production, where anyone who has read the repository could sign a
     # webhook with them.
-    STRIPE_SECRET_KEY: str = "sk_test_mock_placeholder"
-    STRIPE_WEBHOOK_SECRET: str = "whsec_mock_placeholder"
+    STRIPE_SECRET_KEY: SecretStr = SecretStr("sk_test_mock_placeholder")
+    STRIPE_WEBHOOK_SECRET: SecretStr = SecretStr("whsec_mock_placeholder")
     STRIPE_WEBHOOK_TOLERANCE_SECONDS: int = 300
     # The one currency the store prices and charges in. Product prices carry
     # no currency of their own; each order records this value when it is
@@ -544,7 +548,8 @@ class Settings(BaseSettings):
             # Issued by the mail provider, so no length of our choosing.
             ("SMTP_PASSWORD", 0),
         ):
-            value = getattr(self, name) or ""
+            secret = getattr(self, name)
+            value = secret.get_secret_value() if secret is not None else ""
             if not value:
                 problems.append(f"{name} is not set")
             elif _looks_like_placeholder(value):

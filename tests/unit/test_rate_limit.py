@@ -210,7 +210,7 @@ def test_user_id_comes_from_a_valid_access_token():
 
 def _token(**claims):
     payload = {"sub": "42", "type": "access", "exp": int(time.time()) + 600, **claims}
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(payload, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
 
 
 @pytest.mark.parametrize(
@@ -246,7 +246,7 @@ def test_no_user_id_from_tokens_that_are_not_valid_access_tokens():
     )
     no_subject = jwt.encode(
         {"type": "access", "exp": int(time.time()) + 600},
-        settings.JWT_SECRET_KEY,
+        settings.JWT_SECRET_KEY.get_secret_value(),
         algorithm=settings.JWT_ALGORITHM,
     )
     for token in (expired, foreign, no_subject, _token(type="reset"), issue_refresh_token(42)):

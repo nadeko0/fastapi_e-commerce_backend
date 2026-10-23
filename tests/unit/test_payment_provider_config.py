@@ -9,7 +9,7 @@ confirms with a successful test card when no token is sent), and webhooks
 would be verified with a secret anyone can read in .env.example.
 """
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings, settings
 from app.services.payment import get_payment_provider
@@ -55,7 +55,7 @@ def test_the_test_suite_runs_on_the_mock():
 def test_stripe_setting_selects_the_live_provider_with_the_configured_key(monkeypatch):
     with monkeypatch.context() as m:
         m.setattr(settings, "PAYMENT_PROVIDER", "stripe")
-        m.setattr(settings, "STRIPE_SECRET_KEY", REAL_LOOKING_SECRET_KEY)
+        m.setattr(settings, "STRIPE_SECRET_KEY", SecretStr(REAL_LOOKING_SECRET_KEY))
         provider = get_payment_provider()
 
     assert isinstance(provider, LiveStripePaymentProvider)
@@ -95,7 +95,7 @@ def test_production_with_stripe_and_real_secrets_starts():
 def test_development_may_use_the_mock_with_placeholders():
     configured = _settings(ENVIRONMENT="development", PAYMENT_PROVIDER="mock")
     assert configured.PAYMENT_PROVIDER == "mock"
-    assert configured.STRIPE_WEBHOOK_SECRET == "whsec_mock_placeholder"
+    assert configured.STRIPE_WEBHOOK_SECRET.get_secret_value() == "whsec_mock_placeholder"
 
 
 # -- FRONTEND_URL: where a Checkout Session sends the customer back ----------

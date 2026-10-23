@@ -182,7 +182,7 @@ def user_id_from_token(request: Request) -> Optional[str]:
         return None
     try:
         payload = jwt.decode(
-            token.strip(), settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+            token.strip(), settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM]
         )
     except jwt.PyJWTError:  # malformed, expired, or signed with another key
         return None

@@ -86,7 +86,9 @@ class RedisService:
                 # password-protected instance failed. Invisible locally
                 # (tests use fakeredis, which doesn't enforce auth) until
                 # actually deployed against docker-compose's real Redis.
-                password=settings.REDIS_PASSWORD,
+                password=(
+                    settings.REDIS_PASSWORD.get_secret_value() if settings.REDIS_PASSWORD is not None else None
+                ),
                 decode_responses=True,
                 max_connections=settings.REDIS_POOL_SIZE
             )

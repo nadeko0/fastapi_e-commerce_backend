@@ -50,7 +50,7 @@ def _env_example_values():
 
 def test_real_looking_secrets_are_accepted_in_production():
     settings = _settings()
-    assert settings.JWT_SECRET_KEY == "k" * 64
+    assert settings.JWT_SECRET_KEY.get_secret_value() == "k" * 64
 
 
 @pytest.mark.parametrize("name", sorted(_GOOD_SECRETS))
@@ -146,3 +146,51 @@ def test_the_error_does_not_show_the_settings_input():
     with pytest.raises(ValidationError) as error:
         _settings(STRIPE_WEBHOOK_SECRET="placeholder-webhook-secret-value")
     assert "secret-value" not in str(error.value)
+
+
+# Defence in depth (V9): nothing logs the settings object today, but a
+# future logger.info(settings) or error-tracker capture must not print them.
+_FAKE_SECRETS = {
+    "JWT_SECRET_KEY": "fake-jwt-secret-aaaa-bbbb-cccc-dddd-eeee-ffff-0000-1111",
+    "POSTGRES_PASSWORD": "fake-pg-password-2222-3333",
+    "REDIS_PASSWORD": "fake-redis-password-4444-5555",
+    "SMTP_PASSWORD": "fake-smtp-password-6666",
+    "STRIPE_SECRET_KEY": "fake-stripe-api-key-7777-8888",
+    "STRIPE_WEBHOOK_SECRET": "fake-webhook-signing-9999-0000-1212-3434",
+}
+_FAKE_DB_PASSWORD_IN_URI = "fake-uri-password-5656"
+
+
+def _leaks(settings):
+    assembled = _settings("development", **_FAKE_SECRETS)
+    given_uri = _settings(
+        "development",
+        **{
+            **_FAKE_SECRETS,
+            "DATABASE_URI": f"postgresql+psycopg://u:{_FAKE_DB_PASSWORD_IN_URI}@h/d",
+        },
+    )
+    return assembled, given_uri
+
+
+@pytest.mark.parametrize("which", [0, 1])
+def test_no_secret_appears_in_repr_str_or_dumps(which):
+    settings = _leaks(None)[which]
+    secrets = [*_FAKE_SECRETS.values(), _FAKE_DB_PASSWORD_IN_URI]
+    rendered = [
+        repr(settings),
+        str(settings),
+        settings.model_dump_json(),
+        str(settings.model_dump()),
+        str(settings.model_dump(mode="json")),
+    ]
+    for text in rendered:
+        for secret in secrets:
+            assert secret not in text
+
+
+def test_secrets_are_still_readable_by_unwrapping():
+    settings = _settings("development", **_FAKE_SECRETS)
+    assert settings.JWT_SECRET_KEY.get_secret_value() == _FAKE_SECRETS["JWT_SECRET_KEY"]
+    assert settings.STRIPE_SECRET_KEY.get_secret_value() == _FAKE_SECRETS["STRIPE_SECRET_KEY"]
+    assert _FAKE_SECRETS["POSTGRES_PASSWORD"] in settings.DATABASE_URI.get_secret_value()

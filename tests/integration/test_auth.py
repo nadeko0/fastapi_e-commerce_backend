@@ -1041,7 +1041,7 @@ def test_logout_revokes_an_access_token_without_jti_in_every_spelling(
             "sub": str(user_id),
             "type": "access",
         },
-        settings.JWT_SECRET_KEY,
+        settings.JWT_SECRET_KEY.get_secret_value(),
         algorithm=settings.JWT_ALGORITHM,
     )
     assert client.get(

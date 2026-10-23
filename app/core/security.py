@@ -178,7 +178,7 @@ def create_access_token(subject: Union[str, int]) -> str:
         "type": "access",
         "jti": str(uuid.uuid4()),
     }
-    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
 def create_refresh_token(subject: Union[str, int], jti: Optional[str] = None, family: Optional[str] = None) -> str:
@@ -197,7 +197,7 @@ def create_refresh_token(subject: Union[str, int], jti: Optional[str] = None, fa
         "jti": jti or str(uuid.uuid4()),
         "family": family or str(uuid.uuid4()),
     }
-    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
 
@@ -212,7 +212,7 @@ def issue_refresh_token(user_id: Union[str, int], family: Optional[str] = None) 
     later be validated, rotated, and reuse-detected. `family` is passed when
     rotating an existing chain (login omits it, which starts a new chain)."""
     token = create_refresh_token(user_id, family=family)
-    payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+    payload = jwt.decode(token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
     ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     redis_service.register_refresh_token(payload["jti"], user_id, payload["family"], ttl_seconds)
     return token
@@ -232,7 +232,7 @@ async def rotate_refresh_token(token: str, db: Session) -> Tuple[str, str]:
     re-login instead of silently issuing more tokens on a compromised chain.
     """
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
     except jwt.PyJWTError:
         raise RefreshTokenError("Could not validate refresh token")
 
@@ -280,7 +280,7 @@ def revoke_refresh_token(token: str) -> bool:
     try:
         payload = jwt.decode(
             token,
-            settings.JWT_SECRET_KEY,
+            settings.JWT_SECRET_KEY.get_secret_value(),
             algorithms=[settings.JWT_ALGORITHM],
             options={"verify_exp": False},
         )
@@ -308,7 +308,7 @@ def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
     RevocationUnavailable if any of it could not be recorded."""
     payload = {}
     try:
-        payload = jwt.decode(access_token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(access_token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
         # time.time(), not datetime.utcnow().timestamp(): .timestamp() on a
         # naive datetime reads it as *local* time, so on any host whose
         # timezone is not UTC the result is off by the UTC offset, while the
@@ -404,7 +404,7 @@ async def get_current_user(
     try:
         payload = jwt.decode(
             token,
-            settings.JWT_SECRET_KEY,
+            settings.JWT_SECRET_KEY.get_secret_value(),
             algorithms=[settings.JWT_ALGORITHM]
         )
         user_id = user_id_from_subject(payload.get("sub"))
@@ -523,7 +523,7 @@ def blacklist_token(token: str, expires_in: int) -> bool:
     try:
         payload = jwt.decode(
             token,
-            settings.JWT_SECRET_KEY,
+            settings.JWT_SECRET_KEY.get_secret_value(),
             algorithms=[settings.JWT_ALGORITHM],
             options={"verify_exp": False},
         )
@@ -545,7 +545,7 @@ def blacklist_token(token: str, expires_in: int) -> bool:
 # are reset links, a new one is one click away.
 def _password_fingerprint(hashed_password: str) -> str:
     return hmac.new(
-        settings.JWT_SECRET_KEY.encode("utf-8"),
+        settings.JWT_SECRET_KEY.get_secret_value().encode("utf-8"),
         hashed_password.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
@@ -572,7 +572,7 @@ def generate_password_reset_token(email: str, hashed_password: str) -> str:
         "type": "reset",
         "pwd": _password_fingerprint(hashed_password),
     }
-    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
 def verify_password_reset_token(token: str) -> Optional[PasswordResetClaims]:
@@ -580,7 +580,7 @@ def verify_password_reset_token(token: str) -> Optional[PasswordResetClaims]:
     it is still good for the account is PasswordResetClaims.matches, which
     needs the account's current hash."""
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
     except jwt.PyJWTError:
         return None
     email = payload.get("sub")
@@ -592,12 +592,12 @@ def verify_password_reset_token(token: str) -> Optional[PasswordResetClaims]:
 def generate_email_verification_token(email: str) -> str:
     expire = utc_now() + timedelta(hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS)
     to_encode = {"exp": expire, "sub": email, "type": "verify_email"}
-    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
 def verify_email_token(token: str) -> Optional[str]:
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
         if payload["type"] != "verify_email":
             return None
         return payload["sub"]

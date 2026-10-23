@@ -235,7 +235,7 @@ def _payment_payload(order, token=TOKEN_SUCCESS_DEFAULT, currency="USD"):
 
 def _sign(body: bytes, secret: str = None, timestamp: int = None) -> str:
     return StripePaymentProvider.sign_payload(
-        body, secret or settings.STRIPE_WEBHOOK_SECRET, timestamp=timestamp
+        body, secret or settings.STRIPE_WEBHOOK_SECRET.get_secret_value(), timestamp=timestamp
     )
 
 
@@ -1402,11 +1402,11 @@ def test_provider_webhook_timestamp_outside_tolerance_is_rejected():
     body = _webhook_body("payment_intent.succeeded", "pi_old")
     old_timestamp = int(time.time()) - 10_000
     signature = StripePaymentProvider.sign_payload(
-        body, settings.STRIPE_WEBHOOK_SECRET, timestamp=old_timestamp
+        body, settings.STRIPE_WEBHOOK_SECRET.get_secret_value(), timestamp=old_timestamp
     )
     with pytest.raises(SignatureVerificationError):
         provider.construct_webhook_event(
-            body, signature, settings.STRIPE_WEBHOOK_SECRET, tolerance_seconds=300
+            body, signature, settings.STRIPE_WEBHOOK_SECRET.get_secret_value(), tolerance_seconds=300
         )
 
 
@@ -1416,9 +1416,9 @@ def test_provider_webhook_payload_not_valid_json_raises():
     # also parse.
     provider = StripePaymentProvider()
     body = b"not json at all"
-    signature = StripePaymentProvider.sign_payload(body, settings.STRIPE_WEBHOOK_SECRET)
+    signature = StripePaymentProvider.sign_payload(body, settings.STRIPE_WEBHOOK_SECRET.get_secret_value())
     with pytest.raises(SignatureVerificationError):
-        provider.construct_webhook_event(body, signature, settings.STRIPE_WEBHOOK_SECRET)
+        provider.construct_webhook_event(body, signature, settings.STRIPE_WEBHOOK_SECRET.get_secret_value())
 
 
 # =============================================================================

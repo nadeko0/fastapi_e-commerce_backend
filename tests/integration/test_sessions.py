@@ -121,7 +121,7 @@ def test_the_tokens_handed_out_are_what_they_say(client, db_session):
 @given(st.integers(min_value=1, max_value=2**31 - 1))
 def test_an_access_token_names_its_user_and_nobody_else(user_id):
     payload = jwt.decode(
-        create_access_token(user_id), settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+        create_access_token(user_id), settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM]
     )
     assert user_id_from_subject(payload["sub"]) == user_id
 
@@ -194,7 +194,7 @@ def test_a_refresh_token_without_its_chain_claims_is_refused(client, db_session,
         "exp": int(time.time()) + 600,
     }
     del claims[missing]
-    token = jwt.encode(claims, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    token = jwt.encode(claims, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
 
     assert client.post(f"{USERS}/refresh", json={"refresh_token": token}).status_code == 401
 
@@ -241,7 +241,7 @@ def test_logout_with_a_refresh_token_that_is_not_one_still_logs_out(client, refr
 def test_revoking_a_signed_token_without_a_family_is_a_no_op():
     token = jwt.encode(
         {"sub": "1", "type": "refresh", "exp": int(time.time()) + 60},
-        settings.JWT_SECRET_KEY,
+        settings.JWT_SECRET_KEY.get_secret_value(),
         algorithm=settings.JWT_ALGORITHM,
     )
     assert revoke_refresh_token(token) is True

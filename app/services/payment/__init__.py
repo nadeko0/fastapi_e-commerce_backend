@@ -29,7 +29,7 @@ def get_payment_provider() -> PaymentProvider:
     if settings.PAYMENT_PROVIDER == "stripe":
         from app.services.payment.live_stripe_provider import LiveStripePaymentProvider
 
-        return LiveStripePaymentProvider(api_key=settings.STRIPE_SECRET_KEY)
+        return LiveStripePaymentProvider(api_key=settings.STRIPE_SECRET_KEY.get_secret_value())
     return StripePaymentProvider()
 
 

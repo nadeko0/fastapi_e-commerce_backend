@@ -485,7 +485,7 @@ def _expired_token(user_id):
         "sub": str(user_id),
         "type": "access",
     }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(payload, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
 
 
 def _refresh_typed_token(user_id):
@@ -495,7 +495,7 @@ def _refresh_typed_token(user_id):
         "sub": str(user_id),
         "type": "refresh",
     }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(payload, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
 
 
 def _cart_calls(visitor, product_id, headers):
