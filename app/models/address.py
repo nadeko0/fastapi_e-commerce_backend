@@ -17,7 +17,7 @@ from app.models.enums import AddressType, create_string_enum
 class Address(Base):
     __tablename__ = "addresses"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     street = Column(String, nullable=False)

@@ -18,7 +18,7 @@ from app.models.enums import OrderStatus, PaymentStatus, create_string_enum
 class Order(Base):
     __tablename__ = "orders"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     status = Column(create_string_enum(OrderStatus, "status"), nullable=False, server_default="new")
     payment_status = Column(create_string_enum(PaymentStatus, "payment_status"), nullable=False, server_default="pending")
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -52,6 +52,7 @@ class Order(Base):
         ),
         Index('idx_order_user_id', 'user_id'),
         Index('idx_order_status', 'status'),
+        Index('idx_order_shipping_address_id', 'shipping_address_id'),
         Index(
             'uix_order_user_idempotency_key',
             'user_id', 'idempotency_key',
