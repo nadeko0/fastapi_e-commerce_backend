@@ -744,6 +744,7 @@ async def list_addresses(
             Address.user_id == current_user.id,
             Address.is_active
         )
+        .order_by(Address.id)
         .offset((pagination.page - 1) * pagination.size)
         .limit(pagination.size)
         .all()
@@ -1002,7 +1003,7 @@ async def get_user_orders(
             selectinload(Order.items).joinedload(OrderItem.product),
         )
         .filter(Order.user_id == current_user.id)
-        .order_by(Order.created_at.desc())
+        .order_by(Order.created_at.desc(), Order.id.desc())
         .offset((pagination.page - 1) * pagination.size)
         .limit(pagination.size)
         .all()
