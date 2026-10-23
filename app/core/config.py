@@ -272,6 +272,14 @@ class Settings(BaseSettings):
     # size it against DB_POOL_SIZE + DB_MAX_OVERFLOW.
     MAX_IN_FLIGHT_REQUESTS: Optional[int] = None
 
+    # Largest request body accepted, in bytes; bigger gets 413 (RFC 9110,
+    # section 15.5.14) without being read - see app/core/body_limit.py. The
+    # largest legitimate bodies are a product with its images and
+    # characteristics and a Stripe event (snapshot events carry the full
+    # object; Stripe documents no maximum, its own sample handler caps at
+    # 64 KiB), both a few KiB. 1 MiB leaves a wide margin.
+    MAX_REQUEST_BODY_BYTES: int = Field(default=1_048_576, gt=0)
+
     # Kill switch for everything in app/core/rate_limit.py: the per-request
     # limits and the failed-login counter. Off means no request is ever
     # answered 429 by it and Redis is not asked.
