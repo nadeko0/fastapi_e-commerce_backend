@@ -1,6 +1,6 @@
 [project]
 name = "fastapi-ecommerce-backend"
-version = "3.2.0"
+version = "3.2.1"
 description = "E-commerce backend API with FastAPI"
 requires-python = ">=3.13"
 dependencies = [
