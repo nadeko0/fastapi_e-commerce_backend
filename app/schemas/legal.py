@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 # different modules also collided in the generated OpenAPI schema
 # (FastAPI disambiguates same-named schemas with an ugly
 # module-qualified name), which this avoids.
-from app.schemas.user import ConsentHistory  # noqa: F401 (re-exported for this module's callers)
+from app.schemas.user import ConsentHistory
 
 
 class ConsentUpdate(BaseModel):

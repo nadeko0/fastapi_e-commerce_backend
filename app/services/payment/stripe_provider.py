@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import time
 import uuid
-from typing import Any
+from typing import Any, ClassVar
 
 from app.core.currencies import STRIPE_PRESENTMENT_CURRENCIES
 from app.services.payment.base import PaymentProvider, webhook_event_from_payload
@@ -212,12 +212,12 @@ class StripePaymentProvider(PaymentProvider):
     cases to avoid idempotency keys leaking across tests.
     """
 
-    _intents_by_key: dict[str, PaymentIntent] = {}
-    _intents_by_id: dict[str, PaymentIntent] = {}
-    _sessions_by_key: dict[str, CheckoutSession] = {}
-    _sessions_by_id: dict[str, CheckoutSession] = {}
-    _refunds_by_key: dict[str, Refund] = {}
-    _refunds_by_id: dict[str, Refund] = {}
+    _intents_by_key: ClassVar[dict[str, PaymentIntent]] = {}
+    _intents_by_id: ClassVar[dict[str, PaymentIntent]] = {}
+    _sessions_by_key: ClassVar[dict[str, CheckoutSession]] = {}
+    _sessions_by_id: ClassVar[dict[str, CheckoutSession]] = {}
+    _refunds_by_key: ClassVar[dict[str, Refund]] = {}
+    _refunds_by_id: ClassVar[dict[str, Refund]] = {}
 
     @classmethod
     def reset_mock_state(cls) -> None:

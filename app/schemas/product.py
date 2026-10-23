@@ -140,9 +140,13 @@ class ProductFilter(BaseModel):
     @field_validator('max_price')
     @classmethod
     def validate_price_range(cls, v, info: ValidationInfo):
-        if v is not None and 'min_price' in info.data and info.data['min_price'] is not None:
-            if v < info.data['min_price']:
-                raise ValueError('max_price must be greater than min_price')
+        if (
+            v is not None
+            and 'min_price' in info.data
+            and info.data['min_price'] is not None
+            and v < info.data['min_price']
+        ):
+            raise ValueError('max_price must be greater than min_price')
         return v
 
 class ProductSearch(BaseModel):

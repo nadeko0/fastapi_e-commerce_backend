@@ -1575,7 +1575,7 @@ def _settle_refunds(db: Session, order: Order, payment_row: Payment) -> None:
         return
     not_completed = db.query(func.coalesce(func.sum(PaymentRefund.amount), 0)).filter(
         PaymentRefund.payment_id == payment_row.id,
-        PaymentRefund.status.notin_(("succeeded",) + _REFUND_STATUSES_NOT_RETURNED),
+        PaymentRefund.status.notin_(("succeeded", *_REFUND_STATUSES_NOT_RETURNED)),
     ).scalar()
     returned = payment_row.amount_refunded - not_completed
     order.payment_status = (
