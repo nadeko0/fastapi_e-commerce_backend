@@ -233,12 +233,14 @@ def test_the_guard_finds_each_kind_of_blocking_use():
 
 # How long a call on a synchronous boundary sleeps: if it runs on the loop,
 # the loop is stopped that long.
-POISON_SECONDS = 0.5
+POISON_SECONDS = 1.0
 # Latency injected into every async database and Redis call.
 LATENCY_SECONDS = 0.02
 HEARTBEAT_SECONDS = 0.005
 # The heartbeat may be late by noise, never by a poisoned call. Noise under a
-# loaded CPU (other test processes, a shared CI runner) reached ~0.09 s, so the
+# loaded CPU (other test processes, a shared CI runner, a thread pool starting
+# its workers) reached 0.13 s and once ~0.3 s; bcrypt in the threadpool releases
+# the GIL (8 concurrent checks: 15 ms gap), so it is not a cause. Hence the
 # poison is long enough that the limit sits far from both: a blocked loop
 # shows a gap of at least POISON_SECONDS, noise stays well under half of it.
 MAX_HEARTBEAT_GAP = POISON_SECONDS / 2
