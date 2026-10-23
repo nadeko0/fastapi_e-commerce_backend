@@ -14,6 +14,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.core import database
 from app.core.clock import as_utc, utc_now
 from app.core.dependencies import AdminUser, Cache, DbSession, Provider
+from app.core.etag import IfMatch, etag_for, require_if_match
 from app.models.category import Category
 from app.models.order import Order
 from app.models.order_items import OrderItem
@@ -167,6 +168,7 @@ async def create_product(
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or category not found"},
+        412: {"description": "If-Match does not match the product's current ETag"},
     },
 )
 async def update_product(
@@ -175,17 +177,33 @@ async def update_product(
     current_user: AdminUser,
     db: DbSession,
     redis: Cache,
+    response: Response,
+    if_match: IfMatch = None,
 ):
-    """Update fields on an existing product."""
+    """Update fields on an existing product.
 
-    db_product = (
-        await db.execute(select(Product).where(Product.id == product_id).limit(1))
-    ).scalars().first()
+    With If-Match (an ETag from GET /products/{id} or a previous update, or
+    *), the update is applied only if the product is unchanged since (412
+    otherwise). Without it the update is unconditional, as before.
+    """
+
+    stmt = select(Product).options(joinedload(Product.category)).where(Product.id == product_id).limit(1)
+    if if_match is not None:
+        # Hold the row until commit so the check and the write are atomic
+        # (a no-op on SQLite).
+        stmt = stmt.with_for_update(of=Product)
+    db_product = (await db.execute(stmt)).scalars().first()
     if not db_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found"
         )
+    if if_match is not None:
+        current = ProductResponse(
+            **ProductInDB.model_validate(db_product, from_attributes=True).model_dump(),
+            category_name=db_product.category.name,
+        )
+        require_if_match(if_match, etag_for(current))
 
     update_data = product.model_dump(exclude_unset=True)
     # Same check as create_product. Without it a missing category_id was
@@ -226,8 +244,9 @@ async def update_product(
 
 
     base = ProductInDB.model_validate(db_product, from_attributes=True)
-    response = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
-    return APIResponse.success_response(response)
+    result = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
+    response.headers["ETag"] = etag_for(result)
+    return APIResponse.success_response(result)
 
 @router.delete(
     "/products/{product_id}",
@@ -625,6 +644,7 @@ async def list_product_variants(
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or variant not found"},
         409: {"description": "SKU already in use"},
+        412: {"description": "If-Match does not match the variant's current ETag"},
         422: {"description": "Invalid variant data"},
     },
 )
@@ -634,26 +654,35 @@ async def update_product_variant(
     variant: ProductVariantUpdate,
     current_user: AdminUser,
     db: DbSession,
+    response: Response,
+    if_match: IfMatch = None,
 ):
-    """Update fields on an existing variant of a product."""
+    """Update fields on an existing variant of a product.
+
+    With If-Match (the ETag of an earlier update response of this variant, or
+    *), applied only if the variant is unchanged since (412 otherwise).
+    """
 
     await _get_product_or_404(db, product_id)
 
-    db_variant = (
-        await db.execute(
-            select(ProductVariant)
-            .where(
-                ProductVariant.id == variant_id,
-                ProductVariant.product_id == product_id,
-            )
-            .limit(1)
+    stmt = (
+        select(ProductVariant)
+        .where(
+            ProductVariant.id == variant_id,
+            ProductVariant.product_id == product_id,
         )
-    ).scalars().first()
+        .limit(1)
+    )
+    if if_match is not None:
+        stmt = stmt.with_for_update()
+    db_variant = (await db.execute(stmt)).scalars().first()
     if not db_variant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Variant not found"
         )
+    if if_match is not None:
+        require_if_match(if_match, etag_for(ProductVariantResponse.model_validate(db_variant)))
 
     update_data = variant.model_dump(exclude_unset=True)
     if (
@@ -676,7 +705,9 @@ async def update_product_variant(
     await _commit_variant(db, update_data.get("sku"), variant_id)
     await db.refresh(db_variant)
 
-    return APIResponse.success_response(ProductVariantResponse.model_validate(db_variant))
+    result = ProductVariantResponse.model_validate(db_variant)
+    response.headers["ETag"] = etag_for(result)
+    return APIResponse.success_response(result)
 
 
 # -- Payment reconciliation ----------------------------------------------------------
