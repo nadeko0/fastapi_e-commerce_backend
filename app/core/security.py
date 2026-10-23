@@ -390,13 +390,15 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme)
 ) -> User:
 
-    # oauth2_scheme has already answered a request without a token (401,
-    # bare "Bearer"), so every rejection below is of a token that was
-    # presented: RFC 6750 section 3 says to name the reason.
+    # A rejected token that was presented is named as such (RFC 6750
+    # section 3). oauth2_scheme answers a request with no Authorization
+    # header at once; "Authorization: Bearer" with nothing after it gets
+    # here with an empty token, which is no token, so the bare challenge.
+    challenge = 'Bearer error="invalid_token"' if token else "Bearer"
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
-        headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+        headers={"WWW-Authenticate": challenge},
     )
 
     try:

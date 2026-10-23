@@ -543,7 +543,14 @@ def test_a_bad_authorization_header_is_a_401_on_every_cart_route_never_a_guest_c
     responses = _cart_calls(visitor, product.id, {"Authorization": header})
 
     assert [response.status_code for response in responses] == [401] * 6
-    assert all(response.headers["www-authenticate"] == "Bearer" for response in responses)
+    # A token that was presented and rejected is named (RFC 6750 section 3);
+    # a header with no token in it gets the bare challenge.
+    challenge = (
+        'Bearer error="invalid_token"'
+        if kind in ("garbage", "expired", "refresh_token", "blacklisted", "unknown_user")
+        else "Bearer"
+    )
+    assert all(response.headers["www-authenticate"] == challenge for response in responses)
     assert all(_set_cookie(response) is None for response in responses)
     assert fake_redis.get(guest_key) == stored
     assert _account_keys(fake_redis) == []
