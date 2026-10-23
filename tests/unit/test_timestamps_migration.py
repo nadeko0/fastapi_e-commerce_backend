@@ -52,11 +52,12 @@ def _model_timestamp_columns():
     return found
 
 
-def test_there_is_one_head_and_it_follows_the_previous_one():
+def test_it_follows_the_previous_one_in_a_single_chain():
     config = Config(str(ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(ROOT / "migrations"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == [REVISION]
+    assert len(script.get_heads()) == 1
+    assert script.get_revision(REVISION) is not None
     assert _migration().down_revision == "d4e9a1c7b265"
 
 

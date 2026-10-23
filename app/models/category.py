@@ -10,7 +10,7 @@ _int_array = ARRAY(Integer).with_variant(JSON(), "sqlite")
 class Category(Base):
     __tablename__ = "categories"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, index=True)
     description = Column(Text)
     parent_id = Column(Integer, ForeignKey('categories.id'), nullable=True)

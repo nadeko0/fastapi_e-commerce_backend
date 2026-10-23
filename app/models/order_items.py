@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, Column, ForeignKey, Integer, Numeric
+from sqlalchemy import CheckConstraint, Column, ForeignKey, Index, Integer, Numeric
 from sqlalchemy.orm import relationship
 
 from app.core.clock import UTCDateTime, utc_now
@@ -8,7 +8,7 @@ from app.models.base import Base
 class OrderItem(Base):
     __tablename__ = "order_items"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     # NULL means this line was for the plain product (no variant selected) -
@@ -29,6 +29,11 @@ class OrderItem(Base):
         # See Product.__table_args__.
         CheckConstraint("quantity > 0", name="ck_order_item_quantity_positive"),
         CheckConstraint("price_at_time >= 0", name="ck_order_item_price_non_negative"),
+        # PostgreSQL does not index foreign key columns by itself; these serve
+        # loading an order's items and the product/variant order-history checks.
+        Index("idx_order_item_order_id", "order_id"),
+        Index("idx_order_item_product_id", "product_id"),
+        Index("idx_order_item_variant_id", "variant_id"),
     )
 
     # OrderItemResponse (app/schemas/order.py) requires product_name/

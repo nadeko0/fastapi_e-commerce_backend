@@ -35,7 +35,7 @@ _characteristics_json = JSON().with_variant(JSONB(), "postgresql")
 class Product(Base):
     __tablename__ = "products"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=False)
     price = Column(Numeric(10, 2), nullable=False)
@@ -66,7 +66,6 @@ class Product(Base):
         # them to an existing database.
         CheckConstraint("price >= 0", name="ck_product_price_non_negative"),
         CheckConstraint("stock_quantity >= 0", name="ck_product_stock_non_negative"),
-        Index('idx_product_name_description', 'name', 'description'),
         Index('idx_product_price', 'price'),
         Index('idx_product_category', 'category_id'),
         Index('idx_product_active', 'is_active'),
@@ -91,7 +90,7 @@ class ProductVariant(Base):
 
     __tablename__ = "product_variants"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     sku = Column(String, nullable=False, unique=True, index=True)
     # e.g. {"size": "M", "color": "red"} - arbitrary key/value pairs, no

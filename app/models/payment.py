@@ -25,7 +25,7 @@ class Payment(Base):
 
     __tablename__ = "payments"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
     provider = Column(String, nullable=False, default="stripe")
     payment_intent_id = Column(String, nullable=False, unique=True, index=True)
@@ -110,7 +110,7 @@ class WebhookEvent(Base):
 
     __tablename__ = "webhook_events"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     event_id = Column(String, nullable=False, unique=True, index=True)
     event_type = Column(String, nullable=False)
     # The event as JSON text (id, type, created, data). NULL only for rows
