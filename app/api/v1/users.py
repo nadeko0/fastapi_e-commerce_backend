@@ -484,17 +484,17 @@ async def update_consent(
         )
     flag_column, date_column = columns
 
-    # current_user comes from get_current_active_user -> get_current_user,
-    # which depends on app.api.deps.get_db - a *different* get_db than the
-    # one this route depends on (app.core.database.get_db). Those are two
-    # distinct dependency callables, so FastAPI's per-request dependency
-    # cache gives each its own DB session: current_user is attached to the
-    # security session, not this route's `db`. Mutating current_user and
-    # calling this route's db.commit() was a silent no-op - the session
-    # holding the pending change was never committed, so consent updates
-    # never actually persisted despite the endpoint returning 200 with the
-    # (in-memory-only) updated value. Re-querying through `db` attaches the
-    # row to the session this route actually commits.
+    # current_user comes from get_current_active_user -> get_current_user
+    # (app/core/security.py), which loads the row through an AsyncSession
+    # from app.core.database.get_async_db - not through this route's `db`
+    # (app.core.database.get_db, a sync Session). Different dependency
+    # callables, so FastAPI's per-request cache gives each its own session,
+    # and what the route receives is a detached snapshot of the row: it
+    # belongs to no session this route can commit. Mutating current_user and
+    # calling db.commit() was a silent no-op - the change was never written,
+    # so consent updates never persisted despite the endpoint returning 200
+    # with the (in-memory-only) updated value. Re-querying through `db`
+    # attaches the row to the session this route actually commits.
     user = db.query(User).filter(User.id == current_user.id).first()
 
     setattr(user, flag_column, granted)
@@ -634,10 +634,10 @@ async def delete_user_data(
             detail="Incorrect password"
         )
 
-    # See the identical note in update_consent above: current_user is bound
-    # to a different DB session than this route's `db` (get_current_active_user
-    # resolves through app.api.deps.get_db, this route through
-    # app.core.database.get_db), so mutating current_user directly and
+    # See the identical note in update_consent above: current_user is a
+    # detached snapshot loaded through get_async_db (via
+    # get_current_active_user), not attached to this route's `db`
+    # (app.core.database.get_db), so mutating current_user directly and
     # committing `db` silently discarded the deactivation/deletion flags -
     # the account was never actually deactivated. Re-query through `db`.
     # (The former `current_user.deletion_reason = deletion.reason` line is
