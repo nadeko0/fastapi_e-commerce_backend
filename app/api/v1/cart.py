@@ -307,7 +307,8 @@ def _cart_or_503(cart: Cart | None) -> Cart:
     if cart is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Cart is temporarily unavailable, please retry"
+            detail="Cart is temporarily unavailable, please retry",
+            headers={"Retry-After": "5"},
         )
     return cart
 

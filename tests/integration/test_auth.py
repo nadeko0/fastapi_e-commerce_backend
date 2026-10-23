@@ -1026,6 +1026,7 @@ def test_signing_out_everywhere_that_cannot_move_the_watermark_says_so(
         )
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
     assert response.json()["detail"] == "Logout is temporarily unavailable, please retry"
 
 
@@ -1213,6 +1214,7 @@ def test_password_reset_that_cannot_revoke_old_tokens_changes_nothing(
         response = _reset(client, token, "NewStr0ngPass")
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
     assert response.json()["detail"] == "Password reset is temporarily unavailable, please retry"
     assert _can_log_in(client, email, valid_registration_payload["password"])
     assert client.get(
@@ -1234,6 +1236,7 @@ def test_logout_that_cannot_blacklist_the_token_says_so(
         )
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
     assert response.json()["detail"] == "Logout is temporarily unavailable, please retry"
 
 
@@ -1249,6 +1252,7 @@ def test_logout_that_cannot_revoke_the_refresh_token_says_so(
         )
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
 
 
 def test_signing_out_everywhere_that_cannot_revoke_says_so(
@@ -1261,6 +1265,7 @@ def test_signing_out_everywhere_that_cannot_revoke_says_so(
         response = client.post(f"{API_PREFIX}/logout", headers=headers)
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
 
 
 def test_refresh_rejects_token_for_deactivated_user(

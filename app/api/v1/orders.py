@@ -1095,6 +1095,7 @@ async def process_payment(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
+            headers={"Retry-After": "5"},
         ) from e
     except IdempotencyError:
         await db.rollback()
@@ -1345,6 +1346,7 @@ async def create_checkout_session(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
+            headers={"Retry-After": "5"},
         ) from e
     except IdempotencyError:
         await db.rollback()
@@ -1480,6 +1482,7 @@ async def refund_payment(
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
+            headers={"Retry-After": "5"},
         ) from e
     except IdempotencyError:
         raise HTTPException(

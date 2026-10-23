@@ -179,3 +179,4 @@ def test_a_full_run_that_cannot_be_queued_is_503_not_500(shop, client, monkeypat
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Task queue unavailable; reconciliation was not queued"
+    assert response.headers["Retry-After"]

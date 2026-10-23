@@ -476,3 +476,34 @@ def test_a_completed_password_reset_clears_the_backstop_but_not_other_addresses(
 
     assert login(client, payload["email"], "An0therStrongPass").status_code == 200
     assert login(attackers[0], payload["email"], "An0therStrongPass").status_code == 429
+
+
+# --- RateLimit-Policy and RateLimit (IETF httpapi ratelimit-headers-11) -----------
+
+
+def test_ratelimit_fields_follow_the_counter_on_200_and_429(client, limits):
+    limits(RATE_LIMIT_DEFAULT="2/minute")
+    with freeze_time("2026-01-01 00:00:00") as clock:
+        first = client.get(f"{API}/categories")
+        assert first.headers["RateLimit-Policy"] == '"default";q=2;w=60'
+        assert first.headers["RateLimit"] == '"default";r=1;t=60'
+        clock.tick(10)
+        second = client.get(f"{API}/categories")
+        assert second.headers["RateLimit"] == '"default";r=0;t=50'
+        blocked = client.get(f"{API}/categories")
+        assert blocked.status_code == 429
+        assert blocked.headers["Retry-After"] == "50"
+        assert blocked.headers["RateLimit-Policy"] == '"default";q=2;w=60'
+        assert blocked.headers["RateLimit"] == '"default";r=0;t=50'
+
+
+def test_no_ratelimit_fields_on_exempt_routes(client, limits):
+    response = client.get("/health")
+    assert "RateLimit" not in response.headers
+    assert "RateLimit-Policy" not in response.headers
+
+
+def test_ratelimit_fields_are_exposed_to_browsers(client, limits):
+    response = client.get(f"{API}/categories", headers={"Origin": "http://localhost:3000"})
+    exposed = response.headers["access-control-expose-headers"]
+    assert "RateLimit" in exposed and "RateLimit-Policy" in exposed and "Retry-After" in exposed
