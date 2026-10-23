@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.dependencies import Cache, DbSession
-from app.core.openapi import DocumentedRoute
 from app.core.deprecation import QUERY_PARAMETER_DEPRECATED, body_or_query
+from app.core.openapi import DocumentedRoute
 from app.core.rate_limit import (
     client_address,
     parse_rate,
