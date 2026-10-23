@@ -567,12 +567,17 @@ def _checkout_session_row_to_response(payment_row: Payment, order: Order) -> Che
     )
 
 
+def _is_checkout_attempt(payment_row: Payment) -> bool:
+    """A Checkout Session attempt that has not stored a session id."""
+    return payment_row.payment_intent_id.startswith(_PENDING_CHECKOUT_ID_PREFIX)
+
+
 def _replay_checkout_session(payment_row: Payment, order: Order):
     """
     /checkout-session's answer to a key this order has already used. An
     attempt with a session is replayed as it is. One without a session - a
-    twin request still waiting on the provider, a session that timed out
-    or was refused, a /pay attempt that used the same key - has nothing a
+    twin request still waiting on the provider, a session the provider
+    refused, a /pay attempt that used the same key - has nothing a
     CheckoutSessionResponse could describe, and the key cannot be used for
     a second attempt: the unique index on (order, key) refuses the row.
     Such a retry used to go on and hit that index, answering 500; it is a
@@ -738,14 +743,20 @@ def _guard_order_payable(order: Order) -> None:
 # PaymentIntent's id when it is created, and a Checkout Session attempt
 # when its session completes.
 _PENDING_INTENT_ID_PREFIX = "pending-"
+# The placeholder of a Checkout Session attempt (still starts with the
+# prefix above, so everything that looks for "pending-" sees it). It tells
+# the two flows apart while an attempt has no session id: a key whose
+# attempt timed out can only be retried by the flow that made it.
+_PENDING_CHECKOUT_ID_PREFIX = f"{_PENDING_INTENT_ID_PREFIX}cs-"
 
 
 # Payment.status values of an attempt whose outcome is not known yet: the
 # request is still talking to the provider (or died doing so), the customer
 # is in 3D Secure, or a Checkout Session has not been completed or expired.
-# "unknown" is a /pay attempt whose request to the provider timed out: the
-# provider may or may not have carried it out, so it is neither failed nor
-# still running, and only a retry with its own Idempotency-Key settles it.
+# "unknown" is an attempt (/pay or /checkout-session) whose request to the
+# provider timed out: the provider may or may not have carried it out, so
+# it is neither failed nor still running, and only a retry with its own
+# Idempotency-Key settles it.
 _IN_FLIGHT_PAYMENT_STATUSES = ("processing", "requires_action", "unknown")
 
 
@@ -926,6 +937,17 @@ async def process_payment(
         if existing_payment.status != "unknown":
             return APIResponse.success_response(
                 _payment_row_to_response(existing_payment, order)
+            )
+        if _is_checkout_attempt(existing_payment):
+            # Sending it as a PaymentIntent would be a second way to
+            # charge the order; only /checkout-session settles it.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This Idempotency-Key belongs to a checkout session attempt "
+                    "whose outcome is not known yet; retry it on "
+                    "/checkout-session with the same Idempotency-Key"
+                ),
             )
         retried_attempt = existing_payment
 
@@ -1193,11 +1215,23 @@ async def create_checkout_session(
     # reason as /pay - a successful retry against an order that is now
     # paid must not be rejected as a fresh duplicate attempt.
     existing_payment = await _payment_by_key(db, order.id, idempotency_key)
+    # Except an attempt of this flow whose provider request timed out
+    # ("unknown"), as in /pay: Stripe's guidance for a request that may or
+    # may not have been executed is to send it again with the same
+    # idempotency key and parameters, and Stripe returns the original
+    # session. A 409 that sent the client to a new key could create a
+    # second Checkout Session for the order.
+    retried_attempt = None
     if existing_payment:
-        return _replay_checkout_session(existing_payment, order)
+        if existing_payment.status != "unknown" or not _is_checkout_attempt(existing_payment):
+            return _replay_checkout_session(existing_payment, order)
+        retried_attempt = existing_payment
 
     _guard_order_payable(order)
-    await db.run_sync(_guard_no_attempt_in_flight, order)
+    await db.run_sync(
+        _guard_no_attempt_in_flight, order,
+        except_payment_id=retried_attempt.id if retried_attempt else None,
+    )
     _guard_currency_matches_order(payload.currency, order)
 
     amount_cents = _decimal_to_cents(order.total_amount)
@@ -1210,31 +1244,38 @@ async def create_checkout_session(
     )
     cancel_url = payload.cancel_url or f"{settings.FRONTEND_URL}/checkout/cancel"
 
-    payment_row = Payment(
-        order_id=order.id,
-        provider="stripe",
-        payment_intent_id=f"{_PENDING_INTENT_ID_PREFIX}{uuid.uuid4().hex[:24]}",
-        idempotency_key=idempotency_key,
-        amount=amount_cents,
-        currency=order.currency,
-        status="processing",
-    )
-    db.add(payment_row)
-    try:
+    if retried_attempt is not None:
+        # Claimed under the order's lock, as in /pay: a second retry of the
+        # same key finds the attempt "processing" and is answered with that.
+        payment_row = retried_attempt
+        payment_row.status = "processing"
         await db.commit()
-    except IntegrityError:
-        # Two concurrent requests with the same idempotency key both passed
-        # the pre-check above; the unique index catches the duplicate here.
-        # The rollback expires `order`, which the replay reads: reloaded
-        # first (an expired attribute cannot be read on an AsyncSession).
-        await db.rollback()
-        await db.refresh(order)
-        existing_payment = await _payment_by_key(db, order.id, idempotency_key)
-        if existing_payment:
-            return _replay_checkout_session(existing_payment, order)
-        # See the same re-raise in create_order: only the key's unique
-        # index can fail this INSERT.
-        raise  # pragma: no cover
+    else:
+        payment_row = Payment(
+            order_id=order.id,
+            provider="stripe",
+            payment_intent_id=f"{_PENDING_CHECKOUT_ID_PREFIX}{uuid.uuid4().hex[:24]}",
+            idempotency_key=idempotency_key,
+            amount=amount_cents,
+            currency=order.currency,
+            status="processing",
+        )
+        db.add(payment_row)
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Two concurrent requests with the same idempotency key both passed
+            # the pre-check above; the unique index catches the duplicate here.
+            # The rollback expires `order`, which the replay reads: reloaded
+            # first (an expired attribute cannot be read on an AsyncSession).
+            await db.rollback()
+            await db.refresh(order)
+            existing_payment = await _payment_by_key(db, order.id, idempotency_key)
+            if existing_payment:
+                return _replay_checkout_session(existing_payment, order)
+            # See the same re-raise in create_order: only the key's unique
+            # index can fail this INSERT.
+            raise  # pragma: no cover
 
     try:
         session = await run_in_threadpool(
@@ -1249,9 +1290,12 @@ async def create_checkout_session(
         )
     except PaymentProviderTimeoutError as e:
         # Same reasoning as /pay: unknown whether Stripe actually created
-        # the session, so only this attempt's own Payment row is marked
-        # failed - the order's payment_status/status stay untouched.
-        payment_row.status = "failed"
+        # the session, so only this attempt's own Payment row is touched,
+        # marked "unknown" (not failed: it may have been carried out) - the
+        # order's payment_status/status stay untouched. The row keeps its
+        # key, so a retry with the same Idempotency-Key is sent again and
+        # settles it, and it blocks other attempts meanwhile.
+        payment_row.status = "unknown"
         await db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1259,6 +1303,12 @@ async def create_checkout_session(
         ) from e
     except IdempotencyError:
         await db.rollback()
+        if retried_attempt is not None:
+            # Refused before it was carried out: still not settled. The
+            # rollback expired the attempt's row; reloaded before written.
+            await db.refresh(payment_row)
+            payment_row.status = "unknown"
+            await db.commit()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Idempotency key already used with different checkout session parameters",

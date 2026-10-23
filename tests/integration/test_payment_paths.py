@@ -336,7 +336,7 @@ def test_checkout_session_racing_a_twin_with_the_same_key_returns_the_twins_sess
     assert len(shop.payments(order["id"])) == 1
 
 
-def test_checkout_session_provider_timeout_fails_only_the_attempt(shop, outbox, monkeypatch):
+def test_checkout_session_provider_timeout_leaves_the_attempt_unknown(shop, outbox, monkeypatch):
     product = shop.product(price="19.99", stock=3)
     buyer = shop.buyer()
     order = shop.order_of(buyer, product)
@@ -347,27 +347,194 @@ def test_checkout_session_provider_timeout_fails_only_the_attempt(shop, outbox, 
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Payment provider unavailable, please retry"
-    assert payment_rows(shop, order["id"]) == [("failed", 1999, 0, "USD", False)]
+    assert payment_rows(shop, order["id"]) == [("unknown", 1999, 0, "USD", False)]
     assert shop.payments(order["id"])[0].checkout_session_id is None
     assert order_state(shop, order["id"]) == ("new", "pending")
     assert shop.stock(product) == 2
     assert outbox.take() == []
 
 
-def test_checkout_session_after_a_timeout_can_be_retried_with_a_new_key(shop, monkeypatch):
+def test_checkout_session_after_a_timeout_with_a_new_key_answers_409_and_creates_nothing(
+    shop, monkeypatch
+):
+    # The first request may have created its session at Stripe: a new key
+    # would be a second session for the order. Only the first key settles it.
     product = shop.product(price="19.99")
     buyer = shop.buyer()
     order = shop.order_of(buyer, product)
     with monkeypatch.context() as patched:
         _provider_raises(patched, "create_checkout_session", PaymentProviderTimeoutError())
         assert shop.checkout_session(buyer, order["id"]).status_code == 503
+    created = _provider_calls(monkeypatch, "create_checkout_session")
 
     response = shop.checkout_session(buyer, order["id"])
 
+    assert response.status_code == 409
+    assert "same Idempotency-Key" in response.json()["detail"]
+    assert created == []
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
+
+
+def test_checkout_session_retried_with_its_key_after_a_lost_response_reaches_the_same_session(
+    shop, monkeypatch
+):
+    # Stripe created the session but the answer was lost. Same key -> the
+    # same create request with the same Stripe idempotency key; Stripe
+    # replays the original session, so there is exactly one.
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    with monkeypatch.context() as patched:
+        _lose_the_response(patched, "create_checkout_session")
+        assert shop.checkout_session(buyer, order["id"], key=key).status_code == 503
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
+    (lost_session,) = StripePaymentProvider._sessions_by_key.values()
+    created = _provider_calls(monkeypatch, "create_checkout_session")
+
+    response = shop.checkout_session(buyer, order["id"], key=key)
+
     assert response.status_code == 200, response.text
-    assert [p.status for p in shop.payments(order["id"])] == ["failed", "processing"]
-    assert shop.payments(order["id"])[1].checkout_session_id == (
-        response.json()["data"]["checkout_session_id"])
+    assert response.json()["data"]["checkout_session_id"] == lost_session.id
+    assert len(created) == 1
+    assert created[0]["idempotency_key"] == f"checkout-order-{order['id']}:{key}"
+    assert len(StripePaymentProvider._sessions_by_key) == 1
+    row = shop.payments(order["id"])[0]
+    assert (row.status, row.checkout_session_id) == ("processing", lost_session.id)
+    # Settled: the same key now replays, and does not reach Stripe.
+    assert shop.checkout_session(buyer, order["id"], key=key).status_code == 200
+    assert len(created) == 1
+
+
+def test_checkout_session_retry_that_times_out_again_stays_unknown(shop, monkeypatch):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    _provider_raises(monkeypatch, "create_checkout_session", PaymentProviderTimeoutError())
+    assert shop.checkout_session(buyer, order["id"], key=key).status_code == 503
+
+    assert shop.checkout_session(buyer, order["id"], key=key).status_code == 503
+
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
+
+
+def test_checkout_session_retry_the_provider_rejects_fails_the_attempt(shop, monkeypatch):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    with monkeypatch.context() as patched:
+        _provider_raises(patched, "create_checkout_session", PaymentProviderTimeoutError())
+        assert shop.checkout_session(buyer, order["id"], key=key).status_code == 503
+    _provider_raises(monkeypatch, "create_checkout_session",
+                     InvalidRequestError("Invalid currency: 'usd'", param="currency"))
+
+    response = shop.checkout_session(buyer, order["id"], key=key)
+
+    assert response.status_code == 400
+    assert [p.status for p in shop.payments(order["id"])] == ["failed"]
+
+
+def test_checkout_session_retry_refused_by_the_provider_as_a_reused_key_leaves_it_unknown(
+    shop, monkeypatch
+):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    with monkeypatch.context() as patched:
+        _provider_raises(patched, "create_checkout_session", PaymentProviderTimeoutError())
+        assert shop.checkout_session(buyer, order["id"], key=key).status_code == 503
+    _provider_raises(monkeypatch, "create_checkout_session", IdempotencyError("reused"))
+
+    response = shop.checkout_session(buyer, order["id"], key=key)
+
+    assert response.status_code == 409
+    assert "checkout session parameters" in response.json()["detail"]
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
+
+
+def test_checkout_session_retry_of_an_unknown_attempt_whose_order_was_cancelled_answers_400(
+    shop, monkeypatch
+):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    _provider_raises(monkeypatch, "create_checkout_session", PaymentProviderTimeoutError())
+    assert shop.checkout_session(buyer, order["id"], key=key).status_code == 503
+    shop.db.query(Payment).filter(Payment.order_id == order["id"]).update({"status": "failed"})
+    shop.db.commit()
+    assert shop.cancel(buyer, order["id"]).status_code == 200
+    shop.db.query(Payment).filter(Payment.order_id == order["id"]).update({"status": "unknown"})
+    shop.db.commit()
+
+    response = shop.checkout_session(buyer, order["id"], key=key)
+
+    assert response.status_code == 400
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
+
+
+def test_checkout_session_retry_of_an_unknown_attempt_is_blocked_by_another_in_flight(
+    shop, monkeypatch
+):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    _provider_raises(monkeypatch, "create_checkout_session", PaymentProviderTimeoutError())
+    assert shop.checkout_session(buyer, order["id"], key=key).status_code == 503
+    shop.db.add(Payment(
+        order_id=order["id"], provider="stripe", payment_intent_id="pi_other",
+        idempotency_key=new_key(), amount=1999, currency="USD", status="processing"))
+    shop.db.commit()
+
+    response = shop.checkout_session(buyer, order["id"], key=key)
+
+    assert response.status_code == 409
+    assert sorted(p.status for p in shop.payments(order["id"])) == ["processing", "unknown"]
+
+
+def test_pay_with_the_key_of_an_unknown_checkout_attempt_answers_409_and_reaches_no_provider(
+    shop, monkeypatch
+):
+    # The key belongs to a checkout-session attempt: /pay must not run it
+    # as a PaymentIntent (a second way to charge the order).
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    with monkeypatch.context() as patched:
+        _provider_raises(patched, "create_checkout_session", PaymentProviderTimeoutError())
+        assert shop.checkout_session(buyer, order["id"], key=key).status_code == 503
+    created = _provider_calls(monkeypatch, "create_payment_intent")
+
+    response = shop.pay(buyer, order["id"], key=key)
+
+    assert response.status_code == 409
+    assert "checkout session" in response.json()["detail"]
+    assert created == []
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
+
+
+def test_checkout_session_with_the_key_of_an_unknown_pay_attempt_answers_409(
+    shop, monkeypatch
+):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    with monkeypatch.context() as patched:
+        _provider_raises(patched, "create_payment_intent", PaymentProviderTimeoutError())
+        assert shop.pay(buyer, order["id"], key=key).status_code == 503
+    created = _provider_calls(monkeypatch, "create_checkout_session")
+
+    response = shop.checkout_session(buyer, order["id"], key=key)
+
+    assert response.status_code == 409
+    assert created == []
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
 
 
 def test_checkout_session_whose_provider_key_is_refused_as_reused_answers_409(
@@ -407,7 +574,7 @@ def test_checkout_session_the_provider_rejects_fails_the_attempt_with_400(shop, 
 def test_checkout_session_retried_with_the_key_of_a_failed_attempt_answers_409_not_500(
     shop, monkeypatch
 ):
-    # The first request timed out at the provider: its attempt is recorded
+    # The provider rejected the first request: its attempt is recorded
     # as failed, with no session. A retry with the same key found that row
     # without a session, went on to insert a second row with the same key
     # and hit the unique index - answering 500.
@@ -416,8 +583,9 @@ def test_checkout_session_retried_with_the_key_of_a_failed_attempt_answers_409_n
     order = shop.order_of(buyer, product)
     key = new_key()
     with monkeypatch.context() as patched:
-        _provider_raises(patched, "create_checkout_session", PaymentProviderTimeoutError())
-        assert shop.checkout_session(buyer, order["id"], key=key).status_code == 503
+        _provider_raises(patched, "create_checkout_session",
+                         InvalidRequestError("Invalid currency: 'usd'", param="currency"))
+        assert shop.checkout_session(buyer, order["id"], key=key).status_code == 400
     created = _provider_calls(monkeypatch, "create_checkout_session")
 
     response = shop.checkout_session(buyer, order["id"], key=key)
