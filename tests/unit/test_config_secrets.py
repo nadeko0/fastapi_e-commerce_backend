@@ -34,7 +34,8 @@ def _settings(environment="production", **overrides):
         PAYMENT_PROVIDER="stripe",
         FRONTEND_URL="https://shop.example",
         PUBLIC_BASE_URL="https://api.shop.example",
-        **{**_GOOD_SECRETS, **overrides},
+        # conftest lowers the cost to 4; a deployment must run at 12 or more.
+        **{"BCRYPT_ROUNDS": 12, **_GOOD_SECRETS, **overrides},
     )
 
 
@@ -194,3 +195,25 @@ def test_secrets_are_still_readable_by_unwrapping():
     assert settings.JWT_SECRET_KEY.get_secret_value() == _FAKE_SECRETS["JWT_SECRET_KEY"]
     assert settings.STRIPE_SECRET_KEY.get_secret_value() == _FAKE_SECRETS["STRIPE_SECRET_KEY"]
     assert _FAKE_SECRETS["POSTGRES_PASSWORD"] in settings.DATABASE_URI.get_secret_value()
+
+
+@pytest.mark.parametrize("rounds", [4, 10, 11])
+def test_a_low_bcrypt_cost_is_rejected_in_production(rounds):
+    with pytest.raises(ValidationError, match="BCRYPT_ROUNDS must be at least 12"):
+        _settings(BCRYPT_ROUNDS=rounds)
+
+
+@pytest.mark.parametrize("rounds", [12, 13])
+def test_the_production_bcrypt_cost_is_accepted(rounds):
+    assert _settings(BCRYPT_ROUNDS=rounds).BCRYPT_ROUNDS == rounds
+
+
+@pytest.mark.parametrize("environment", ["development", "test"])
+def test_the_minimum_bcrypt_cost_is_allowed_where_nothing_is_deployed(environment):
+    assert _settings(environment=environment, BCRYPT_ROUNDS=4).BCRYPT_ROUNDS == 4
+
+
+@pytest.mark.parametrize("rounds", [3, 32])
+def test_bcrypt_cost_outside_the_library_range_is_refused(rounds):
+    with pytest.raises(ValidationError):
+        _settings(environment="development", BCRYPT_ROUNDS=rounds)
