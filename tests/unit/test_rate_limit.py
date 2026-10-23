@@ -249,7 +249,7 @@ def test_no_user_id_from_tokens_that_are_not_valid_access_tokens():
         settings.JWT_SECRET_KEY.get_secret_value(),
         algorithm=settings.JWT_ALGORITHM,
     )
-    for token in (expired, foreign, no_subject, _token(type="reset"), issue_refresh_token(42)):
+    for token in (expired, foreign, no_subject, _token(type="reset"), asyncio.run(issue_refresh_token(42))):
         assert user_id_from_token(make_request(authorization=f"Bearer {token}")) is None
 
 

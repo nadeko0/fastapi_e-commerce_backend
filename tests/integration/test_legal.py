@@ -1,3 +1,5 @@
+import asyncio
+
 from app.core.security import blacklist_token
 
 USERS_PREFIX = "/api/v1/users"
@@ -260,7 +262,7 @@ def test_consent_status_rejects_blacklisted_token(client):
     # a blacklisted (logged-out) token because they depended on a second,
     # non-auth-checking get_current_user implementation.
     token = _register_and_login(client, _valid_registration_payload())
-    blacklist_token(token, expires_in=3600)
+    asyncio.run(blacklist_token(token, expires_in=3600))
 
     response = client.get(f"{LEGAL_PREFIX}/consent-status", headers=_auth_headers(token))
 
@@ -269,7 +271,7 @@ def test_consent_status_rejects_blacklisted_token(client):
 
 def test_data_retention_rejects_blacklisted_token(client):
     token = _register_and_login(client, _valid_registration_payload())
-    blacklist_token(token, expires_in=3600)
+    asyncio.run(blacklist_token(token, expires_in=3600))
 
     response = client.get(f"{LEGAL_PREFIX}/data-retention", headers=_auth_headers(token))
 
@@ -278,7 +280,7 @@ def test_data_retention_rejects_blacklisted_token(client):
 
 def test_update_consent_rejects_blacklisted_token(client):
     token = _register_and_login(client, _valid_registration_payload())
-    blacklist_token(token, expires_in=3600)
+    asyncio.run(blacklist_token(token, expires_in=3600))
 
     response = client.post(
         f"{LEGAL_PREFIX}/consent",
@@ -291,7 +293,7 @@ def test_update_consent_rejects_blacklisted_token(client):
 
 def test_data_request_rejects_blacklisted_token(client):
     token = _register_and_login(client, _valid_registration_payload())
-    blacklist_token(token, expires_in=3600)
+    asyncio.run(blacklist_token(token, expires_in=3600))
 
     response = client.post(
         f"{LEGAL_PREFIX}/data-request",

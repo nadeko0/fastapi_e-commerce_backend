@@ -7,6 +7,7 @@ plain http - which is the point of the attribute. Each `browser()` is one
 visitor with a cookie jar of its own.
 """
 
+import asyncio
 import json
 import re
 import secrets
@@ -530,7 +531,7 @@ def test_a_bad_authorization_header_is_a_401_on_every_cart_route_never_a_guest_c
 
     if kind == "blacklisted":
         token = create_access_token(user_id)
-        blacklist_token(token, 600)
+        asyncio.run(blacklist_token(token, 600))
     header = {
         "garbage": "Bearer not-a-jwt",
         "expired": f"Bearer {_expired_token(user_id)}",

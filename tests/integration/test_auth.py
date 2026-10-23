@@ -286,7 +286,7 @@ def test_me_rejects_expired_access_token(client, valid_registration_payload):
 def test_me_rejects_blacklisted_token(client, valid_registration_payload):
     access_token = _register_and_login(client, valid_registration_payload)
 
-    blacklist_token(access_token, expires_in=3600)
+    asyncio.run(blacklist_token(access_token, expires_in=3600))
 
     response = client.get(
         f"{API_PREFIX}/me",
@@ -748,7 +748,7 @@ def test_refresh_with_a_signed_token_whose_subject_is_not_a_user_id_is_a_401(cli
     from app.core.security import issue_refresh_token
 
     response = client.post(
-        f"{API_PREFIX}/refresh", json={"refresh_token": issue_refresh_token(subject)}
+        f"{API_PREFIX}/refresh", json={"refresh_token": asyncio.run(issue_refresh_token(subject))}
     )
 
     assert response.status_code == 401
@@ -1073,7 +1073,7 @@ def test_a_blacklisted_token_is_refused_in_every_spelling(client, valid_registra
     padded = {"Authorization": f"Bearer {_pad_signature(token)}"}
     assert client.get(f"{API_PREFIX}/me", headers=padded).status_code == 200
 
-    blacklist_token(token, expires_in=600)
+    asyncio.run(blacklist_token(token, expires_in=600))
 
     assert client.get(
         f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {token}"}

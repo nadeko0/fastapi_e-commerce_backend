@@ -2,6 +2,7 @@
 logout and password reset - the edge cases tests/integration/test_auth.py
 does not already walk through."""
 
+import asyncio
 import time
 from datetime import timedelta
 
@@ -23,6 +24,7 @@ from app.core.security import (
     user_id_from_subject,
 )
 from app.models.user import User
+from app.services.redis import RedisService
 
 USERS = "/api/v1/users"
 EMAIL = "session.user@example.com"
@@ -201,9 +203,9 @@ def test_a_refresh_token_without_its_chain_claims_is_refused(client, db_session,
 
 def test_a_refresh_token_never_registered_burns_nothing_else(client, db_session):
     tokens = _tokens(client)
-    stray = issue_refresh_token(_user(db_session).id)
+    stray = asyncio.run(issue_refresh_token(_user(db_session).id))
     # Forget it, as if it had expired out of Redis.
-    security.redis_service.consume_refresh_token(
+    RedisService().consume_refresh_token(
         jwt.decode(stray, options={"verify_signature": False})["jti"]
     )
 
@@ -244,7 +246,7 @@ def test_revoking_a_signed_token_without_a_family_is_a_no_op():
         settings.JWT_SECRET_KEY.get_secret_value(),
         algorithm=settings.JWT_ALGORITHM,
     )
-    assert revoke_refresh_token(token) is True
+    assert asyncio.run(revoke_refresh_token(token)) is True
 
 
 def test_logout_needs_a_login(client):
@@ -252,12 +254,12 @@ def test_logout_needs_a_login(client):
 
 
 def test_an_access_token_that_expired_on_the_way_is_still_blacklisted(fake_redis):
-    # logout() reads the remaining lifetime from `exp`; for a token that has
+    # logout reads the remaining lifetime from `exp`; for a token that has
     # just expired that is nothing, and it is blacklisted for a second.
     with freeze_time("2026-01-01 12:00:00") as clock:
         token = create_access_token(1)
         clock.tick(timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES, seconds=1))
-        security.logout(token, "garbage")
+        asyncio.run(security.logout(token, "garbage"))
 
         jti = jwt.decode(token, options={"verify_signature": False})["jti"]
         assert fake_redis.get(f"blacklist:jti:{jti}") == "1"
@@ -265,7 +267,7 @@ def test_an_access_token_that_expired_on_the_way_is_still_blacklisted(fake_redis
 
 
 def test_a_token_that_does_not_verify_is_not_blacklisted(fake_redis):
-    assert blacklist_token("not.a.token", 60) is False
+    assert asyncio.run(blacklist_token("not.a.token", 60)) is False
     assert fake_redis.keys("blacklist:*") == []
 
 

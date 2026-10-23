@@ -6,6 +6,7 @@ tokens below were produced once by python-jose 3.5.0 (jwt.encode, HS256)
 for LEGACY_SECRET and an `exp` in 2100; python-jose itself is not a
 dependency any more and is not needed to run these tests.
 """
+import asyncio
 import time
 
 import jwt
@@ -91,6 +92,6 @@ def test_logout_still_revokes_the_family_of_an_expired_refresh_token(fake_redis)
     fake_redis.sadd("refresh_family:f1", "j1")
     fake_redis.set("refresh_active:j1", "{}")
 
-    revoke_refresh_token(expired)
+    asyncio.run(revoke_refresh_token(expired))
 
     assert not fake_redis.exists("refresh_family:f1", "refresh_active:j1")

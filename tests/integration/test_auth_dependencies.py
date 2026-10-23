@@ -36,6 +36,7 @@ from app.models.category import Category
 from app.models.enums import UserRole
 from app.models.product import Product
 from app.models.user import User
+from app.services.redis import RedisService
 
 USERS_PREFIX = "/api/v1/users"
 ADMIN_PREFIX = "/api/v1/admin"
@@ -106,13 +107,13 @@ def test_valid_token_authenticates(client):
     assert response.json()["data"]["email"] == "auth.user@example.com"
 
 
-def test_token_blacklisted_through_the_sync_service_is_rejected(client):
-    # Logout blacklists through the sync RedisService; the auth dependency
-    # reads through the async client. Both must be looking at one keyspace.
+def test_token_blacklisted_by_the_helper_is_rejected(client):
+    # blacklist_token (what logout writes) and the auth dependency both go
+    # through the async client: what one writes the other must see.
     token = _register_and_login(client)
     assert client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token)).status_code == 200
 
-    blacklist_token(token, expires_in=3600)
+    assert asyncio.run(blacklist_token(token, expires_in=3600)) is True
 
     response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
     assert response.status_code == 401
@@ -130,7 +131,7 @@ def test_token_blacklisted_through_the_async_client_is_seen_by_the_sync_service(
 
     asyncio.run(_blacklist())
 
-    assert security.redis_service.is_blacklisted(f"jti:{jti}") is True
+    assert RedisService().is_blacklisted(f"jti:{jti}") is True
     assert client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token)).status_code == 401
 
 
@@ -221,8 +222,8 @@ def test_token_issued_before_a_password_change_is_rejected(client, db_session):
 
         frozen.tick(delta=5)
         # What a password reset records (app/api/v1/users.py), written
-        # through the sync service.
-        assert invalidate_tokens_issued_before_now(user_id)
+        # through the async helper.
+        assert asyncio.run(invalidate_tokens_issued_before_now(user_id))
 
         rejected = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(old_token))
 
@@ -243,7 +244,7 @@ def test_password_change_of_one_user_does_not_invalidate_another_users_token(cli
     with freeze_time("2026-01-01 12:00:00") as frozen:
         token = create_access_token(user_id)
         frozen.tick(delta=5)
-        invalidate_tokens_issued_before_now(other_id)
+        asyncio.run(invalidate_tokens_issued_before_now(other_id))
 
         response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
 
@@ -367,8 +368,8 @@ def test_authentication_uses_neither_the_sync_session_nor_the_sync_redis_service
     def _forbidden(*args, **kwargs):
         raise AssertionError("sync RedisService used while authenticating")
 
-    monkeypatch.setattr(security.redis_service, "is_blacklisted", _forbidden)
-    monkeypatch.setattr(security.redis_service, "get", _forbidden)
+    monkeypatch.setattr(RedisService, "is_blacklisted", _forbidden)
+    monkeypatch.setattr(RedisService, "get", _forbidden)
     event.listen(db_session.get_bind(), "before_cursor_execute", _record)
     try:
         response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
@@ -411,7 +412,7 @@ def test_a_request_without_authorization_authenticates_nobody(client, monkeypatc
     assert async_statements == []
 
 
-def test_the_optional_caller_is_held_to_every_check_of_the_required_one(client, db_session):
+def test_the_optional_caller_is_held_to_every_check_of_the_required_one(client, db_session, fake_redis):
     token = _register_and_login(client)
     user_id = _user_id(db_session)
     assert client.get(CART_PREFIX, headers=_auth_headers(token)).status_code == 200
@@ -422,15 +423,15 @@ def test_the_optional_caller_is_held_to_every_check_of_the_required_one(client, 
         older = create_access_token(user_id)
         assert client.get(CART_PREFIX, headers=_auth_headers(older)).status_code == 200
         frozen.tick(delta=5)
-        invalidate_tokens_issued_before_now(user_id)
+        asyncio.run(invalidate_tokens_issued_before_now(user_id))
         assert client.get(CART_PREFIX, headers=_auth_headers(older)).status_code == 401
-    security.redis_service.delete(f"pwd_changed:{user_id}")
+    fake_redis.delete(f"pwd_changed:{user_id}")
 
     # Blacklisted (logged out). A token of its own: one issued for the same
     # user in the same second as `token` would be that very token.
     with freeze_time("2026-01-01 12:00:00"):
         logged_out = create_access_token(user_id)
-        blacklist_token(logged_out, 600)
+        asyncio.run(blacklist_token(logged_out, 600))
         assert client.get(CART_PREFIX, headers=_auth_headers(logged_out)).status_code == 401
 
     # A user that no longer exists.
