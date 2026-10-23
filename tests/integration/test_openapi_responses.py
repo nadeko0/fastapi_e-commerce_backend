@@ -51,7 +51,7 @@ def test_error_bodies_are_models(spec):
     schemas = spec["components"]["schemas"]
     assert schemas["ErrorMessage"]["properties"]["detail"]["type"] == "string"
     assert set(schemas["RateLimitDetail"]["properties"]) == {"error", "retry_after"}
-    item = schemas["ValidationErrorItem"]["properties"]
+    item = schemas["ValidationError"]["properties"]
     assert "input" not in item
     assert {"type", "loc", "msg"} <= set(item)
 
@@ -59,7 +59,7 @@ def test_error_bodies_are_models(spec):
 def test_validation_error_is_the_sanitised_list_or_a_message(spec):
     schema = _op(spec, "post", "/users/register")["responses"]["422"]["content"]["application/json"]["schema"]
     assert {ref["$ref"].rsplit("/", 1)[1] for ref in schema["anyOf"]} == {
-        "ValidationErrorMessage", "ErrorMessage"}
+        "HTTPValidationError", "ErrorMessage"}
 
 
 def test_429_and_503_document_retry_after(spec):
@@ -204,3 +204,17 @@ def test_characteristics_must_be_a_json_object(client, value):
     (error,) = response.json()["detail"]
     assert error["loc"] == ["query", "characteristics"]
     assert "input" not in error
+
+
+def test_default_validation_error_component_names_are_kept(spec):
+    """Clients generated types from these names before the 422 was documented."""
+    schemas = spec["components"]["schemas"]
+    assert {"HTTPValidationError", "ValidationError"} <= set(schemas)
+    assert schemas["HTTPValidationError"]["required"] == ["detail"]
+    detail = schemas["HTTPValidationError"]["properties"]["detail"]
+    assert detail["items"]["$ref"].endswith("/ValidationError")
+    assert set(schemas["ValidationError"]["required"]) == {"type", "loc", "msg"}
+    for path in ("/users/register", "/products"):
+        method = "post" if path.endswith("register") else "get"
+        schema = _op(spec, method, path)["responses"]["422"]["content"]["application/json"]["schema"]
+        assert any(ref["$ref"].endswith("/HTTPValidationError") for ref in schema["anyOf"])

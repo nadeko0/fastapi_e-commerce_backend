@@ -33,7 +33,7 @@ class ErrorMessage(BaseModel):
     detail: str
 
 
-class ValidationErrorItem(BaseModel):
+class ValidationError(BaseModel):
     """One request validation error, without the submitted value."""
 
     type: str
@@ -45,10 +45,10 @@ class ValidationErrorItem(BaseModel):
     )
 
 
-class ValidationErrorMessage(BaseModel):
+class HTTPValidationError(BaseModel):
     """The 422 of request validation."""
 
-    detail: list[ValidationErrorItem]
+    detail: list[ValidationError]
 
 
 class RateLimitDetail(BaseModel):
@@ -87,7 +87,7 @@ CONFLICT = {"description": "Conflicts with the current state", "model": ErrorMes
 PAYLOAD_TOO_LARGE = {"description": "Request body is too large", "model": ErrorMessage}
 VALIDATION_ERROR = {
     "description": "Validation Error: the error list, or a message for a value rejected by the route",
-    "model": ValidationErrorMessage | ErrorMessage,
+    "model": HTTPValidationError | ErrorMessage,
 }
 TOO_MANY_REQUESTS = {
     "description": "Too many requests",
@@ -118,7 +118,7 @@ _MODEL_FOR_EXISTING = {
     404: ErrorMessage,
     409: ErrorMessage,
     413: ErrorMessage,
-    422: ValidationErrorMessage | ErrorMessage,
+    422: HTTPValidationError | ErrorMessage,
     429: RateLimitMessage,
     503: ErrorMessage | RateLimitMessage,
 }
