@@ -88,7 +88,7 @@ class RedisService:
                 # actually deployed against docker-compose's real Redis.
                 password=settings.REDIS_PASSWORD,
                 decode_responses=True,
-                max_connections=50
+                max_connections=settings.REDIS_POOL_SIZE
             )
         return cls._instance
 
