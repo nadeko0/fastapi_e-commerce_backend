@@ -1,40 +1,23 @@
-"""Proves the fix for the production incident: a burst of concurrent
-`login`/`reset_password` requests, each paying a real (simulated) bcrypt
-cost, must not exhaust or permanently leak the DB connection pool.
+"""A burst of concurrent `login`/`reset_password` requests, each paying a
+real (simulated) bcrypt cost, must not exhaust or leak the DB connection
+pool, and no request may hold a connection while its password is hashed.
 
-Root cause (confirmed, not guessed): login() and reset_password() used to
-query the user - checking a connection out of the pool and opening an
-implicit transaction - and then `await` the CPU-bound bcrypt call *while
-still holding that connection*. verify_password_async/get_password_hash_async
-offload to anyio's shared threadpool (see app/core/security.py), which also
-carries every other concurrent request's bcrypt work and FastAPI's own
-threadpool dispatch of sync `Depends(get_db)` dependencies. Under load that
-shared queue backs up, so a connection held open across the await is held
-for the cumulative queueing delay of every other concurrent bcrypt call, not
-just its own hash cost - which is what let a burst of concurrent
-logins/registrations exhaust pool_size + max_overflow.
+History (the production incident this guards against): login() and
+reset_password() used to query the user - checking a connection out of the
+pool and opening a transaction - and then awaited the CPU-bound bcrypt call
+*while still holding that connection*. bcrypt runs in a shared threadpool,
+so under load the connection stayed checked out for the queueing delay of
+every other concurrent hash, not just its own cost, and a burst of logins
+exhausted pool_size + max_overflow. A client disconnect parked on that await
+could also strand the connection.
 
-Confirmed separately (see the instrumentation in this investigation) that a
-client disconnect while a request is parked on that await can strand the
-connection *permanently*: FastAPI's dependency cleanup itself runs via
-another threadpool `await`, and anyio delivers cancellation per cancel-scope
-- once a scope is cancelled, any further checkpoint inside it (including the
-cleanup call) raises immediately instead of running, so `session.close()`
-never executes. That matches the reported symptom of connections stuck
-`idle in transaction` in `pg_stat_activity` even after all client traffic
-had stopped.
-
-The fix (see login()/reset_password() in app/api/v1/users.py) releases the
-DB session's connection *before* awaiting the CPU-bound bcrypt call, so
-there is nothing left open for either queueing delay or a disconnect to
-hold/strand.
-
-conftest.py's default dependency_overrides point every session at a single
-StaticPool in-memory SQLite connection, which never actually enforces a
-connection limit and so can't reproduce (or disprove) pool exhaustion. This
-test instead swaps app.core.database's module-level engine/SessionLocal for
-a real, small QueuePool-backed SQLite engine and lets the *real*
-get_db/session_scope code run against it.
+The routes are now on the async engine (Depends(get_async_db)) and still
+release the session with `await db.close()` before hashing. This test runs
+the real get_async_db against a small bounded AsyncAdaptedQueuePool (conftest
+otherwise uses NullPool, which can neither exhaust nor leak) and checks, on
+that pool, (1) that the number of checked-out connections is zero while the
+hash runs, (2) that a burst far above the pool's capacity completes, and
+(3) that nothing is left checked out afterwards.
 """
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -42,11 +25,11 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 import app.core.database as database_module
-from app.core.database import get_db as database_get_db
 from app.core.security import get_password_hash
 from app.main import app
 from app.models.base import Base
@@ -60,31 +43,14 @@ TOTAL_CAPACITY = POOL_SIZE + MAX_OVERFLOW
 @pytest.fixture
 def bounded_pool_client(tmp_path, monkeypatch, fake_redis):
     db_path = tmp_path / "pool_test.db"
-    engine = create_engine(
-        f"sqlite:///{db_path}",
-        connect_args={"check_same_thread": False, "timeout": 30},
-        poolclass=QueuePool,
-        pool_size=POOL_SIZE,
-        max_overflow=MAX_OVERFLOW,
-        # Fail fast rather than hang if the pool really is exhausted - a
-        # long real-world pool_timeout would just make a broken test slow,
-        # not pass.
-        pool_timeout=5,
+
+    # Seed with a plain sync engine on the same file, closed before the app
+    # opens its own connections.
+    seed_engine = create_engine(
+        f"sqlite:///{db_path}", connect_args={"check_same_thread": False, "timeout": 30}
     )
-    TestSessionLocal = sessionmaker(
-        autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
-    )
-    Base.metadata.create_all(bind=engine)
-
-    monkeypatch.setattr(database_module, "engine", engine)
-    monkeypatch.setattr(database_module, "SessionLocal", TestSessionLocal)
-
-    # Remove conftest's blanket StaticPool override for this dependency so
-    # the real get_db/session_scope code path - the thing under test - runs
-    # against our bounded pool instead.
-    removed_override = app.dependency_overrides.pop(database_get_db, None)
-
-    seed_session = TestSessionLocal()
+    Base.metadata.create_all(bind=seed_engine)
+    seed_session = sessionmaker(bind=seed_engine, expire_on_commit=False)()
     seed_session.add(User(
         email="loadtest@example.com",
         hashed_password=get_password_hash("Str0ngPass"),
@@ -94,14 +60,111 @@ def bounded_pool_client(tmp_path, monkeypatch, fake_redis):
     ))
     seed_session.commit()
     seed_session.close()
+    seed_engine.dispose()
+
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{db_path}",
+        connect_args={"timeout": 30},
+        poolclass=AsyncAdaptedQueuePool,
+        pool_size=POOL_SIZE,
+        max_overflow=MAX_OVERFLOW,
+        # Fail fast rather than hang if the pool really is exhausted - a
+        # long real-world pool_timeout would just make a broken test slow,
+        # not pass.
+        pool_timeout=5,
+    )
+    # get_async_db reads database_module.AsyncSessionLocal when it runs, so
+    # replacing it puts the real dependency on the bounded pool.
+    monkeypatch.setattr(
+        database_module,
+        "AsyncSessionLocal",
+        async_sessionmaker(bind=engine, autoflush=False, expire_on_commit=False),
+    )
 
     try:
         with TestClient(app) as client:
-            yield client, engine
+            try:
+                yield client, engine
+            finally:
+                # The pooled connections belong to the client's event loop:
+                # close them there, before it goes away.
+                client.portal.call(engine.dispose)
     finally:
-        if removed_override is not None:
-            app.dependency_overrides[database_get_db] = removed_override
-        engine.dispose()
+        pass
+
+
+class _CheckedOutDuring:
+    """Records engine.pool.checkedout() each time the (patched) bcrypt call
+    runs, i.e. while a request is waiting for its hash."""
+
+    def __init__(self, engine):
+        self.engine = engine
+        self.samples = []
+
+    def sample(self):
+        self.samples.append(self.engine.pool.checkedout())
+
+
+def test_login_holds_no_connection_while_the_password_is_checked(
+    bounded_pool_client, monkeypatch
+):
+    client, engine = bounded_pool_client
+
+    import bcrypt as bcrypt_module
+
+    seen = _CheckedOutDuring(engine)
+    original_checkpw = bcrypt_module.checkpw
+
+    def spying_checkpw(password, hashed):
+        seen.sample()
+        return original_checkpw(password, hashed)
+
+    monkeypatch.setattr(bcrypt_module, "checkpw", spying_checkpw)
+
+    response = client.post(
+        "/api/v1/users/login",
+        data={"username": "loadtest@example.com", "password": "Str0ngPass"},
+    )
+
+    assert response.status_code == 200
+    # The user was read (a connection was used) and the hash was computed
+    # after the session was closed: none was checked out at that moment.
+    assert seen.samples == [0]
+    assert engine.pool.checkedout() == 0
+
+
+def test_password_reset_holds_no_connection_while_the_new_password_is_hashed(
+    bounded_pool_client, monkeypatch
+):
+    client, engine = bounded_pool_client
+
+    import bcrypt as bcrypt_module
+
+    from app.core.security import generate_password_reset_token
+
+    seen = _CheckedOutDuring(engine)
+    original_hashpw = bcrypt_module.hashpw
+
+    def spying_hashpw(password, salt):
+        seen.sample()
+        return original_hashpw(password, salt)
+
+    seed_engine = create_engine(f"sqlite:///{engine.url.database}")
+    with sessionmaker(bind=seed_engine)() as session:
+        user = session.query(User).filter(User.email == "loadtest@example.com").one()
+        token = generate_password_reset_token(user.email, user.hashed_password)
+    seed_engine.dispose()
+
+    monkeypatch.setattr(bcrypt_module, "hashpw", spying_hashpw)
+
+    response = client.post(
+        f"/api/v1/users/password/reset/{token}",
+        json={"current_password": "Str0ngPass", "new_password": "NewStr0ngPass1"},
+    )
+
+    assert response.status_code == 200
+    assert seen.samples == [0]
+    assert engine.pool.checkedout() == 0
 
 
 def test_concurrent_logins_do_not_exhaust_or_leak_the_connection_pool(
@@ -195,11 +258,11 @@ def test_concurrent_password_resets_do_not_exhaust_or_leak_the_connection_pool(
 
     from app.core.security import generate_password_reset_token
 
-    # The fixture points database_module.SessionLocal at the bounded pool.
-    seed_session = database_module.SessionLocal()
-    user = seed_session.query(User).filter(User.email == "loadtest@example.com").one()
-    token = generate_password_reset_token(user.email, user.hashed_password)
-    seed_session.close()
+    seed_engine = create_engine(f"sqlite:///{engine.url.database}")
+    with sessionmaker(bind=seed_engine)() as session:
+        user = session.query(User).filter(User.email == "loadtest@example.com").one()
+        token = generate_password_reset_token(user.email, user.hashed_password)
+    seed_engine.dispose()
 
     n_requests = TOTAL_CAPACITY * 8
 
