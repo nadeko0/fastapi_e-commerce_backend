@@ -193,12 +193,12 @@ class GDPRExport(BaseModel):
     status: str = Field(default="processing", description="Current status of the export")
 
     model_config = ConfigDict(json_schema_extra={
-            "example": {
+            "examples": [{
                 "request_id": "export_123_1642161234",
                 "request_date": "2025-01-14T19:21:32.388Z",
                 "expires_at": "2025-01-15T19:21:32.388Z",
                 "status": "processing"
-            }
+            }]
         })
 
 class GDPRExportData(BaseModel):
@@ -211,7 +211,7 @@ class GDPRExportData(BaseModel):
     generated_at: datetime = Field(default_factory=utc_now)
 
     model_config = ConfigDict(json_schema_extra={
-            "example": {
+            "examples": [{
                 "personal_data": {},
                 "consents": [],
                 "addresses": [],
@@ -223,7 +223,7 @@ class GDPRExportData(BaseModel):
                     "status": "completed"
                 },
                 "generated_at": "2025-01-14T19:21:32.388Z"
-            }
+            }]
         })
 
 class GDPRDelete(BaseModel):
