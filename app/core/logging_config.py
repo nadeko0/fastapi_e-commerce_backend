@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -22,9 +23,15 @@ class JSONFormatter(logging.Formatter):
     lines are the standard shape most log pipelines expect out of the box.
     """
 
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        # RFC 3339 section 5.6 date-time in UTC, e.g. 2026-10-23T14:05:09.123Z.
+        # strftime's %z gives "+0000" (no colon), which RFC 3339 does not allow.
+        moment = datetime.fromtimestamp(record.created, tz=UTC)
+        return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
     def format(self, record: logging.LogRecord) -> str:
         payload = {
-            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+            "timestamp": self.formatTime(record),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -43,7 +50,7 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
-def setup_logging():
+def setup_logging(config=settings):
     formatter = JSONFormatter()
 
     file_handler = RotatingFileHandler(
@@ -60,15 +67,21 @@ def setup_logging():
     console_handler.setLevel(logging.WARNING)
 
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO if settings.ENVIRONMENT == "development" else logging.WARNING)
+    # Third-party loggers (sqlalchemy.engine, uvicorn.access, httpx...) inherit
+    # the root level, so keep it quiet outside development. The application's
+    # own loggers ("app.*") get LOG_LEVEL, otherwise GDPR, security and
+    # payment events logged at INFO would never be written in production.
+    root_logger.setLevel(logging.INFO if config.ENVIRONMENT == "development" else logging.WARNING)
+    logging.getLogger("app").setLevel(config.LOG_LEVEL)
 
     root_logger.handlers = []
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
 
-    root_logger.info(
-        f"Starting application in {settings.ENVIRONMENT} environment "
-        f"(Version: {settings.VERSION})"
+    startup_logger = logging.getLogger(__name__)
+    startup_logger.info(
+        f"Starting application in {config.ENVIRONMENT} environment "
+        f"(Version: {config.VERSION})"
     )
-    root_logger.info(f"Log directory: {log_dir.absolute()}")
-    root_logger.info("Logging system initialized with file rotation (100MB max, 5 backups)")
+    startup_logger.info(f"Log directory: {log_dir.absolute()}")
+    startup_logger.info("Logging system initialized with file rotation (100MB max, 5 backups)")

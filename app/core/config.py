@@ -98,6 +98,10 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
+    # Threshold of the application's own loggers ("app.*"). Third-party
+    # loggers keep their own levels. DEBUG is refused outside development
+    # and test: it would put request detail in logs that outlive the request.
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     HOST: str = "0.0.0.0"
     PORT: int = 8000
@@ -527,6 +531,8 @@ class Settings(BaseSettings):
         if self.ENVIRONMENT in _UNDEPLOYED_ENVIRONMENTS:
             return self
         problems = []
+        if self.LOG_LEVEL == "DEBUG":
+            problems.append("LOG_LEVEL must not be DEBUG outside development and test")
         # The mock provider marks every order paid without taking any money.
         if self.PAYMENT_PROVIDER != "stripe":
             problems.append("PAYMENT_PROVIDER must be 'stripe' outside development and test")
