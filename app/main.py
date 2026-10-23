@@ -13,6 +13,7 @@ from app.core.database import async_engine, engine
 from app.core.deprecation import DeprecationMiddleware
 from app.core.errors import register_error_handlers
 from app.core.forwarded import ForwardedClientMiddleware
+from app.core.head import HeadMiddleware
 from app.core.logging_config import setup_logging
 from app.core.overload import InFlightLimitMiddleware
 from app.core.rate_limit import rate_limit
@@ -73,6 +74,9 @@ app = FastAPI(
 )
 
 register_error_handlers(app)
+
+# HEAD runs as GET without a body (RFC 9110 9.3.2); innermost (app/core/head.py).
+app.add_middleware(HeadMiddleware)
 
 # Registered before everything else, so it is the innermost middleware: the
 # 413 then passes back out through the security-headers and CORS layers like
