@@ -482,6 +482,7 @@ def _cents_to_decimal(cents: int) -> Decimal:
 # status names) -> the more limited PaymentStatus enum exposed in the API.
 _PAYMENT_ROW_STATUS_TO_API_STATUS = {
     "processing": PaymentStatus.PENDING,
+    "unknown": PaymentStatus.PENDING,
     "requires_action": PaymentStatus.REQUIRES_ACTION,
     "succeeded": PaymentStatus.PAID,
     "failed": PaymentStatus.FAILED,
@@ -694,10 +695,15 @@ _PENDING_INTENT_ID_PREFIX = "pending-"
 # Payment.status values of an attempt whose outcome is not known yet: the
 # request is still talking to the provider (or died doing so), the customer
 # is in 3D Secure, or a Checkout Session has not been completed or expired.
-_IN_FLIGHT_PAYMENT_STATUSES = ("processing", "requires_action")
+# "unknown" is a /pay attempt whose request to the provider timed out: the
+# provider may or may not have carried it out, so it is neither failed nor
+# still running, and only a retry with its own Idempotency-Key settles it.
+_IN_FLIGHT_PAYMENT_STATUSES = ("processing", "requires_action", "unknown")
 
 
-def _guard_no_attempt_in_flight(db: Session, order: Order) -> None:
+def _guard_no_attempt_in_flight(
+    db: Session, order: Order, except_payment_id: Optional[int] = None
+) -> None:
     """
     Shared by /pay and /checkout-session, called with the order row locked:
     refuse a new attempt while another one for this order may still charge
@@ -713,15 +719,20 @@ def _guard_no_attempt_in_flight(db: Session, order: Order) -> None:
     would otherwise lock the order until it expires. If such an attempt
     does succeed after all, the webhook flags the second success for manual
     review, as before.
+
+    `except_payment_id` is the attempt being retried by its own key.
     """
     started_after = utc_now() - timedelta(
         minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
     )
-    in_flight = db.query(Payment.id).filter(
+    query = db.query(Payment.id).filter(
         Payment.order_id == order.id,
         Payment.status.in_(_IN_FLIGHT_PAYMENT_STATUSES),
         Payment.created_at > started_after,
-    ).first()
+    )
+    if except_payment_id is not None:
+        query = query.filter(Payment.id != except_payment_id)
+    in_flight = query.first()
     if in_flight:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -854,13 +865,27 @@ async def process_payment(
         Payment.order_id == order.id,
         Payment.idempotency_key == idempotency_key,
     ).first()
+    #
+    # One exception: an attempt whose provider request timed out ("unknown")
+    # is not an outcome to replay. Stripe's guidance for a request that may
+    # or may not have been executed is to send it again with the same
+    # idempotency key and parameters, and Stripe then returns the original
+    # result; so the retry below goes through to the provider again with
+    # this attempt's own keys. Answering it with a "failed" row sent the
+    # client to a new key, which could create and charge a second
+    # PaymentIntent for the same order.
+    retried_attempt = None
     if existing_payment:
-        return APIResponse.success_response(
-            _payment_row_to_response(existing_payment, order)
-        )
+        if existing_payment.status != "unknown":
+            return APIResponse.success_response(
+                _payment_row_to_response(existing_payment, order)
+            )
+        retried_attempt = existing_payment
 
     _guard_order_payable(order)
-    _guard_no_attempt_in_flight(db, order)
+    _guard_no_attempt_in_flight(
+        db, order, except_payment_id=retried_attempt.id if retried_attempt else None
+    )
 
     if payment.amount != order.total_amount:
         raise HTTPException(
@@ -872,31 +897,39 @@ async def process_payment(
     amount_cents = _decimal_to_cents(payment.amount)
     provider_idempotency_key = _provider_idempotency_key("pay", order, idempotency_key)
 
-    payment_row = Payment(
-        order_id=order.id,
-        provider="stripe",
-        payment_intent_id=f"{_PENDING_INTENT_ID_PREFIX}{uuid.uuid4().hex[:24]}",
-        idempotency_key=idempotency_key,
-        amount=amount_cents,
-        currency=order.currency,
-        status="processing",
-    )
-    db.add(payment_row)
-    try:
+    if retried_attempt is not None:
+        # Claimed under the order's lock: a second retry of the same key
+        # now finds the attempt "processing" and is answered with that,
+        # instead of sending the provider the same request at the same time.
+        payment_row = retried_attempt
+        payment_row.status = "processing"
         db.commit()
-    except IntegrityError:
-        # Two concurrent requests with the same idempotency key both passed
-        # the pre-check above; the unique index catches the duplicate here.
-        db.rollback()
-        existing_payment = db.query(Payment).filter(
-            Payment.order_id == order.id,
-            Payment.idempotency_key == idempotency_key,
-        ).first()
-        if existing_payment:
-            return APIResponse.success_response(
-                _payment_row_to_response(existing_payment, order)
-            )
-        raise
+    else:
+        payment_row = Payment(
+            order_id=order.id,
+            provider="stripe",
+            payment_intent_id=f"{_PENDING_INTENT_ID_PREFIX}{uuid.uuid4().hex[:24]}",
+            idempotency_key=idempotency_key,
+            amount=amount_cents,
+            currency=order.currency,
+            status="processing",
+        )
+        db.add(payment_row)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Two concurrent requests with the same idempotency key both passed
+            # the pre-check above; the unique index catches the duplicate here.
+            db.rollback()
+            existing_payment = db.query(Payment).filter(
+                Payment.order_id == order.id,
+                Payment.idempotency_key == idempotency_key,
+            ).first()
+            if existing_payment:
+                return APIResponse.success_response(
+                    _payment_row_to_response(existing_payment, order)
+                )
+            raise
 
     # Every provider call in this module goes through run_in_threadpool.
     # The provider is synchronous (the Stripe SDK makes blocking HTTP calls:
@@ -942,11 +975,13 @@ async def process_payment(
         # Provider unreachable/timed out: we do not know whether Stripe
         # actually processed anything, so the order's payment_status/status
         # must stay exactly as they were before this attempt - only this
-        # attempt's own Payment row is marked failed, for audit and so a
-        # retry with a fresh Idempotency-Key can be told apart from this
-        # dead attempt. Regression test for: a transport failure silently
-        # leaving the order half-updated.
-        payment_row.status = "failed"
+        # attempt's own Payment row is marked "unknown" (not failed: it may
+        # have been carried out). It keeps its provider keys, so a retry
+        # with the same Idempotency-Key is sent again and settles it, and
+        # it blocks other attempts meanwhile (_guard_no_attempt_in_flight).
+        # Regression test for: a transport failure silently leaving the
+        # order half-updated.
+        payment_row.status = "unknown"
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -954,6 +989,10 @@ async def process_payment(
         )
     except IdempotencyError:
         db.rollback()
+        if retried_attempt is not None:
+            # Refused before it was carried out: still not settled.
+            payment_row.status = "unknown"
+            db.commit()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Idempotency key already used with different payment parameters",

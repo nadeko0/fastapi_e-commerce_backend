@@ -78,7 +78,7 @@ def _attempt_still_storing_its_id(db: Session, object_data: dict) -> bool:
     )
     return db.query(Payment.id).filter(
         Payment.order_id == order_id,
-        Payment.status == "processing",
+        Payment.status.in_(("processing", "unknown")),
         Payment.checkout_session_id.is_(None),
         Payment.payment_intent_id.like(f"{_PENDING_INTENT_ID_PREFIX}%"),
         Payment.created_at > started_after,

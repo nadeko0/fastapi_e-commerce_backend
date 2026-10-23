@@ -641,3 +641,158 @@ def test_3ds_attempt_success_reported_twice_with_different_event_ids_applies_onc
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
     assert [(e[0], e[4]) for e in outbox.take()] == [("status_update", "paid")]
     assert cents(order["total_amount"]) == 1999
+
+
+# -- /pay after a timeout: the outcome is unknown, not failed -------------------
+
+def _lose_the_response(monkeypatch, name):
+    """The provider carries out the call and the response never arrives."""
+    real = getattr(StripePaymentProvider, name)
+
+    def _lost(self, *args, **kwargs):
+        real(self, *args, **kwargs)
+        raise PaymentProviderTimeoutError("response lost")
+
+    monkeypatch.setattr(StripePaymentProvider, name, _lost)
+
+
+def test_pay_retried_with_its_key_after_a_lost_confirm_response_reaches_the_same_intent(
+    shop, monkeypatch
+):
+    # Stripe confirmed (and charged) but the answer was lost: the attempt's
+    # outcome is unknown, not failed. Same key -> the same Stripe requests
+    # again (Stripe replays the original result); no second PaymentIntent.
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    with monkeypatch.context() as patched:
+        _lose_the_response(patched, "confirm_payment_intent")
+        assert shop.pay(buyer, order["id"], key=key).status_code == 503
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
+    created = _provider_calls(monkeypatch, "create_payment_intent")
+    confirmed = _provider_calls(monkeypatch, "confirm_payment_intent")
+    first_intent_id = shop.payments(order["id"])[0].payment_intent_id
+
+    response = shop.pay(buyer, order["id"], key=key)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["status"] == "paid"
+    assert response.json()["data"]["transaction_id"] == first_intent_id
+    assert len(created) == 1 and len(confirmed) == 1
+    assert created[0]["idempotency_key"].endswith(key)
+    assert confirmed[0]["idempotency_key"] == created[0]["idempotency_key"] + ":confirm"
+    assert len(StripePaymentProvider._intents_by_id) == 1
+    assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
+    assert order_state(shop, order["id"]) == ("confirmed", "paid")
+
+
+def test_pay_retried_with_its_key_after_a_lost_create_response_creates_one_intent(
+    shop, monkeypatch
+):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    with monkeypatch.context() as patched:
+        _lose_the_response(patched, "create_payment_intent")
+        assert shop.pay(buyer, order["id"], key=key).status_code == 503
+    assert len(StripePaymentProvider._intents_by_id) == 1
+
+    response = shop.pay(buyer, order["id"], key=key)
+
+    assert response.status_code == 200, response.text
+    assert len(StripePaymentProvider._intents_by_id) == 1
+    assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
+
+
+def test_pay_with_a_new_key_while_an_attempt_is_unknown_answers_409_and_charges_nothing(
+    shop, monkeypatch
+):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    with monkeypatch.context() as patched:
+        _lose_the_response(patched, "confirm_payment_intent")
+        assert shop.pay(buyer, order["id"]).status_code == 503
+
+    response = shop.pay(buyer, order["id"])
+
+    assert response.status_code == 409
+    assert "same Idempotency-Key" in response.json()["detail"]
+    assert len(StripePaymentProvider._intents_by_id) == 1
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
+
+
+def test_pay_retry_that_times_out_again_stays_unknown(shop, monkeypatch):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    _provider_raises(monkeypatch, "create_payment_intent", PaymentProviderTimeoutError())
+    assert shop.pay(buyer, order["id"], key=key).status_code == 503
+
+    assert shop.pay(buyer, order["id"], key=key).status_code == 503
+
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
+
+
+def test_pay_retry_of_an_unknown_attempt_whose_order_was_cancelled_answers_400(
+    shop, monkeypatch
+):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    _provider_raises(monkeypatch, "create_payment_intent", PaymentProviderTimeoutError())
+    assert shop.pay(buyer, order["id"], key=key).status_code == 503
+    # The attempt is unknown, and the order is cancelled meanwhile.
+    shop.db.query(Payment).filter(Payment.order_id == order["id"]).update({"status": "failed"})
+    shop.db.commit()
+    assert shop.cancel(buyer, order["id"]).status_code == 200
+    shop.db.query(Payment).filter(Payment.order_id == order["id"]).update({"status": "unknown"})
+    shop.db.commit()
+
+    response = shop.pay(buyer, order["id"], key=key)
+
+    assert response.status_code == 400
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
+
+
+def test_pay_retry_of_an_unknown_attempt_is_blocked_by_another_attempt_in_flight(
+    shop, monkeypatch
+):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    _provider_raises(monkeypatch, "create_payment_intent", PaymentProviderTimeoutError())
+    assert shop.pay(buyer, order["id"], key=key).status_code == 503
+    # A second attempt that started after the first one went stale.
+    shop.db.add(Payment(
+        order_id=order["id"], provider="stripe", payment_intent_id="pi_other",
+        idempotency_key=new_key(), amount=1999, currency="USD", status="processing"))
+    shop.db.commit()
+
+    response = shop.pay(buyer, order["id"], key=key)
+
+    assert response.status_code == 409
+    assert sorted(p.status for p in shop.payments(order["id"])) == ["processing", "unknown"]
+
+
+def test_pay_retry_refused_by_the_provider_as_a_reused_key_leaves_the_attempt_unknown(
+    shop, monkeypatch
+):
+    product = shop.product(price="19.99")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    with monkeypatch.context() as patched:
+        _provider_raises(patched, "create_payment_intent", PaymentProviderTimeoutError())
+        assert shop.pay(buyer, order["id"], key=key).status_code == 503
+    _provider_raises(monkeypatch, "create_payment_intent", IdempotencyError("reused"))
+
+    response = shop.pay(buyer, order["id"], key=key)
+
+    assert response.status_code == 409
+    assert [p.status for p in shop.payments(order["id"])] == ["unknown"]

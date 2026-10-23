@@ -493,10 +493,11 @@ def test_provider_timeout_leaves_order_state_unchanged(client, db_session, monke
 
     payments = _get_payments(db_session, order["id"])
     assert len(payments) == 1
-    assert payments[0].status == "failed"
+    # Not "failed": Stripe may have carried the request out.
+    assert payments[0].status == "unknown"
 
 
-def test_retry_after_timeout_with_new_key_succeeds(client, db_session, monkeypatch):
+def test_retry_after_timeout_with_the_same_key_succeeds(client, db_session, monkeypatch):
     setup = _create_verified_buyer_with_order(client, db_session)
     order = setup["order"]
 
@@ -519,10 +520,12 @@ def test_retry_after_timeout_with_new_key_succeeds(client, db_session, monkeypat
         )
     assert failed_response.status_code == 503
 
+    # The same key: the outcome of the first request is not known, so it is
+    # sent again (a new key is refused with 409 until this one is settled).
     retry_response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers={**setup["headers"], "Idempotency-Key": "attempt-2"},
+        headers={**setup["headers"], "Idempotency-Key": "attempt-1"},
     )
     assert retry_response.status_code == 200
     assert retry_response.json()["data"]["status"] == "paid"
@@ -1662,7 +1665,7 @@ def test_provider_failure_between_create_and_confirm_leaves_well_defined_state(
     response = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers=_with_idempotency_key(setup["headers"]),
+        headers={**setup["headers"], "Idempotency-Key": "confirm-drop"},
     )
 
     assert response.status_code == 503
@@ -1682,11 +1685,10 @@ def test_provider_failure_between_create_and_confirm_leaves_well_defined_state(
     # itself never ran.
     assert payments[0].payment_intent_id.startswith("pi_")
     assert not payments[0].payment_intent_id.startswith("pending-")
-    assert payments[0].status == "failed"
+    assert payments[0].status == "unknown"
 
-    # A retry with a fresh Idempotency-Key must still be able to succeed -
-    # the dead attempt must not have left anything in a state that blocks
-    # a subsequent attempt.
+    # A retry with the same Idempotency-Key must still be able to succeed:
+    # the confirm is sent again, with the same Stripe key.
     monkeypatch.setattr(
         "app.services.payment.stripe_provider.StripePaymentProvider.confirm_payment_intent",
         real_confirm,
@@ -1694,7 +1696,7 @@ def test_provider_failure_between_create_and_confirm_leaves_well_defined_state(
     retry = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
         json=_payment_payload(order),
-        headers={**setup["headers"], "Idempotency-Key": "retry-after-confirm-drop"},
+        headers={**setup["headers"], "Idempotency-Key": "confirm-drop"},
     )
     assert retry.status_code == 200
     assert retry.json()["data"]["status"] == "paid"
