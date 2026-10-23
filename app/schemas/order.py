@@ -1,13 +1,65 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from typing import Annotated
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.core.config import settings
 from app.models.enums import OrderStatus
 from app.schemas.common import Int32
+
+# Order.total_amount is Numeric(10, 2), so no amount paid or refunded for an
+# order has more digits than that. Checked by the amount fields themselves,
+# before their validators quantize: quantize raises decimal.InvalidOperation
+# past its 28-digit context, which pydantic does not turn into a 422, so
+# {"amount": 1e30} used to answer 500.
+ORDER_AMOUNT_MAX_DIGITS = 10
+# Whole cents only: a fraction of a cent used to be rounded away by those
+# validators after gt=0 had passed, so a refund of 0.001 went out as 0.00
+# and 99.995 was taken as 100.00. Trailing zeros do not count (10.500 is
+# 10.50), and a JSON number is read by its shortest form (19.99, not the
+# float's binary expansion).
+ORDER_AMOUNT_DECIMAL_PLACES = 2
+
+
+def _to_cents(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"))
+
+
+# An amount of money: at most ORDER_AMOUNT_MAX_DIGITS digits and whole cents
+# (both checked before the AfterValidator, so quantize never sees a value it
+# cannot handle), then written with exactly two decimal places (10.5 -> 10.50).
+# A bound (ge/gt) has to sit before the AfterValidator, where pydantic can
+# still fold it into the decimal schema; after it, it would not be enforced
+# and would leak into the OpenAPI schema. Hence one alias per bound.
+Money = Annotated[
+    Decimal,
+    Field(max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES),
+    AfterValidator(_to_cents),
+]
+NonNegativeMoney = Annotated[
+    Decimal,
+    Field(
+        ge=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
+    ),
+    AfterValidator(_to_cents),
+]
+PositiveMoney = Annotated[
+    Decimal,
+    Field(
+        gt=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
+    ),
+    AfterValidator(_to_cents),
+]
 
 
 class PaymentStatus(str, Enum):
@@ -25,12 +77,10 @@ class OrderItemBase(BaseModel):
     product_id: int
     variant_id: int | None = None
     quantity: int = Field(..., gt=0)
-    price_at_time: Decimal = Field(..., ge=0, decimal_places=2)
-
-    @field_validator('price_at_time')
-    @classmethod
-    def validate_price(cls, v):
-        return Decimal(str(v)).quantize(Decimal('0.01'))
+    # Whole cents but, unlike Money, no digit limit: this is read from the DB.
+    price_at_time: Annotated[
+        Decimal, Field(ge=0, decimal_places=2), AfterValidator(_to_cents)
+    ]
 
 class OrderItemInDB(OrderItemBase):
     id: int
@@ -88,18 +138,13 @@ class OrderInDB(OrderBase):
     user_id: int
     status: OrderStatus
     payment_status: PaymentStatus
-    total_amount: Decimal
+    total_amount: Annotated[Decimal, AfterValidator(_to_cents)]
     currency: str
     created_at: datetime
     updated_at: datetime
     items: list[OrderItemInDB]
 
     model_config = ConfigDict(from_attributes=True)
-
-    @field_validator('total_amount')
-    @classmethod
-    def validate_total(cls, v):
-        return Decimal(str(v)).quantize(Decimal('0.01'))
 
 class OrderResponse(OrderInDB):
     shipping_address: "AddressResponse"  # Forward reference
@@ -117,26 +162,11 @@ class OrderListResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-# Order.total_amount is Numeric(10, 2), so no amount paid or refunded for an
-# order has more digits than that. Checked by the amount fields themselves,
-# before their validators quantize: quantize raises decimal.InvalidOperation
-# past its 28-digit context, which pydantic does not turn into a 422, so
-# {"amount": 1e30} used to answer 500.
-ORDER_AMOUNT_MAX_DIGITS = 10
-# Whole cents only: a fraction of a cent used to be rounded away by those
-# validators after gt=0 had passed, so a refund of 0.001 went out as 0.00
-# and 99.995 was taken as 100.00. Trailing zeros do not count (10.500 is
-# 10.50), and a JSON number is read by its shortest form (19.99, not the
-# float's binary expansion).
-ORDER_AMOUNT_DECIMAL_PLACES = 2
-
 class PaymentCreate(BaseModel):
     """Schema for payment processing"""
     order_id: Int32
     payment_method: str = Field(..., pattern="^(stripe|paypal)$")
-    amount: Decimal = Field(
-        ..., max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
-    )
+    amount: Money
     # Optional: the order is always charged in its own currency
     # (Order.currency). A client may still send the code it expects to pay
     # in; one that differs is rejected with 400, the same as an amount that
@@ -149,11 +179,6 @@ class PaymentCreate(BaseModel):
     # Stripe.js/Elements collects it), but making it optional here keeps
     # the existing request shape backward compatible.
     payment_method_token: str | None = None
-
-    @field_validator('amount')
-    @classmethod
-    def validate_amount(cls, v):
-        return Decimal(str(v)).quantize(Decimal('0.01'))
 
 class PaymentResponse(PaymentCreate):
     id: int
@@ -238,18 +263,9 @@ class CheckoutSessionResponse(BaseModel):
 
 class RefundCreate(BaseModel):
     """Schema for issuing a refund on a paid order."""
-    amount: Decimal | None = Field(
-        None, gt=0, max_digits=ORDER_AMOUNT_MAX_DIGITS,
-        decimal_places=ORDER_AMOUNT_DECIMAL_PLACES,
-        description="Amount to refund; omit for a full refund",
+    amount: PositiveMoney | None = Field(
+        None, description="Amount to refund; omit for a full refund"
     )
-
-    @field_validator('amount')
-    @classmethod
-    def validate_amount(cls, v):
-        if v is None:
-            return v
-        return Decimal(str(v)).quantize(Decimal('0.01'))
 
 class RefundResponse(BaseModel):
     id: str

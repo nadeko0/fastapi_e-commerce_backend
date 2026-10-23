@@ -14,7 +14,7 @@ from pydantic import (
 )
 
 from app.schemas.common import Int32, Int32Max
-from app.schemas.order import ORDER_AMOUNT_DECIMAL_PLACES, ORDER_AMOUNT_MAX_DIGITS
+from app.schemas.order import NonNegativeMoney
 
 # An image URL is validated as an HttpUrl but kept as the plain string: it
 # is stored in a string-array column and returned as that string. Without
@@ -39,19 +39,11 @@ class ProductCharacteristic(BaseModel):
 class ProductBase(BaseModel):
     name: str = Field(..., min_length=3, max_length=200)
     description: str = Field(..., min_length=10)
-    price: Decimal = Field(
-        ..., ge=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
-    )
+    price: NonNegativeMoney
     stock_quantity: Int32Max = Field(..., ge=0)
     category_id: Int32
     images: list[ImageUrl] = Field(default_factory=list)
     characteristics: dict[str, ProductCharacteristic] = Field(default_factory=dict)
-
-    @field_validator('price')
-    @classmethod
-    def validate_price(cls, v):
-        """Ensure price has exactly 2 decimal places"""
-        return Decimal(str(v)).quantize(Decimal('0.01'))
 
     @field_validator('images')
     @classmethod
@@ -68,9 +60,7 @@ class ProductCreate(ProductBase):
 class ProductUpdate(BaseModel):
     name: str | None = Field(None, min_length=3, max_length=200)
     description: str | None = Field(None, min_length=10)
-    price: Decimal | None = Field(
-        None, ge=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
-    )
+    price: NonNegativeMoney | None = None
     stock_quantity: Int32Max | None = Field(None, ge=0)
     category_id: Int32 | None = None
     images: list[ImageUrl] | None = None
@@ -84,13 +74,6 @@ class ProductUpdate(BaseModel):
         if v is None:
             raise ValueError('may be omitted but cannot be null')
         return v
-
-    @field_validator('price')
-    @classmethod
-    def validate_price(cls, v):
-        if v is None:
-            return v
-        return Decimal(str(v)).quantize(Decimal('0.01'))
 
     @field_validator('images')
     @classmethod
@@ -166,18 +149,9 @@ class ProductVariantBase(BaseModel):
     """
     sku: str = Field(..., min_length=1, max_length=100)
     attributes: dict[str, Any] = Field(default_factory=dict)
-    price_override: Decimal | None = Field(
-        None, ge=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
-    )
+    price_override: NonNegativeMoney | None = None
     stock_quantity: Int32Max = Field(0, ge=0)
     is_active: bool = True
-
-    @field_validator('price_override')
-    @classmethod
-    def validate_price_override(cls, v):
-        if v is None:
-            return v
-        return Decimal(str(v)).quantize(Decimal('0.01'))
 
 class ProductVariantCreate(ProductVariantBase):
     pass
@@ -186,9 +160,7 @@ class ProductVariantUpdate(BaseModel):
     """Schema for updating an existing product variant. All fields optional."""
     sku: str | None = Field(None, min_length=1, max_length=100)
     attributes: dict[str, Any] | None = None
-    price_override: Decimal | None = Field(
-        None, ge=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
-    )
+    price_override: NonNegativeMoney | None = None
     stock_quantity: Int32Max | None = Field(None, ge=0)
     is_active: bool | None = None
 
@@ -200,13 +172,6 @@ class ProductVariantUpdate(BaseModel):
         if v is None:
             raise ValueError('may be omitted but cannot be null')
         return v
-
-    @field_validator('price_override')
-    @classmethod
-    def validate_price_override(cls, v):
-        if v is None:
-            return v
-        return Decimal(str(v)).quantize(Decimal('0.01'))
 
 class ProductVariantResponse(ProductVariantBase):
     id: int
