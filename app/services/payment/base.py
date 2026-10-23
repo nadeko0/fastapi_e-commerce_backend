@@ -32,7 +32,7 @@ def webhook_event_from_payload(
     try:
         body = json.loads(payload.decode("utf-8"))
     except ValueError:  # UnicodeDecodeError and JSONDecodeError are both ValueErrors
-        raise SignatureVerificationError("Payload is not valid JSON", sig_header)
+        raise SignatureVerificationError("Payload is not valid JSON", sig_header) from None
     if not isinstance(body, dict):
         raise SignatureVerificationError("Payload is not a JSON object", sig_header)
     return WebhookEventData(

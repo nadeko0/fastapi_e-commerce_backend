@@ -270,7 +270,7 @@ class RedisService:
         try:
             return self._atomic_mutate_cart(user_id, mutator, must_exist=True)
         except CartNotFoundError:
-            raise ItemNotInCartError(product_id)
+            raise ItemNotInCartError(product_id) from None
 
     def remove_from_cart_atomic(
         self, user_id: CartOwnerRef, product_id: int, variant_id: int | None = None
@@ -285,7 +285,7 @@ class RedisService:
                 user_id, codec.remove_item_mutator(product_id, variant_id), must_exist=True
             )
         except CartNotFoundError:
-            raise ItemNotInCartError(product_id)
+            raise ItemNotInCartError(product_id) from None
 
     def clear_cart_atomic(self, user_id: CartOwnerRef) -> Cart | None:
         """Atomically remove all items from the cart. A cart that does not

@@ -83,7 +83,7 @@ def _product_filter(**params) -> ProductFilter:
         raise RequestValidationError([
             {**detail, "loc": ("query", *detail["loc"])}
             for detail in error.errors(include_url=False, include_context=False)
-        ])
+        ]) from None
 
 
 # The parameters FastAPI reads from the request are the model's fields.

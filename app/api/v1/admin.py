@@ -345,7 +345,7 @@ async def list_orders(
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Invalid order status. Valid values are: {', '.join([s.value for s in OrderStatus])}"
-            )
+            ) from None
 
     if payment_status:
         try:
@@ -355,7 +355,7 @@ async def list_orders(
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Invalid payment status. Valid values are: {', '.join([s.value for s in PaymentStatus])}"
-            )
+            ) from None
     # A date without an offset is taken to be UTC (as clients always sent
     # them); one with an offset is converted. Either way the comparison is
     # between instants.
@@ -539,12 +539,12 @@ async def _commit_variant(db: AsyncSession, sku: str | None, variant_id: int | N
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="A variant with this SKU already exists"
-                )
+                ) from e
         logger.warning("Variant write violated a database constraint", exc_info=e)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="The variant violates a data constraint"
-        )
+        ) from e
 
 
 @router.post(
@@ -750,7 +750,7 @@ async def run_reconciliation(
             raise HTTPException(
                 status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Task queue unavailable; reconciliation was not queued",
-            )
+            ) from e
         response.status_code = http_status.HTTP_202_ACCEPTED
         return APIResponse.success_response({"queued": True})
     if not (await db.execute(select(Order.id).where(Order.id == order_id).limit(1))).first():

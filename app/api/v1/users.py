@@ -405,7 +405,7 @@ async def refresh_access_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate refresh token",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from None
 
     return APIResponse.success_response(Token(
         access_token=new_access_token,
@@ -433,11 +433,11 @@ async def logout(
     must not be told it is logged out while its tokens still work."""
     try:
         await logout_tokens(token, logout_in.refresh_token)
-    except RevocationUnavailable:
+    except RevocationUnavailable as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Logout is temporarily unavailable, please retry"
-        )
+        ) from e
     return APIResponse.success_response({"message": "Logged out successfully"})
 
 # Where each consent type is stored on User: (flag, date). Spelled out
@@ -722,7 +722,7 @@ async def update_current_user(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update profile"
-        )
+        ) from e
 
 @router.get("/addresses", response_model=APIResponse[AddressListResponse])
 async def list_addresses(
@@ -822,13 +822,13 @@ async def create_address(
                 "message": "Invalid address data",
                 "errors": sanitized_errors(e.errors())
             }
-        )
-    except IntegrityError:
+        ) from None
+    except IntegrityError as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This address already exists for the current user"
-        )
+        ) from e
 
 @router.put(
     "/addresses/{address_id}",

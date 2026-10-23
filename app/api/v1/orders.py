@@ -1020,7 +1020,7 @@ async def process_payment(
             intent.id, idempotency_key=f"{provider_idempotency_key}:confirm",
             return_url=f"{settings.FRONTEND_URL}/checkout/return?order_id={order.id}",
         )
-    except PaymentProviderTimeoutError:
+    except PaymentProviderTimeoutError as e:
         # Provider unreachable/timed out: we do not know whether Stripe
         # actually processed anything, so the order's payment_status/status
         # must stay exactly as they were before this attempt - only this
@@ -1035,7 +1035,7 @@ async def process_payment(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
-        )
+        ) from e
     except IdempotencyError:
         await db.rollback()
         if retried_attempt is not None:
@@ -1048,7 +1048,7 @@ async def process_payment(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Idempotency key already used with different payment parameters",
-        )
+        ) from None
     except InvalidRequestError as e:
         # A structurally invalid amount/currency (e.g. a non-integer or
         # non-positive amount, or a currency code that isn't a real ISO
@@ -1060,7 +1060,7 @@ async def process_payment(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=e.message,
-        )
+        ) from e
     except CardError as e:
         # The provider *did* respond - with a decline. This is a terminal
         # outcome for this attempt (not a transport failure), so the order
@@ -1072,7 +1072,7 @@ async def process_payment(
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=e.message,
-        )
+        ) from e
 
     if intent.status == PaymentIntentStatus.REQUIRES_ACTION:
         # 3D Secure / SCA required: a distinct, non-terminal state - must
@@ -1247,7 +1247,7 @@ async def create_checkout_session(
             description=f"Order #{order.id}",
             metadata={"order_id": str(order.id)},
         )
-    except PaymentProviderTimeoutError:
+    except PaymentProviderTimeoutError as e:
         # Same reasoning as /pay: unknown whether Stripe actually created
         # the session, so only this attempt's own Payment row is marked
         # failed - the order's payment_status/status stay untouched.
@@ -1256,13 +1256,13 @@ async def create_checkout_session(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
-        )
+        ) from e
     except IdempotencyError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Idempotency key already used with different checkout session parameters",
-        )
+        ) from None
     except InvalidRequestError as e:
         payment_row.status = "failed"
         order.updated_at = utc_now()
@@ -1270,7 +1270,7 @@ async def create_checkout_session(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=e.message,
-        )
+        ) from e
 
     payment_row.checkout_session_id = session.id
     payment_row.checkout_session_url = session.url
@@ -1381,18 +1381,18 @@ async def refund_payment(
             # Namespaced like /pay's (see _provider_idempotency_key).
             idempotency_key=_provider_idempotency_key("refund", order, idempotency_key),
         )
-    except PaymentProviderTimeoutError:
+    except PaymentProviderTimeoutError as e:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
-        )
+        ) from e
     except IdempotencyError:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Idempotency key already used with different refund parameters",
-        )
+        ) from None
     except (CardError, InvalidRequestError) as e:
-        raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message)
+        raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message) from e
 
     # Re-read under the order's lock before adding to it: payment_row was
     # read before the provider call, and another refund of this charge may
@@ -1639,7 +1639,7 @@ async def stripe_webhook(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid webhook signature",
-        )
+        ) from None
 
     # Stripe's own advice (https://docs.stripe.com/webhooks): answer 2xx
     # quickly, before any complex logic, and handle events asynchronously.

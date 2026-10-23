@@ -122,7 +122,7 @@ def session_scope():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="A database error occurred"
-        )
+        ) from e
     finally:
         session.close()
 
@@ -143,7 +143,7 @@ async def get_async_db() -> AsyncGenerator[AsyncSession]:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="A database error occurred"
-            )
+            ) from e
 
 # The session dependency, declared once. scope="function" ends the session
 # (commit, close) after the route returns but before the response is sent

@@ -72,12 +72,12 @@ class GDPRService:
                 "privacy_policy": user.privacy_policy_accepted,
 
             }
-        except Exception:
+        except Exception as e:
             await self.db.rollback()
             raise HTTPException(
                 status_code=500,
                 detail="Failed to update consent preferences"
-            )
+            ) from e
 
     async def process_data_export(self, user: User) -> str:
         """
@@ -112,11 +112,11 @@ class GDPRService:
 
             return request_id
 
-        except Exception:
+        except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail="Failed to process data export request"
-            )
+            ) from e
 
     async def process_data_deletion(self, user: User) -> str:
         """
@@ -148,12 +148,12 @@ class GDPRService:
 
             return request_id
 
-        except Exception:
+        except Exception as e:
             await self.db.rollback()
             raise HTTPException(
                 status_code=500,
                 detail="Failed to process deletion request"
-            )
+            ) from e
 
     def get_consent_status(self, user: User) -> dict:
         """

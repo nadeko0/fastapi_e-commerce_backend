@@ -265,15 +265,15 @@ class LiveStripePaymentProvider(PaymentProvider):
         try:
             pi = stripe.PaymentIntent.create(**params)
         except stripe_error.IdempotencyError as e:
-            raise IdempotencyError(str(e.user_message or e))
+            raise IdempotencyError(str(e.user_message or e)) from None
         except stripe_error.CardError as e:
-            raise self._translate_card_error(e)
+            raise self._translate_card_error(e) from e
         except stripe_error.InvalidRequestError as e:
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
-            )
+            ) from e
         except stripe_error.StripeError as e:
-            raise _provider_unavailable(e)
+            raise _provider_unavailable(e) from e
         return _to_payment_intent(pi)
 
     def confirm_payment_intent(
@@ -303,19 +303,19 @@ class LiveStripePaymentProvider(PaymentProvider):
         try:
             pi = stripe.PaymentIntent.confirm(payment_intent_id, **params)
         except stripe_error.IdempotencyError as e:
-            raise IdempotencyError(str(e.user_message or e))
+            raise IdempotencyError(str(e.user_message or e)) from None
         except stripe_error.CardError as e:
-            raise self._translate_card_error(e)
+            raise self._translate_card_error(e) from e
         except stripe_error.InvalidRequestError as e:
             if e.code == "resource_missing":
                 raise CardError(
                     f"No such payment_intent: '{payment_intent_id}'", code="resource_missing"
-                )
+                ) from e
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
-            )
+            ) from e
         except stripe_error.StripeError as e:
-            raise _provider_unavailable(e)
+            raise _provider_unavailable(e) from e
         return _to_payment_intent(pi)
 
     def retrieve_payment_intent(self, payment_intent_id: str) -> PaymentIntent:
@@ -325,12 +325,12 @@ class LiveStripePaymentProvider(PaymentProvider):
             if e.code == "resource_missing":
                 raise CardError(
                     f"No such payment_intent: '{payment_intent_id}'", code="resource_missing"
-                )
+                ) from e
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
-            )
+            ) from e
         except stripe_error.StripeError as e:
-            raise _provider_unavailable(e)
+            raise _provider_unavailable(e) from e
         return _to_payment_intent(pi)
 
     # -- Checkout Session ------------------------------------------------
@@ -374,13 +374,13 @@ class LiveStripePaymentProvider(PaymentProvider):
         try:
             session = stripe.checkout.Session.create(**params)
         except stripe_error.IdempotencyError as e:
-            raise IdempotencyError(str(e.user_message or e))
+            raise IdempotencyError(str(e.user_message or e)) from None
         except stripe_error.InvalidRequestError as e:
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
-            )
+            ) from e
         except stripe_error.StripeError as e:
-            raise _provider_unavailable(e)
+            raise _provider_unavailable(e) from e
         return _to_checkout_session(session)
 
     def retrieve_checkout_session(self, session_id: str) -> CheckoutSession:
@@ -390,12 +390,12 @@ class LiveStripePaymentProvider(PaymentProvider):
             if e.code == "resource_missing":
                 raise CardError(
                     f"No such checkout.session: '{session_id}'", code="resource_missing"
-                )
+                ) from e
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
-            )
+            ) from e
         except stripe_error.StripeError as e:
-            raise _provider_unavailable(e)
+            raise _provider_unavailable(e) from e
         return _to_checkout_session(session)
 
     def expire_checkout_session(self, session_id: str) -> CheckoutSession:
@@ -405,13 +405,13 @@ class LiveStripePaymentProvider(PaymentProvider):
             if e.code == "resource_missing":
                 raise CardError(
                     f"No such checkout.session: '{session_id}'", code="resource_missing"
-                )
+                ) from e
             # Real Stripe rejects expiring an already-complete/already-expired
             # Session via InvalidRequestError - surfaced as CardError to
             # match the mock provider's contract for the same condition.
-            raise CardError(str(e.user_message or e), code=e.code or "invalid_request")
+            raise CardError(str(e.user_message or e), code=e.code or "invalid_request") from e
         except stripe_error.StripeError as e:
-            raise _provider_unavailable(e)
+            raise _provider_unavailable(e) from e
         return _to_checkout_session(session)
 
     # -- Refund --------------------------------------------------------
@@ -434,21 +434,21 @@ class LiveStripePaymentProvider(PaymentProvider):
         try:
             refund = stripe.Refund.create(**params)
         except stripe_error.IdempotencyError as e:
-            raise IdempotencyError(str(e.user_message or e))
+            raise IdempotencyError(str(e.user_message or e)) from None
         except stripe_error.InvalidRequestError as e:
             if e.code == "resource_missing":
                 raise CardError(
                     f"No such payment_intent: '{payment_intent_id}'", code="resource_missing"
-                )
+                ) from e
             # Real Stripe rejects over-refunds and refunds of a non-succeeded
             # intent via InvalidRequestError (e.g. code="charge_already_refunded"
             # / "invalid_request_error" on amount) - surfaced as CardError to
             # match the mock provider's contract for these same conditions.
-            raise CardError(str(e.user_message or e), code=e.code or "invalid_request")
+            raise CardError(str(e.user_message or e), code=e.code or "invalid_request") from e
         except stripe_error.CardError as e:
-            raise self._translate_card_error(e)
+            raise self._translate_card_error(e) from e
         except stripe_error.StripeError as e:
-            raise _provider_unavailable(e)
+            raise _provider_unavailable(e) from e
         return _to_refund(refund)
 
     def list_refunds(self, payment_intent_id: str) -> list[Refund]:
@@ -464,9 +464,9 @@ class LiveStripePaymentProvider(PaymentProvider):
             except stripe_error.InvalidRequestError as e:
                 raise InvalidRequestError(
                     str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
-                )
+                ) from e
             except stripe_error.StripeError as e:
-                raise _provider_unavailable(e)
+                raise _provider_unavailable(e) from e
             refunds.extend(_to_refund(r) for r in page.data)
             if not page.has_more:
                 return refunds
@@ -501,7 +501,7 @@ class LiveStripePaymentProvider(PaymentProvider):
         try:
             payload.decode("utf-8")
         except UnicodeDecodeError:
-            raise SignatureVerificationError("Payload is not valid UTF-8", sig_header)
+            raise SignatureVerificationError("Payload is not valid UTF-8", sig_header) from None
         # Only the signature check is the SDK's (verify_header, which
         # stripe.Webhook.construct_event calls first); the body is then read
         # by the same code as the mock's, which refuses one that is not a
@@ -512,7 +512,7 @@ class LiveStripePaymentProvider(PaymentProvider):
                 payload, sig_header, webhook_secret, tolerance_seconds
             )
         except stripe_error.SignatureVerificationError as e:
-            raise SignatureVerificationError(str(e.user_message or e), sig_header)
+            raise SignatureVerificationError(str(e.user_message or e), sig_header) from None
         # The SDK checks the timestamp on one side only (older than the
         # tolerance) and not at all when the tolerance is 0, so a signature
         # dated in the future stayed valid until that date plus the
