@@ -131,3 +131,30 @@ def test_a_leftover_data_encryption_key_is_ignored():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "False"
+
+
+_REMOVED_UNUSED_SETTINGS = [
+    "REDIS_JWT_BLACKLIST_TTL_DAYS",
+    "REDIS_SESSION_TTL_HOURS",
+    "CONSENT_REQUIRED",
+    "COMPANY_NAME",
+    "COOKIE_CONSENT_ENABLED",
+    "GDPR_EXPORT_READY_TEMPLATE",
+    "GDPR_DELETION_CONFIRMED_TEMPLATE",
+    "GDPR_REQUEST_RECEIVED_TEMPLATE",
+]
+
+
+def test_settings_nothing_reads_are_gone_and_a_leftover_line_is_ignored():
+    # These were declared and documented but read nowhere; an existing .env
+    # that still sets them must start the app and the values must not
+    # come back as settings.
+    env = {**os.environ, **_BASE_ENV, **dict.fromkeys(_REMOVED_UNUSED_SETTINGS, "1")}
+    names = repr(_REMOVED_UNUSED_SETTINGS)
+    result = _run_with_env(
+        env,
+        "from app.core.config import settings; "
+        f"print([n for n in {names} if hasattr(settings, n)])",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "[]"

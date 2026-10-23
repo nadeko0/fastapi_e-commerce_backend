@@ -251,8 +251,6 @@ class Settings(BaseSettings):
     # machine: set it to false only to work over plain http locally.
     GUEST_CART_COOKIE_SECURE: bool = True
     REDIS_PRODUCT_CACHE_TTL_HOURS: int = 1
-    REDIS_JWT_BLACKLIST_TTL_DAYS: int = 7
-    REDIS_SESSION_TTL_HOURS: int = 24
 
     # Rate limiting settings
     # Reverse proxies/load balancers allowed to set X-Forwarded-For: single
@@ -337,7 +335,6 @@ class Settings(BaseSettings):
 
     # Essential GDPR Settings
     USER_DATA_RETENTION_DAYS: int = 365
-    CONSENT_REQUIRED: bool = True
     # There is no DATA_ENCRYPTION_KEY: the application encrypts no field
     # itself (personal data is protected by the database volume's disk
     # encryption and TLS to the database). One used to be required at
@@ -357,7 +354,6 @@ class Settings(BaseSettings):
     DATA_DELETION_GRACE_PERIOD_DAYS: int = 1
 
     # Company Information (MVP)
-    COMPANY_NAME: str = "Your Company Name"
     COMPANY_EMAIL: str = "contact@yourcompany.com"
     COMPANY_ADDRESS: str = "Your Company Address, EU"  # Required for EU compliance
     COMPANY_VAT: str = "EU VAT Number"  # Required for EU business
@@ -370,16 +366,10 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: str = "admin@yourcompany.com"
 
     # Cookie Consent Settings
-    COOKIE_CONSENT_ENABLED: bool = True
     COOKIE_CONSENT_EXPIRE_DAYS: int = 365
     ESSENTIAL_COOKIES: CommaSeparated = [
         "session", "csrf_token", "__Host-guest_cart",
     ]
-
-    # GDPR Email Templates
-    GDPR_EXPORT_READY_TEMPLATE: str = "gdpr_export_ready"
-    GDPR_DELETION_CONFIRMED_TEMPLATE: str = "gdpr_deletion_confirmed"
-    GDPR_REQUEST_RECEIVED_TEMPLATE: str = "gdpr_request_received"
 
     # Email Settings
     SMTP_HOST: str
