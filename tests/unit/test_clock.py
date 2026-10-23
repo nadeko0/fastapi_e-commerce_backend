@@ -42,7 +42,8 @@ def test_utc_now_is_aware_and_in_utc():
 
 
 def test_as_utc_takes_a_naive_value_as_utc():
-    assert as_utc(datetime(2026, 10, 1, 12, 0)) == datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    # DTZ001: the naive value is the input under test.
+    assert as_utc(datetime(2026, 10, 1, 12, 0)) == datetime(2026, 10, 1, 12, 0, tzinfo=UTC)  # noqa: DTZ001
 
 
 def test_as_utc_converts_an_aware_value():
@@ -57,7 +58,8 @@ def test_the_column_is_timestamp_with_time_zone():
 
 
 def test_a_naive_value_goes_in_as_utc_and_comes_out_aware(session):
-    session.add(Stamped(id=1, at=datetime(2026, 10, 1, 12, 0)))
+    # DTZ001: the naive value is the input under test.
+    session.add(Stamped(id=1, at=datetime(2026, 10, 1, 12, 0)))  # noqa: DTZ001
     session.commit()
     session.expire_all()
 
@@ -107,4 +109,4 @@ def test_the_deprecated_utcnow_fails_the_suite():
     # pyproject.toml turns its DeprecationWarning into an error, so a new use
     # of datetime.utcnow() cannot slip in unnoticed.
     with pytest.raises(DeprecationWarning):
-        datetime.utcnow()
+        datetime.utcnow()  # noqa: DTZ003 - the deprecated call is what is under test

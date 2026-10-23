@@ -4,7 +4,7 @@ line becomes an OrderItemResponse from each shape it can arrive in, and the
 validators of the payment-facing request bodies (PaymentCreate,
 RefundCreate, CheckoutSessionCreate) at the edges of what they accept.
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -19,7 +19,7 @@ from app.schemas.order import (
     RefundCreate,
 )
 
-CREATED = datetime(2026, 1, 2, 3, 4, 5)
+CREATED = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
 
 def _line(**overrides):

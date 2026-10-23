@@ -132,7 +132,8 @@ def test_payment_windows_hold_to_the_minute_across_awkward_instants(
     local_zone(monkeypatch, offset)
     with freeze_time(start, tz_offset=offset) as clock:
         # The zone really is `offset` hours away, for local readings only.
-        assert datetime.now() - utc_now().replace(tzinfo=None) == timedelta(hours=offset)
+        # DTZ005: the naive local reading is what the freeze's tz_offset moves.
+        assert datetime.now() - utc_now().replace(tzinfo=None) == timedelta(hours=offset)  # noqa: DTZ005
         assert time.localtime().tm_hour == (start + timedelta(hours=offset)).hour
         product = shop.product(price="10.00", stock=5)
         buyer = shop.buyer()
