@@ -40,7 +40,14 @@ jobs:
         run: uv python install
       - name: Install dependencies
         run: uv sync --locked --group dev
-      - name: Run tests with coverage (gate at 85%)
+      # Two runs, one coverage file. The parallel run (pytest-xdist, one SQLite
+      # database and one fakeredis server per worker) skips the 21 tests that
+      # assert on elapsed time or event-loop latency, because CPU contention from
+      # other workers would make them flaky; they run alone right after, with
+      # --cov-append, so the coverage numbers and both gates see every test.
+      # The 85% gate is enforced on the combined data in the second run (the
+      # first one cannot reach it without the second's tests).
+      - name: Run tests in parallel with coverage
         env:
           JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
           POSTGRES_SERVER: localhost
@@ -53,7 +60,25 @@ jobs:
           SMTP_PASSWORD: ci
           EMAILS_FROM_EMAIL: ci@example.com
           EMAILS_FROM_NAME: CI
-        run: uv run pytest tests/ -q --cov=app --cov-report=term-missing --cov-report=xml
+        run: >-
+          uv run pytest tests/ -q -n auto --dist worksteal -m "not timing_sensitive"
+          --cov=app --cov-report= --cov-fail-under=0
+      - name: Run the timing-sensitive tests alone (coverage gate at 85%)
+        env:
+          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
+          POSTGRES_SERVER: localhost
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+          REDIS_HOST: localhost
+          SMTP_HOST: localhost
+          SMTP_USER: ci@example.com
+          SMTP_PASSWORD: ci
+          EMAILS_FROM_EMAIL: ci@example.com
+          EMAILS_FROM_NAME: CI
+        run: >-
+          uv run pytest tests/ -q -m timing_sensitive
+          --cov=app --cov-append --cov-report=term-missing --cov-report=xml
       - name: Payment layer coverage gate (100% lines and branches)
         run: >-
           uv run coverage report --fail-under=100
@@ -105,7 +130,7 @@ jobs:
           EMAILS_FROM_EMAIL: ci@example.com
           EMAILS_FROM_NAME: CI
         run: >-
-          uv run pytest -q -p no:cacheprovider
+          uv run pytest -q -p no:cacheprovider -n auto --dist worksteal
           tests/integration/test_payment*.py
           tests/integration/test_order*.py
           tests/integration/test_checkout_session*.py
@@ -175,7 +200,22 @@ jobs:
           SMTP_PASSWORD: ci
           EMAILS_FROM_EMAIL: ci@example.com
           EMAILS_FROM_NAME: CI
-        run: uv run pytest tests/ -m "db_sensitive" -q -p no:cacheprovider -rs
+        run: uv run pytest tests/ -m "db_sensitive and not timing_sensitive" -q -p no:cacheprovider -rs -n auto --dist worksteal
+      - name: Timing-sensitive database tests on PostgreSQL, alone
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/ci
+          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
+          POSTGRES_SERVER: localhost
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+          REDIS_HOST: localhost
+          SMTP_HOST: localhost
+          SMTP_USER: ci@example.com
+          SMTP_PASSWORD: ci
+          EMAILS_FROM_EMAIL: ci@example.com
+          EMAILS_FROM_NAME: CI
+        run: uv run pytest tests/ -m "db_sensitive and timing_sensitive" -q -p no:cacheprovider -rs
 
   audit:
     # Fails the build when a package pinned in uv.lock has a known
