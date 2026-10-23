@@ -91,7 +91,7 @@ app.add_middleware(
     # a browser client can back off. Starlette: credentials and "*" do not mix.
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
-    expose_headers=["Retry-After", "X-Request-ID"],
+    expose_headers=["Retry-After", "X-Request-ID", "RateLimit", "RateLimit-Policy"],
 )
 
 # X-Forwarded-For -> request.client, by TRUSTED_PROXIES and nothing else,
@@ -183,7 +183,10 @@ async def health_check(request: Request):
 
     status_code = 200 if health_status["status"] == "healthy" else 503
     logger.info(f"Health check completed with status: {health_status['status']}")
-    return probes.probe_response(request, health_status, status_code)
+    return probes.probe_response(
+        request, health_status, status_code,
+        headers={"Retry-After": "5"} if status_code == 503 else None,
+    )
 
 
 app.include_router(probes.router)

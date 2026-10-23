@@ -442,7 +442,8 @@ async def logout(
     except RevocationUnavailable as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Logout is temporarily unavailable, please retry"
+            detail="Logout is temporarily unavailable, please retry",
+            headers={"Retry-After": "5"},
         ) from e
     return APIResponse.success_response({"message": "Logged out successfully"})
 
@@ -1170,7 +1171,8 @@ async def reset_password(
     if not await invalidate_tokens_issued_before_now(user_id):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Password reset is temporarily unavailable, please retry"
+            detail="Password reset is temporarily unavailable, please retry",
+            headers={"Retry-After": "5"},
         )
 
     # Only if the password is still the one the token was checked

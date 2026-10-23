@@ -17,6 +17,9 @@ How it works, top to bottom:
    expires when its window ends. Checking and counting are one small Lua
    script, so one atomic round trip per request, whatever the load on a key.
 4. OVER THE LIMIT: 429 with Retry-After = seconds until the window ends.
+   Every counted response, 429 included, also carries RateLimit-Policy and
+   RateLimit (IETF httpapi ratelimit-headers draft), built from the
+   counter and TTL the script returned.
 
 Wired in once, in app/main.py, as an application-wide FastAPI dependency
 (`rate_limit`). A dependency rather than a middleware because it runs after
@@ -49,7 +52,7 @@ from functools import lru_cache
 from typing import NamedTuple
 
 import jwt
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Response
 from redis.exceptions import RedisError
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS, HTTP_503_SERVICE_UNAVAILABLE
 
@@ -228,9 +231,9 @@ return {count, ttl}
 _count_script = None
 
 
-async def _count(key: str, rate: Rate) -> int:
-    """Count one request against `key`. 0 if it is within `rate`, otherwise
-    the whole seconds until the window ends. Raises RedisError when Redis
+async def _hit(key: str, rate: Rate) -> tuple[int, int]:
+    """Count one request against `key`: (requests in this window including
+    this one, ms until the window ends). Raises RedisError when Redis
     cannot be asked; what that means is the caller's decision."""
     global _count_script
     redis = get_async_redis()
@@ -239,9 +242,36 @@ async def _count(key: str, rate: Rate) -> int:
     count, ttl_ms = await _count_script(
         keys=[key], args=[rate.seconds * 1000], client=redis
     )
+    return int(count), int(ttl_ms)
+
+
+def _wait(count: int, ttl_ms: int, rate: Rate) -> int:
+    """0 if `count` is within `rate`, otherwise the whole seconds until the
+    window ends."""
     if count <= rate.count:
         return 0
     return max(1, math.ceil(ttl_ms / 1000))
+
+
+async def _count(key: str, rate: Rate) -> int:
+    """Count one request against `key`. 0 if it is within `rate`, otherwise
+    the whole seconds until the window ends. Raises RedisError."""
+    count, ttl_ms = await _hit(key, rate)
+    return _wait(count, ttl_ms, rate)
+
+
+def rate_limit_headers(name: str, rate: Rate, count: int, ttl_ms: int) -> dict[str, str]:
+    """RateLimit-Policy and RateLimit fields, from the state the counting
+    script just returned (no extra round trip). IETF draft-ietf-httpapi-
+    ratelimit-headers-11: both are Structured Field Lists whose items are
+    the policy name (a String); q = quota, w = window seconds, r = remaining
+    quota, t = seconds until the quota is replenished (the window's end)."""
+    remaining = max(0, rate.count - count)
+    reset = max(0, math.ceil(ttl_ms / 1000))
+    return {
+        "RateLimit-Policy": f'"{name}";q={rate.count};w={rate.seconds}',
+        "RateLimit": f'"{name}";r={remaining};t={reset}',
+    }
 
 
 async def seconds_until_allowed(key: str, rate: Rate) -> int:
@@ -271,7 +301,7 @@ class RateLimiter:
     """Holds no state. A class only so that the check has one patchable
     name: the load-test tracer wraps RateLimiter.check_rate_limit."""
 
-    async def check_rate_limit(self, request: Request) -> None:
+    async def check_rate_limit(self, request: Request, response: Response | None = None) -> None:
         """Return if the request may proceed; raise the 429 if not."""
         if not settings.RATE_LIMIT_ENABLED:
             return
@@ -286,20 +316,32 @@ class RateLimiter:
         user_id = None if setting == "RATE_LIMIT_AUTH" else user_id_from_token(request)
         caller = f"user:{user_id}" if user_id else f"ip:{client_address(request)}"
 
-        retry_after = await seconds_until_allowed(
-            f"rl:{operation[0]} {operation[1]}:{caller}",
-            parse_rate(getattr(settings, setting)),
+        rate = parse_rate(getattr(settings, setting))
+        try:
+            count, ttl_ms = await _hit(f"rl:{operation[0]} {operation[1]}:{caller}", rate)
+        except RedisError as e:
+            # Fail open, and say nothing about a state that is not known.
+            logger.error(f"Rate limiting error, request allowed: {e}")
+            return
+        headers = rate_limit_headers(
+            setting.removeprefix("RATE_LIMIT_").lower(), rate, count, ttl_ms
         )
+        retry_after = _wait(count, ttl_ms, rate)
         if retry_after:
-            raise too_many_requests("Rate limit exceeded", retry_after)
+            error = too_many_requests("Rate limit exceeded", retry_after)
+            error.headers.update(headers)
+            raise error
+        if response is not None:
+            response.headers.update(headers)
 
 
 limiter = RateLimiter()
 
 
-async def rate_limit(request: Request) -> None:
-    """The FastAPI dependency: FastAPI(dependencies=[Depends(rate_limit)])."""
-    await limiter.check_rate_limit(request)
+async def rate_limit(request: Request, response: Response) -> None:
+    """The FastAPI dependency: FastAPI(dependencies=[Depends(rate_limit)]).
+    Headers set on `response` are merged into the route's own response."""
+    await limiter.check_rate_limit(request, response)
 
 
 # --- 5. Failed logins, per account ----------------------------------------

@@ -753,6 +753,7 @@ async def run_reconciliation(
             raise HTTPException(
                 status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Task queue unavailable; reconciliation was not queued",
+                headers={"Retry-After": "5"},
             ) from e
         response.status_code = http_status.HTTP_202_ACCEPTED
         return APIResponse.success_response({"queued": True})

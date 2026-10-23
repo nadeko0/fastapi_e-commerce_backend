@@ -346,6 +346,7 @@ def test_checkout_session_provider_timeout_leaves_the_attempt_unknown(shop, outb
     response = shop.checkout_session(buyer, order["id"])
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
     assert response.json()["detail"] == "Payment provider unavailable, please retry"
     assert payment_rows(shop, order["id"]) == [("unknown", 1999, 0, "USD", False)]
     assert shop.payments(order["id"])[0].checkout_session_id is None
@@ -662,6 +663,7 @@ def test_refund_provider_timeout_answers_503_and_records_nothing(shop, outbox, m
     response = shop.refund(admin, order["id"], amount="5.00")
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert shop.stock(product) == 3

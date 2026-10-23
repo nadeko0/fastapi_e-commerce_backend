@@ -953,6 +953,7 @@ def test_add_item_returns_503_when_redis_fails(client, db_session, monkeypatch):
     response = _add(client, token, product.id, 1)
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
 
 
 def test_update_item_returns_503_when_redis_fails(client, db_session, monkeypatch):
@@ -969,6 +970,7 @@ def test_update_item_returns_503_when_redis_fails(client, db_session, monkeypatc
     )
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
 
 
 def test_remove_item_returns_503_when_redis_fails(client, db_session, monkeypatch):
@@ -981,6 +983,7 @@ def test_remove_item_returns_503_when_redis_fails(client, db_session, monkeypatc
     response = client.delete(f"{CART_PREFIX}/items/{product.id}", headers=_auth_headers(token))
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
 
 
 def test_clear_cart_returns_503_when_redis_fails(client, db_session, monkeypatch):
@@ -990,6 +993,7 @@ def test_clear_cart_returns_503_when_redis_fails(client, db_session, monkeypatch
     response = client.delete(CART_PREFIX, headers=_auth_headers(token))
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
 
 
 # --- C: GET /cart must not write --------------------------------------------

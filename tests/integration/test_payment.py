@@ -487,6 +487,7 @@ def test_provider_timeout_leaves_order_state_unchanged(client, db_session, monke
     )
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
     db_order = _get_order(db_session, order["id"])
     assert db_order.payment_status == "pending"
     assert db_order.status == "new"
@@ -519,6 +520,7 @@ def test_retry_after_timeout_with_the_same_key_succeeds(client, db_session, monk
             headers={**setup["headers"], "Idempotency-Key": "attempt-1"},
         )
     assert failed_response.status_code == 503
+    assert failed_response.headers["Retry-After"]
 
     # The same key: the outcome of the first request is not known, so it is
     # sent again (a new key is refused with 409 until this one is settled).
@@ -1669,6 +1671,7 @@ def test_provider_failure_between_create_and_confirm_leaves_well_defined_state(
     )
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
     assert call_count["n"] == 1
 
     db_order = _get_order(db_session, order["id"])

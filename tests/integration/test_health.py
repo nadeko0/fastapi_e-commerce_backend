@@ -64,6 +64,7 @@ def test_health_check_reports_degraded_and_503_on_database_failure(client, monke
     response = client.get("/health")
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
     body = response.json()
     assert body["status"] == "degraded"
     assert body["services"] == {"database": "unhealthy", "redis": "healthy"}
@@ -84,6 +85,7 @@ def test_health_check_reports_degraded_and_503_on_redis_failure(client, monkeypa
     response = client.get("/health")
 
     assert response.status_code == 503
+    assert response.headers["Retry-After"]
     body = response.json()
     assert body["status"] == "degraded"
     assert body["services"] == {"database": "healthy", "redis": "unhealthy"}

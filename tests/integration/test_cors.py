@@ -83,4 +83,4 @@ def test_preflight_for_a_method_the_api_does_not_serve_is_refused(client):
 def test_retry_after_is_readable_by_the_browser(client):
     response = client.get("/health", headers={"Origin": ORIGIN})
 
-    assert response.headers["access-control-expose-headers"] == "Retry-After, X-Request-ID"
+    assert response.headers["access-control-expose-headers"] == "Retry-After, X-Request-ID, RateLimit, RateLimit-Policy"
