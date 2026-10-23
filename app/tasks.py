@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from datetime import timedelta
+from types import SimpleNamespace
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -219,6 +220,10 @@ def send_order_confirmation(order_id: int) -> None:
             f"email_sent:order_confirmation:{order_id}", EMAIL_SENT_MARKER_TTL_SECONDS
         ):
             return
+        # Everything the email needs is loaded: end the transaction before
+        # the (possibly slow) SMTP call, not after it.
+        db.expunge_all()
+        db.rollback()
         send_order_confirmation_email(order.user.email, order)
 
 @celery.task(
@@ -256,6 +261,9 @@ def send_order_status_update(order_id: int) -> None:
             EMAIL_SENT_MARKER_TTL_SECONDS,
         ):
             return
+        # Loaded above: end the transaction before the SMTP call.
+        db.expunge_all()
+        db.rollback()
         send_order_status_update_email(order.user.email, order)
 
 # Accounts anonymised per transaction by purge_expired_deletion_requests.
@@ -411,9 +419,23 @@ def expire_unpaid_orders(db) -> int:
             db.rollback()
             continue
         cancel_order_and_restock(db, order)
+        # What the email needs is read before the commit: after it the
+        # attributes are expired, and reading order.user would open a new
+        # transaction that stays open through the SMTP call (a slow server
+        # past idle_in_transaction_session_timeout ends the connection and
+        # aborts the sweep).
+        recipient = order.user.email
+        notice = SimpleNamespace(
+            id=order.id,
+            status=order.status,
+            payment_status=order.payment_status,
+            created_at=order.created_at,
+            total_amount=order.total_amount,
+            currency=order.currency,
+        )
         db.commit()
         cancelled += 1
-        send_order_cancellation_email(order.user.email, order)
+        send_order_cancellation_email(recipient, notice)
     return cancelled
 
 @celery.task(
@@ -525,6 +547,9 @@ def check_low_stock(threshold: int = 5) -> None:
             .all()
         )
 
+        # Loaded: end the transaction before the SMTP call.
+        db.expunge_all()
+        db.rollback()
         if low_stock_products:
             send_low_stock_alert_email(
                 settings.ADMIN_EMAIL,
