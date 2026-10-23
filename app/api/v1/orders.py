@@ -17,6 +17,7 @@ from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, CurrentUser, DbSession, Provider
 from app.core.idempotency import ensure_same_request, request_fingerprint
+from app.core.openapi import DocumentedRoute
 from app.models.address import Address
 from app.models.order import Order
 from app.models.order_items import OrderItem
@@ -57,7 +58,8 @@ from app.services.payment.types import PaymentIntentStatus
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/orders", tags=["orders"])
+router = APIRouter(prefix="/orders", tags=["orders"], route_class=DocumentedRoute)
+
 
 # Everything OrderResponse reads off an order: its address, its lines, and
 # each line's product and variant (variant_sku). On an AsyncSession a lazy
@@ -1703,16 +1705,28 @@ def _has_open_dispute(db: Session, order_id: int, payment_id: int | None = None)
     return db.scalars(query.limit(1)).first() is not None
 
 
+# Stripe-Signature is documented as required: a request without it is
+# refused. It is read from the request, not declared as a Header parameter,
+# because a required parameter would make FastAPI answer a missing header
+# with its own 422; the refusal stays the 400 below, like a bad signature.
 @router.post(
     "/webhooks/stripe",
     response_model=APIResponse[dict],
-    responses={400: {"description": "Invalid webhook signature"}},
+    responses={400: {"description": "Missing or invalid webhook signature"}},
+    openapi_extra={
+        "parameters": [{
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": True,
+            "description": "Stripe's signature of the payload (t=timestamp,v1=signature).",
+            "schema": {"type": "string"},
+        }]
+    },
 )
 async def stripe_webhook(
     request: Request,
     db: DbSession,
     provider: Provider,
-    stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
 ):
     """
     Receive Stripe webhook events for both payment flows. The event is
@@ -1733,6 +1747,7 @@ async def stripe_webhook(
     missing-auth bug.
     """
     payload = await request.body()
+    stripe_signature = request.headers.get("Stripe-Signature")
 
     try:
         event = provider.construct_webhook_event(

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.dependencies import Cache, DbSession
+from app.core.openapi import DocumentedRoute
 from app.core.rate_limit import (
     client_address,
     parse_rate,
@@ -340,7 +341,33 @@ def _cart_full(error: CartFullError) -> HTTPException:
     )
 
 
-router = APIRouter(prefix="/cart", tags=["cart"])
+class GuestCartRoute(DocumentedRoute):
+    """The cart serves guests as well as accounts: DocumentedRoute makes its
+    security optional (a token is not required; one that is sent must be
+    good, 401), and the guest cart cookie it reads is documented here as an
+    optional cookie parameter. OpenAPI 3.1.0 has no cookie scheme that fits
+    a Security Requirement for it: apiKey in cookie names a credential, and
+    this cookie is only the guest's cart id."""
+
+    def __init__(self, path, endpoint, **kwargs) -> None:
+        extra = kwargs.get("openapi_extra") or {}
+        kwargs["openapi_extra"] = {
+            **extra,
+            "parameters": [
+                *extra.get("parameters", []),
+                {
+                    "name": guest_cart_cookie_name(),
+                    "in": "cookie",
+                    "required": False,
+                    "description": "The guest cart, set by the server on the first add.",
+                    "schema": {"type": "string"},
+                },
+            ],
+        }
+        super().__init__(path, endpoint, **kwargs)
+
+
+router = APIRouter(prefix="/cart", tags=["cart"], route_class=GuestCartRoute)
 
 async def get_cart_owner(
     request: Request,

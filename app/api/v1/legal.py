@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession
+from app.core.openapi import DocumentedRoute
 from app.core.security import verify_password_async
 from app.models.user import User
 from app.schemas.common import APIResponse
@@ -19,7 +20,7 @@ from app.schemas.legal import (
 )
 from app.services.gdpr import GDPRService
 
-router = APIRouter(prefix="/legal", tags=["Legal & GDPR"])
+router = APIRouter(prefix="/legal", tags=["Legal & GDPR"], route_class=DocumentedRoute)
 
 # Legal document content - In production, these should be stored in a database or CMS
 PRIVACY_POLICY = """

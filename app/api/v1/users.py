@@ -25,6 +25,7 @@ from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.core.dependencies import BearerToken, Cache, CurrentUser, DbSession
 from app.core.errors import sanitized_errors
+from app.core.openapi import DocumentedRoute
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password
 from app.core.rate_limit import check_login_attempt, clear_login_failures
 from app.core.security import (
@@ -88,7 +89,7 @@ from app.services.email import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["users"], route_class=DocumentedRoute)
 # oauth2_scheme is imported from app.core.security rather than redefined here
 # with a second OAuth2PasswordBearer instance: a prior local definition used
 # tokenUrl="users/login" (missing the /api/v1 prefix, unlike security.py's
