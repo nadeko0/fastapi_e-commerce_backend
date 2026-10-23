@@ -2,7 +2,9 @@ from typing import Annotated, ClassVar, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
+    AfterValidator,
     AnyHttpUrl,
+    BeforeValidator,
     Field,
     SecretStr,
     TypeAdapter,
@@ -35,6 +37,10 @@ def _split_comma_separated(v: str | list[str]) -> list[str]:
         return [i.strip() for i in v.split(",") if i.strip()]
     return v
 
+
+# A list setting given as a comma-separated env string (or a JSON list).
+# NoDecode: see the explanation on BACKEND_CORS_ORIGINS below.
+CommaSeparated = Annotated[list[str], NoDecode, BeforeValidator(_split_comma_separated)]
 
 _HTTP_URL = TypeAdapter(AnyHttpUrl)
 _DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -141,12 +147,9 @@ class Settings(BaseSettings):
     # comma-separated case - ever ran. Confirmed by actually deploying the
     # Docker image, not just running the local test suite (which never sets
     # this env var and so never exercised the parsing path at all).
-    BACKEND_CORS_ORIGINS: Annotated[list[str], NoDecode] = []
-
-    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
-    @classmethod
-    def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:
-        return [_to_origin(item) for item in _split_comma_separated(v)]
+    BACKEND_CORS_ORIGINS: Annotated[
+        CommaSeparated, AfterValidator(lambda origins: [_to_origin(o) for o in origins])
+    ] = []
 
     JWT_SECRET_KEY: SecretStr
     JWT_ALGORITHM: str = "HS256"
@@ -256,12 +259,7 @@ class Settings(BaseSettings):
     # is the rightmost X-Forwarded-For entry that is not itself trusted (see
     # client_address in app/core/rate_limit.py). Behind a proxy this MUST be
     # set, or every visitor shares the proxy's rate-limit counters.
-    TRUSTED_PROXIES: Annotated[list[str], NoDecode] = []
-
-    @field_validator("TRUSTED_PROXIES", mode="before")
-    @classmethod
-    def split_trusted_proxies(cls, v: str | list[str]) -> list[str]:
-        return _split_comma_separated(v)
+    TRUSTED_PROXIES: CommaSeparated = []
     # Per worker process. Unset (the default) means no limit, which is the
     # behaviour this app always had. When set, a request arriving while this
     # many are already in progress gets an immediate 503 instead of joining
@@ -370,14 +368,9 @@ class Settings(BaseSettings):
     # Cookie Consent Settings
     COOKIE_CONSENT_ENABLED: bool = True
     COOKIE_CONSENT_EXPIRE_DAYS: int = 365
-    ESSENTIAL_COOKIES: Annotated[list[str], NoDecode] = [
+    ESSENTIAL_COOKIES: CommaSeparated = [
         "session", "csrf_token", "__Host-guest_cart",
     ]
-
-    @field_validator("ESSENTIAL_COOKIES", mode="before")
-    @classmethod
-    def split_essential_cookies(cls, v: str | list[str]) -> list[str]:
-        return _split_comma_separated(v)
 
     # GDPR Email Templates
     GDPR_EXPORT_READY_TEMPLATE: str = "gdpr_export_ready"
