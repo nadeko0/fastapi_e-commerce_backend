@@ -11,7 +11,7 @@ makes them disagree: a webhook that never arrived, a refund made at the
 provider, a row changed by hand.
 """
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from celery.schedules import crontab
@@ -510,7 +510,7 @@ def _direct_payment(db, order_id, intent_id, *, status="succeeded", amount=2500,
     return payment
 
 
-NOW = datetime(2026, 10, 22, 12, 0, 0)
+NOW = datetime(2026, 10, 22, 12, 0, 0, tzinfo=UTC)
 
 
 def _payment_made_at(shop, provider, order_id, created_at):

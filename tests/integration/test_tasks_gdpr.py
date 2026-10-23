@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from freezegun import freeze_time
@@ -277,7 +277,7 @@ def test_purge_processes_every_batch(db_session, monkeypatch):
         assert db_session.get(User, account.id).email.endswith("@deleted.invalid")
 
 
-PURGE_NOW = datetime(2026, 10, 20, 3, 0, 0)
+PURGE_NOW = datetime(2026, 10, 20, 3, 0, 0, tzinfo=UTC)
 
 
 def _requested_at(db_session, email, requested_at, **overrides):

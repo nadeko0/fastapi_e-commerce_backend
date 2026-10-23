@@ -10,7 +10,7 @@ The route-level walk through the same table (PUT /orders/{id}/status) is
 tests/integration/test_order_status_machine.py.
 """
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from itertools import product as pairs
 
@@ -82,7 +82,7 @@ def test_every_status_is_reachable_from_new_and_there_is_no_cycle():
 
     def depth(status, seen=()):
         assert status not in seen, f"cycle through {status}"
-        return 1 + max((depth(n, seen + (status,)) for n in ORDER_STATUS_TRANSITIONS[status]),
+        return 1 + max((depth(n, (*seen, status)) for n in ORDER_STATUS_TRANSITIONS[status]),
                        default=0)
 
     assert depth(N) == 5  # new, confirmed, processing, sent, delivered
@@ -225,7 +225,7 @@ def test_an_order_without_lines_is_cancelled_with_nothing_to_return(db_session):
     user, address, product, variant, other = _shop(db_session)
     order = Order(user_id=user.id, status="new", payment_status="pending",
                   shipping_address_id=address.id, total_amount=Decimal("0"),
-                  created_at=datetime(2026, 1, 1))
+                  created_at=datetime(2026, 1, 1, tzinfo=UTC))
     db_session.add(order)
     db_session.commit()
 

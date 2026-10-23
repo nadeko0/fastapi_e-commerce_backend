@@ -4,7 +4,7 @@ update, cancellation), rendered with the real message builders and only
 the email provider replaced: amounts are stated in the order's own
 currency.
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -30,7 +30,7 @@ def outbox(monkeypatch):
 def _order(currency, status="new"):
     order = Order(id=42, status=status, payment_status="pending", user_id=1,
                   shipping_address_id=1, total_amount=Decimal("12.50"), currency=currency,
-                  created_at=datetime(2026, 10, 25, 1, 30, 0))
+                  created_at=datetime(2026, 10, 25, 1, 30, 0, tzinfo=UTC))
     # The confirmation reads the flat OrderItemResponse fields.
     order.items = []
     return order
@@ -40,7 +40,7 @@ def _confirmation_order(currency):
     line = SimpleNamespace(product_name="Widget <b>", quantity=5,
                            price_at_time=Decimal("2.50"))
     return SimpleNamespace(id=42, status="new", total_amount=Decimal("12.50"),
-                           currency=currency, created_at=datetime(2026, 10, 25, 1, 30, 0),
+                           currency=currency, created_at=datetime(2026, 10, 25, 1, 30, 0, tzinfo=UTC),
                            items=[line])
 
 

@@ -249,15 +249,15 @@ def _order(db_session, user_id, created_at):
 
 
 def test_the_order_list_shows_only_ones_own_orders_newest_first(client, db_session):
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     headers = _auth(client)
     _register(client, "other@example.com")
     me = db_session.query(User).filter(User.email == "owner@example.com").one()
     other = db_session.query(User).filter(User.email == "other@example.com").one()
-    older = _order(db_session, me.id, datetime(2026, 1, 1))
-    newer = _order(db_session, me.id, datetime(2026, 2, 1))
-    _order(db_session, other.id, datetime(2026, 3, 1))
+    older = _order(db_session, me.id, datetime(2026, 1, 1, tzinfo=UTC))
+    newer = _order(db_session, me.id, datetime(2026, 2, 1, tzinfo=UTC))
+    _order(db_session, other.id, datetime(2026, 3, 1, tzinfo=UTC))
 
     response = client.get(f"{USERS}/orders", headers=headers)
 
