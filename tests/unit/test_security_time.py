@@ -8,6 +8,7 @@ clock instead. On a host whose timezone is UTC the two time-based tests
 cannot tell the old code from the new, which is what the source check at the
 bottom is for.
 """
+import asyncio
 import inspect
 import time
 
@@ -23,7 +24,7 @@ from app.core.security import (
 
 def test_password_change_watermark_is_the_current_utc_epoch(fake_redis):
     before = time.time()
-    invalidate_tokens_issued_before_now(42)
+    asyncio.run(invalidate_tokens_issued_before_now(42))
     after = time.time()
 
     watermark = float(fake_redis.get("pwd_changed:42"))
@@ -36,7 +37,7 @@ def test_password_change_watermark_is_the_current_utc_epoch(fake_redis):
 def test_logout_blacklists_the_token_for_its_remaining_lifetime(fake_redis):
     token = create_access_token(7)
 
-    logout(token)
+    asyncio.run(logout(token))
 
     jti = jwt.decode(token, options={"verify_signature": False})["jti"]
     ttl = fake_redis.ttl(f"blacklist:jti:{jti}")

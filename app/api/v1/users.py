@@ -24,16 +24,16 @@ from app.core.security import (
     generate_password_reset_token,
     get_current_active_user,
     get_password_hash_async,
-    invalidate_tokens_issued_before_now_async,
-    issue_refresh_token_async,
+    invalidate_tokens_issued_before_now,
+    issue_refresh_token,
     oauth2_scheme,
-    rotate_refresh_token_async,
+    rotate_refresh_token,
     verify_email_token,
     verify_password_async,
     verify_password_reset_token,
 )
 from app.core.security import (
-    logout_async as logout_tokens,
+    logout as logout_tokens,
 )
 from app.models.address import Address
 from app.models.order import Order
@@ -358,7 +358,7 @@ async def login(
 
     logger.info(f"Generating tokens for user {user_id}")
     access_token = create_access_token(user_id)
-    refresh_token = await issue_refresh_token_async(user_id)
+    refresh_token = await issue_refresh_token(user_id)
     logger.info(f"Tokens generated for user {user_id}")
 
     # The cart the visitor filled before logging in becomes part of the
@@ -392,7 +392,7 @@ async def refresh_access_token(
     re-login.
     """
     try:
-        new_access_token, new_refresh_token = await rotate_refresh_token_async(
+        new_access_token, new_refresh_token = await rotate_refresh_token(
             refresh_in.refresh_token, db
         )
     except RefreshTokenError:
@@ -1153,7 +1153,7 @@ async def reset_password(
         # used again once Redis is back. After the bcrypt hash rather than
         # before it, so that a login with the old password during the hash
         # does not mint a token newer than the watermark.
-        if not await invalidate_tokens_issued_before_now_async(user_id):
+        if not await invalidate_tokens_issued_before_now(user_id):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Password reset is temporarily unavailable, please retry"
