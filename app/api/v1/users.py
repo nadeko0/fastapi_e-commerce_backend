@@ -1,8 +1,17 @@
 import logging
 from datetime import datetime, timedelta
-from typing import List
+from typing import Annotated, List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy import func, select, update
@@ -13,7 +22,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.api.v1.cart import merge_guest_cart_on_login_async
 from app.core.clock import as_utc, utc_now
 from app.core.config import settings
-from app.core.database import get_async_db
+from app.core.dependencies import BearerToken, Cache, CurrentUser, DbSession
 from app.core.errors import sanitized_errors
 from app.core.rate_limit import check_login_attempt, clear_login_failures
 from app.core.security import (
@@ -23,11 +32,9 @@ from app.core.security import (
     create_access_token,
     generate_email_verification_token,
     generate_password_reset_token,
-    get_current_active_user,
     get_password_hash_async,
     invalidate_tokens_issued_before_now,
     issue_refresh_token,
-    oauth2_scheme,
     rotate_refresh_token,
     verify_email_token,
     verify_password_async,
@@ -76,7 +83,6 @@ from app.services.email import (
     send_password_reset_email,
     send_welcome_email,
 )
-from app.services.redis_async import AsyncRedisService, get_cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +120,8 @@ REGISTRATION_RECEIVED = (
 async def register_user(
     user_in: UserCreate,
     request: Request,
-    db: AsyncSession = Depends(get_async_db, scope="function"),
-    background_tasks: BackgroundTasks = None,
+    db: DbSession,
+    background_tasks: BackgroundTasks,
 ):
     """Register a new user account and queue a welcome/verification email.
 
@@ -178,22 +184,21 @@ async def register_user(
     # login()).
     await db.close()
 
-    if background_tasks:
-        if new_email:
-            verification_token = generate_email_verification_token(new_email)
-            logger.info(f"Queuing welcome email for user {new_user_id}")
-            background_tasks.add_task(
-                send_welcome_email,
-                new_email,
-                new_full_name,
-                verification_token
-            )
-            logger.info(f"Welcome email task queued for user {new_user_id}")
-        elif existing_email:
-            # To the address on the account, which may differ in case from
-            # the one typed.
-            logger.info("Registration for an existing account; owner notified")
-            background_tasks.add_task(send_account_exists_email, existing_email)
+    if new_email:
+        verification_token = generate_email_verification_token(new_email)
+        logger.info(f"Queuing welcome email for user {new_user_id}")
+        background_tasks.add_task(
+            send_welcome_email,
+            new_email,
+            new_full_name,
+            verification_token
+        )
+        logger.info(f"Welcome email task queued for user {new_user_id}")
+    elif existing_email:
+        # To the address on the account, which may differ in case from
+        # the one typed.
+        logger.info("Registration for an existing account; owner notified")
+        background_tasks.add_task(send_account_exists_email, existing_email)
 
     return APIResponse.success_response({"message": REGISTRATION_RECEIVED})
 
@@ -207,7 +212,7 @@ async def register_user(
 )
 async def verify_email(
     token: str,
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    db: DbSession,
 ):
     """Confirm a user's email address using a verification token."""
 
@@ -244,8 +249,8 @@ async def verify_email(
     responses={400: {"description": "Email already verified"}},
 )
 async def resend_verification_email(
-    current_user: User = Depends(get_current_active_user),
-    background_tasks: BackgroundTasks = None,
+    current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
 ):
     """Resend the email verification link to the current user."""
 
@@ -255,15 +260,14 @@ async def resend_verification_email(
             detail="Email already verified"
         )
 
-    if background_tasks:
-        verification_token = generate_email_verification_token(current_user.email)
-        logger.info(f"Queuing verification email resend for user {current_user.id}")
-        background_tasks.add_task(
-            send_email_verification,
-            current_user.email,
-            verification_token
-        )
-        logger.info(f"Verification email resend task queued for user {current_user.id}")
+    verification_token = generate_email_verification_token(current_user.email)
+    logger.info(f"Queuing verification email resend for user {current_user.id}")
+    background_tasks.add_task(
+        send_email_verification,
+        current_user.email,
+        verification_token
+    )
+    logger.info(f"Verification email resend task queued for user {current_user.id}")
 
     return APIResponse.success_response({
         "message": "Verification email sent"
@@ -281,9 +285,9 @@ async def resend_verification_email(
 async def login(
     request: Request,
     response: Response,
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
-    redis: AsyncRedisService = Depends(get_cache_service),
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    db: DbSession,
+    redis: Cache,
 ):
     """Authenticate with email/password and receive access and refresh tokens.
 
@@ -383,7 +387,7 @@ async def login(
 )
 async def refresh_access_token(
     refresh_in: RefreshTokenRequest,
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    db: DbSession,
 ):
     """Exchange a refresh token for a new access token, rotating the refresh
     token in the process. Does not require a valid (or even present) access
@@ -415,9 +419,9 @@ async def refresh_access_token(
     responses={503: {"description": "Tokens could not be revoked, retry the request"}},
 )
 async def logout(
+    token: BearerToken,
+    current_user: CurrentUser,
     logout_in: LogoutRequest = LogoutRequest(),
-    token: str = Depends(oauth2_scheme),
-    current_user: User = Depends(get_current_active_user),
 ):
     """Log out the current user: blacklist the access token in use and,
     if a refresh token is supplied, revoke its whole token family so it
@@ -463,8 +467,8 @@ async def update_consent(
     consent_type: ConsentType,
     granted: bool,
     request: Request,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """Update the current user's consent for a given consent type."""
 
@@ -522,9 +526,9 @@ async def update_consent(
     responses={400: {"description": "Too much data for an inline export (GDPR_EXPORT_MAX_RECORDS)"}},
 )
 async def export_user_data(
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
-    background_tasks: BackgroundTasks = None,
+    current_user: CurrentUser,
+    db: DbSession,
+    background_tasks: BackgroundTasks,
 ):
     """Export the current user's personal data, consents, addresses, and orders (GDPR)."""
 
@@ -603,14 +607,13 @@ async def export_user_data(
     )
 
 
-    if background_tasks:
-        logger.info(f"Queuing GDPR data export email for user {current_user.id}")
-        background_tasks.add_task(
-            send_gdpr_export_email,
-            current_user.email,
-            export_metadata
-        )
-        logger.info(f"GDPR data export email task queued for user {current_user.id}")
+    logger.info(f"Queuing GDPR data export email for user {current_user.id}")
+    background_tasks.add_task(
+        send_gdpr_export_email,
+        current_user.email,
+        export_metadata
+    )
+    logger.info(f"GDPR data export email task queued for user {current_user.id}")
 
     return APIResponse.success_response(export)
 
@@ -621,8 +624,8 @@ async def export_user_data(
 )
 async def delete_user_data(
     deletion: GDPRDelete,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """Request deletion of the current user's account and data (GDPR)."""
 
@@ -654,7 +657,7 @@ async def delete_user_data(
 
 @router.get("/me", response_model=APIResponse[UserResponse])
 async def get_current_user_data(
-    current_user: User = Depends(get_current_active_user),
+    current_user: CurrentUser,
 ):
     """Retrieve the current authenticated user's profile."""
 
@@ -671,8 +674,8 @@ async def get_current_user_data(
 )
 async def update_current_user(
     user_in: UserUpdate,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """Update fields on the current authenticated user's profile."""
 
@@ -723,9 +726,9 @@ async def update_current_user(
 
 @router.get("/addresses", response_model=APIResponse[AddressListResponse])
 async def list_addresses(
-    pagination: PaginationParams = Depends(),
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    pagination: Annotated[PaginationParams, Query()],
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """List the current user's active addresses, paginated."""
 
@@ -765,8 +768,8 @@ async def list_addresses(
 )
 async def create_address(
     address_in: AddressCreate,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """Add a new address for the current user."""
 
@@ -838,8 +841,8 @@ async def create_address(
 async def update_address(
     address_id: Int32,
     address_in: AddressUpdate,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """Update fields on one of the current user's addresses."""
 
@@ -898,8 +901,8 @@ async def update_address(
 )
 async def delete_address(
     address_id: Int32,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """Deactivate one of the current user's addresses."""
 
@@ -955,8 +958,8 @@ async def delete_address(
 )
 async def set_default_address(
     default_address: SetDefaultAddress,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """Mark one of the current user's addresses as the default shipping address."""
 
@@ -1004,9 +1007,9 @@ async def set_default_address(
 
 @router.get("/orders", response_model=APIResponse[List[OrderResponse]])
 async def get_user_orders(
-    pagination: PaginationParams = Depends(),
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    pagination: Annotated[PaginationParams, Query()],
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """List the current user's orders, most recent first, paginated."""
 
@@ -1039,22 +1042,21 @@ def _invalid_reset_token() -> HTTPException:
 @router.post("/password/reset", response_model=APIResponse[dict])
 async def request_password_reset(
     reset_request: PasswordReset,
-    db: AsyncSession = Depends(get_async_db, scope="function"),
-    background_tasks: BackgroundTasks = None,
+    db: DbSession,
+    background_tasks: BackgroundTasks,
 ):
     """Request a password reset email; always succeeds to avoid leaking registered emails."""
 
     user = await _user_by_email(db, reset_request.email)
     if user:
         token = generate_password_reset_token(user.email, user.hashed_password)
-        if background_tasks:
-            logger.info(f"Queuing password reset email for user {user.id}")
-            background_tasks.add_task(
-                send_password_reset_email,
-                user.email,
-                token
-            )
-            logger.info(f"Password reset email task queued for user {user.id}")
+        logger.info(f"Queuing password reset email for user {user.id}")
+        background_tasks.add_task(
+            send_password_reset_email,
+            user.email,
+            token
+        )
+        logger.info(f"Password reset email task queued for user {user.id}")
 
 
     return APIResponse.success_response({
@@ -1071,7 +1073,7 @@ async def request_password_reset(
 )
 async def validate_reset_token(
     token: str,
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    db: DbSession,
 ):
     """Check whether a password reset token is still valid."""
 
@@ -1110,7 +1112,7 @@ async def reset_password(
     token: str,
     new_password: PasswordUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_async_db, scope="function"),
+    db: DbSession,
 ):
     """Reset a user's password using a valid reset token."""
 

@@ -7,7 +7,7 @@ import time
 import uuid
 import weakref
 from datetime import timedelta
-from typing import NamedTuple, Optional, Tuple, Union
+from typing import Annotated, NamedTuple, Optional, Tuple, Union
 
 import bcrypt
 import jwt
@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import utc_now
 from app.core.config import settings
-from app.core.database import get_async_db
+from app.core.database import DbSession
 from app.models.user import User, UserRole
 from app.services.redis_async import AsyncRedisService, is_token_blacklisted, is_token_superseded
 
@@ -241,8 +241,8 @@ class RevocationUnavailable(Exception):
 #   the row in the route's own session (see update_consent in
 #   app/api/v1/users.py) and change that one.
 async def get_current_user(
-    db: AsyncSession = Depends(get_async_db, scope="function"),
-    token: str = Depends(oauth2_scheme)
+    db: DbSession,
+    token: Annotated[str, Depends(oauth2_scheme)],
 ) -> User:
 
     # A rejected token that was presented is named as such (RFC 6750
@@ -300,7 +300,7 @@ async def get_current_user(
     return user
 
 async def get_current_active_user(
-    current_user: User = Depends(get_current_user),
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
     if not current_user.is_active:
         raise HTTPException(
@@ -310,7 +310,7 @@ async def get_current_active_user(
     return current_user
 
 async def get_current_admin_user(
-    current_user: User = Depends(get_current_active_user),
+    current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> User:
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
@@ -329,8 +329,8 @@ _optional_oauth2_scheme = OAuth2PasswordBearer(
 
 async def get_optional_active_user(
     request: Request,
-    db: AsyncSession = Depends(get_async_db, scope="function"),
-    _declared: Optional[str] = Depends(_optional_oauth2_scheme),
+    db: DbSession,
+    _declared: Annotated[Optional[str], Depends(_optional_oauth2_scheme)],
 ) -> Optional[User]:
     """For a route that serves both logged-in and anonymous callers (the
     cart): the active user when the request carries an Authorization

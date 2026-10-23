@@ -1,8 +1,8 @@
 import logging
 from contextlib import contextmanager
-from typing import AsyncGenerator
+from typing import Annotated, AsyncGenerator
 
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, status
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -143,3 +143,11 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="A database error occurred"
             )
+
+# The session dependency, declared once. scope="function" ends the session
+# (commit, close) after the route returns but before the response is sent
+# (see tests/integration/test_db_session_scope.py). Everything that takes
+# a session names this callable with this scope, so FastAPI's per-request
+# dependency cache shares one session between a route and the dependencies
+# it uses (app.core.security).
+DbSession = Annotated[AsyncSession, Depends(get_async_db, scope="function")]
