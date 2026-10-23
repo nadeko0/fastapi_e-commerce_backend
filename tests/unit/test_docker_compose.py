@@ -149,7 +149,7 @@ def test_base_images_are_pinned_by_digest_on_their_current_majors():
     # stop being reproducible and a replaced image is taken unnoticed. The
     # tag stays in front of the digest for the reader (Docker uses the
     # digest). Majors as they were: python 3.13, postgres 15, redis 7,
-    # uv 0.13.0.
+    # uv 0.13.5.
     dockerfile = _read("Dockerfile")
     references = re.findall(r"^FROM (\S+)", dockerfile, re.M)
     stages = set(re.findall(r"^FROM \S+ AS (\S+)", dockerfile, re.M))
@@ -158,7 +158,7 @@ def test_base_images_are_pinned_by_digest_on_their_current_majors():
     ]
     references += re.findall(r"^\s*image: (\S+)", _read("docker-compose.yml"), re.M)
     expected_tags = [
-        "python:3.13-slim", "python:3.13-slim", "ghcr.io/astral-sh/uv:0.13.0",
+        "python:3.13-slim", "python:3.13-slim", "ghcr.io/astral-sh/uv:0.13.5",
         "postgres:15-alpine", "redis:7-alpine",
     ]
     assert sorted(ref.split("@")[0] for ref in references) == sorted(expected_tags), references
