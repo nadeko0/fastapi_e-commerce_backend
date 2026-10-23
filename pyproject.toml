@@ -94,6 +94,9 @@ ignore = [
     # UP046 (PEP 695 generic class syntax) is a hand migration of the one generic
     # response model. Tracked separately.
     "UP046",
+    # SIM300 (yoda conditions) would turn `assert x == expected` into `assert expected == x`
+    # in the tests: the actual-then-expected order is the project convention.
+    "SIM300",
 ]
 # Added on top of E/F/I/W: pyupgrade (UP), bugbear (B), async pitfalls (ASYNC),
 # naive datetimes (DTZ), FastAPI (FAST), simplifications (SIM), and the Ruff-specific
