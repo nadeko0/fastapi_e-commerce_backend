@@ -349,7 +349,8 @@ async def login(
         # the email as submitted, account or no account.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password"
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     # A success wipes the email's failed-attempt count. After db.close()
@@ -632,7 +633,8 @@ async def delete_user_data(
     if not await verify_password_async(deletion.password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect password"
+            detail="Incorrect password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     # See the identical note in update_consent above: current_user is a
