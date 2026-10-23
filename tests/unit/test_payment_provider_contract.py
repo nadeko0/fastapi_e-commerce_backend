@@ -31,9 +31,10 @@ Where the two differ by design, the last section says how and why, and
 asserts each side.
 """
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Callable, Dict
+from typing import Any
 
 import pytest
 from fake_stripe_api import FakeStripeAPI
@@ -73,7 +74,7 @@ class Stripe:
     # The customer finishing 3D Secure on the page next_action sent them to.
     authenticate: Callable[[str], None]
     # Stripe finishing an asynchronous refund; returns the event it sends.
-    settle_refund: Callable[[str], Dict[str, Any]]
+    settle_refund: Callable[[str], dict[str, Any]]
     # api.stripe.com becoming unreachable.
     go_offline: Callable[[], None]
 

@@ -8,7 +8,7 @@ not redesigning the call sites in app/api/v1/orders.py.
 import json
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.services.payment.exceptions import SignatureVerificationError
 from app.services.payment.types import (
@@ -20,7 +20,7 @@ from app.services.payment.types import (
 
 
 def webhook_event_from_payload(
-    payload: bytes, sig_header: Optional[str], signed_at: int
+    payload: bytes, sig_header: str | None, signed_at: int
 ) -> WebhookEventData:
     """The event in a webhook body, read the same way by both providers once
     its signature is verified. A body that is not a UTF-8 JSON object is
@@ -51,8 +51,8 @@ class PaymentProvider(ABC):
         amount: int,
         currency: str,
         idempotency_key: str,
-        payment_method: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        payment_method: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> PaymentIntent:
         """Mirrors stripe.PaymentIntent.create(...)."""
         raise NotImplementedError
@@ -62,7 +62,7 @@ class PaymentProvider(ABC):
         self,
         payment_intent_id: str,
         *,
-        idempotency_key: Optional[str] = None,
+        idempotency_key: str | None = None,
         return_url: str,
     ) -> PaymentIntent:
         """Mirrors stripe.PaymentIntent.confirm(id, ...).
@@ -86,15 +86,15 @@ class PaymentProvider(ABC):
         self,
         *,
         payment_intent_id: str,
-        amount: Optional[int] = None,
-        idempotency_key: Optional[str] = None,
+        amount: int | None = None,
+        idempotency_key: str | None = None,
     ) -> Refund:
         """Mirrors stripe.Refund.create(payment_intent=..., amount=...).
         amount=None means a full refund of whatever has not yet been refunded."""
         raise NotImplementedError
 
     @abstractmethod
-    def list_refunds(self, payment_intent_id: str) -> List[Refund]:
+    def list_refunds(self, payment_intent_id: str) -> list[Refund]:
         """Mirrors stripe.Refund.list(payment_intent=...): every refund of the
         PaymentIntent, whatever its status, each with `provider_status` set.
         A PaymentIntent with none gives []. Read only; used by the daily
@@ -118,8 +118,8 @@ class PaymentProvider(ABC):
         idempotency_key: str,
         success_url: str,
         cancel_url: str,
-        description: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        description: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> CheckoutSession:
         """Mirrors stripe.checkout.Session.create(mode="payment", line_items=[...],
         success_url=..., cancel_url=..., ...). success_url/cancel_url are
@@ -145,7 +145,7 @@ class PaymentProvider(ABC):
     def construct_webhook_event(
         self,
         payload: bytes,
-        sig_header: Optional[str],
+        sig_header: str | None,
         webhook_secret: str,
         tolerance_seconds: int = 300,
     ) -> WebhookEventData:

@@ -1,7 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import List, Optional
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -31,7 +30,7 @@ class PaymentStatus(str, Enum):
 
 class OrderItemBase(BaseModel):
     product_id: int
-    variant_id: Optional[int] = None
+    variant_id: int | None = None
     quantity: int = Field(..., gt=0)
     price_at_time: Decimal = Field(..., ge=0, decimal_places=2)
 
@@ -52,7 +51,7 @@ class OrderItemResponse(OrderItemInDB):
     product_image: str
     # None for the common no-variant line - only set when this line was for
     # a specific ProductVariant (app/models/product.py).
-    variant_sku: Optional[str] = None
+    variant_sku: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -89,7 +88,7 @@ class OrderItemResponse(OrderItemInDB):
 
 class OrderBase(BaseModel):
     shipping_address_id: int
-    delivery_instructions: Optional[str] = Field(None, max_length=500)
+    delivery_instructions: str | None = Field(None, max_length=500)
 
 class OrderInDB(OrderBase):
     id: int
@@ -100,7 +99,7 @@ class OrderInDB(OrderBase):
     currency: str
     created_at: datetime
     updated_at: datetime
-    items: List[OrderItemInDB]
+    items: list[OrderItemInDB]
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -111,13 +110,13 @@ class OrderInDB(OrderBase):
 
 class OrderResponse(OrderInDB):
     shipping_address: "AddressResponse"  # Forward reference
-    items: List[OrderItemResponse]
+    items: list[OrderItemResponse]
 
     model_config = ConfigDict(from_attributes=True)
 
 class OrderListResponse(BaseModel):
     """Schema for list of orders with pagination"""
-    items: List[OrderResponse]
+    items: list[OrderResponse]
     total: int
     page: int
     size: int
@@ -150,13 +149,13 @@ class PaymentCreate(BaseModel):
     # in; one that differs is rejected with 400, the same as an amount that
     # differs from the order total, rather than ignored, so a client that
     # believes it is paying in another currency finds out before any charge.
-    currency: Optional[str] = Field(None, pattern="^[A-Z]{3}$")
+    currency: str | None = Field(None, pattern="^[A-Z]{3}$")
     # Stripe PaymentMethod token to confirm the intent with (e.g.
     # "pm_card_visa"). Optional and defaults to a successful mock card in
     # the provider - a real integration would require this (the client's
     # Stripe.js/Elements collects it), but making it optional here keeps
     # the existing request shape backward compatible.
-    payment_method_token: Optional[str] = None
+    payment_method_token: str | None = None
 
     @field_validator('amount')
     @classmethod
@@ -167,17 +166,17 @@ class PaymentResponse(PaymentCreate):
     id: int
     status: PaymentStatus
     created_at: datetime
-    transaction_id: Optional[str] = None
+    transaction_id: str | None = None
     # Client-side secret needed to complete 3D Secure authentication via
     # Stripe.js when status == requires_action; mirrors the real
     # PaymentIntent.client_secret / next_action shape.
-    client_secret: Optional[str] = None
+    client_secret: str | None = None
     requires_action: bool = False
-    next_action: Optional[dict] = None
+    next_action: dict | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
-def _url_origin(url: str) -> Optional[tuple]:
+def _url_origin(url: str) -> tuple | None:
     """(scheme, host, port) of an http(s) URL, the port filled in from the
     scheme when absent; None for anything else, including a URL carrying
     userinfo or a port that is not a number."""
@@ -202,12 +201,12 @@ class CheckoutSessionCreate(BaseModel):
     The currency is the order's too; as in PaymentCreate, one sent that
     differs from it is rejected (400).
     """
-    currency: Optional[str] = Field(None, pattern="^[A-Z]{3}$")
+    currency: str | None = Field(None, pattern="^[A-Z]{3}$")
     # Where Stripe sends the customer after the hosted page. Omit to use the
     # frontend's /checkout/success and /checkout/cancel (built on
     # settings.FRONTEND_URL in create_checkout_session).
-    success_url: Optional[str] = None
-    cancel_url: Optional[str] = None
+    success_url: str | None = None
+    cancel_url: str | None = None
 
     # Client-controlled redirect targets, followed by the customer's browser
     # from a Stripe-hosted page they trust, right after paying. Any http(s)
@@ -246,7 +245,7 @@ class CheckoutSessionResponse(BaseModel):
 
 class RefundCreate(BaseModel):
     """Schema for issuing a refund on a paid order."""
-    amount: Optional[Decimal] = Field(
+    amount: Decimal | None = Field(
         None, gt=0, max_digits=ORDER_AMOUNT_MAX_DIGITS,
         decimal_places=ORDER_AMOUNT_DECIMAL_PLACES,
         description="Amount to refund; omit for a full refund",

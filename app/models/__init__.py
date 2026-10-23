@@ -14,17 +14,17 @@ from app.models.user import User
 
 # This ensures all models are imported and relationships can be properly established
 __all__ = [
-    'Base',
-    'User',
     'Address',
+    'Base',
+    'Category',
     'Order',
     'OrderItem',
+    'Payment',
+    'PaymentDiscrepancy',
+    'PaymentDispute',
+    'PaymentRefund',
     'Product',
     'ProductVariant',
-    'Category',
-    'Payment',
+    'User',
     'WebhookEvent',
-    'PaymentRefund',
-    'PaymentDispute',
-    'PaymentDiscrepancy',
 ]

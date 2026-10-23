@@ -1,5 +1,4 @@
 from datetime import timedelta
-from typing import Dict, Optional
 
 from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -17,16 +16,16 @@ class GDPRService:
     # process_data_deletion); the pure ones (get_consent_status,
     # validate_retention_period) never touch it, so a route that only calls
     # those builds the service without a session.
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self, db: AsyncSession | None = None):
         self.db = db
 
     async def update_user_consent(
         self,
         user: User,
         consent_update: ConsentUpdate,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
-    ) -> Dict[str, bool]:
+        ip_address: str | None = None,
+        user_agent: str | None = None
+    ) -> dict[str, bool]:
         """
         Update user's consent preferences and maintain consent history
         """
@@ -156,7 +155,7 @@ class GDPRService:
                 detail="Failed to process deletion request"
             )
 
-    def get_consent_status(self, user: User) -> Dict:
+    def get_consent_status(self, user: User) -> dict:
         """
         Get current consent status for a user
         """

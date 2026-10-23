@@ -1,5 +1,5 @@
 import html
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 import app.services.email as email
 from app.core.clock import utc_now
@@ -129,7 +129,7 @@ def send_order_cancellation_email(to_email: str, order: Order) -> bool:
         html_content
     )
 
-def send_low_stock_alert_email(to_email: str, products: List[Product]) -> bool:
+def send_low_stock_alert_email(to_email: str, products: list[Product]) -> bool:
     # product.name is admin-entered and unvalidated for markup; escape it
     # before rendering into the HTML alert email (defense in depth, mirrors
     # the order-confirmation and welcome emails).

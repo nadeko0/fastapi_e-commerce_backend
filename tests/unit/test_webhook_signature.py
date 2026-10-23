@@ -15,7 +15,7 @@ from the machine's local zone.
 import hashlib
 import hmac
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from freezegun import freeze_time
@@ -27,7 +27,7 @@ from app.services.payment.stripe_provider import StripePaymentProvider
 SECRET = "webhook-signing-secret-for-tests-not-a-real-one"
 OTHER_SECRET = "another-webhook-signing-secret-for-tests"
 TOLERANCE = 300
-NOW = datetime(2026, 10, 21, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 21, 12, 0, 0, tzinfo=UTC)
 
 
 def _epoch(moment: datetime) -> int:
@@ -276,14 +276,14 @@ def test_a_zero_tolerance_accepts_only_the_current_second(provider):
 # not UTC).
 
 AWKWARD_INSTANTS = {
-    "midnight UTC": datetime(2026, 10, 22, 0, 0, 0, tzinfo=timezone.utc),
-    "end of a 31-day month": datetime(2026, 10, 31, 23, 59, 59, tzinfo=timezone.utc),
-    "new year": datetime(2027, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
-    "end of February in a leap year": datetime(2028, 2, 29, 23, 59, 59, tzinfo=timezone.utc),
-    "EU summer time begins": datetime(2026, 3, 29, 1, 0, 0, tzinfo=timezone.utc),
-    "EU summer time ends": datetime(2026, 10, 25, 1, 0, 0, tzinfo=timezone.utc),
-    "US daylight time begins": datetime(2026, 3, 8, 7, 0, 0, tzinfo=timezone.utc),
-    "US daylight time ends": datetime(2026, 11, 1, 6, 0, 0, tzinfo=timezone.utc),
+    "midnight UTC": datetime(2026, 10, 22, 0, 0, 0, tzinfo=UTC),
+    "end of a 31-day month": datetime(2026, 10, 31, 23, 59, 59, tzinfo=UTC),
+    "new year": datetime(2027, 1, 1, 0, 0, 0, tzinfo=UTC),
+    "end of February in a leap year": datetime(2028, 2, 29, 23, 59, 59, tzinfo=UTC),
+    "EU summer time begins": datetime(2026, 3, 29, 1, 0, 0, tzinfo=UTC),
+    "EU summer time ends": datetime(2026, 10, 25, 1, 0, 0, tzinfo=UTC),
+    "US daylight time begins": datetime(2026, 3, 8, 7, 0, 0, tzinfo=UTC),
+    "US daylight time ends": datetime(2026, 11, 1, 6, 0, 0, tzinfo=UTC),
 }
 LOCAL_OFFSETS = [-12, -5, 0, 1, 2, 5.5, 14]
 

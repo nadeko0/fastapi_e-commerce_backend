@@ -8,7 +8,7 @@ at the API boundary.
 """
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class PaymentIntentStatus(str, Enum):
@@ -44,11 +44,11 @@ class PaymentIntent:
     currency: str
     status: PaymentIntentStatus
     client_secret: str
-    payment_method: Optional[str] = None
-    idempotency_key: Optional[str] = None
-    last_payment_error: Optional[Dict[str, Any]] = None
-    next_action: Optional[Dict[str, Any]] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    payment_method: str | None = None
+    idempotency_key: str | None = None
+    last_payment_error: dict[str, Any] | None = None
+    next_action: dict[str, Any] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     amount_refunded: int = 0
     # What Stripe actually collected (PaymentIntent.amount_received): 0 until
     # the payment succeeds, and not reduced by refunds.
@@ -65,7 +65,7 @@ class Refund:
     # The status exactly as the provider reports it ("canceled" and
     # "requires_action" too, which `status` folds into PENDING). Only the
     # read operations fill it; None means `status.value` is all there is.
-    provider_status: Optional[str] = None
+    provider_status: str | None = None
 
 
 @dataclass
@@ -78,7 +78,7 @@ class CheckoutSession:
     point it is a real PaymentIntent id."""
 
     id: str
-    url: Optional[str]
+    url: str | None
     status: CheckoutSessionStatus
     # Mirrors Stripe's own "paid" / "unpaid" / "no_payment_required" string
     # verbatim rather than a closed enum - Stripe documents this as an open
@@ -86,9 +86,9 @@ class CheckoutSession:
     payment_status: str
     amount_total: int  # smallest currency unit (e.g. cents)
     currency: str
-    payment_intent: Optional[str] = None
-    idempotency_key: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    payment_intent: str | None = None
+    idempotency_key: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -97,5 +97,5 @@ class WebhookEventData:
 
     id: str
     type: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     created: int

@@ -7,13 +7,12 @@ app/services/payment/README notes in stripe_provider.py) - these are small,
 dependency-free stand-ins with the same names/semantics so the rest of the
 codebase (and anyone who has used the real SDK) reads naturally.
 """
-from typing import Optional
 
 
 class PaymentProviderError(Exception):
     """Base class for all payment-provider errors (mirrors stripe.error.StripeError)."""
 
-    def __init__(self, message: str, *, code: Optional[str] = None):
+    def __init__(self, message: str, *, code: str | None = None):
         self.message = message
         self.code = code
         super().__init__(message)
@@ -30,7 +29,7 @@ class CardError(PaymentProviderError):
         message: str,
         *,
         code: str = "card_declined",
-        decline_code: Optional[str] = None,
+        decline_code: str | None = None,
     ):
         super().__init__(message, code=code)
         self.decline_code = decline_code
@@ -43,7 +42,7 @@ class SignatureVerificationError(PaymentProviderError):
     Mirrors stripe.error.SignatureVerificationError.
     """
 
-    def __init__(self, message: str, sig_header: Optional[str] = None):
+    def __init__(self, message: str, sig_header: str | None = None):
         super().__init__(message, code="signature_verification_failed")
         self.sig_header = sig_header
 
@@ -75,7 +74,7 @@ class InvalidRequestError(PaymentProviderError):
         self,
         message: str,
         *,
-        param: Optional[str] = None,
+        param: str | None = None,
         code: str = "parameter_invalid",
     ):
         super().__init__(message, code=code)

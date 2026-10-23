@@ -39,9 +39,8 @@ def test_session_scope_rolls_back_and_raises_http_exception_on_db_error(
 ):
     from fastapi import HTTPException
 
-    with pytest.raises(HTTPException) as exc_info:
-        with database_module.session_scope() as session:
-            session.execute(text("SELECT * FROM this_table_does_not_exist"))
+    with pytest.raises(HTTPException) as exc_info, database_module.session_scope() as session:
+        session.execute(text("SELECT * FROM this_table_does_not_exist"))
 
     assert exc_info.value.status_code == 500
 

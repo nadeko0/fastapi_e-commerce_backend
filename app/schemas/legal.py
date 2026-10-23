@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -28,21 +27,21 @@ class ConsentUpdate(BaseModel):
 
 class UserConsent(BaseModel):
     marketing_consent: bool
-    marketing_consent_date: Optional[datetime]
+    marketing_consent_date: datetime | None
     privacy_policy_accepted: bool
-    privacy_policy_accepted_date: Optional[datetime]
-    consent_history: List[ConsentHistory]
+    privacy_policy_accepted_date: datetime | None
+    consent_history: list[ConsentHistory]
 
     model_config = ConfigDict(from_attributes=True)
 
 class DataRequest(BaseModel):
     request_type: str  # "export" or "deletion"
-    reason: Optional[str] = None
+    reason: str | None = None
     # The account's current password. Required for "deletion", as on
     # POST /users/data/delete: erasure cannot be undone after the grace
     # period, and a bearer token alone (a stolen session) must not be
     # enough for it. Not needed for "export".
-    password: Optional[str] = None
+    password: str | None = None
 
     @model_validator(mode="after")
     def require_password_for_deletion(self):
@@ -92,7 +91,7 @@ class LegalDocument(BaseModel):
 
 class ConsentUpdateResponse(BaseModel):
     status: str
-    updated_consents: Dict[str, bool]
+    updated_consents: dict[str, bool]
     timestamp: datetime
 
     model_config = ConfigDict(

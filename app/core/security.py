@@ -7,7 +7,7 @@ import time
 import uuid
 import weakref
 from datetime import timedelta
-from typing import Annotated, NamedTuple, Optional, Tuple, Union
+from typing import Annotated, NamedTuple
 
 import bcrypt
 import jwt
@@ -135,7 +135,7 @@ _USER_ID_SUBJECT = re.compile(r"[1-9][0-9]{0,9}")
 # The largest id the users.id column (INTEGER, 32 bits in Postgres) holds.
 _MAX_USER_ID = 2**31 - 1
 
-def user_id_from_subject(subject: object) -> Optional[int]:
+def user_id_from_subject(subject: object) -> int | None:
     """The user id a verified token's `sub` claim names, or None.
 
     Anything but the canonical spelling names nobody and is refused, not
@@ -171,11 +171,11 @@ VERIFY_TOKEN_REQUIRED_CLAIMS = ["exp", "sub", "type"]
 # it. A float is encoded as is, and on decode PyJWT checks it with int(),
 # so validation is unchanged. `exp` stays whole seconds. Tokens issued
 # before this carry a whole-second iat and still compare correctly.
-def _issued_at_and_expiry(lifetime: timedelta) -> Tuple[float, int]:
+def _issued_at_and_expiry(lifetime: timedelta) -> tuple[float, int]:
     issued_at = time.time()
     return issued_at, int(issued_at) + int(lifetime.total_seconds())
 
-def create_access_token(subject: Union[str, int]) -> str:
+def create_access_token(subject: str | int) -> str:
     issued_at, expire = _issued_at_and_expiry(
         timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
@@ -190,7 +190,7 @@ def create_access_token(subject: Union[str, int]) -> str:
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
-def create_refresh_token(subject: Union[str, int], jti: Optional[str] = None, family: Optional[str] = None) -> str:
+def create_refresh_token(subject: str | int, jti: str | None = None, family: str | None = None) -> str:
     issued_at, expire = _issued_at_and_expiry(
         timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     )
@@ -330,8 +330,8 @@ _optional_oauth2_scheme = OAuth2PasswordBearer(
 async def get_optional_active_user(
     request: Request,
     db: DbSession,
-    _declared: Annotated[Optional[str], Depends(_optional_oauth2_scheme)],
-) -> Optional[User]:
+    _declared: Annotated[str | None, Depends(_optional_oauth2_scheme)],
+) -> User | None:
     """For a route that serves both logged-in and anonymous callers (the
     cart): the active user when the request carries an Authorization
     header, None when it carries none.
@@ -384,7 +384,7 @@ def _blacklist_id(token: str, payload: dict) -> str:
 async_redis_service = AsyncRedisService()
 
 
-async def issue_refresh_token(user_id: Union[str, int], family: Optional[str] = None) -> str:
+async def issue_refresh_token(user_id: str | int, family: str | None = None) -> str:
     """Create a refresh token and register its jti with Redis so it can
     later be validated, rotated, and reuse-detected. `family` is passed when
     rotating an existing chain (login omits it, which starts a new chain)."""
@@ -400,7 +400,7 @@ async def issue_refresh_token(user_id: Union[str, int], family: Optional[str] = 
     return token
 
 
-async def rotate_refresh_token(token: str, db: AsyncSession) -> Tuple[str, str]:
+async def rotate_refresh_token(token: str, db: AsyncSession) -> tuple[str, str]:
     """Validate a refresh token and, if valid and unused, rotate it: returns
     a (new_access_token, new_refresh_token) pair. Deliberately does NOT
     require a valid access token - a refresh token's whole purpose is to
@@ -489,7 +489,7 @@ async def blacklist_token(token: str, expires_in: int) -> bool:
     return await async_redis_service.add_to_blacklist(_blacklist_id(token, payload), expires_in)
 
 
-async def invalidate_tokens_issued_before_now(user_id: Union[str, int]) -> bool:
+async def invalidate_tokens_issued_before_now(user_id: str | int) -> bool:
     """Record a per-user "password changed at" watermark: any access or
     refresh token of the user issued before now is refused
     (is_token_superseded). Token fixation mitigation: a token issued before
@@ -512,7 +512,7 @@ async def invalidate_tokens_issued_before_now(user_id: Union[str, int]) -> bool:
     return await async_redis_service.setex(key, ttl_seconds, time.time())
 
 
-async def logout(access_token: str, refresh_token: Optional[str] = None) -> None:
+async def logout(access_token: str, refresh_token: str | None = None) -> None:
     """Blacklist the current access token, and revoke the refresh token's
     whole family - or, without a refresh token, every token of the user
     ("sign out everywhere"): without one there is no telling which session
@@ -592,7 +592,7 @@ def generate_password_reset_token(email: str, hashed_password: str) -> str:
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
-def verify_password_reset_token(token: str) -> Optional[PasswordResetClaims]:
+def verify_password_reset_token(token: str) -> PasswordResetClaims | None:
     """The claims of a well-formed, unexpired reset token, or None. Whether
     it is still good for the account is PasswordResetClaims.matches, which
     needs the account's current hash."""
@@ -617,7 +617,7 @@ def generate_email_verification_token(email: str) -> str:
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
-def verify_email_token(token: str) -> Optional[str]:
+def verify_email_token(token: str) -> str | None:
     try:
         payload = jwt.decode(
             token,

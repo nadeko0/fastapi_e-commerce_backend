@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import timedelta
 from decimal import Decimal
-from typing import Annotated, List, Optional
+from typing import Annotated, List  # noqa: UP035 - see the UP006 noqa on response_model
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 from fastapi import status as http_status
@@ -79,7 +79,7 @@ async def _load_order_for_response(db: AsyncSession, order_id: int) -> Order:
 
 async def _order_by_idempotency_key(
     db: AsyncSession, user_id: int, idempotency_key: str
-) -> Optional[Order]:
+) -> Order | None:
     """The user's order created under this Idempotency-Key, if any."""
     return (await db.execute(
         select(Order).options(*_ORDER_RESPONSE_LOADS).where(
@@ -491,7 +491,7 @@ async def cancel_own_order(
 
 async def _payment_by_key(
     db: AsyncSession, order_id: int, idempotency_key: str
-) -> Optional[Payment]:
+) -> Payment | None:
     """The order's payment attempt recorded under this Idempotency-Key."""
     return (await db.execute(
         select(Payment).where(
@@ -750,7 +750,7 @@ _IN_FLIGHT_PAYMENT_STATUSES = ("processing", "requires_action", "unknown")
 
 
 def _guard_no_attempt_in_flight(
-    db: Session, order: Order, except_payment_id: Optional[int] = None
+    db: Session, order: Order, except_payment_id: int | None = None
 ) -> None:
     """
     Shared by /pay and /checkout-session, called with the order row locked:
@@ -791,7 +791,7 @@ def _guard_no_attempt_in_flight(
         )
 
 
-def _guard_currency_matches_order(requested_currency: Optional[str], order: Order) -> None:
+def _guard_currency_matches_order(requested_currency: str | None, order: Order) -> None:
     """
     Shared by /pay and /checkout-session: the order is charged in its own
     currency only. The currency used to be taken from the request as-is
@@ -1158,7 +1158,7 @@ async def create_checkout_session(
         alias="Idempotency-Key", min_length=8, max_length=255,
         description="Unique per payment attempt; resend the same value when retrying.",
     )],
-    payload: Optional[CheckoutSessionCreate] = None,
+    payload: CheckoutSessionCreate | None = None,
 ):
     """
     Create a Stripe Checkout Session (the fully-hosted-redirect flow) for an
@@ -1438,7 +1438,7 @@ async def refund_payment(
 
 @router.get(
     "/{order_id}/payments",
-    response_model=APIResponse[List[dict]],
+    response_model=APIResponse[List[dict]],  # noqa: UP006 - List, not list: the repr names the OpenAPI schema (contract)
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
@@ -1583,7 +1583,7 @@ def _settle_refunds(db: Session, order: Order, payment_row: Payment) -> None:
     )
 
 
-def _has_open_dispute(db: Session, order_id: int, payment_id: Optional[int] = None) -> bool:
+def _has_open_dispute(db: Session, order_id: int, payment_id: int | None = None) -> bool:
     """Whether a charge of the order (or the given one) is disputed and the
     dispute has not closed."""
     query = db.query(PaymentDispute.id).join(Payment).filter(
@@ -1604,7 +1604,7 @@ async def stripe_webhook(
     request: Request,
     db: DbSession,
     provider: Provider,
-    stripe_signature: Annotated[Optional[str], Header(alias="Stripe-Signature")] = None,
+    stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
 ):
     """
     Receive Stripe webhook events for both payment flows. The event is

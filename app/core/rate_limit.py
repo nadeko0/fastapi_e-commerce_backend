@@ -46,7 +46,7 @@ import logging
 import math
 import re
 from functools import lru_cache
-from typing import NamedTuple, Optional, Tuple
+from typing import NamedTuple
 
 import jwt
 from fastapi import HTTPException, Request
@@ -168,7 +168,7 @@ def client_address(request: Request) -> str:
     return str(client)
 
 
-def user_id_from_token(request: Request) -> Optional[str]:
+def user_id_from_token(request: Request) -> str | None:
     """The user id of a valid access token on this request, or None.
 
     Signature, expiry and token type only - no blacklist, no database. This
@@ -332,7 +332,7 @@ async def rate_limit(request: Request) -> None:
 # account exists, and nothing here looks at the database, so the answer
 # cannot be used to find out which emails are registered.
 
-def _login_keys(email: str, request: Request) -> Tuple[str, str]:
+def _login_keys(email: str, request: Request) -> tuple[str, str]:
     """(per email and address, per email) counter keys."""
     # Case and surrounding blanks cost a client nothing to vary, so they
     # are folded away. A digest, so that no mailbox sits in a key name.

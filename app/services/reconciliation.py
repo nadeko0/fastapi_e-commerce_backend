@@ -33,7 +33,6 @@ a difference until the next run finds it gone.
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -69,7 +68,7 @@ _REFUND_NOT_RETURNED = ("failed", "canceled")
 
 _S = PaymentIntentStatus
 # Payment.status -> the PaymentIntent statuses it agrees with.
-_EXPECTED_INTENT_STATUS: Dict[str, Set[PaymentIntentStatus]] = {
+_EXPECTED_INTENT_STATUS: dict[str, set[PaymentIntentStatus]] = {
     "succeeded": {_S.SUCCEEDED},
     "canceled": {_S.CANCELED},
     # A declined attempt waits for another card; a timed-out one never
@@ -90,8 +89,8 @@ _EXPECTED_INTENT_STATUS: Dict[str, Set[PaymentIntentStatus]] = {
 class Difference:
     kind: str
     subject: str
-    ours: Optional[str]
-    theirs: Optional[str]
+    ours: str | None
+    theirs: str | None
 
 
 @dataclass(frozen=True)
@@ -111,7 +110,7 @@ class PaymentSnapshot:
     amount: int
     amount_refunded: int
     currency: str
-    refunds: Tuple[RefundSnapshot, ...]
+    refunds: tuple[RefundSnapshot, ...]
 
 
 @dataclass
@@ -123,7 +122,7 @@ class ReconciliationResult:
     resolved: int = 0         # differences that are gone
     truncated: bool = False   # more payments in the window than RECONCILIATION_MAX_PAYMENTS
     aborted: bool = False     # stopped early: too many provider failures in a row
-    error_payment_ids: List[int] = field(default_factory=list)
+    error_payment_ids: list[int] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -148,7 +147,7 @@ def snapshot_payment(payment: Payment) -> PaymentSnapshot:
     )
 
 
-def provider_refunded_total(refunds: List[Refund]) -> int:
+def provider_refunded_total(refunds: list[Refund]) -> int:
     return sum(r.amount for r in refunds if _refund_status(r) not in _REFUND_NOT_RETURNED)
 
 
@@ -157,14 +156,14 @@ def _refund_status(refund: Refund) -> str:
 
 
 def compare(
-    payment: PaymentSnapshot, intent: Optional[PaymentIntent], refunds: List[Refund]
-) -> List[Difference]:
+    payment: PaymentSnapshot, intent: PaymentIntent | None, refunds: list[Refund]
+) -> list[Difference]:
     """Every way `payment` differs from the provider's `intent` and
     `refunds`. `intent` None means the provider has no such payment."""
     if intent is None:
         return [Difference(KIND_PAYMENT_MISSING, "", payment.payment_intent_id, None)]
 
-    found: List[Difference] = []
+    found: list[Difference] = []
     if intent.status not in _EXPECTED_INTENT_STATUS.get(payment.status, set()):
         found.append(Difference(KIND_STATUS, "", payment.status, intent.status.value))
 
@@ -202,8 +201,8 @@ def compare(
 
 
 def record(
-    db: Session, payment_id: int, found: List[Difference], now: datetime
-) -> Tuple[int, int]:
+    db: Session, payment_id: int, found: list[Difference], now: datetime
+) -> tuple[int, int]:
     """Bring the payment's discrepancy rows in line with `found`; commits.
     Returns (opened, resolved): rows created or reopened, rows closed."""
     rows = {
@@ -238,7 +237,7 @@ def record(
 
 def _ask_provider(
     provider: PaymentProvider, payment_intent_id: str
-) -> Tuple[Optional[PaymentIntent], List[Refund]]:
+) -> tuple[PaymentIntent | None, list[Refund]]:
     """The provider's PaymentIntent and refunds; (None, []) if it has no
     such PaymentIntent. Raises PaymentProviderError for any other failure."""
     try:
@@ -254,8 +253,8 @@ def reconcile_payments(
     db: Session,
     provider: PaymentProvider,
     *,
-    order_id: Optional[int] = None,
-    now: Optional[datetime] = None,
+    order_id: int | None = None,
+    now: datetime | None = None,
 ) -> ReconciliationResult:
     """Reconcile the payments of the window (see the RECONCILIATION_*
     settings), or every payment of `order_id` whatever its age. Stripe
@@ -313,8 +312,8 @@ def reconcile_payments(
 
 
 def open_discrepancies(
-    db: Session, *, page: int, size: int, order_id: Optional[int] = None
-) -> Tuple[List[Tuple[PaymentDiscrepancy, Payment]], int]:
+    db: Session, *, page: int, size: int, order_id: int | None = None
+) -> tuple[list[tuple[PaymentDiscrepancy, Payment]], int]:
     """A page of the unresolved discrepancies, oldest first, each with its
     payment, and how many there are in all."""
     query = (

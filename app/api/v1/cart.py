@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated, Dict, Optional, Tuple
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
@@ -155,7 +155,7 @@ def _guest_cart_cookie_attributes() -> dict:
     }
 
 
-def read_guest_cart_id(request: Request) -> Optional[str]:
+def read_guest_cart_id(request: Request) -> str | None:
     """The guest cart identifier the request carries, or None when it
     carries none or something that is not one."""
     value = request.cookies.get(guest_cart_cookie_name())
@@ -268,7 +268,7 @@ async def _get_active_variant_for_product(
 
 async def _load_catalog(
     db: AsyncSession, cart: Cart
-) -> Tuple[Dict[int, Product], Dict[int, ProductVariant]]:
+) -> tuple[dict[int, Product], dict[int, ProductVariant]]:
     """The product and variant rows behind `cart`'s lines, keyed by id: one
     query for all the products and one for all the variants, and none at
     all for what the cart does not contain. Inactive rows are included; it
@@ -279,12 +279,12 @@ async def _load_catalog(
         item.variant_id for item in cart.items.values() if item.variant_id is not None
     }
 
-    products: Dict[int, Product] = {}
+    products: dict[int, Product] = {}
     if product_ids:
         rows = await db.scalars(select(Product).where(Product.id.in_(sorted(product_ids))))
         products = {product.id: product for product in rows}
 
-    variants: Dict[int, ProductVariant] = {}
+    variants: dict[int, ProductVariant] = {}
     if variant_ids:
         rows = await db.scalars(
             select(ProductVariant).where(ProductVariant.id.in_(sorted(variant_ids)))
@@ -299,7 +299,7 @@ async def _priced_cart(db: AsyncSession, cart: Cart) -> CartResponse:
     return CartResponse.from_cart(cart, products, variants)
 
 
-def _cart_or_503(cart: Optional[Cart]) -> Cart:
+def _cart_or_503(cart: Cart | None) -> Cart:
     """The atomic cart mutations return None when Redis failed and nothing
     was written. That None used to go straight into CartResponse.from_cart
     and surface as a 500 (AttributeError on None.items); a 503 tells the
@@ -343,7 +343,7 @@ router = APIRouter(prefix="/cart", tags=["cart"])
 
 async def get_cart_owner(
     request: Request,
-    current_user: Annotated[Optional[User], Depends(get_optional_active_user)],
+    current_user: Annotated[User | None, Depends(get_optional_active_user)],
 ) -> CartOwner:
     """Whose cart this request is about: the one place that decides it.
     See "Whose cart it is" at the top of this module."""
@@ -403,7 +403,7 @@ async def add_to_cart(
     # ge=1: 0 or a negative quantity was accepted, and could take a line to
     # zero or below - which made the whole stored cart unreadable.
     quantity: Annotated[int, Query(ge=1, le=INT32_MAX)] = 1,
-    variant_id: Optional[Int32] = None,
+    variant_id: Int32 | None = None,
 ):
     """Add a product (optionally, a specific variant) to the caller's cart,
     or increase its quantity. A given product_id+variant_id pair merges
@@ -486,7 +486,7 @@ async def update_cart_item(
     owner: Owner,
     db: DbSession,
     redis: Cache,
-    variant_id: Optional[Int32] = None,
+    variant_id: Int32 | None = None,
 ):
     """Update the quantity of an item already in the caller's cart."""
 
@@ -534,7 +534,7 @@ async def remove_from_cart(
     owner: Owner,
     db: DbSession,
     redis: Cache,
-    variant_id: Optional[Int32] = None,
+    variant_id: Int32 | None = None,
 ):
     """Remove an item from the caller's cart. This is also how a line
     marked unavailable is cleared: the product does not need to exist.

@@ -27,7 +27,7 @@ different keys can coexist safely in the same process - relevant for tests.
 """
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import stripe
 from stripe import error as stripe_error
@@ -184,8 +184,8 @@ def _signed_at(sig_header: str) -> int:
 
 # The HTTP client this module last installed as stripe.default_http_client,
 # and the settings it was built from (see _configure_http_client).
-_http_client: Optional[stripe.RequestsClient] = None
-_http_client_settings: Optional[tuple] = None
+_http_client: stripe.RequestsClient | None = None
+_http_client_settings: tuple | None = None
 
 
 def _configure_http_client() -> None:
@@ -231,10 +231,10 @@ class LiveStripePaymentProvider(PaymentProvider):
         amount: int,
         currency: str,
         idempotency_key: str,
-        payment_method: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        payment_method: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> PaymentIntent:
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "amount": amount,
             "currency": currency,
             "idempotency_key": idempotency_key,
@@ -280,7 +280,7 @@ class LiveStripePaymentProvider(PaymentProvider):
         self,
         payment_intent_id: str,
         *,
-        idempotency_key: Optional[str] = None,
+        idempotency_key: str | None = None,
         return_url: str,
     ) -> PaymentIntent:
         # Stripe requires `return_url` at confirm time for any PaymentIntent
@@ -294,7 +294,7 @@ class LiveStripePaymentProvider(PaymentProvider):
         # Required, with no fallback: it used to default to a placeholder
         # page on a domain that is not ours, where 3D Secure would have
         # sent real customers. /pay builds it on FRONTEND_URL.
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "api_key": self._api_key,
             "return_url": return_url,
         }
@@ -343,10 +343,10 @@ class LiveStripePaymentProvider(PaymentProvider):
         idempotency_key: str,
         success_url: str,
         cancel_url: str,
-        description: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        description: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> CheckoutSession:
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "mode": "payment",
             "line_items": [
                 {
@@ -420,10 +420,10 @@ class LiveStripePaymentProvider(PaymentProvider):
         self,
         *,
         payment_intent_id: str,
-        amount: Optional[int] = None,
-        idempotency_key: Optional[str] = None,
+        amount: int | None = None,
+        idempotency_key: str | None = None,
     ) -> Refund:
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "payment_intent": payment_intent_id,
             "api_key": self._api_key,
         }
@@ -451,9 +451,9 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise _provider_unavailable(e)
         return _to_refund(refund)
 
-    def list_refunds(self, payment_intent_id: str) -> List[Refund]:
-        refunds: List[Refund] = []
-        params: Dict[str, Any] = {
+    def list_refunds(self, payment_intent_id: str) -> list[Refund]:
+        refunds: list[Refund] = []
+        params: dict[str, Any] = {
             "payment_intent": payment_intent_id,
             "limit": _REFUND_PAGE_SIZE,
             "api_key": self._api_key,
@@ -482,7 +482,7 @@ class LiveStripePaymentProvider(PaymentProvider):
     def construct_webhook_event(
         self,
         payload: bytes,
-        sig_header: Optional[str],
+        sig_header: str | None,
         webhook_secret: str,
         tolerance_seconds: int = 300,
     ) -> WebhookEventData:

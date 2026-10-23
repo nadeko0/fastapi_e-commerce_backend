@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi import status as http_status
@@ -291,7 +291,7 @@ ORDER_SORT_COLUMNS = {
 
 
 class AdminOrderListParams(PaginationParams):
-    sort_by: Optional[str] = Field(
+    sort_by: str | None = Field(
         None, pattern=f"^({'|'.join(ORDER_SORT_COLUMNS)})_(asc|desc)$"
     )
 
@@ -312,10 +312,10 @@ async def list_orders(
     # in orders.update_order_status - this shadows the fastapi.status
     # module within this function body, so error responses below must use
     # the http_status alias instead.
-    status: Optional[str] = None,
-    payment_status: Optional[str] = None,
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
+    status: str | None = None,
+    payment_status: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
 ):
     """List orders across all users, with filtering, sorting, and pagination."""
 
@@ -514,7 +514,7 @@ async def _variant_sku_exists(db: AsyncSession, sku: str) -> bool:
     return found.first() is not None
 
 
-async def _commit_variant(db: AsyncSession, sku: Optional[str], variant_id: Optional[int] = None) -> None:
+async def _commit_variant(db: AsyncSession, sku: str | None, variant_id: int | None = None) -> None:
     """Commit a created or updated variant, telling a SKU conflict apart
     from any other failed constraint.
 
@@ -687,7 +687,7 @@ async def list_reconciliation_discrepancies(
     pagination: Annotated[PaginationParams, Depends()],
     current_user: AdminUser,
     db: DbSession,
-    order_id: Optional[Int32] = None,
+    order_id: Int32 | None = None,
 ):
     """The differences the payment reconciliation found between our payments
     and the provider's and that still stand, oldest first (admin only):
@@ -734,7 +734,7 @@ async def run_reconciliation(
     current_user: AdminUser,
     db: DbSession,
     provider: Provider,
-    order_id: Optional[Int32] = None,
+    order_id: Int32 | None = None,
 ):
     """Reconcile now (admin only). With order_id: every payment of that order,
     whatever its age, and the outcome in the response. Without: the same run
@@ -783,7 +783,7 @@ async def list_webhook_events(
     current_user: AdminUser,
     db: DbSession,
     # Named "status" for the public API/query param; see list_orders above.
-    status: Optional[str] = None,
+    status: str | None = None,
 ):
     """
     List the Stripe webhook events the app stored, newest first, optionally
