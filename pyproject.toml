@@ -104,3 +104,8 @@ ignore = [
 # (implicit Optional), RUF022 (sorted __all__), RUF100 (stale noqa).
 extend-select = ["UP", "B", "ASYNC", "DTZ", "FAST", "SIM", "RUF005", "RUF012", "RUF013", "RUF022", "RUF100"]
 
+[tool.ruff.lint.per-file-ignores]
+# This file builds throwaway FastAPI apps whose routes are deliberately written in the
+# shapes the architecture guard must catch (default-style Depends, an untyped
+# dependency, time.sleep in an async route); rewriting them would stop testing the guard.
+"tests/integration/test_no_blocking_on_loop.py" = ["B008", "FAST002", "ASYNC251"]
