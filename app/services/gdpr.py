@@ -3,7 +3,7 @@ from typing import Dict, Optional
 
 from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import utc_now
 from app.core.config import settings
@@ -13,10 +13,14 @@ from app.schemas.user import GDPRExport
 
 
 class GDPRService:
-    def __init__(self, db: Session):
+    # `db` is only needed by the two methods that write (update_user_consent,
+    # process_data_deletion); the pure ones (get_consent_status,
+    # validate_retention_period) never touch it, so a route that only calls
+    # those builds the service without a session.
+    def __init__(self, db: Optional[AsyncSession] = None):
         self.db = db
 
-    def update_user_consent(
+    async def update_user_consent(
         self,
         user: User,
         consent_update: ConsentUpdate,
@@ -62,15 +66,15 @@ class GDPRService:
         user.consent_history = (user.consent_history or []) + consent_entries
 
         try:
-            self.db.commit()
-            self.db.refresh(user)
+            await self.db.commit()
+            await self.db.refresh(user)
             return {
                 "marketing": user.marketing_consent,
                 "privacy_policy": user.privacy_policy_accepted,
 
             }
         except Exception:
-            self.db.rollback()
+            await self.db.rollback()
             raise HTTPException(
                 status_code=500,
                 detail="Failed to update consent preferences"
@@ -137,7 +141,7 @@ class GDPRService:
             user.data_deletion_requested = True
             user.data_deletion_date = utc_now()
 
-            self.db.commit()
+            await self.db.commit()
 
             # Send deletion confirmation email
             from app.services.email import send_gdpr_deletion_confirmation
@@ -146,7 +150,7 @@ class GDPRService:
             return request_id
 
         except Exception:
-            self.db.rollback()
+            await self.db.rollback()
             raise HTTPException(
                 status_code=500,
                 detail="Failed to process deletion request"
