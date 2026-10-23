@@ -191,3 +191,36 @@ def test_celery_worker_gets_time_to_finish_its_task_on_stop():
     assert grace, worker
     assert int(grace.group(1)) > tasks.celery.conf.task_time_limit
     assert "stop_signal" not in worker  # the default, SIGTERM, is the warm shutdown
+
+
+def test_image_carries_oci_labels_filled_from_build_args():
+    # image-spec annotations: version, revision and created vary per build and
+    # arrive as build ARGs; the rest is fixed. The license is the repo's LICENSE.
+    dockerfile = _read("Dockerfile")
+    for arg in ("VERSION", "REVISION", "CREATED"):
+        assert re.search(rf"^ARG {arg}=", dockerfile, re.M), arg
+    labels = dockerfile[dockerfile.index("LABEL "):]
+    for key, value in (
+        ("title", None),
+        ("description", None),
+        ("source", "https://github.com/nadeko0/fastapi_e-commerce_backend"),
+        ("licenses", "MIT"),
+        ("version", "${VERSION}"),
+        ("revision", "${REVISION}"),
+        ("created", "${CREATED}"),
+    ):
+        match = re.search(rf'org\.opencontainers\.image\.{key}="([^"]+)"', labels)
+        assert match, key
+        if value:
+            assert match.group(1) == value, key
+    assert _read("LICENSE").startswith("MIT License")
+
+
+def test_ci_passes_the_label_values_and_publishes_a_cyclonedx_sbom():
+    ci = _read(".github/workflows/ci.yml")
+    build = ci[ci.index("\n  docker-build:"):]
+    for arg in ("VERSION=", "REVISION=${{ github.sha }}", "CREATED="):
+        assert arg in build, arg
+    audit = ci[ci.index("\n  audit:"):ci.index("\n  docker-build:")]
+    assert "--format cyclonedx1.5" in audit
+    assert "actions/upload-artifact@" in audit
