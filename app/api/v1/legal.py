@@ -1,12 +1,12 @@
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import database
 from app.core.clock import utc_now
 from app.core.config import settings
-from app.core.security import get_current_active_user, verify_password_async
+from app.core.dependencies import CurrentUser, DbSession
+from app.core.security import verify_password_async
 from app.models.user import User
 from app.schemas.common import APIResponse
 from app.schemas.legal import (
@@ -269,8 +269,8 @@ async def _load_user(db: AsyncSession, user_id: int) -> User:
 async def update_user_consent(
     consent_update: ConsentUpdate,
     request: Request,
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    current_user = Depends(get_current_active_user)
+    db: DbSession,
+    current_user: CurrentUser
 ):
     """
     Update user's consent preferences for marketing and analytics.
@@ -314,8 +314,8 @@ async def update_user_consent(
 )
 async def request_personal_data(
     request_data: DataRequest,
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    current_user = Depends(get_current_active_user)
+    db: DbSession,
+    current_user: CurrentUser
 ):
     """
     Handle GDPR data access and deletion requests.
@@ -361,7 +361,7 @@ async def request_personal_data(
 
 @router.get("/consent-status", response_model=APIResponse[UserConsent])
 async def get_consent_status(
-    current_user = Depends(get_current_active_user)
+    current_user: CurrentUser
 ):
     """
     Retrieve current consent status and history for the user.
@@ -376,7 +376,7 @@ async def get_consent_status(
 
 @router.get("/data-retention", response_model=APIResponse[dict])
 async def check_data_retention(
-    current_user = Depends(get_current_active_user)
+    current_user: CurrentUser
 ):
     """
     Check if user data is within the retention period.

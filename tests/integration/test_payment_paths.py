@@ -33,6 +33,7 @@ from payment_support import (
 import app.api.v1.orders as orders_module
 from app.models.order import Order
 from app.models.payment import Payment
+from app.models.user import User
 from app.services.payment.exceptions import (
     IdempotencyError,
     InvalidRequestError,
@@ -109,7 +110,7 @@ def _provider_raises(monkeypatch, name, error):
 def test_order_needs_a_phone_number_on_the_profile(shop, outbox):
     product = shop.product(stock=5)
     buyer = shop.buyer()
-    user = shop.db.get(orders_module.User, buyer.user_id)
+    user = shop.db.get(User, buyer.user_id)
     user.phone = None
     shop.db.commit()
     assert shop.add_to_cart(buyer, product, 2).status_code == 200

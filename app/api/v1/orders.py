@@ -3,9 +3,9 @@ import logging
 import uuid
 from datetime import timedelta
 from decimal import Decimal
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select, update
@@ -13,17 +13,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.core import database
 from app.core.clock import utc_now
 from app.core.config import settings
-from app.core.security import get_current_active_user, get_current_admin_user
+from app.core.dependencies import AdminUser, Cache, CurrentUser, DbSession, Provider
 from app.models.address import Address
 from app.models.order import Order
 from app.models.order_items import OrderItem
 from app.models.payment import Payment
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, PaymentRefund
 from app.models.product import Product, ProductVariant
-from app.models.user import User
 from app.schemas.common import APIResponse, Int32
 from app.schemas.order import (
     CheckoutSessionCreate,
@@ -47,10 +45,6 @@ from app.services.orders import (
     is_valid_status_transition,
     lock_stock_rows,
 )
-from app.services.payment import (
-    PaymentProvider,
-    get_payment_provider,
-)
 from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
@@ -59,7 +53,6 @@ from app.services.payment.exceptions import (
     SignatureVerificationError,
 )
 from app.services.payment.types import PaymentIntentStatus
-from app.services.redis_async import AsyncRedisService, get_cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +102,9 @@ async def _order_by_idempotency_key(
 async def create_order(
     shipping_address_id: Int32,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    redis: AsyncRedisService = Depends(get_cache_service),
+    current_user: CurrentUser,
+    db: DbSession,
+    redis: Cache,
     # Required, not optional. Placing an order is the one request in this API
     # that must never be applied twice, and the client is the only party that
     # knows whether two requests are one attempt retried or two purchases:
@@ -120,10 +113,10 @@ async def create_order(
     # retried after its response was lost created a second order from
     # whatever was still in the cart. Generate one key (a UUID) per checkout
     # attempt and resend the same key on every retry of that attempt.
-    idempotency_key: str = Header(
-        ..., alias="Idempotency-Key", min_length=8, max_length=255,
+    idempotency_key: Annotated[str, Header(
+        alias="Idempotency-Key", min_length=8, max_length=255,
         description="Unique per checkout attempt; resend the same value when retrying.",
-    ),
+    )],
 ):
     """Create an order from the current user's cart, decrementing stock atomically.
 
@@ -344,8 +337,8 @@ async def create_order(
 )
 async def get_order(
     order_id: Int32,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """Retrieve a single order belonging to the current user."""
 
@@ -383,8 +376,8 @@ async def update_order_status(
     # and raises AttributeError instead of a proper 404/400 response.
     status: OrderStatus,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_admin_user),  # Admin only
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
+    current_user: AdminUser,  # Admin only
+    db: DbSession,
 ):
     """Transition an order to a new status (admin only)."""
 
@@ -454,8 +447,8 @@ async def update_order_status(
 async def cancel_own_order(
     order_id: Int32,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
+    current_user: CurrentUser,
+    db: DbSession,
 ):
     """Cancel one of the current user's own orders that has not been paid,
     returning its items to stock.
@@ -869,9 +862,9 @@ async def process_payment(
     order_id: Int32,
     payment: PaymentCreate,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    provider: PaymentProvider = Depends(get_payment_provider),
+    current_user: CurrentUser,
+    db: DbSession,
+    provider: Provider,
     # Required, as on POST /orders and for the same reason. While it was
     # optional, two requests without it that arrived together (a double
     # click, a second tab, a retry after a lost response) both passed the
@@ -879,10 +872,10 @@ async def process_payment(
     # held across the provider call, so the second success could only be
     # flagged for manual review, after the customer was charged twice. With
     # a key, the second request of one attempt is the first one's replay.
-    idempotency_key: str = Header(
-        ..., alias="Idempotency-Key", min_length=8, max_length=255,
+    idempotency_key: Annotated[str, Header(
+        alias="Idempotency-Key", min_length=8, max_length=255,
         description="Unique per payment attempt; resend the same value when retrying.",
-    ),
+    )],
 ):
     """Charge an order's total via the payment provider, creating a PaymentIntent.
 
@@ -1156,16 +1149,16 @@ async def process_payment(
 async def create_checkout_session(
     order_id: Int32,
     background_tasks: BackgroundTasks,
-    payload: Optional[CheckoutSessionCreate] = None,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    provider: PaymentProvider = Depends(get_payment_provider),
+    current_user: CurrentUser,
+    db: DbSession,
+    provider: Provider,
     # Required like /pay's: two sessions created for one order without a
     # key can both be completed, and both charge the customer.
-    idempotency_key: str = Header(
-        ..., alias="Idempotency-Key", min_length=8, max_length=255,
+    idempotency_key: Annotated[str, Header(
+        alias="Idempotency-Key", min_length=8, max_length=255,
         description="Unique per payment attempt; resend the same value when retrying.",
-    ),
+    )],
+    payload: Optional[CheckoutSessionCreate] = None,
 ):
     """
     Create a Stripe Checkout Session (the fully-hosted-redirect flow) for an
@@ -1301,15 +1294,15 @@ async def create_checkout_session(
 async def refund_payment(
     order_id: Int32,
     refund_request: RefundCreate,
-    current_user: User = Depends(get_current_admin_user),  # Refunds are a support/admin action
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    provider: PaymentProvider = Depends(get_payment_provider),
+    current_user: AdminUser,  # Refunds are a support/admin action
+    db: DbSession,
+    provider: Provider,
     # Required like /pay's: without a key, a retried or double-clicked
     # partial refund was a second refund, the money returned twice.
-    idempotency_key: str = Header(
-        ..., alias="Idempotency-Key", min_length=8, max_length=255,
+    idempotency_key: Annotated[str, Header(
+        alias="Idempotency-Key", min_length=8, max_length=255,
         description="Unique per refund; resend the same value when retrying.",
-    ),
+    )],
 ):
     """Issue a full or partial refund for a paid order (admin only).
 
@@ -1453,8 +1446,8 @@ async def refund_payment(
 )
 async def list_order_payments(
     order_id: Int32,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
+    current_user: AdminUser,
+    db: DbSession,
 ):
     """Every payment attempt of an order, oldest first, with its refunds and
     disputes (admin only). Amounts are in major units, as everywhere in the
@@ -1609,9 +1602,9 @@ def _has_open_dispute(db: Session, order_id: int, payment_id: Optional[int] = No
 )
 async def stripe_webhook(
     request: Request,
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    provider: PaymentProvider = Depends(get_payment_provider),
-    stripe_signature: Optional[str] = Header(default=None, alias="Stripe-Signature"),
+    db: DbSession,
+    provider: Provider,
+    stripe_signature: Annotated[Optional[str], Header(alias="Stripe-Signature")] = None,
 ):
     """
     Receive Stripe webhook events for both payment flows. The event is

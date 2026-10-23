@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi import status as http_status
@@ -13,7 +13,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.core import database
 from app.core.clock import as_utc, utc_now
-from app.core.security import get_current_admin_user
+from app.core.dependencies import AdminUser, Cache, DbSession, Provider
 from app.models.category import Category
 from app.models.order import Order
 from app.models.order_items import OrderItem
@@ -24,7 +24,6 @@ from app.models.payment import (
     WebhookEvent,
 )
 from app.models.product import Product, ProductVariant
-from app.models.user import User
 from app.schemas.category import (
     CategoryCreate,
     CategoryResponse,
@@ -47,9 +46,7 @@ from app.schemas.product import (
     ProductVariantUpdate,
 )
 from app.schemas.webhook_event import WebhookEventListResponse, WebhookEventResponse
-from app.services.payment import PaymentProvider, get_payment_provider
 from app.services.reconciliation import open_discrepancies, reconcile_payments
-from app.services.redis_async import AsyncRedisService, get_cache_service
 from app.services.stripe_events import enqueue_event
 from app.tasks import check_payment_reconciliation
 
@@ -73,9 +70,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 )
 async def create_category(
     category: CategoryCreate,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    redis: AsyncRedisService = Depends(get_cache_service),
+    current_user: AdminUser,
+    db: DbSession,
+    redis: Cache,
 ):
     """Create a new category, optionally nested under a parent category."""
 
@@ -116,9 +113,9 @@ async def create_category(
 )
 async def create_product(
     product: ProductCreate,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    redis: AsyncRedisService = Depends(get_cache_service),
+    current_user: AdminUser,
+    db: DbSession,
+    redis: Cache,
 ):
     """Create a new product under an existing category."""
 
@@ -175,9 +172,9 @@ async def create_product(
 async def update_product(
     product_id: Int32,
     product: ProductUpdate,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    redis: AsyncRedisService = Depends(get_cache_service),
+    current_user: AdminUser,
+    db: DbSession,
+    redis: Cache,
 ):
     """Update fields on an existing product."""
 
@@ -242,9 +239,9 @@ async def update_product(
 )
 async def delete_product(
     product_id: Int32,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    redis: AsyncRedisService = Depends(get_cache_service),
+    current_user: AdminUser,
+    db: DbSession,
+    redis: Cache,
 ):
     """Delete a product, or soft-delete (deactivate) it if it has existing orders."""
 
@@ -308,6 +305,9 @@ class AdminOrderListParams(PaginationParams):
     },
 )
 async def list_orders(
+    pagination: Annotated[AdminOrderListParams, Depends()],
+    current_user: AdminUser,
+    db: DbSession,
     # Named "status" for the public API/query param; see the identical note
     # in orders.update_order_status - this shadows the fastapi.status
     # module within this function body, so error responses below must use
@@ -316,9 +316,6 @@ async def list_orders(
     payment_status: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    pagination: AdminOrderListParams = Depends(),
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """List orders across all users, with filtering, sorting, and pagination."""
 
@@ -408,10 +405,10 @@ async def list_orders(
     },
 )
 async def get_statistics(
-    period: str = Query("24h", pattern="^(24h|7d|30d)$"),
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    redis: AsyncRedisService = Depends(get_cache_service),
+    current_user: AdminUser,
+    db: DbSession,
+    redis: Cache,
+    period: Annotated[str, Query(pattern="^(24h|7d|30d)$")] = "24h",
 ):
     """Retrieve order/revenue statistics and popular products for a time period."""
 
@@ -563,8 +560,8 @@ async def _commit_variant(db: AsyncSession, sku: Optional[str], variant_id: Opti
 async def create_product_variant(
     product_id: Int32,
     variant: ProductVariantCreate,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
+    current_user: AdminUser,
+    db: DbSession,
 ):
     """Create a new variant (e.g. a size/color combination) under a product."""
 
@@ -601,8 +598,8 @@ async def list_product_variants(
     product_id: Int32,
     # Every route on this router needs it: this one used to answer anyone,
     # inactive variants, SKUs and exact stock levels included.
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
+    current_user: AdminUser,
+    db: DbSession,
 ):
     """List all variants belonging to a product."""
 
@@ -635,8 +632,8 @@ async def update_product_variant(
     product_id: Int32,
     variant_id: Int32,
     variant: ProductVariantUpdate,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
+    current_user: AdminUser,
+    db: DbSession,
 ):
     """Update fields on an existing variant of a product."""
 
@@ -687,10 +684,10 @@ async def update_product_variant(
     responses={403: {"description": "Admin privileges required"}},
 )
 async def list_reconciliation_discrepancies(
+    pagination: Annotated[PaginationParams, Depends()],
+    current_user: AdminUser,
+    db: DbSession,
     order_id: Optional[Int32] = None,
-    pagination: PaginationParams = Depends(),
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """The differences the payment reconciliation found between our payments
     and the provider's and that still stand, oldest first (admin only):
@@ -734,10 +731,10 @@ async def list_reconciliation_discrepancies(
 )
 async def run_reconciliation(
     response: Response,
+    current_user: AdminUser,
+    db: DbSession,
+    provider: Provider,
     order_id: Optional[Int32] = None,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
-    provider: PaymentProvider = Depends(get_payment_provider),
 ):
     """Reconcile now (admin only). With order_id: every payment of that order,
     whatever its age, and the outcome in the response. Without: the same run
@@ -782,11 +779,11 @@ async def run_reconciliation(
     },
 )
 async def list_webhook_events(
+    pagination: Annotated[PaginationParams, Depends()],
+    current_user: AdminUser,
+    db: DbSession,
     # Named "status" for the public API/query param; see list_orders above.
     status: Optional[str] = None,
-    pagination: PaginationParams = Depends(),
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
 ):
     """
     List the Stripe webhook events the app stored, newest first, optionally
@@ -833,8 +830,8 @@ async def list_webhook_events(
 )
 async def replay_webhook_event(
     event_id: str,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(database.get_async_db, scope="function"),
+    current_user: AdminUser,
+    db: DbSession,
 ):
     """
     Send a failed Stripe event through the worker again (after the cause of
