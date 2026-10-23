@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, CurrentUser, DbSession, Provider
+from app.core.idempotency import ensure_same_request, request_fingerprint
 from app.models.address import Address
 from app.models.order import Order
 from app.models.order_items import OrderItem
@@ -96,7 +97,7 @@ async def _order_by_idempotency_key(
         400: {"description": "Cart is empty, profile incomplete, or a cart item is out of stock"},
         403: {"description": "Email verification required before placing orders"},
         404: {"description": "Shipping address not found"},
-        422: {"description": "Missing or malformed Idempotency-Key header"},
+        422: {"description": "Missing or malformed Idempotency-Key header, or the key was already used with a different shipping_address_id"},
     },
 )
 async def create_order(
@@ -121,7 +122,8 @@ async def create_order(
     """Create an order from the current user's cart, decrementing stock atomically.
 
     Requires an `Idempotency-Key` header. Repeating a request with a key
-    already used by this user returns the order created the first time.
+    already used by this user returns the order created the first time;
+    a key already used with a different `shipping_address_id` is answered 422.
     """
 
     if not current_user.is_email_verified:
@@ -139,8 +141,14 @@ async def create_order(
     # A retried checkout request (e.g. client timeout + retry, double-click)
     # with the same key returns the order already created instead of
     # double-charging stock/placing a duplicate order.
+    # What defines this request is the address: the cart is server state, and
+    # a replay returns the order the first request built from it.
+    fingerprint = request_fingerprint(
+        operation="create_order", shipping_address_id=shipping_address_id
+    )
     existing = await _order_by_idempotency_key(db, current_user.id, idempotency_key)
     if existing:
+        ensure_same_request(existing.idempotency_fingerprint, fingerprint)
         return APIResponse.success_response(OrderResponse.model_validate(existing))
 
     cart = await redis.get_cart(current_user.id)
@@ -177,6 +185,7 @@ async def create_order(
         payment_status=PaymentStatus.PENDING,
         shipping_address_id=shipping_address_id,
         idempotency_key=idempotency_key,
+        idempotency_fingerprint=fingerprint,
         total_amount=Decimal('0.00'),
         currency=settings.STORE_CURRENCY,
     )
@@ -203,6 +212,7 @@ async def create_order(
         await db.rollback()
         existing = await _order_by_idempotency_key(db, current_user.id, idempotency_key)
         if existing:
+            ensure_same_request(existing.idempotency_fingerprint, fingerprint)
             return APIResponse.success_response(OrderResponse.model_validate(existing))
         # Only the key's unique index can fail a bare order INSERT (its
         # foreign keys were just read and nothing deletes orders' users or
@@ -572,6 +582,24 @@ def _is_checkout_attempt(payment_row: Payment) -> bool:
     return payment_row.payment_intent_id.startswith(_PENDING_CHECKOUT_ID_PREFIX)
 
 
+def _is_checkout_row(payment_row: Payment) -> bool:
+    """An attempt of the Checkout Session flow, with or without its session."""
+    return payment_row.checkout_session_id is not None or _is_checkout_attempt(payment_row)
+
+
+def _ensure_same_request_in_flow(
+    payment_row: Payment | None, fingerprint: str, *, checkout: bool
+) -> None:
+    """
+    422 when the attempt recorded under the key came from this flow (/pay, or
+    /checkout-session when `checkout`) with a different request. An attempt of
+    the other flow keeps the answer it always had (a 409, or the replay): the
+    two flows' fingerprints are not comparable.
+    """
+    if payment_row is not None and _is_checkout_row(payment_row) == checkout:
+        ensure_same_request(payment_row.idempotency_fingerprint, fingerprint)
+
+
 def _replay_checkout_session(payment_row: Payment, order: Order):
     """
     /checkout-session's answer to a key this order has already used. An
@@ -865,7 +893,7 @@ _MANUAL_REVIEW_RESPONSE = {"status": "processed", "applied": False, "requires_ma
         402: {"description": "Card declined by the payment provider"},
         404: {"description": "Order not found"},
         409: {"description": "Another attempt for this order is in progress, or idempotency key already used with different payment parameters"},
-        422: {"description": "Missing or malformed Idempotency-Key header"},
+        422: {"description": "Missing or malformed Idempotency-Key header, or the key was already used with a different request body"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
 )
@@ -891,7 +919,8 @@ async def process_payment(
     """Charge an order's total via the payment provider, creating a PaymentIntent.
 
     Requires an `Idempotency-Key` header. Repeating a request with a key
-    already used for this order returns the first attempt's outcome.
+    already used for this order returns the first attempt's outcome; a key
+    already used with a different request body is answered 422.
     """
 
     # Locked (SELECT ... FOR UPDATE) until the commit that records this
@@ -923,6 +952,13 @@ async def process_payment(
     # of the same key on an order that is now paid is exactly the case this
     # guard exists for, and must not be rejected as a duplicate payment.
     existing_payment = await _payment_by_key(db, order.id, idempotency_key)
+    # What defines the request is the whole validated body (amount, currency,
+    # method, token), so a retry that changes any of it is not a replay. The
+    # order is fixed by the path and the key is scoped to it.
+    fingerprint = request_fingerprint(
+        operation="pay", body=payment.model_dump(mode="json")
+    )
+    _ensure_same_request_in_flow(existing_payment, fingerprint, checkout=False)
     #
     # One exception: an attempt whose provider request timed out ("unknown")
     # is not an outcome to replay. Stripe's guidance for a request that may
@@ -980,6 +1016,7 @@ async def process_payment(
             provider="stripe",
             payment_intent_id=f"{_PENDING_INTENT_ID_PREFIX}{uuid.uuid4().hex[:24]}",
             idempotency_key=idempotency_key,
+            idempotency_fingerprint=fingerprint,
             amount=amount_cents,
             currency=order.currency,
             status="processing",
@@ -997,6 +1034,7 @@ async def process_payment(
             await db.refresh(order)
             existing_payment = await _payment_by_key(db, order.id, idempotency_key)
             if existing_payment:
+                _ensure_same_request_in_flow(existing_payment, fingerprint, checkout=False)
                 return APIResponse.success_response(
                     _payment_row_to_response(existing_payment, order)
                 )
@@ -1164,7 +1202,7 @@ async def process_payment(
         400: {"description": "Order already paid or cancelled"},
         404: {"description": "Order not found"},
         409: {"description": "Another attempt for this order is in progress, or idempotency key already used with different checkout session parameters"},
-        422: {"description": "Missing or malformed Idempotency-Key header"},
+        422: {"description": "Missing or malformed Idempotency-Key header, or the key was already used with a different request body"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
 )
@@ -1215,6 +1253,11 @@ async def create_checkout_session(
     # reason as /pay - a successful retry against an order that is now
     # paid must not be rejected as a fresh duplicate attempt.
     existing_payment = await _payment_by_key(db, order.id, idempotency_key)
+    # The validated body is the request (the amount comes from the order).
+    fingerprint = request_fingerprint(
+        operation="checkout_session", body=payload.model_dump(mode="json")
+    )
+    _ensure_same_request_in_flow(existing_payment, fingerprint, checkout=True)
     # Except an attempt of this flow whose provider request timed out
     # ("unknown"), as in /pay: Stripe's guidance for a request that may or
     # may not have been executed is to send it again with the same
@@ -1256,6 +1299,7 @@ async def create_checkout_session(
             provider="stripe",
             payment_intent_id=f"{_PENDING_CHECKOUT_ID_PREFIX}{uuid.uuid4().hex[:24]}",
             idempotency_key=idempotency_key,
+            idempotency_fingerprint=fingerprint,
             amount=amount_cents,
             currency=order.currency,
             status="processing",
@@ -1272,6 +1316,7 @@ async def create_checkout_session(
             await db.refresh(order)
             existing_payment = await _payment_by_key(db, order.id, idempotency_key)
             if existing_payment:
+                _ensure_same_request_in_flow(existing_payment, fingerprint, checkout=True)
                 return _replay_checkout_session(existing_payment, order)
             # See the same re-raise in create_order: only the key's unique
             # index can fail this INSERT.

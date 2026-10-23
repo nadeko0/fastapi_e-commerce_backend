@@ -40,6 +40,9 @@ class Order(Base):
     # Client-supplied key (Idempotency-Key header) for safe checkout retries.
     # Unique per user: the same key from two different users is not a clash.
     idempotency_key: Mapped[str | None]
+    # SHA-256 of the request that carried the key (app/core/idempotency.py);
+    # NULL for orders stored before it existed, which replay without a check.
+    idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
 
