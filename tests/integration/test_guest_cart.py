@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+import fakeredis
 import jwt
 import pytest
 from fastapi.testclient import TestClient
@@ -239,9 +240,9 @@ def test_guest_mutation_returns_503_when_redis_fails(browser, db_session, monkey
     guest = browser()
     _add(guest, product.id, 1)
 
-    def _raise(*args, **kwargs):
+    async def _raise(*args, **kwargs):
         raise RedisConnectionError("connection lost")
-    monkeypatch.setattr(RedisService()._redis, "transaction", _raise)
+    monkeypatch.setattr(fakeredis.FakeAsyncRedis, "transaction", _raise)
 
     assert _add(guest, product.id, 1).status_code == 503
     assert _add(browser(), product.id, 1).status_code == 503

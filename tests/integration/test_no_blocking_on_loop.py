@@ -60,10 +60,6 @@ PENDING_ROUTERS = {
     "orders",
 
     "admin",
-
-    "cart",
-
-    "products",
 }
 
 # --- 1. The static guard ----------------------------------------------------
@@ -343,6 +339,35 @@ PRODUCT_CACHE_READS = RouteGroup(
     ],
 )
 
+# The cart of a logged-in user: read, add, change the quantity, validate. No
+# removal: the passes run at once on one account's cart, and a removal in one
+# would turn the quantity change of another into a 404.
+CART_ACCOUNT = RouteGroup(
+    seed=_seed_catalog,
+    headers=lambda db_session: make_user_headers(db_session, "cart-load@example.com")[0],
+    requests=lambda ids: [
+        ("GET", "/api/v1/cart"),
+        ("POST", f"/api/v1/cart/items?product_id={ids['product_id']}&quantity=1"),
+        ("PUT", f"/api/v1/cart/items/{ids['product_id']}?quantity=2"),
+        ("POST", "/api/v1/cart/validate"),
+    ],
+)
+
+# A guest's cart, through the guest cookie the client keeps: the add opens a
+# cart and sets the cookie, then a read, a validation and the emptying of the
+# cart (which clears the cookie again). Every request is a 200 whatever order
+# the concurrent passes interleave in.
+CART_GUEST = RouteGroup(
+    seed=_seed_catalog,
+    requests=lambda ids: [
+        ("GET", "/api/v1/cart"),
+        ("POST", f"/api/v1/cart/items?product_id={ids['product_id']}&quantity=1"),
+        ("GET", "/api/v1/cart"),
+        ("POST", "/api/v1/cart/validate"),
+        ("DELETE", "/api/v1/cart"),
+    ],
+)
+
 # A logged-in user's legal routes: the two reads and a consent update (the
 # write runs as many times as the reads; SQLite serializes it, which costs
 # wall time but never blocks the loop).
@@ -366,7 +391,8 @@ ROUTE_GROUPS: Dict[str, Tuple[Optional[str], Optional[RouteGroup]]] = {
     "orders": ("orders", None),
     "admin": ("admin", None),
     "legal": ("legal", LEGAL),
-    "cart": ("cart", None),
+    "cart": ("cart", CART_ACCOUNT),
+    "cart_guest": ("cart", CART_GUEST),
 }
 
 

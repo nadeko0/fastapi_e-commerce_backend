@@ -3,6 +3,7 @@ import threading
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+import fakeredis
 import pytest
 from redis import ConnectionError as RedisConnectionError
 from sqlalchemy import event
@@ -14,7 +15,7 @@ from app.models.category import Category
 from app.models.product import Product, ProductVariant
 from app.models.user import User
 from app.schemas.cart import CART_KEY_PREFIX
-from app.services.redis import RedisService
+from app.services.redis_async import AsyncRedisService
 
 USERS_PREFIX = "/api/v1/users"
 CART_PREFIX = "/api/v1/cart"
@@ -936,9 +937,11 @@ def test_update_cart_item_rejects_non_positive_quantity(client, db_session, quan
 # --- B: Redis failure during a mutation -------------------------------------
 
 def _break_cart_transaction(monkeypatch):
-    def _raise(*args, **kwargs):
+    # The routes use the async client (AsyncRedisService); every one the
+    # test run hands out is a FakeAsyncRedis, so its class is what breaks.
+    async def _raise(*args, **kwargs):
         raise RedisConnectionError("connection lost")
-    monkeypatch.setattr(RedisService()._redis, "transaction", _raise)
+    monkeypatch.setattr(fakeredis.FakeAsyncRedis, "transaction", _raise)
 
 
 def test_add_item_returns_503_when_redis_fails(client, db_session, monkeypatch):
@@ -1018,22 +1021,22 @@ def test_get_cart_does_not_erase_an_add_landing_during_the_read(client, db_sessi
     category = _make_category(db_session)
     product = _make_product(db_session, category.id)
 
-    real_get_cart = RedisService.get_cart
+    real_get_cart = AsyncRedisService.get_cart
     injected = []
 
-    def _get_cart_then_concurrent_add(self, user_id):
-        cart = real_get_cart(self, user_id)
+    async def _get_cart_then_concurrent_add(self, user_id):
+        cart = await real_get_cart(self, user_id)
         if not injected:
             injected.append(user_id)
-            self.add_to_cart_atomic(
+            await self.add_to_cart_atomic(
                 user_id=user_id, product_id=product.id, quantity=2, price=Decimal("9.99"),
                 name="Widget", image="", stock_quantity=10,
             )
         return cart
 
-    monkeypatch.setattr(RedisService, "get_cart", _get_cart_then_concurrent_add)
+    monkeypatch.setattr(AsyncRedisService, "get_cart", _get_cart_then_concurrent_add)
     client.get(CART_PREFIX, headers=_auth_headers(token))
-    monkeypatch.setattr(RedisService, "get_cart", real_get_cart)
+    monkeypatch.setattr(AsyncRedisService, "get_cart", real_get_cart)
 
     items = _cart(client, token)["items"]
     assert [(item["product_id"], item["quantity"]) for item in items] == [(product.id, 2)]
