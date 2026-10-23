@@ -1085,8 +1085,9 @@ def test_there_is_no_token_validator_besides_the_auth_dependency():
     # validate_token decoded any token of ours - refresh, reset, email
     # verification - as long as it was not blacklisted, and was used
     # nowhere. Wired up for authentication some day it would have repeated
-    # the bug app/api/deps.py describes. One way to authenticate a token:
-    # get_current_user.
+    # an old bug: a second get_current_user (in the since-removed
+    # app/api/deps.py) that skipped the blacklist and the token type check.
+    # One way to authenticate a token: get_current_user.
     import app.core.security as security_module
 
     assert not hasattr(security_module, "validate_token")
