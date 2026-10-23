@@ -23,6 +23,10 @@ PHONE = "+15550001111"
 @pytest.fixture
 def every_log_line(caplog):
     caplog.set_level(logging.DEBUG)
+    # The SQLite driver the tests run on (aiosqlite) logs every statement
+    # with its bound parameters at DEBUG; the production driver does not.
+    # That is the test database's chatter, not the application's logging.
+    caplog.set_level(logging.INFO, logger="aiosqlite")
     return caplog
 
 
@@ -80,18 +84,20 @@ def test_a_failed_profile_update_logs_no_personal_data(
     })
     headers = _login(client)
 
-    from sqlalchemy.orm import Session
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-    original_commit = Session.commit
+    original_commit = AsyncSession.commit
+    commits = {"n": 0}
 
-    def broken_commit(self, *args, **kwargs):
-        # Only the route's own (sync) session: see
+    async def broken_commit(self, *args, **kwargs):
+        # The first commit is the auth dependency's (shared session): see
         # test_update_profile_returns_500_on_genuine_db_error.
-        if self.bind.dialect.is_async:
-            return original_commit(self, *args, **kwargs)
+        commits["n"] += 1
+        if commits["n"] == 1:
+            return await original_commit(self, *args, **kwargs)
         raise RuntimeError(f"database said no to {NEW_NAME}")
 
-    monkeypatch.setattr(Session, "commit", broken_commit)
+    monkeypatch.setattr(AsyncSession, "commit", broken_commit)
     response = client.put(f"{USERS}/me", json={"full_name": NEW_NAME}, headers=headers)
 
     assert response.status_code == 500

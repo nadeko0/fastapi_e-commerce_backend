@@ -96,15 +96,17 @@ def test_update_profile_returns_404_when_user_deleted_after_token_issued(
     # gone by then.
     access_token = _register_and_login(client, valid_registration_payload)
 
-    import sqlalchemy.orm
+    from sqlalchemy.ext.asyncio import AsyncSession
 
     call_count = {"n": 0}
 
-    def patched_first(self):
+    async def patched_get(self, *args, **kwargs):
         call_count["n"] += 1
         return None
 
-    monkeypatch.setattr(sqlalchemy.orm.Query, "first", patched_first)
+    # The route re-loads the user with db.get(); the auth dependency reads
+    # it with execute(), so only the route's lookup is affected.
+    monkeypatch.setattr(AsyncSession, "get", patched_get)
 
     response = client.put(
         f"{API_PREFIX}/me",
@@ -126,20 +128,21 @@ def test_update_profile_returns_500_on_genuine_db_error(
     # during the update (here, db.commit() raising) must still produce a 500.
     access_token = _register_and_login(client, valid_registration_payload)
 
-    from sqlalchemy.orm import Session
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-    original_commit = Session.commit
+    original_commit = AsyncSession.commit
+    commits = {"n": 0}
 
-    def _boom(self, *args, **kwargs):
-        # Only the route's own (sync) session fails. An AsyncSession wraps a
-        # plain Session too, so patching Session.commit also reaches the one
-        # the auth dependency reads the user through - and this test is
-        # about the update failing, not authentication.
-        if self.bind.dialect.is_async:
-            return original_commit(self, *args, **kwargs)
+    async def _boom(self, *args, **kwargs):
+        # The auth dependency shares the route's session and commits first
+        # (it ends its read transaction); this test is about the update
+        # failing, not authentication, so only the commits after that fail.
+        commits["n"] += 1
+        if commits["n"] == 1:
+            return await original_commit(self, *args, **kwargs)
         raise RuntimeError("simulated database failure")
 
-    monkeypatch.setattr(Session, "commit", _boom)
+    monkeypatch.setattr(AsyncSession, "commit", _boom)
 
     response = client.put(
         f"{API_PREFIX}/me",

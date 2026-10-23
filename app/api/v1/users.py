@@ -5,14 +5,15 @@ from typing import List
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload, selectinload
 
-from app.api.v1.cart import merge_guest_cart_on_login
+from app.api.v1.cart import merge_guest_cart_on_login_async
 from app.core.clock import as_utc, utc_now
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_async_db
 from app.core.rate_limit import check_login_attempt, clear_login_failures
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
@@ -23,16 +24,16 @@ from app.core.security import (
     generate_password_reset_token,
     get_current_active_user,
     get_password_hash_async,
-    invalidate_tokens_issued_before_now,
-    issue_refresh_token,
+    invalidate_tokens_issued_before_now_async,
+    issue_refresh_token_async,
     oauth2_scheme,
-    rotate_refresh_token,
+    rotate_refresh_token_async,
     verify_email_token,
     verify_password_async,
     verify_password_reset_token,
 )
 from app.core.security import (
-    logout as logout_tokens,
+    logout_async as logout_tokens,
 )
 from app.models.address import Address
 from app.models.order import Order
@@ -74,7 +75,7 @@ from app.services.email import (
     send_password_reset_email,
     send_welcome_email,
 )
-from app.services.redis import RedisService
+from app.services.redis_async import AsyncRedisService, get_cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -88,12 +89,15 @@ router = APIRouter(prefix="/users", tags=["users"])
 # unnecessary second source of truth for the same value.
 
 
-def _user_by_email(db: Session, email: str):
+async def _user_by_email(db: AsyncSession, email: str):
     """The account for this email, in whatever case it was typed or stored.
     lower(email) on the column, not just the normalised input: rows stored
     before emails were normalised keep the spelling their owner typed. The
     comparison is what the unique index on lower(email) covers."""
-    return db.query(User).filter(func.lower(User.email) == normalize_email(email)).first()
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == normalize_email(email)).limit(1)
+    )
+    return result.scalars().first()
 
 
 
@@ -109,7 +113,7 @@ REGISTRATION_RECEIVED = (
 async def register_user(
     user_in: UserCreate,
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     background_tasks: BackgroundTasks = None,
 ):
     """Register a new user account and queue a welcome/verification email.
@@ -158,22 +162,20 @@ async def register_user(
     )
     db.add(user)
     try:
-        db.commit()
+        await db.commit()
         existing_email = None
         new_email, new_full_name, new_user_id = user.email, user.full_name, user.id
     except IntegrityError:
         # The email (in any case: see uq_users_email_lower) has an account.
-        db.rollback()
-        existing = _user_by_email(db, user_in.email)
+        await db.rollback()
+        existing = await _user_by_email(db, user_in.email)
         existing_email = existing.email if existing else None
         new_email = None
     # Nothing below touches `db`. Closing here returns the connection now
-    # instead of leaving it to FastAPI's post-return dependency teardown,
-    # which a client disconnect in the rest of the request can skip
-    # entirely (fastapi.concurrency.contextmanager_in_threadpool has no
-    # `finally` around its yield) - the exposure login()/reset_password()
-    # close their sessions early for (see the long comment in login()).
-    db.close()
+    # instead of leaving it to FastAPI's post-return dependency teardown -
+    # the same early release login()/reset_password() do (see the comment in
+    # login()).
+    await db.close()
 
     if background_tasks:
         if new_email:
@@ -204,7 +206,7 @@ async def register_user(
 )
 async def verify_email(
     token: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Confirm a user's email address using a verification token."""
 
@@ -215,7 +217,7 @@ async def verify_email(
             detail="Invalid or expired verification token"
         )
 
-    user = _user_by_email(db, email)
+    user = await _user_by_email(db, email)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -229,7 +231,7 @@ async def verify_email(
 
     user.is_email_verified = True
     user.email_verification_date = utc_now()
-    db.commit()
+    await db.commit()
 
     return APIResponse.success_response({
         "message": "Email verified successfully"
@@ -279,8 +281,8 @@ async def login(
     request: Request,
     response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db),
-    redis: RedisService = Depends(),
+    db: AsyncSession = Depends(get_async_db),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Authenticate with email/password and receive access and refresh tokens.
 
@@ -301,7 +303,7 @@ async def login(
     # exists.
     await check_login_attempt(form_data.username, request)
 
-    user = _user_by_email(db, form_data.username)
+    user = await _user_by_email(db, form_data.username)
     user_id = user.id if user else None
     hashed_password = user.hashed_password if user else None
     # Read here with the others, off the row already loaded, because the
@@ -310,26 +312,15 @@ async def login(
 
     # Release this request's DB connection back to the pool *before* the
     # CPU-bound bcrypt verification, instead of after. verify_password_async
-    # offloads to a shared threadpool (see app/core/security.py) that also
-    # carries every other concurrent request's bcrypt work plus FastAPI's own
-    # threadpool dispatch of sync `Depends(get_db)` dependencies - under load
-    # that queue backs up, so a connection held open across this await gets
-    # held for however long the queue is, not just one hash's cost. Worse,
-    # if the client disconnects while parked on this await, the connection
-    # is stranded permanently: FastAPI's dependency cleanup (`session.close()`
-    # in app.core.database.get_db) itself runs via another threadpool await,
-    # and anyio delivers cancellation per-scope - once cancelled, that
-    # cleanup checkpoint raises immediately instead of ever running
-    # `session.close()`. Closing the session here, before the await, means
-    # there is no open connection left for that cancellation to strand (this
-    # was confirmed by instrumenting fastapi.concurrency.contextmanager_in_
-    # threadpool directly: cancelling a task mid-await inside it never
-    # invoked cm.__exit__ at all, even after waiting well past the awaited
-    # call's completion). `db` itself is a plain SQLAlchemy Session, not a
-    # connection - closing it here doesn't invalidate it, it just returns
-    # the checked-out connection to the pool; the session transparently
-    # checks out a fresh one on its next use below.
-    db.close()
+    # offloads to a shared threadpool (see app/core/security.py) that carries
+    # every other concurrent request's bcrypt work too, so under load a
+    # connection held open across this await is held for however long that
+    # queue is, not just one hash's cost. Closing the AsyncSession returns
+    # the checked-out connection to the pool; the session itself stays
+    # usable and checks out a fresh connection on its next use below
+    # (tests/integration/test_db_pool_concurrency.py proves that none is
+    # held during the hash).
+    await db.close()
 
     # Deliberately NOT `user_id is None or not await verify_password_async(...)`:
     # `or` short-circuits, so that structure would skip the bcrypt call
@@ -357,14 +348,17 @@ async def login(
     # above, so no database connection is held across this await.
     await clear_login_failures(form_data.username, request)
 
-    db.query(User).filter(User.id == user_id).update(
-        {User.last_login: utc_now()}
+    await db.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(last_login=utc_now())
+        .execution_options(synchronize_session=False)
     )
-    db.commit()
+    await db.commit()
 
     logger.info(f"Generating tokens for user {user_id}")
     access_token = create_access_token(user_id)
-    refresh_token = issue_refresh_token(user_id)
+    refresh_token = await issue_refresh_token_async(user_id)
     logger.info(f"Tokens generated for user {user_id}")
 
     # The cart the visitor filled before logging in becomes part of the
@@ -373,7 +367,7 @@ async def login(
     # here, as after the db.close() above) and the tokens exist, and
     # nothing in it can raise - the login succeeds whatever becomes of the
     # cart. Only an active account gets this far (see the refusal above).
-    merge_guest_cart_on_login(request, response, user_id, redis)
+    await merge_guest_cart_on_login_async(request, response, user_id, redis)
 
     return APIResponse.success_response(Token(
         access_token=access_token,
@@ -388,7 +382,7 @@ async def login(
 )
 async def refresh_access_token(
     refresh_in: RefreshTokenRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Exchange a refresh token for a new access token, rotating the refresh
     token in the process. Does not require a valid (or even present) access
@@ -398,7 +392,7 @@ async def refresh_access_token(
     re-login.
     """
     try:
-        new_access_token, new_refresh_token = await rotate_refresh_token(
+        new_access_token, new_refresh_token = await rotate_refresh_token_async(
             refresh_in.refresh_token, db
         )
     except RefreshTokenError:
@@ -433,7 +427,7 @@ async def logout(
     503 when that could not be recorded (Redis unavailable): the client
     must not be told it is logged out while its tokens still work."""
     try:
-        logout_tokens(token, logout_in.refresh_token)
+        await logout_tokens(token, logout_in.refresh_token)
     except RevocationUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -469,7 +463,7 @@ async def update_consent(
     granted: bool,
     request: Request,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Update the current user's consent for a given consent type."""
 
@@ -487,17 +481,13 @@ async def update_consent(
     flag_column, date_column = columns
 
     # current_user comes from get_current_active_user -> get_current_user
-    # (app/core/security.py), which loads the row through an AsyncSession
-    # from app.core.database.get_async_db - not through this route's `db`
-    # (app.core.database.get_db, a sync Session). Different dependency
-    # callables, so FastAPI's per-request cache gives each its own session,
-    # and what the route receives is a detached snapshot of the row: it
-    # belongs to no session this route can commit. Mutating current_user and
-    # calling db.commit() was a silent no-op - the change was never written,
-    # so consent updates never persisted despite the endpoint returning 200
-    # with the (in-memory-only) updated value. Re-querying through `db`
-    # attaches the row to the session this route actually commits.
-    user = db.query(User).filter(User.id == current_user.id).first()
+    # (app/core/security.py). That dependency and this route's `db` are the
+    # same callable (get_async_db), so they share one AsyncSession, but
+    # get_current_user expunges the user it returns (and commits), so what
+    # the route receives is a detached snapshot: mutating it and committing
+    # `db` would write nothing. Re-loading the row through `db` attaches it
+    # to the session this route commits.
+    user = await db.get(User, current_user.id)
 
     setattr(user, flag_column, granted)
     setattr(user, date_column, utc_now())
@@ -518,8 +508,11 @@ async def update_consent(
         "user_agent": request.headers.get("user-agent"),
     }]
 
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    # Refreshed because the INSERT/UPDATE does not read server-side defaults
+    # back and UserResponse reads them (e.g. role); an AsyncSession cannot
+    # load them lazily.
+    await db.refresh(user)
     return APIResponse.success_response(UserResponse.model_validate(user))
 
 @router.get(
@@ -529,7 +522,7 @@ async def update_consent(
 )
 async def export_user_data(
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     background_tasks: BackgroundTasks = None,
 ):
     """Export the current user's personal data, consents, addresses, and orders (GDPR)."""
@@ -553,7 +546,8 @@ async def export_user_data(
         status="completed",
     )
     # Loaded here, eagerly, through this route's own session - not read off
-    # current_user.addresses / current_user.orders. Those lazy relationships
+    # current_user.addresses / current_user.orders (an AsyncSession cannot
+    # lazy-load them anyway). Those lazy relationships
     # cost one query per order, per item, per product and per variant when
     # OrderResponse serialized them: 165 queries for one export of an account
     # with a handful of orders (measured by tracing, scripts/loadtest/
@@ -566,7 +560,7 @@ async def export_user_data(
     # response, so its size must have a ceiling. Past it the holder is told
     # where to get the data instead - the request itself (Art. 15) still has
     # to be answered, just not inline.
-    records = db.query(
+    records = await db.scalar(select(
         select(func.count()).select_from(Address)
         .where(Address.user_id == current_user.id).scalar_subquery()
         + select(func.count()).select_from(Order)
@@ -574,7 +568,7 @@ async def export_user_data(
         + select(func.count()).select_from(OrderItem)
         .join(Order, OrderItem.order_id == Order.id)
         .where(Order.user_id == current_user.id).scalar_subquery()
-    ).scalar()
+    ))
     if records > settings.GDPR_EXPORT_MAX_RECORDS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -587,17 +581,18 @@ async def export_user_data(
                 "limit": settings.GDPR_EXPORT_MAX_RECORDS,
             },
         )
-    addresses = db.query(Address).filter(Address.user_id == current_user.id).all()
-    orders = (
-        db.query(Order)
+    addresses = (await db.execute(
+        select(Address).where(Address.user_id == current_user.id)
+    )).scalars().all()
+    orders = (await db.execute(
+        select(Order)
         .options(
             joinedload(Order.shipping_address),
             selectinload(Order.items).joinedload(OrderItem.product),
             selectinload(Order.items).joinedload(OrderItem.variant),
         )
-        .filter(Order.user_id == current_user.id)
-        .all()
-    )
+        .where(Order.user_id == current_user.id)
+    )).scalars().all()
     export = GDPRExportData(
         personal_data=current_user,
         consents=consents,
@@ -626,7 +621,7 @@ async def export_user_data(
 async def delete_user_data(
     deletion: GDPRDelete,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Request deletion of the current user's account and data (GDPR)."""
 
@@ -638,19 +633,16 @@ async def delete_user_data(
         )
 
     # See the identical note in update_consent above: current_user is a
-    # detached snapshot loaded through get_async_db (via
-    # get_current_active_user), not attached to this route's `db`
-    # (app.core.database.get_db), so mutating current_user directly and
-    # committing `db` silently discarded the deactivation/deletion flags -
-    # the account was never actually deactivated. Re-query through `db`.
-    # (The former `current_user.deletion_reason = deletion.reason` line is
-    # also dropped: User has no deletion_reason column, so it only ever set
-    # a transient, non-persisted Python attribute.)
-    user = db.query(User).filter(User.id == current_user.id).first()
+    # detached snapshot (get_current_user expunges it), so mutating it and
+    # committing `db` would discard the deactivation/deletion flags. Re-load
+    # it through `db`. (The former `current_user.deletion_reason = ...` line
+    # is also dropped: User has no deletion_reason column, so it only ever
+    # set a transient, non-persisted Python attribute.)
+    user = await db.get(User, current_user.id)
     user.is_active = False
     user.data_deletion_requested = True
     user.data_deletion_date = utc_now()
-    db.commit()
+    await db.commit()
 
     logger.info(f"Scheduling hard delete for user {user.id} after 1 day")
 
@@ -679,7 +671,7 @@ async def get_current_user_data(
 async def update_current_user(
     user_in: UserUpdate,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Update fields on the current authenticated user's profile."""
 
@@ -697,7 +689,7 @@ async def update_current_user(
 
     logger.info(f"Fields to update: {list(update_data.keys())}")
 
-    user = db.query(User).filter(User.id == current_user.id).first()
+    user = await db.get(User, current_user.id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -709,18 +701,18 @@ async def update_current_user(
         for field, new_value in update_data.items():
             setattr(user, field, new_value)
 
-        db.commit()
+        await db.commit()
         logger.info(
             f"Profile updated successfully for user {user.id}. "
             f"Updated fields: {list(update_data.keys())}"
         )
 
 
-        db.refresh(user)
+        await db.refresh(user)
         return APIResponse.success_response(UserResponse.model_validate(user))
 
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         # The exception's type only: its message can quote the values.
         logger.error(f"Failed to update profile for user {current_user.id}: {type(e).__name__}")
         raise HTTPException(
@@ -732,26 +724,27 @@ async def update_current_user(
 async def list_addresses(
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """List the current user's active addresses, paginated."""
 
-    total = db.query(Address).filter(
-        Address.user_id == current_user.id,
-        Address.is_active
-    ).count()
+    total = await db.scalar(
+        select(func.count()).select_from(Address).where(
+            Address.user_id == current_user.id,
+            Address.is_active
+        )
+    )
 
-    addresses = (
-        db.query(Address)
-        .filter(
+    addresses = (await db.execute(
+        select(Address)
+        .where(
             Address.user_id == current_user.id,
             Address.is_active
         )
         .order_by(Address.id)
         .offset((pagination.page - 1) * pagination.size)
         .limit(pagination.size)
-        .all()
-    )
+    )).scalars().all()
 
     return APIResponse.success_response(AddressListResponse(
         items=addresses,
@@ -772,26 +765,30 @@ async def list_addresses(
 async def create_address(
     address_in: AddressCreate,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Add a new address for the current user."""
 
     try:
 
-        active_addresses = db.query(Address).filter(
-            Address.user_id == current_user.id,
-            Address.is_active
-        ).all()
+        active_addresses = (await db.execute(
+            select(Address).where(
+                Address.user_id == current_user.id,
+                Address.is_active
+            )
+        )).scalars().all()
 
 
         should_be_default = address_in.is_default or not active_addresses
         if should_be_default:
 
-            existing_default = db.query(Address).filter(
-                Address.user_id == current_user.id,
-                Address.is_active,
-                Address.is_default
-            ).first()
+            existing_default = (await db.execute(
+                select(Address).where(
+                    Address.user_id == current_user.id,
+                    Address.is_active,
+                    Address.is_default
+                ).limit(1)
+            )).scalars().first()
             if existing_default:
                 existing_default.is_default = False
 
@@ -803,13 +800,14 @@ async def create_address(
         )
 
         db.add(address)
-        db.commit()
-        db.refresh(address)
+        await db.commit()
+        # address_type has a server default the INSERT does not read back.
+        await db.refresh(address)
 
         logger.info(f"Created address with ID: {address.id} for user {current_user.id}")
 
 
-        created = db.get(Address, address.id)
+        created = await db.get(Address, address.id)
         logger.info(f"Verified address exists: {created and created.id} for user {current_user.id}")
 
         return APIResponse.success_response(AddressResponse.model_validate(address))
@@ -822,7 +820,7 @@ async def create_address(
             }
         )
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This address already exists for the current user"
@@ -840,14 +838,16 @@ async def update_address(
     address_id: Int32,
     address_in: AddressUpdate,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Update fields on one of the current user's addresses."""
 
-    address = db.query(Address).filter(
-        Address.id == address_id,
-        Address.user_id == current_user.id
-    ).first()
+    address = (await db.execute(
+        select(Address).where(
+            Address.id == address_id,
+            Address.user_id == current_user.id
+        ).limit(1)
+    )).scalars().first()
 
     logger.info(f"Found address {address_id} for update request from user {current_user.id}")
 
@@ -867,12 +867,14 @@ async def update_address(
 
 
     if address_in.is_default:
-        existing_default = db.query(Address).filter(
-            Address.user_id == current_user.id,
-            Address.is_active,
-            Address.is_default,
-            Address.id != address_id
-        ).first()
+        existing_default = (await db.execute(
+            select(Address).where(
+                Address.user_id == current_user.id,
+                Address.is_active,
+                Address.is_default,
+                Address.id != address_id
+            ).limit(1)
+        )).scalars().first()
         if existing_default:
             existing_default.is_default = False
 
@@ -880,8 +882,8 @@ async def update_address(
     for field, value in address_in.model_dump(exclude_unset=True).items():
         setattr(address, field, value)
 
-    db.commit()
-    db.refresh(address)
+    await db.commit()
+    await db.refresh(address)
 
     return APIResponse.success_response(AddressResponse.model_validate(address))
 
@@ -896,14 +898,16 @@ async def update_address(
 async def delete_address(
     address_id: Int32,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Deactivate one of the current user's addresses."""
 
-    address = db.query(Address).filter(
-        Address.id == address_id,
-        Address.user_id == current_user.id
-    ).first()
+    address = (await db.execute(
+        select(Address).where(
+            Address.id == address_id,
+            Address.user_id == current_user.id
+        ).limit(1)
+    )).scalars().first()
 
     logger.info(f"Processing deletion request for address {address_id} from user {current_user.id}")
 
@@ -924,15 +928,17 @@ async def delete_address(
 
 
     if address.is_default:
-        new_default = db.query(Address).filter(
-            Address.user_id == current_user.id,
-            Address.is_active,
-            Address.id != address_id
-        ).order_by(Address.created_at.desc()).first()
+        new_default = (await db.execute(
+            select(Address).where(
+                Address.user_id == current_user.id,
+                Address.is_active,
+                Address.id != address_id
+            ).order_by(Address.created_at.desc()).limit(1)
+        )).scalars().first()
         if new_default:
             new_default.is_default = True
 
-    db.commit()
+    await db.commit()
 
     return APIResponse.success_response({
         "message": "Address deleted successfully"
@@ -949,14 +955,16 @@ async def delete_address(
 async def set_default_address(
     default_address: SetDefaultAddress,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Mark one of the current user's addresses as the default shipping address."""
 
-    address = db.query(Address).filter(
-        Address.id == default_address.address_id,
-        Address.user_id == current_user.id
-    ).first()
+    address = (await db.execute(
+        select(Address).where(
+            Address.id == default_address.address_id,
+            Address.user_id == current_user.id
+        ).limit(1)
+    )).scalars().first()
 
     logger.info(f"Processing set default request for address {default_address.address_id} from user {current_user.id}")
 
@@ -976,13 +984,18 @@ async def set_default_address(
     address.is_default = True
 
 
-    db.query(Address).filter(
-        Address.user_id == current_user.id,
-        Address.is_active,
-        Address.id != address.id
-    ).update({Address.is_default: False})
+    await db.execute(
+        update(Address)
+        .where(
+            Address.user_id == current_user.id,
+            Address.is_active,
+            Address.id != address.id
+        )
+        .values(is_default=False)
+        .execution_options(synchronize_session=False)
+    )
 
-    db.commit()
+    await db.commit()
 
     return APIResponse.success_response({
         "message": "Default address updated successfully"
@@ -992,25 +1005,26 @@ async def set_default_address(
 async def get_user_orders(
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """List the current user's orders, most recent first, paginated."""
 
-    # Eager-load shipping_address (many-to-one) and items->product
-    # (one-to-many): OrderResponse serializes both for every order in the
-    # page, so without this each row triggers its own lazy-load queries.
-    orders = (
-        db.query(Order)
+    # Eager-load shipping_address (many-to-one) and items->product/variant
+    # (one-to-many): OrderResponse serializes them for every order in the
+    # page (variant_sku reads item.variant), and an AsyncSession cannot
+    # lazy-load them while the response is built.
+    orders = (await db.execute(
+        select(Order)
         .options(
             joinedload(Order.shipping_address),
             selectinload(Order.items).joinedload(OrderItem.product),
+            selectinload(Order.items).joinedload(OrderItem.variant),
         )
-        .filter(Order.user_id == current_user.id)
+        .where(Order.user_id == current_user.id)
         .order_by(Order.created_at.desc(), Order.id.desc())
         .offset((pagination.page - 1) * pagination.size)
         .limit(pagination.size)
-        .all()
-    )
+    )).scalars().all()
     return APIResponse.success_response([
         OrderResponse.model_validate(order) for order in orders
     ])
@@ -1024,12 +1038,12 @@ def _invalid_reset_token() -> HTTPException:
 @router.post("/password/reset", response_model=APIResponse[dict])
 async def request_password_reset(
     reset_request: PasswordReset,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     background_tasks: BackgroundTasks = None,
 ):
     """Request a password reset email; always succeeds to avoid leaking registered emails."""
 
-    user = _user_by_email(db, reset_request.email)
+    user = await _user_by_email(db, reset_request.email)
     if user:
         token = generate_password_reset_token(user.email, user.hashed_password)
         if background_tasks:
@@ -1056,7 +1070,7 @@ async def request_password_reset(
 )
 async def validate_reset_token(
     token: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Check whether a password reset token is still valid."""
 
@@ -1065,7 +1079,7 @@ async def validate_reset_token(
         raise _invalid_reset_token()
     email = claims.email
 
-    user = _user_by_email(db, email)
+    user = await _user_by_email(db, email)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1095,7 +1109,7 @@ async def reset_password(
     token: str,
     new_password: PasswordUpdate,
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Reset a user's password using a valid reset token."""
 
@@ -1105,18 +1119,16 @@ async def reset_password(
             raise _invalid_reset_token()
         email = claims.email
 
-        user = _user_by_email(db, email)
+        user = await _user_by_email(db, email)
         user_id = user.id if user else None
         old_hashed_password = user.hashed_password if user else None
 
         # Same reasoning as login(): release the connection before the
-        # CPU-bound bcrypt hash, not after, so neither queueing delay nor a
-        # mid-await client disconnect can hold/strand it. See the long
-        # comment in login() for the full mechanism. Before the refusals
-        # below as well: a refused request would otherwise keep its
-        # connection until dependency teardown gets a thread, and under a
-        # burst of resets that thread is queued behind every bcrypt hash.
-        db.close()
+        # CPU-bound bcrypt hash, not after, so the queueing delay of the
+        # hash cannot hold it. See the comment in login(). Before the
+        # refusals below as well: a refused request would otherwise keep its
+        # connection until dependency teardown.
+        await db.close()
 
         if user_id is None:
             raise HTTPException(
@@ -1141,7 +1153,7 @@ async def reset_password(
         # used again once Redis is back. After the bcrypt hash rather than
         # before it, so that a login with the old password during the hash
         # does not mint a token newer than the watermark.
-        if not invalidate_tokens_issued_before_now(user_id):
+        if not await invalidate_tokens_issued_before_now_async(user_id):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Password reset is temporarily unavailable, please retry"
@@ -1150,10 +1162,14 @@ async def reset_password(
         # Only if the password is still the one the token was checked
         # against: two requests presenting the same token both pass that
         # check above, and only the first to get here may use it.
-        updated = db.query(User).filter(
-            User.id == user_id, User.hashed_password == old_hashed_password
-        ).update({User.hashed_password: new_hashed_password}, synchronize_session=False)
-        db.commit()
+        result = await db.execute(
+            update(User)
+            .where(User.id == user_id, User.hashed_password == old_hashed_password)
+            .values(hashed_password=new_hashed_password)
+            .execution_options(synchronize_session=False)
+        )
+        updated = result.rowcount
+        await db.commit()
         if updated != 1:
             raise _invalid_reset_token()
 
