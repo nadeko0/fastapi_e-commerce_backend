@@ -9,11 +9,10 @@ import inspect
 
 from fastapi.routing import APIRoute
 
-import app.api.deps as deps
 import app.core.database as database
 from app.api.v1 import legal
 
-SYNC_SESSION_DEPENDENCIES = {database.get_db, deps.get_db}
+# Any dependency defined in app.core.database other than get_async_db.
 LEGAL_DB_ROUTES = {
     "update_user_consent",
     "request_personal_data",
@@ -35,7 +34,9 @@ def test_no_legal_route_depends_on_a_sync_session():
     routes = _legal_routes()
     assert len(routes) == 7
     for route in routes:
-        assert not SYNC_SESSION_DEPENDENCIES & set(_calls(route.dependant)), route.path
+        for call in _calls(route.dependant):
+            if call.__module__ == database.__name__:
+                assert call is database.get_async_db, route.path
 
 
 def test_legal_db_routes_share_the_auth_async_session():

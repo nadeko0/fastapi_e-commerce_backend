@@ -76,7 +76,7 @@ DUMMY_PASSWORD_HASH = get_password_hash(str(uuid.uuid4()))
 # run_in_threadpool dispatches onto anyio's shared default worker pool
 # (capacity ~40, shared with every other sync-dependency/threadpool call in
 # the process - including FastAPI's own threadpool wrapping of sync
-# `Depends(get_db)` generators). Under concurrent login/register/reset-
+# generator dependencies). Under concurrent login/register/reset-
 # password load, unbounded bcrypt calls can all pile into that shared pool
 # at once; on a CPU-starved host (bcrypt is CPU-bound, not I/O-bound) they
 # queue behind each other for real wall-clock time rather than actually

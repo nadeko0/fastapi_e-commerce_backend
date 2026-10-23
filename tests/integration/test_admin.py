@@ -598,7 +598,7 @@ def test_admin_create_variant_race_returns_409_not_500(client, db_session, monke
     # DB's unique constraint on ProductVariant.sku as the real guarantee.
     # Before this fix, the loser's IntegrityError from that constraint was
     # uncaught in the endpoint: still caught safely upstream by
-    # app.core.database.get_db's session_scope (so no raw SQL ever leaked to
+    # app.core.database.get_async_db (so no raw SQL ever leaked to
     # the client), but surfaced as a generic 500 instead of the same 409 the
     # sequential-duplicate case already returns.
     #

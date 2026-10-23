@@ -4,7 +4,7 @@ Two checks keep the async migration honest.
 
 1. A static guard. For every `async def` route, walk the full dependency
    tree FastAPI resolved (route.dependant) and fail on a synchronous
-   resource: either `get_db`, or the synchronous RedisService class. The
+   resource: a sync session dependency from app.core.database, or the synchronous RedisService class. The
    endpoint's own source is scanned too (AST) for the same things used
    directly: `.query(`, RedisService / redis_service, `.apply_async`. Sync
    code reached through `await db.run_sync(...)` or `run_in_threadpool(...)`
@@ -44,7 +44,6 @@ from fastapi.routing import APIRoute
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import app.api.deps as deps_module
 import app.core.database as database_module
 import app.services.redis_async as redis_async
 from app.core.clock import utc_now
@@ -66,10 +65,12 @@ PENDING_ROUTERS: set = set()
 # --- 1. The static guard ----------------------------------------------------
 
 SYNC_DEPENDENCIES = {
-    database_module.get_db: "sync session (app.core.database.get_db)",
-    deps_module.get_db: "sync session (app.api.deps.get_db)",
     RedisService: "sync Redis (RedisService)",
 }
+# The only dependency a route may take from app.core.database is
+# get_async_db; anything else defined there is a sync session (the sync
+# get_db was removed once the last router moved to AsyncSession).
+SYNC_SESSION_MODULE = database_module.__name__
 SYNC_NAMES_IN_BODY = {"RedisService", "redis_service"}
 
 
@@ -119,11 +120,15 @@ def route_violations(route: APIRoute) -> List[str]:
     endpoint (FastAPI runs those in a worker thread) and for a clean one."""
     if not inspect.iscoroutinefunction(inspect.unwrap(route.endpoint)):
         return []
-    found = {
-        SYNC_DEPENDENCIES[call]
-        for call in dependency_calls(route.dependant)
-        if call in SYNC_DEPENDENCIES
-    }
+    found = set()
+    for call in dependency_calls(route.dependant):
+        if call in SYNC_DEPENDENCIES:
+            found.add(SYNC_DEPENDENCIES[call])
+        elif (
+            getattr(call, "__module__", None) == SYNC_SESSION_MODULE
+            and call is not database_module.get_async_db
+        ):
+            found.add(f"sync session ({SYNC_SESSION_MODULE}.{call.__name__})")
     return sorted(found) + body_violations(route.endpoint)
 
 
@@ -179,19 +184,21 @@ def test_pending_names_are_real_routers():
 def test_the_guard_finds_each_kind_of_blocking_use():
     probe = FastAPI()
 
-    @probe.get("/session")
-    async def session_dependency(db=Depends(database_module.get_db)):
-        return 1
+    def get_db():
+        yield None
 
-    @probe.get("/deps-session")
-    async def deps_session_dependency(db=Depends(deps_module.get_db)):
+    # A sync session dependency is recognised by where it is defined.
+    get_db.__module__ = database_module.__name__
+
+    @probe.get("/session")
+    async def session_dependency(db=Depends(get_db)):
         return 1
 
     @probe.get("/redis")
     async def redis_dependency(redis: RedisService = Depends()):
         return 1
 
-    def nested(db=Depends(database_module.get_db)):
+    def nested(db=Depends(get_db)):
         return db
 
     @probe.get("/nested")
@@ -211,7 +218,7 @@ def test_the_guard_finds_each_kind_of_blocking_use():
         return object().apply_async()
 
     @probe.get("/threaded")
-    def sync_endpoint(db=Depends(database_module.get_db)):
+    def sync_endpoint(db=Depends(get_db)):
         return 1
 
     @probe.get("/clean")
@@ -223,7 +230,6 @@ def test_the_guard_finds_each_kind_of_blocking_use():
     }
 
     assert any("app.core.database.get_db" in v for v in found["/session"])
-    assert any("app.api.deps.get_db" in v for v in found["/deps-session"])
     assert any("RedisService" in v for v in found["/redis"])
     assert any("app.core.database.get_db" in v for v in found["/nested"])
     assert found["/query"] == ["Session.query() in the body"]
