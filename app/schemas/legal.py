@@ -19,10 +19,10 @@ class ConsentUpdate(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
+            "examples": [{
                 "marketing_consent": True,
                 "privacy_policy_accepted": True
-            }
+            }]
         }
     )
 
@@ -52,11 +52,11 @@ class DataRequest(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
+            "examples": [{
                 "request_type": "deletion",
                 "reason": "No longer using the shop",
                 "password": "your-current-password"
-            }
+            }]
         }
     )
 
@@ -67,11 +67,11 @@ class DataRequestResponse(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
+            "examples": [{
                 "request_id": "req_123456",
                 "status": "processing",
                 "estimated_completion_time": "2025-01-15T19:21:32.388Z"
-            }
+            }]
         }
     )
 
@@ -82,11 +82,11 @@ class LegalDocument(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
+            "examples": [{
                 "content": "Privacy Policy content...",
                 "version": "1.0",
                 "last_updated": "2025-01-14T19:21:32.388Z"
-            }
+            }]
         }
     )
 
@@ -97,13 +97,13 @@ class ConsentUpdateResponse(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
+            "examples": [{
                 "status": "success",
                 "updated_consents": {
                     "marketing": True,
                     "privacy_policy": True
                 },
                 "timestamp": "2025-01-14T19:21:32.388Z"
-            }
+            }]
         }
     )
