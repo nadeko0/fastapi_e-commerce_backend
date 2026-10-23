@@ -1,21 +1,24 @@
+from datetime import datetime
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any
+
 from sqlalchemy import (
     ARRAY,
     JSON,
-    Boolean,
     CheckConstraint,
-    Column,
     ForeignKey,
     Index,
-    Integer,
-    Numeric,
     String,
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.clock import UTCDateTime, utc_now
+from app.core.clock import utc_now
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.category import Category
 
 # ARRAY is Postgres-only; SQLite (used for the in-memory test DB) has no
 # array column type, so this column falls back to JSON there. Behavior is
@@ -35,29 +38,29 @@ _characteristics_json = JSON().with_variant(JSONB(), "postgresql")
 class Product(Base):
     __tablename__ = "products"
 
-    id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False, index=True)
-    description = Column(Text, nullable=False)
-    price = Column(Numeric(10, 2), nullable=False)
-    stock_quantity = Column(Integer, nullable=False, default=0)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(index=True)
+    description: Mapped[str] = mapped_column(Text)
+    price: Mapped[Decimal]
+    stock_quantity: Mapped[int] = mapped_column(default=0)
     # Callable defaults (list/dict, not literal [] / {}): a literal default
     # is one shared object reused by SQLAlchemy for every row that doesn't
     # set the column explicitly, so mutating one Product's images/
     # characteristics would silently mutate every other defaulted Product's
     # too (see app/models/category.py's `path` column for the same fix).
-    images = Column(_string_array, nullable=False, default=list)
-    characteristics = Column(_characteristics_json, nullable=False, default=dict)
-    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
+    images: Mapped[list[str]] = mapped_column(_string_array, default=list)
+    characteristics: Mapped[dict[str, Any]] = mapped_column(_characteristics_json, default=dict)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     # Soft-delete flag: admin.delete_product deactivates instead of hard
     # deleting when a product has existing order history, so past orders
     # keep a valid product reference. Public listings must filter on this.
-    is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
-    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
 
-    category = relationship("Category", back_populates="products")
-    variants = relationship(
-        "ProductVariant", back_populates="product", cascade="all, delete-orphan"
+    category: Mapped["Category"] = relationship(back_populates="products")
+    variants: Mapped[list["ProductVariant"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan"
     )
     __table_args__ = (
         # Money and stock invariants, enforced by the database as well as
@@ -90,22 +93,22 @@ class ProductVariant(Base):
 
     __tablename__ = "product_variants"
 
-    id = Column(Integer, primary_key=True)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
-    sku = Column(String, nullable=False, unique=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+    sku: Mapped[str] = mapped_column(unique=True, index=True)
     # e.g. {"size": "M", "color": "red"} - arbitrary key/value pairs, no
     # fixed schema, matching Product.characteristics' domain-neutral intent.
     # Callable default - see the Product.images/characteristics comment above.
-    attributes = Column(_characteristics_json, nullable=False, default=dict)
+    attributes: Mapped[dict[str, Any]] = mapped_column(_characteristics_json, default=dict)
     # NULL means "use the parent Product's price" - most variants of a
     # priced-per-unit product won't need a per-variant override.
-    price_override = Column(Numeric(10, 2), nullable=True)
-    stock_quantity = Column(Integer, nullable=False, default=0)
-    is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
-    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
+    price_override: Mapped[Decimal | None]
+    stock_quantity: Mapped[int] = mapped_column(default=0)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
 
-    product = relationship("Product", back_populates="variants")
+    product: Mapped["Product"] = relationship(back_populates="variants")
 
     __table_args__ = (
         # See Product.__table_args__.

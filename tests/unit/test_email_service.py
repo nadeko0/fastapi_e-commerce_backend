@@ -87,7 +87,7 @@ def test_send_order_confirmation_email_accepts_plain_string_status(monkeypatch):
 def test_send_order_status_update_email_accepts_plain_string_status(monkeypatch):
     """Regression test: send_order_status_update_email is type-hinted to
     accept a raw SQLAlchemy Order, but Order.status is a bare String column
-    (app/models/enums.py's create_string_enum), not a SQLAlchemy Enum type -
+    (app/models/order.py), not a SQLAlchemy Enum type -
     a freshly-queried Order's .status is therefore a plain str with no
     .value attribute, unlike OrderResponse.status (the Pydantic model every
     real app/api/v1/orders.py call site actually passes, which does coerce

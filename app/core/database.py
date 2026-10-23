@@ -70,7 +70,6 @@ _engine_kwargs = dict(
 engine = create_engine(settings.DATABASE_URI.get_secret_value(), **_engine_kwargs)
 
 SessionLocal = sessionmaker(
-    autocommit=False,
     autoflush=False,
     bind=engine,
     expire_on_commit=False

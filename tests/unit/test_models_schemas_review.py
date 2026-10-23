@@ -5,8 +5,7 @@ Covers:
 - Mutable Column(default=[]/{}) sharing one object across ORM instances
   (Category.path, Product.images/characteristics, ProductVariant.attributes,
   User.consent_history/data_export_requests).
-- create_string_enum returning a usable column type after dropping its
-  unused {'name', 'check'} dict.
+- the enum-backed String columns round-tripping their values.
 - AddressBase/AddressUpdate.delivery_phone validation, previously
   unvalidated unlike UserBase.phone for the same concept.
 - app/schemas/legal.py's Config classes now using the Pydantic v2 keys
@@ -19,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.models.category import Category
-from app.models.enums import AddressType, OrderStatus, UserRole, create_string_enum
+from app.models.enums import AddressType, OrderStatus, UserRole
 from app.models.product import Product, ProductVariant
 from app.models.user import User
 from app.schemas.address import AddressCreate, AddressUpdate
@@ -104,16 +103,11 @@ class TestMutableColumnDefaults:
         assert u2.data_export_requests == []
 
 
-class TestCreateStringEnum:
-    def test_returns_the_string_type_directly(self):
-        from sqlalchemy import String
-
-        assert create_string_enum(UserRole, "role") is String
-
+class TestStringEnumColumns:
     def test_columns_built_from_it_round_trip_values(self, db_session):
         # End-to-end: the enum-backed columns (User.role, Order.status via
         # OrderStatus, Address.address_type) still insert/read back correctly
-        # after create_string_enum stopped returning the unused dict half.
+        # as plain String columns.
         user = _minimal_user(role=UserRole.ADMIN.value)
         db_session.add(user)
         db_session.flush()

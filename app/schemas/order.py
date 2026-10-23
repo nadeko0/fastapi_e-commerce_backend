@@ -6,16 +6,9 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.config import settings
+from app.models.enums import OrderStatus
 from app.schemas.common import Int32
 
-
-class OrderStatus(str, Enum):
-    NEW = "new"
-    CONFIRMED = "confirmed"
-    PROCESSING = "processing"
-    SENT = "sent"
-    DELIVERED = "delivered"
-    CANCELLED = "cancelled"
 
 class PaymentStatus(str, Enum):
     PENDING = "pending"

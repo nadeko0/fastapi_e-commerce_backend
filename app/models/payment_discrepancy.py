@@ -5,18 +5,21 @@ difference, so an admin sees what differs, since when, and what each side
 says. Nothing in the payment flow reads this table; it only reports.
 """
 
+from datetime import datetime
+from typing import TYPE_CHECKING
+
 from sqlalchemy import (
-    Column,
     ForeignKey,
     Index,
-    Integer,
-    String,
     UniqueConstraint,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.clock import UTCDateTime, utc_now
+from app.core.clock import utc_now
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.payment import Payment
 
 # Discrepancy.kind values. "Subject" is the refund id for the refund kinds
 # and "" for the others.
@@ -34,26 +37,26 @@ KIND_REFUND_UNKNOWN = "refund_unknown_to_provider"  # we record a refund the pro
 class PaymentDiscrepancy(Base):
     __tablename__ = "payment_discrepancies"
 
-    id = Column(Integer, primary_key=True)
-    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=False)
-    kind = Column(String, nullable=False)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id"))
+    kind: Mapped[str]
     # See the KIND_* note above. Never NULL, so that the unique constraint
     # below holds (NULLs are all distinct to a unique index).
-    subject = Column(String, nullable=False, default="")
+    subject: Mapped[str] = mapped_column(default="")
     # What each side says, as text ("succeeded", "1999", "EUR"); None where
     # that side has nothing (a refund only one side knows).
-    ours = Column(String, nullable=True)
-    theirs = Column(String, nullable=True)
+    ours: Mapped[str | None]
+    theirs: Mapped[str | None]
     # When this difference was first seen, and last seen, by a run. A
     # difference that went away and came back starts again (detected_at is
     # reset), so detected_at is always "since when".
-    detected_at = Column(UTCDateTime, default=utc_now, nullable=False)
-    last_seen_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(default=utc_now)
+    last_seen_at: Mapped[datetime] = mapped_column(default=utc_now)
     # Set by the first run that no longer sees the difference; None while
     # it is open.
-    resolved_at = Column(UTCDateTime, nullable=True)
+    resolved_at: Mapped[datetime | None]
 
-    payment = relationship("Payment", backref="discrepancies")
+    payment: Mapped["Payment"] = relationship(back_populates="discrepancies")
 
     __table_args__ = (
         UniqueConstraint("payment_id", "kind", "subject", name="uix_payment_discrepancy"),

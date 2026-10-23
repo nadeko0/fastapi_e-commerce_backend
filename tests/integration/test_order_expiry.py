@@ -287,7 +287,7 @@ def test_expiry_rechecks_an_order_paid_after_it_was_listed(
 
     monkeypatch.setattr(
         tasks, "SessionLocal",
-        sessionmaker(class_=_PaidAfterListing, autocommit=False, autoflush=False, bind=engine),
+        sessionmaker(class_=_PaidAfterListing, autoflush=False, bind=engine),
     )
 
     assert tasks.cancel_expired_unpaid_orders() == 0

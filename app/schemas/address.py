@@ -1,16 +1,11 @@
 import re
 from datetime import datetime
-from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.models.enums import AddressType
 from app.schemas.common import Int32
 
-
-class AddressType(str, Enum):
-    HOME = "home"
-    WORK = "work"
-    OTHER = "other"
 
 # Mirrors app.schemas.user.UserBase's phone validation exactly - both
 # represent the same "phone number" concept and previously diverged:

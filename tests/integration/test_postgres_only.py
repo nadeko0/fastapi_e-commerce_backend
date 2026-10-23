@@ -357,6 +357,23 @@ def test_migrations_round_trip_and_agree_with_the_session_schema():
         _alembic(url, "upgrade", "head")
         assert _schema_snapshot(url) == first
 
+        # The migrated schema and the models agree: autogenerate finds nothing
+        # to add, drop or alter (types and server defaults included).
+        from alembic.autogenerate import compare_metadata
+        from alembic.migration import MigrationContext
+
+        from app.models.base import Base
+
+        compare_engine = create_engine(url)
+        try:
+            with compare_engine.connect() as connection:
+                context = MigrationContext.configure(
+                    connection, opts={"compare_type": True, "compare_server_default": True}
+                )
+                assert compare_metadata(context, Base.metadata) == []
+        finally:
+            compare_engine.dispose()
+
         # The schema every test of the session runs on was built the same way.
         from conftest import TEST_DB_URL
 

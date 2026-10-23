@@ -204,7 +204,7 @@ else:
         shutil.rmtree(_db_dir, ignore_errors=True)
 
 
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+TestingSessionLocal = sessionmaker(autoflush=False, bind=engine)
 
 # Swapped at the factory, not via dependency_overrides: the real
 # get_async_db (commit on success, rollback + generic 500 on a database

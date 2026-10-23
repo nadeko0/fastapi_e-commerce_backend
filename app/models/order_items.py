@@ -1,29 +1,37 @@
-from sqlalchemy import CheckConstraint, Column, ForeignKey, Index, Integer, Numeric
-from sqlalchemy.orm import relationship
+from datetime import datetime
+from decimal import Decimal
+from typing import TYPE_CHECKING
 
-from app.core.clock import UTCDateTime, utc_now
+from sqlalchemy import CheckConstraint, ForeignKey, Index
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.clock import utc_now
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.order import Order
+    from app.models.product import Product, ProductVariant
 
 
 class OrderItem(Base):
     __tablename__ = "order_items"
 
-    id = Column(Integer, primary_key=True)
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
     # NULL means this line was for the plain product (no variant selected) -
     # the common case, and the only case that existed before variant support
     # was wired into checkout. When set, stock for this line was decremented
     # from ProductVariant.stock_quantity (not Product.stock_quantity) at
     # checkout, and must be restocked there on cancellation too.
-    variant_id = Column(Integer, ForeignKey("product_variants.id"), nullable=True)
-    quantity = Column(Integer, nullable=False)
-    price_at_time = Column(Numeric(10, 2), nullable=False)
-    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    variant_id: Mapped[int | None] = mapped_column(ForeignKey("product_variants.id"))
+    quantity: Mapped[int]
+    price_at_time: Mapped[Decimal]
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
 
-    order = relationship("Order", back_populates="items")
-    product = relationship("Product")
-    variant = relationship("ProductVariant")
+    order: Mapped["Order"] = relationship(back_populates="items")
+    product: Mapped["Product"] = relationship()
+    variant: Mapped["ProductVariant | None"] = relationship()
 
     __table_args__ = (
         # See Product.__table_args__.
