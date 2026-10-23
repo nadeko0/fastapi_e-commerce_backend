@@ -159,7 +159,7 @@ def test_country_code_upper_case_name_title_case(country, expected):
 
 @pytest.mark.parametrize(
     "phone,expected",
-    [("+49 30 1234567", "+49301234567"), ("(030) 123-45", "+03012345"), ("", ""), (None, None)],
+    [("+49 30 1234567", "+49301234567"), ("(415) 555-2671", "+4155552671"), ("", ""), (None, None)],
 )
 def test_delivery_phone_is_normalised(phone, expected):
     assert AddressCreate(**{**_ADDRESS, "delivery_phone": phone}).delivery_phone == expected

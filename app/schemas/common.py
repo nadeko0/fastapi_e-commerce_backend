@@ -14,6 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.clock import UTCDatetime, utc_now
 
+# ITU-T E.164: "+", a country code whose first digit is 1-9, at most 15 digits
+# in all (here also at least 5, as before). Applied to input schemas only.
+E164_PHONE_PATTERN = r"^\+[1-9]\d{4,14}$"
+
 # What an INTEGER column holds (32-bit on PostgreSQL; SQLite takes 64-bit but
 # refuses a Python int beyond that). An id, a quantity or a page number
 # outside it cannot match or be stored, and reaching the driver it answered

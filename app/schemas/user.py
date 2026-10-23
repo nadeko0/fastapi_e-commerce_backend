@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.core.clock import utc_now
 from app.models.enums import UserRole
+from app.schemas.common import E164_PHONE_PATTERN
 
 
 class ConsentType(str, Enum):
@@ -54,6 +55,10 @@ class UserBase(BaseModel):
         return f"+{phone}"
 
 class UserCreate(UserBase):
+    # Strict on input only: UserBase (shared with the responses) keeps the old
+    # pattern so a number stored before the E.164 rule still reads.
+    phone: str | None = Field(None, pattern=E164_PHONE_PATTERN, description="International phone number (5-15 digits)")
+
     password: str = Field(..., min_length=8, pattern=r"^[A-Za-z\d@$!%*#?&]{8,}$")
 
     @field_validator('email', mode="before")
@@ -95,7 +100,7 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     full_name: str | None = Field(None, min_length=2, max_length=100)
-    phone: str | None = Field(None, pattern=r"^\+\d{5,15}$", description="International phone number (5-15 digits)")
+    phone: str | None = Field(None, pattern=E164_PHONE_PATTERN, description="International phone number (5-15 digits)")
 
     @field_validator('phone')
     @classmethod
