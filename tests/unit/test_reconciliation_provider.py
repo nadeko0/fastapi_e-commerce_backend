@@ -12,7 +12,7 @@ test_payment_provider_contract.py):
 Then what only the live adapter does: read every page of a long list, refuse
 to return a partial one, and translate the SDK's errors.
 
-stripe.Refund.list(payment_intent=..., limit=..., starting_after=...) is the
+client.v1.refunds.list(params={payment_intent, limit, starting_after}) is the
 call: the parameters are the ones in stripe-python 16's RefundListParams
 (payment_intent, limit up to 100, starting_after) and the result a ListObject
 with `data` and `has_more`.
@@ -20,7 +20,6 @@ with `data` and `has_more`.
 import pytest
 import stripe
 from fake_stripe_api import FakeStripeAPI, _Obj
-from stripe import error as stripe_error
 
 from app.services.payment import live_stripe_provider
 from app.services.payment.exceptions import (
@@ -49,10 +48,10 @@ class ListingFakeStripe(FakeStripeAPI):
 
     def install(self, monkeypatch):
         super().install(monkeypatch)
-        monkeypatch.setattr(stripe.Refund, "list", self.refund_list)
+        self.patch(monkeypatch, stripe.RefundService, "list", self.refund_list)
 
-    def refund_list(self, **params):
-        _, params = self._request(params)
+    def refund_list(self, params=None, options=None):
+        _, params = self._request(params, options)
         assert set(params) <= {"payment_intent", "limit", "starting_after"}
         refunds = [r for r in reversed(list(self.refunds.values()))
                    if r["payment_intent"] == params["payment_intent"]]
@@ -238,16 +237,16 @@ def test_a_canceled_refund_keeps_its_status_in_provider_status(live):
 
 
 @pytest.mark.parametrize("raised,expected", [
-    (stripe_error.RateLimitError("Too many requests"), PaymentProviderTimeoutError),
-    (stripe_error.APIConnectionError("down"), PaymentProviderTimeoutError),
+    (stripe.RateLimitError("Too many requests"), PaymentProviderTimeoutError),
+    (stripe.APIConnectionError("down"), PaymentProviderTimeoutError),
 ])
 def test_list_refunds_translates_what_the_sdk_raises(live, monkeypatch, raised, expected):
     provider, _ = live
 
-    def boom(**params):
+    def boom(*args, **kwargs):
         raise raised
 
-    monkeypatch.setattr(stripe.Refund, "list", boom)
+    monkeypatch.setattr(stripe.RefundService, "list", boom)
     with pytest.raises(expected):
         provider.list_refunds("pi_1")
 
@@ -255,10 +254,10 @@ def test_list_refunds_translates_what_the_sdk_raises(live, monkeypatch, raised, 
 def test_list_refunds_translates_a_refused_request(live, monkeypatch):
     provider, _ = live
 
-    def boom(**params):
-        raise stripe_error.InvalidRequestError("Bad id", "payment_intent", code="bad")
+    def boom(*args, **kwargs):
+        raise stripe.InvalidRequestError("Bad id", "payment_intent", code="bad")
 
-    monkeypatch.setattr(stripe.Refund, "list", boom)
+    monkeypatch.setattr(stripe.RefundService, "list", boom)
     with pytest.raises(InvalidRequestError) as refused:
         provider.list_refunds("pi_1")
     assert (refused.value.param, refused.value.code) == ("payment_intent", "bad")
@@ -268,8 +267,8 @@ def test_retrieving_a_payment_intent_under_a_rate_limit_is_a_timeout(live, monke
     provider, _ = live
 
     def boom(*args, **kwargs):
-        raise stripe_error.RateLimitError("Too many requests")
+        raise stripe.RateLimitError("Too many requests")
 
-    monkeypatch.setattr(stripe.PaymentIntent, "retrieve", boom)
+    monkeypatch.setattr(stripe.PaymentIntentService, "retrieve", boom)
     with pytest.raises(PaymentProviderTimeoutError):
         provider.retrieve_payment_intent("pi_1")

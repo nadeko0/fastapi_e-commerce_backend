@@ -17,20 +17,22 @@ as the mock: same method signatures, same dataclass return types
 (PaymentIntent/Refund/WebhookEventData), and the same exception hierarchy
 (CardError/InvalidRequestError/IdempotencyError/SignatureVerificationError/
 PaymentProviderTimeoutError) - achieved by translating the real `stripe`
-SDK's exceptions (stripe.error.*) onto our exceptions at the boundary of
+SDK's exceptions (stripe.CardError etc.) onto our exceptions at the boundary of
 every method, so callers (app/api/v1/orders.py) never need to know or care
 which provider is in use.
 
-Per-instance api_key (passed as a request-level kwarg to every SDK call,
-never assigned to the global `stripe.api_key`) so multiple providers using
-different keys can coexist safely in the same process - relevant for tests.
+Every call goes through a stripe.StripeClient built with the provider's own
+api_key, the configured timeouts and retry count (see _stripe_client); no
+module-level SDK global (stripe.api_key, default_http_client,
+max_network_retries) is ever assigned, so providers using different keys can
+coexist safely in the same process - relevant for tests.
 """
 import logging
 import time
+from functools import lru_cache
 from typing import Any
 
 import stripe
-from stripe import error as stripe_error
 
 from app.core.config import settings
 from app.services.payment.base import PaymentProvider, webhook_event_from_payload
@@ -54,7 +56,7 @@ from app.services.payment.types import (
 logger = logging.getLogger(__name__)
 
 
-def _provider_unavailable(error: stripe_error.StripeError) -> PaymentProviderTimeoutError:
+def _provider_unavailable(error: stripe.StripeError) -> PaymentProviderTimeoutError:
     """
     What a StripeError that is none of the specific ones each method handles
     (card, invalid request, idempotency) becomes: PaymentProviderTimeoutError,
@@ -66,7 +68,7 @@ def _provider_unavailable(error: stripe_error.StripeError) -> PaymentProviderTim
     catch-all that follows the specific clauses. A refused API key is ours to
     fix, not the customer's to retry, so it is also logged as critical.
     """
-    if isinstance(error, (stripe_error.AuthenticationError, stripe_error.PermissionError)):
+    if isinstance(error, (stripe.AuthenticationError, stripe.PermissionError)):
         logger.critical(
             "Stripe refused our API key (%s); payments cannot be taken until it is fixed",
             type(error).__name__,
@@ -182,36 +184,34 @@ def _signed_at(sig_header: str) -> int:
                     if item.split("=", 1)[0] == "t"))
 
 
-# The HTTP client this module last installed as stripe.default_http_client,
-# and the settings it was built from (see _configure_http_client).
-_http_client: stripe.RequestsClient | None = None
-_http_client_settings: tuple | None = None
+@lru_cache(maxsize=8)
+def _build_stripe_client(
+    api_key: str, connect_timeout: float, read_timeout: float, max_network_retries: int
+) -> stripe.StripeClient:
+    return stripe.StripeClient(
+        api_key,
+        # The SDK's own default is a timeout of 80 s per try
+        # (RequestsClient(timeout=80)), far longer than a worker thread
+        # should be held on a hung connection. The timeout is a (connect,
+        # read) pair as in `requests`.
+        http_client=stripe.RequestsClient(timeout=(connect_timeout, read_timeout)),
+        max_network_retries=max_network_retries,
+    )
 
 
-def _configure_http_client() -> None:
+def _stripe_client(api_key: str) -> stripe.StripeClient:
     """
-    Give the Stripe SDK an explicit timeout and retry count from settings.
-    The SDK reads stripe.default_http_client and stripe.max_network_retries
-    on every request, and its own default is a timeout of 80 s per try
-    (RequestsClient(timeout=80)), far longer than a worker thread should be
-    held on a hung connection. The timeout is a (connect, read) pair as in
-    `requests`. One client is shared by every provider instance (a new one is
-    made per request), so its connection pool is kept; it is rebuilt only if
-    the settings or the installed client changed.
+    The StripeClient for this key and the current timeout/retry settings.
+    A provider instance is made per request, so the client (and with it the
+    HTTP connection pool) is cached on what it is built from: the same key
+    and settings give the same client, a changed setting gives a new one.
     """
-    global _http_client, _http_client_settings
-    wanted = (
+    return _build_stripe_client(
+        api_key,
         settings.STRIPE_CONNECT_TIMEOUT_SECONDS,
         settings.STRIPE_READ_TIMEOUT_SECONDS,
         settings.STRIPE_MAX_NETWORK_RETRIES,
     )
-    if _http_client is None or _http_client_settings != wanted or (
-        stripe.default_http_client is not _http_client
-    ):
-        _http_client = stripe.RequestsClient(timeout=(wanted[0], wanted[1]))
-        _http_client_settings = wanted
-        stripe.default_http_client = _http_client
-        stripe.max_network_retries = wanted[2]
 
 
 class LiveStripePaymentProvider(PaymentProvider):
@@ -220,8 +220,7 @@ class LiveStripePaymentProvider(PaymentProvider):
     def __init__(self, api_key: str):
         if not api_key:
             raise ValueError("LiveStripePaymentProvider requires a real Stripe secret key")
-        self._api_key = api_key
-        _configure_http_client()
+        self._client = _stripe_client(api_key)
 
     # -- PaymentIntent -----------------------------------------------------
 
@@ -237,8 +236,6 @@ class LiveStripePaymentProvider(PaymentProvider):
         params: dict[str, Any] = {
             "amount": amount,
             "currency": currency,
-            "idempotency_key": idempotency_key,
-            "api_key": self._api_key,
             # This codebase only ever deals in card payments (see
             # PaymentProvider's card-shaped exception hierarchy: CardError,
             # decline_code, etc). allowed_payment_method_types=["card"]
@@ -263,16 +260,18 @@ class LiveStripePaymentProvider(PaymentProvider):
         if metadata:
             params["metadata"] = metadata
         try:
-            pi = stripe.PaymentIntent.create(**params)
-        except stripe_error.IdempotencyError as e:
+            pi = self._client.v1.payment_intents.create(
+                params=params, options={"idempotency_key": idempotency_key}
+            )
+        except stripe.IdempotencyError as e:
             raise IdempotencyError(str(e.user_message or e)) from None
-        except stripe_error.CardError as e:
+        except stripe.CardError as e:
             raise self._translate_card_error(e) from e
-        except stripe_error.InvalidRequestError as e:
+        except stripe.InvalidRequestError as e:
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
             ) from e
-        except stripe_error.StripeError as e:
+        except stripe.StripeError as e:
             raise _provider_unavailable(e) from e
         return _to_payment_intent(pi)
 
@@ -294,19 +293,18 @@ class LiveStripePaymentProvider(PaymentProvider):
         # Required, with no fallback: it used to default to a placeholder
         # page on a domain that is not ours, where 3D Secure would have
         # sent real customers. /pay builds it on FRONTEND_URL.
-        params: dict[str, Any] = {
-            "api_key": self._api_key,
-            "return_url": return_url,
-        }
+        options: stripe.RequestOptions = {}
         if idempotency_key is not None:
-            params["idempotency_key"] = idempotency_key
+            options["idempotency_key"] = idempotency_key
         try:
-            pi = stripe.PaymentIntent.confirm(payment_intent_id, **params)
-        except stripe_error.IdempotencyError as e:
+            pi = self._client.v1.payment_intents.confirm(
+                payment_intent_id, params={"return_url": return_url}, options=options
+            )
+        except stripe.IdempotencyError as e:
             raise IdempotencyError(str(e.user_message or e)) from None
-        except stripe_error.CardError as e:
+        except stripe.CardError as e:
             raise self._translate_card_error(e) from e
-        except stripe_error.InvalidRequestError as e:
+        except stripe.InvalidRequestError as e:
             if e.code == "resource_missing":
                 raise CardError(
                     f"No such payment_intent: '{payment_intent_id}'", code="resource_missing"
@@ -314,14 +312,14 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
             ) from e
-        except stripe_error.StripeError as e:
+        except stripe.StripeError as e:
             raise _provider_unavailable(e) from e
         return _to_payment_intent(pi)
 
     def retrieve_payment_intent(self, payment_intent_id: str) -> PaymentIntent:
         try:
-            pi = stripe.PaymentIntent.retrieve(payment_intent_id, api_key=self._api_key)
-        except stripe_error.InvalidRequestError as e:
+            pi = self._client.v1.payment_intents.retrieve(payment_intent_id)
+        except stripe.InvalidRequestError as e:
             if e.code == "resource_missing":
                 raise CardError(
                     f"No such payment_intent: '{payment_intent_id}'", code="resource_missing"
@@ -329,7 +327,7 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
             ) from e
-        except stripe_error.StripeError as e:
+        except stripe.StripeError as e:
             raise _provider_unavailable(e) from e
         return _to_payment_intent(pi)
 
@@ -366,27 +364,27 @@ class LiveStripePaymentProvider(PaymentProvider):
             # Stripe's own requirement.
             "success_url": success_url,
             "cancel_url": cancel_url,
-            "idempotency_key": idempotency_key,
-            "api_key": self._api_key,
         }
         if metadata:
             params["metadata"] = metadata
         try:
-            session = stripe.checkout.Session.create(**params)
-        except stripe_error.IdempotencyError as e:
+            session = self._client.v1.checkout.sessions.create(
+                params=params, options={"idempotency_key": idempotency_key}
+            )
+        except stripe.IdempotencyError as e:
             raise IdempotencyError(str(e.user_message or e)) from None
-        except stripe_error.InvalidRequestError as e:
+        except stripe.InvalidRequestError as e:
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
             ) from e
-        except stripe_error.StripeError as e:
+        except stripe.StripeError as e:
             raise _provider_unavailable(e) from e
         return _to_checkout_session(session)
 
     def retrieve_checkout_session(self, session_id: str) -> CheckoutSession:
         try:
-            session = stripe.checkout.Session.retrieve(session_id, api_key=self._api_key)
-        except stripe_error.InvalidRequestError as e:
+            session = self._client.v1.checkout.sessions.retrieve(session_id)
+        except stripe.InvalidRequestError as e:
             if e.code == "resource_missing":
                 raise CardError(
                     f"No such checkout.session: '{session_id}'", code="resource_missing"
@@ -394,14 +392,14 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
             ) from e
-        except stripe_error.StripeError as e:
+        except stripe.StripeError as e:
             raise _provider_unavailable(e) from e
         return _to_checkout_session(session)
 
     def expire_checkout_session(self, session_id: str) -> CheckoutSession:
         try:
-            session = stripe.checkout.Session.expire(session_id, api_key=self._api_key)
-        except stripe_error.InvalidRequestError as e:
+            session = self._client.v1.checkout.sessions.expire(session_id)
+        except stripe.InvalidRequestError as e:
             if e.code == "resource_missing":
                 raise CardError(
                     f"No such checkout.session: '{session_id}'", code="resource_missing"
@@ -410,7 +408,7 @@ class LiveStripePaymentProvider(PaymentProvider):
             # Session via InvalidRequestError - surfaced as CardError to
             # match the mock provider's contract for the same condition.
             raise CardError(str(e.user_message or e), code=e.code or "invalid_request") from e
-        except stripe_error.StripeError as e:
+        except stripe.StripeError as e:
             raise _provider_unavailable(e) from e
         return _to_checkout_session(session)
 
@@ -423,19 +421,17 @@ class LiveStripePaymentProvider(PaymentProvider):
         amount: int | None = None,
         idempotency_key: str | None = None,
     ) -> Refund:
-        params: dict[str, Any] = {
-            "payment_intent": payment_intent_id,
-            "api_key": self._api_key,
-        }
+        params: dict[str, Any] = {"payment_intent": payment_intent_id}
         if amount is not None:
             params["amount"] = amount
+        options: stripe.RequestOptions = {}
         if idempotency_key is not None:
-            params["idempotency_key"] = idempotency_key
+            options["idempotency_key"] = idempotency_key
         try:
-            refund = stripe.Refund.create(**params)
-        except stripe_error.IdempotencyError as e:
+            refund = self._client.v1.refunds.create(params=params, options=options)
+        except stripe.IdempotencyError as e:
             raise IdempotencyError(str(e.user_message or e)) from None
-        except stripe_error.InvalidRequestError as e:
+        except stripe.InvalidRequestError as e:
             if e.code == "resource_missing":
                 raise CardError(
                     f"No such payment_intent: '{payment_intent_id}'", code="resource_missing"
@@ -445,9 +441,9 @@ class LiveStripePaymentProvider(PaymentProvider):
             # / "invalid_request_error" on amount) - surfaced as CardError to
             # match the mock provider's contract for these same conditions.
             raise CardError(str(e.user_message or e), code=e.code or "invalid_request") from e
-        except stripe_error.CardError as e:
+        except stripe.CardError as e:
             raise self._translate_card_error(e) from e
-        except stripe_error.StripeError as e:
+        except stripe.StripeError as e:
             raise _provider_unavailable(e) from e
         return _to_refund(refund)
 
@@ -456,16 +452,15 @@ class LiveStripePaymentProvider(PaymentProvider):
         params: dict[str, Any] = {
             "payment_intent": payment_intent_id,
             "limit": _REFUND_PAGE_SIZE,
-            "api_key": self._api_key,
         }
         for _ in range(_REFUND_MAX_PAGES):
             try:
-                page = stripe.Refund.list(**params)
-            except stripe_error.InvalidRequestError as e:
+                page = self._client.v1.refunds.list(params=params)
+            except stripe.InvalidRequestError as e:
                 raise InvalidRequestError(
                     str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
                 ) from e
-            except stripe_error.StripeError as e:
+            except stripe.StripeError as e:
                 raise _provider_unavailable(e) from e
             refunds.extend(_to_refund(r) for r in page.data)
             if not page.has_more:
@@ -511,7 +506,7 @@ class LiveStripePaymentProvider(PaymentProvider):
             stripe.WebhookSignature.verify_header(
                 payload, sig_header, webhook_secret, tolerance_seconds
             )
-        except stripe_error.SignatureVerificationError as e:
+        except stripe.SignatureVerificationError as e:
             raise SignatureVerificationError(str(e.user_message or e), sig_header) from None
         # The SDK checks the timestamp on one side only (older than the
         # tolerance) and not at all when the tolerance is 0, so a signature
@@ -525,7 +520,7 @@ class LiveStripePaymentProvider(PaymentProvider):
         return webhook_event_from_payload(payload, sig_header, signed_at)
 
     @staticmethod
-    def _translate_card_error(e: "stripe_error.CardError") -> CardError:
+    def _translate_card_error(e: "stripe.CardError") -> CardError:
         decline_code = None
         if e.error is not None:
             decline_code = getattr(e.error, "decline_code", None)

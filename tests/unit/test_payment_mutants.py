@@ -15,7 +15,6 @@ import time
 import pytest
 import stripe
 from pydantic import ValidationError
-from stripe import error as stripe_error
 
 import app.services.payment.live_stripe_provider as live_module
 from app.core.config import settings
@@ -194,19 +193,19 @@ def _create_refund(p):
 # is not special-cased), and what a refused request becomes: (class, code used
 # when Stripe sent none).
 _CALLS = {
-    "create_payment_intent": (_create_intent, stripe.PaymentIntent, "create",
+    "create_payment_intent": (_create_intent, stripe.PaymentIntentService, "create",
                               None, (InvalidRequestError, "parameter_invalid")),
-    "confirm_payment_intent": (_confirm_intent, stripe.PaymentIntent, "confirm",
+    "confirm_payment_intent": (_confirm_intent, stripe.PaymentIntentService, "confirm",
                                "payment_intent: 'pi_1'", (InvalidRequestError, "parameter_invalid")),
-    "retrieve_payment_intent": (_retrieve_intent, stripe.PaymentIntent, "retrieve",
+    "retrieve_payment_intent": (_retrieve_intent, stripe.PaymentIntentService, "retrieve",
                                 "payment_intent: 'pi_1'", (InvalidRequestError, "parameter_invalid")),
-    "create_checkout_session": (_create_session, stripe.checkout.Session, "create",
+    "create_checkout_session": (_create_session, stripe.checkout.SessionService, "create",
                                 None, (InvalidRequestError, "parameter_invalid")),
-    "retrieve_checkout_session": (_retrieve_session, stripe.checkout.Session, "retrieve",
+    "retrieve_checkout_session": (_retrieve_session, stripe.checkout.SessionService, "retrieve",
                                   "checkout.session: 'cs_1'", (InvalidRequestError, "parameter_invalid")),
-    "expire_checkout_session": (_expire_session, stripe.checkout.Session, "expire",
+    "expire_checkout_session": (_expire_session, stripe.checkout.SessionService, "expire",
                                 "checkout.session: 'cs_1'", (CardError, "invalid_request")),
-    "create_refund": (_create_refund, stripe.Refund, "create",
+    "create_refund": (_create_refund, stripe.RefundService, "create",
                       "payment_intent: 'pi_1'", (CardError, "invalid_request")),
 }
 _IDEMPOTENT = ["create_payment_intent", "confirm_payment_intent", "create_checkout_session",
@@ -218,7 +217,7 @@ _CARD = ["create_payment_intent", "confirm_payment_intent", "create_refund"]
 def test_a_connection_failure_becomes_a_timeout_with_stripes_message(live, monkeypatch, name):
     call, owner, method, _, _ = _CALLS[name]
     monkeypatch.setattr(owner, method, _raising(
-        stripe_error.APIConnectionError("network down", headers=HEADERS)))
+        stripe.APIConnectionError("network down", headers=HEADERS)))
 
     with pytest.raises(PaymentProviderTimeoutError) as caught:
         call(live)
@@ -228,11 +227,11 @@ def test_a_connection_failure_becomes_a_timeout_with_stripes_message(live, monke
 
 
 _UNAVAILABLE = [
-    stripe_error.RateLimitError,
-    stripe_error.APIError,
-    stripe_error.AuthenticationError,
-    stripe_error.PermissionError,
-    stripe_error.StripeError,
+    stripe.RateLimitError,
+    stripe.APIError,
+    stripe.AuthenticationError,
+    stripe.PermissionError,
+    stripe.StripeError,
 ]
 
 
@@ -256,9 +255,9 @@ def test_any_other_stripe_error_is_a_provider_timeout_not_a_500(
 
 
 @pytest.mark.parametrize("error_class", [
-    stripe_error.AuthenticationError, stripe_error.PermissionError])
+    stripe.AuthenticationError, stripe.PermissionError])
 def test_a_refused_api_key_is_logged_as_critical(live, monkeypatch, caplog, error_class):
-    monkeypatch.setattr(stripe.PaymentIntent, "create", _raising(error_class("bad key", headers=HEADERS)))
+    monkeypatch.setattr(stripe.PaymentIntentService, "create", _raising(error_class("bad key", headers=HEADERS)))
 
     with (
         caplog.at_level("CRITICAL", logger=live_module.logger.name),
@@ -271,8 +270,8 @@ def test_a_refused_api_key_is_logged_as_critical(live, monkeypatch, caplog, erro
 
 
 def test_a_rate_limit_is_not_logged_as_critical(live, monkeypatch, caplog):
-    monkeypatch.setattr(stripe.PaymentIntent, "create",
-                        _raising(stripe_error.RateLimitError("slow down", headers=HEADERS)))
+    monkeypatch.setattr(stripe.PaymentIntentService, "create",
+                        _raising(stripe.RateLimitError("slow down", headers=HEADERS)))
 
     with (
         caplog.at_level("CRITICAL", logger=live_module.logger.name),
@@ -287,7 +286,7 @@ def test_a_rate_limit_is_not_logged_as_critical(live, monkeypatch, caplog):
 def test_an_idempotency_conflict_keeps_stripes_message(live, monkeypatch, name):
     call, owner, method, _, _ = _CALLS[name]
     monkeypatch.setattr(owner, method, _raising(
-        stripe_error.IdempotencyError("key reused", headers=HEADERS)))
+        stripe.IdempotencyError("key reused", headers=HEADERS)))
 
     with pytest.raises(IdempotencyError) as caught:
         call(live)
@@ -299,7 +298,7 @@ def test_an_idempotency_conflict_keeps_stripes_message(live, monkeypatch, name):
 @pytest.mark.parametrize("name", [n for n in _CALLS if _CALLS[n][3]])
 def test_a_missing_object_is_a_card_error_naming_it(live, monkeypatch, name):
     call, owner, method, what, _ = _CALLS[name]
-    monkeypatch.setattr(owner, method, _raising(stripe_error.InvalidRequestError(
+    monkeypatch.setattr(owner, method, _raising(stripe.InvalidRequestError(
         "stripe words", "id", code="resource_missing", headers=HEADERS)))
 
     with pytest.raises(CardError) as caught:
@@ -312,7 +311,7 @@ def test_a_missing_object_is_a_card_error_naming_it(live, monkeypatch, name):
 @pytest.mark.parametrize("name", list(_CALLS))
 def test_a_refused_request_keeps_stripes_message_param_and_code(live, monkeypatch, name):
     call, owner, method, _, (expected_class, _) = _CALLS[name]
-    monkeypatch.setattr(owner, method, _raising(stripe_error.InvalidRequestError(
+    monkeypatch.setattr(owner, method, _raising(stripe.InvalidRequestError(
         "amount too small", "amount", code="amount_too_small", headers=HEADERS)))
 
     with pytest.raises(expected_class) as caught:
@@ -328,7 +327,7 @@ def test_a_refused_request_keeps_stripes_message_param_and_code(live, monkeypatc
 @pytest.mark.parametrize("name", list(_CALLS))
 def test_a_refused_request_without_a_code_gets_the_default_one(live, monkeypatch, name):
     call, owner, method, _, (expected_class, default_code) = _CALLS[name]
-    monkeypatch.setattr(owner, method, _raising(stripe_error.InvalidRequestError(
+    monkeypatch.setattr(owner, method, _raising(stripe.InvalidRequestError(
         "bad request", None, code=None, headers=HEADERS)))
 
     with pytest.raises(expected_class) as caught:
@@ -343,7 +342,7 @@ def _card_declined(code="card_declined", decline_code="insufficient_funds"):
     error = {"message": "Your card was declined.", "code": code}
     if decline_code:
         error["decline_code"] = decline_code
-    return stripe_error.CardError(
+    return stripe.CardError(
         "Your card was declined.", None, code, json_body={"error": error}, headers=HEADERS)
 
 
@@ -363,7 +362,7 @@ def test_a_decline_keeps_stripes_message_code_and_decline_code(live, monkeypatch
 @pytest.mark.parametrize("name", _CARD)
 def test_a_decline_without_a_code_or_decline_code_gets_the_defaults(live, monkeypatch, name):
     call, owner, method, _, _ = _CALLS[name]
-    declined = stripe_error.CardError(
+    declined = stripe.CardError(
         "Declined.", None, None, json_body={"error": {"message": "Declined."}}, headers=HEADERS)
     monkeypatch.setattr(owner, method, _raising(declined))
 
@@ -376,7 +375,7 @@ def test_a_decline_without_a_code_or_decline_code_gets_the_defaults(live, monkey
 
 
 def test_a_checkout_session_of_an_unknown_status_is_taken_as_open(live, monkeypatch):
-    monkeypatch.setattr(stripe.checkout.Session, "retrieve", lambda *a, **k: _SdkObject(
+    monkeypatch.setattr(stripe.checkout.SessionService, "retrieve", lambda *a, **k: _SdkObject(
         id="cs_1", status="something_new", payment_status="paid", amount_total=100,
         currency="usd"))
 
@@ -387,7 +386,7 @@ def test_a_checkout_session_of_an_unknown_status_is_taken_as_open(live, monkeypa
 
 
 def test_a_checkout_session_without_a_payment_status_is_unpaid(live, monkeypatch):
-    monkeypatch.setattr(stripe.checkout.Session, "retrieve", lambda *a, **k: _SdkObject(
+    monkeypatch.setattr(stripe.checkout.SessionService, "retrieve", lambda *a, **k: _SdkObject(
         id="cs_1", status="open", amount_total=100, currency="usd"))
 
     assert live.retrieve_checkout_session("cs_1").payment_status == "unpaid"

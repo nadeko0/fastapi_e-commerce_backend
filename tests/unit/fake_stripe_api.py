@@ -23,7 +23,6 @@ import uuid
 from typing import Any
 
 import stripe
-from stripe import error as stripe_error
 
 # -- docs.stripe.com/testing --------------------------------------------------
 
@@ -95,11 +94,11 @@ class _Obj:
 
 
 def _invalid(message, param=None, code=None):
-    return stripe_error.InvalidRequestError(message, param, code=code)
+    return stripe.InvalidRequestError(message, param, code=code)
 
 
 def _card_error(code, decline_code, message="Your card was declined."):
-    return stripe_error.CardError(
+    return stripe.CardError(
         message, None, code,
         json_body={"error": {"type": "card_error", "message": message, "code": code,
                              "decline_code": decline_code}},
@@ -117,21 +116,38 @@ class FakeStripeAPI:
         self.saved: dict[str, tuple[str, dict[str, Any], tuple[str, Any]]] = {}
 
     def install(self, monkeypatch) -> None:
-        monkeypatch.setattr(stripe.PaymentIntent, "create", self.payment_intent_create)
-        monkeypatch.setattr(stripe.PaymentIntent, "confirm", self.payment_intent_confirm)
-        monkeypatch.setattr(stripe.PaymentIntent, "retrieve", self.payment_intent_retrieve)
-        monkeypatch.setattr(stripe.Refund, "create", self.refund_create)
-        monkeypatch.setattr(stripe.checkout.Session, "create", self.session_create)
-        monkeypatch.setattr(stripe.checkout.Session, "retrieve", self.session_retrieve)
-        monkeypatch.setattr(stripe.checkout.Session, "expire", self.session_expire)
+        self.patch(monkeypatch, stripe.PaymentIntentService, "create", self.payment_intent_create)
+        self.patch(monkeypatch, stripe.PaymentIntentService, "confirm", self.payment_intent_confirm)
+        self.patch(monkeypatch, stripe.PaymentIntentService, "retrieve",
+                   self.payment_intent_retrieve)
+        self.patch(monkeypatch, stripe.RefundService, "create", self.refund_create)
+        self.patch(monkeypatch, stripe.checkout.SessionService, "create", self.session_create)
+        self.patch(monkeypatch, stripe.checkout.SessionService, "retrieve", self.session_retrieve)
+        self.patch(monkeypatch, stripe.checkout.SessionService, "expire", self.session_expire)
+
+    def patch(self, monkeypatch, service_class, name, handler) -> None:
+        """Replace one StripeClient service method. The stub is a plain
+        function, so it is handed the service it was called on: that is how
+        every call is checked to carry the provider's key (the one the
+        StripeClient was built with)."""
+        def stub(service, *args, **kwargs):
+            assert service._requestor._options.api_key == self.api_key, (
+                "every call carries the provider's key"
+            )
+            return handler(*args, **kwargs)
+        monkeypatch.setattr(service_class, name, stub)
 
     # -- plumbing ------------------------------------------------------------
 
-    def _request(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    def _request(
+        self, params: dict[str, Any] | None, options: dict[str, Any] | None
+    ) -> tuple[str | None, dict[str, Any]]:
         if self.offline:
-            raise stripe_error.APIConnectionError("Could not connect to Stripe")
-        assert params.pop("api_key") == self.api_key, "every call carries the provider's key"
-        return params.pop("idempotency_key", None), params
+            raise stripe.APIConnectionError("Could not connect to Stripe")
+        options = dict(options or {})
+        key = options.pop("idempotency_key", None)
+        assert not options, f"unexpected request options: {options}"
+        return key, dict(params or {})
 
     def _idempotent(self, endpoint, key, params, execute):
         """Run `execute` once per idempotency key: a retry with the same
@@ -143,7 +159,7 @@ class FakeStripeAPI:
         if key is not None and key in self.saved:
             saved_endpoint, saved_params, (kind, outcome) = self.saved[key]
             if (saved_endpoint, saved_params) != (endpoint, params):
-                raise stripe_error.IdempotencyError(
+                raise stripe.IdempotencyError(
                     "Keys for idempotent requests can only be used with the same "
                     "parameters they were first used with."
                 )
@@ -152,7 +168,7 @@ class FakeStripeAPI:
             return _Obj(outcome)
         try:
             response = execute()
-        except stripe_error.StripeError as error:
+        except stripe.StripeError as error:
             if key is not None:
                 self.saved[key] = (endpoint, params, ("error", error))
             raise
@@ -187,8 +203,8 @@ class FakeStripeAPI:
 
     # -- PaymentIntent -----------------------------------------------------
 
-    def payment_intent_create(self, **params):
-        key, params = self._request(params)
+    def payment_intent_create(self, params, options=None):
+        key, params = self._request(params, options)
         assert params.pop("allowed_payment_method_types") == ["card"]
         self._require_chargeable(params.get("amount"), params.get("currency"))
 
@@ -210,8 +226,8 @@ class FakeStripeAPI:
 
         return self._idempotent("payment_intents.create", key, params, execute)
 
-    def payment_intent_confirm(self, intent_id, **params):
-        key, params = self._request(params)
+    def payment_intent_confirm(self, intent_id, params=None, options=None):
+        key, params = self._request(params, options)
 
         def execute():
             intent = self._intent(intent_id)
@@ -246,8 +262,8 @@ class FakeStripeAPI:
 
         return self._idempotent(f"payment_intents.confirm:{intent_id}", key, params, execute)
 
-    def payment_intent_retrieve(self, intent_id, **params):
-        self._request(params)
+    def payment_intent_retrieve(self, intent_id, params=None, options=None):
+        self._request(params, options)
         return _Obj(self._intent(intent_id))
 
     def authenticate(self, intent_id) -> None:
@@ -261,7 +277,7 @@ class FakeStripeAPI:
             self._succeed(intent)
         else:
             # A decline is reported to the integration by webhook, not by a call.
-            with contextlib.suppress(stripe_error.CardError):
+            with contextlib.suppress(stripe.CardError):
                 self._decline(intent, *outcome)
 
     @staticmethod
@@ -279,8 +295,8 @@ class FakeStripeAPI:
 
     # -- Refund --------------------------------------------------------------
 
-    def refund_create(self, **params):
-        key, params = self._request(params)
+    def refund_create(self, params, options=None):
+        key, params = self._request(params, options)
         if "amount" in params:
             self._require_amount(params["amount"])
 
@@ -323,8 +339,8 @@ class FakeStripeAPI:
 
     # -- Checkout Session ------------------------------------------------------
 
-    def session_create(self, **params):
-        key, params = self._request(params)
+    def session_create(self, params, options=None):
+        key, params = self._request(params, options)
         for url_param in ("success_url", "cancel_url"):
             if not params.get(url_param):
                 raise _invalid(f"Missing required param: {url_param}.", url_param,
@@ -349,12 +365,12 @@ class FakeStripeAPI:
 
         return self._idempotent("checkout.sessions.create", key, params, execute)
 
-    def session_retrieve(self, session_id, **params):
-        self._request(params)
+    def session_retrieve(self, session_id, params=None, options=None):
+        self._request(params, options)
         return _Obj(self._session(session_id))
 
-    def session_expire(self, session_id, **params):
-        self._request(params)
+    def session_expire(self, session_id, params=None, options=None):
+        self._request(params, options)
         session = self._session(session_id)
         if session["status"] != "open":
             raise _invalid("Only Checkout Sessions with a status of open can be expired.")
