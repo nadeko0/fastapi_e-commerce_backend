@@ -176,3 +176,18 @@ def test_ci_tests_against_the_postgres_image_production_runs():
     job = job[: job.index("\n  docker-build:")]
     assert re.search(rf"^\s*image: {re.escape(compose_image)}\s*$", job, re.M)
     assert "test-postgres" in re.search(r"docker-build:.*?needs: \[([^\]]*)\]", ci, re.S).group(1)
+
+
+def test_celery_worker_gets_time_to_finish_its_task_on_stop():
+    # `docker stop` sends SIGTERM (Celery: warm shutdown, running tasks
+    # finish) and SIGKILL after stop_grace_period, 10 s by default. A task
+    # killed mid-run is, with acks_late and the Redis broker, redelivered
+    # only after the visibility timeout (1 hour). The grace period has to
+    # outlast the longest task: the hard time limit.
+    from app import tasks
+
+    worker = _without_comments(service_block("celery-worker"))
+    grace = re.search(r"^\s*stop_grace_period: (\d+)s\s*$", worker, re.M)
+    assert grace, worker
+    assert int(grace.group(1)) > tasks.celery.conf.task_time_limit
+    assert "stop_signal" not in worker  # the default, SIGTERM, is the warm shutdown
