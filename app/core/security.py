@@ -23,7 +23,7 @@ from app.core.config import settings
 from app.core.database import get_async_db
 from app.models.user import User, UserRole
 from app.services.redis import RedisService
-from app.services.redis_async import is_token_blacklisted, is_token_superseded
+from app.services.redis_async import AsyncRedisService, is_token_blacklisted, is_token_superseded
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
 redis_service = RedisService()
@@ -530,6 +530,132 @@ def blacklist_token(token: str, expires_in: int) -> bool:
     except jwt.PyJWTError:
         return False
     return redis_service.add_to_blacklist(_blacklist_id(token, payload), expires_in)
+
+
+# -- Async twins of the token helpers --------------------------------------
+#
+# The same behaviour and the same Redis keys as issue_refresh_token,
+# rotate_refresh_token, revoke_refresh_token, logout,
+# invalidate_tokens_issued_before_now and blacklist_token above, for
+# coroutines: Redis is reached through AsyncRedisService (never blocking the
+# loop) and rotate_refresh_token_async takes an AsyncSession. Failure
+# semantics are unchanged and fail closed: a Redis error while recording a
+# revocation is reported (False / RevocationUnavailable), never swallowed.
+# The sync versions stay until the last route that calls them is migrated.
+
+async_redis_service = AsyncRedisService()
+
+
+async def issue_refresh_token_async(user_id: Union[str, int], family: Optional[str] = None) -> str:
+    """Async issue_refresh_token."""
+    token = create_refresh_token(user_id, family=family)
+    payload = jwt.decode(token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
+    ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    await async_redis_service.register_refresh_token(payload["jti"], user_id, payload["family"], ttl_seconds)
+    return token
+
+
+async def rotate_refresh_token_async(token: str, db: AsyncSession) -> Tuple[str, str]:
+    """Async rotate_refresh_token (see it for the reuse-detection rules):
+    Redis through the async client, the user loaded with select() on an
+    AsyncSession."""
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
+    except jwt.PyJWTError:
+        raise RefreshTokenError("Could not validate refresh token")
+
+    if payload.get("type") != "refresh":
+        raise RefreshTokenError("Not a refresh token")
+
+    user_id = user_id_from_subject(payload.get("sub"))
+    jti = payload.get("jti")
+    family = payload.get("family")
+    issued_at = payload.get("iat")
+    if user_id is None or jti is None or family is None:
+        raise RefreshTokenError("Could not validate refresh token")
+
+    consumed = await async_redis_service.consume_refresh_token(jti)
+    if consumed is None:
+        # Unknown jti or a replay of an already-rotated token: burn the rest
+        # of the chain either way; if it was not tracked this is a no-op.
+        await async_redis_service.revoke_refresh_family(family)
+        raise RefreshTokenError("Refresh token already used or invalid")
+
+    if await is_token_superseded(user_id, issued_at):
+        raise RefreshTokenError("Refresh token no longer valid")
+
+    user = (await db.execute(select(User).where(User.id == user_id).limit(1))).scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise RefreshTokenError("User not found or inactive")
+
+    new_access_token = create_access_token(user.id)
+    new_refresh_token = await issue_refresh_token_async(user.id, family=family)
+
+    return new_access_token, new_refresh_token
+
+
+async def revoke_refresh_token_async(token: str) -> bool:
+    """Async revoke_refresh_token: a token that does not decode is a no-op
+    (True); False only when Redis could not be told."""
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY.get_secret_value(),
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"verify_exp": False},
+        )
+    except jwt.PyJWTError:
+        return True
+    family = payload.get("family")
+    if family:
+        return await async_redis_service.revoke_refresh_family(family)
+    return True
+
+
+async def blacklist_token_async(token: str, expires_in: int) -> bool:
+    """Async blacklist_token."""
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY.get_secret_value(),
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"verify_exp": False},
+        )
+    except jwt.PyJWTError:
+        return False
+    return await async_redis_service.add_to_blacklist(_blacklist_id(token, payload), expires_in)
+
+
+async def invalidate_tokens_issued_before_now_async(user_id: Union[str, int]) -> bool:
+    """Async invalidate_tokens_issued_before_now (same key, same
+    sub-second watermark). False when Redis could not be told."""
+    key = f"pwd_changed:{user_id}"
+    ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    return await async_redis_service.setex(key, ttl_seconds, time.time())
+
+
+async def logout_async(access_token: str, refresh_token: Optional[str] = None) -> None:
+    """Async logout (see it for the rules). Raises RevocationUnavailable if
+    any of it could not be recorded."""
+    payload = {}
+    try:
+        payload = jwt.decode(access_token, settings.JWT_SECRET_KEY.get_secret_value(), algorithms=[settings.JWT_ALGORITHM])
+        expires_in = max(int(payload["exp"] - time.time()), 1)
+    except jwt.PyJWTError:
+        expires_in = 1
+    if not await blacklist_token_async(access_token, expires_in):
+        raise RevocationUnavailable("access token not blacklisted")
+    if refresh_token:
+        if not await revoke_refresh_token_async(refresh_token):
+            raise RevocationUnavailable("refresh token family not revoked")
+        return
+    user_id = user_id_from_subject(payload.get("sub"))
+    if user_id is None:
+        return
+    if not await async_redis_service.revoke_user_refresh_families(user_id):
+        raise RevocationUnavailable("refresh token families not revoked")
+    if not await invalidate_tokens_issued_before_now_async(user_id):
+        raise RevocationUnavailable("tokens issued before the logout not invalidated")
 
 # A password reset token is single-use without any server-side state: it
 # carries a fingerprint of the password hash it was issued against, and is
