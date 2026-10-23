@@ -39,6 +39,7 @@ from app.services.redis import (
     ItemNotInCartError,
     RedisService,
 )
+from app.services.redis_async import AsyncRedisService, get_cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +58,9 @@ logger = logging.getLogger(__name__)
 # Every product and variant read below goes through AsyncSession
 # (get_async_db), as in app/api/v1/products.py, and the same two rules
 # apply: every query is awaited, and nothing may touch an unloaded
-# relationship (only columns are read here). RedisService is still the
-# synchronous client, so its calls do block the event loop for one local
-# round trip each; converting it is a separate step.
+# relationship (only columns are read here). The cart itself is read and
+# written through AsyncRedisService (get_cache_service), awaited the same
+# way; the synchronous RedisService is not used by any route here.
 #
 # Nothing below depends on whose cart it is. The owner is resolved once
 # (get_cart_owner), and pricing and validation work on the Cart alone.
@@ -189,6 +190,28 @@ def _sync_guest_cart_cookie(response: Response, owner: CartOwner, cart: Cart) ->
 def merge_guest_cart_on_login(
     request: Request, response: Response, user_id: int, redis: RedisService
 ) -> None:
+    """Synchronous twin of merge_guest_cart_on_login_async, kept only until
+    login (app/api/v1/users.py) is migrated to the async Redis service;
+    then it goes. Same rules, see the async one."""
+    name = guest_cart_cookie_name()
+    if name not in request.cookies:
+        return
+    guest_id = read_guest_cart_id(request)
+    if guest_id is not None:
+        try:
+            merged = redis.merge_guest_cart(guest_id, user_id)
+        except Exception:
+            logger.exception("Guest cart merge failed unexpectedly for user %s", user_id)
+            merged = False
+        if not merged:
+            logger.warning("Guest cart not merged at login of user %s; left for a later login", user_id)
+            return
+    _clear_guest_cart_cookie(response)
+
+
+async def merge_guest_cart_on_login_async(
+    request: Request, response: Response, user_id: int, redis: AsyncRedisService
+) -> None:
     """Called by login (app/api/v1/users.py) once the user is authenticated:
     if the request carries a guest cart cookie, merge that cart into the
     account's and retire the identifier.
@@ -207,10 +230,10 @@ def merge_guest_cart_on_login(
     guest_id = read_guest_cart_id(request)
     if guest_id is not None:
         try:
-            merged = redis.merge_guest_cart(guest_id, user_id)
+            merged = await redis.merge_guest_cart(guest_id, user_id)
         except Exception:
-            # RedisService already turns a Redis error into False; this is
-            # for anything else. A problem with a cart is not a reason to
+            # AsyncRedisService already turns a Redis error into False; this
+            # is for anything else. A problem with a cart is not a reason to
             # refuse someone who has just proved who they are.
             logger.exception("Guest cart merge failed unexpectedly for user %s", user_id)
             merged = False
@@ -218,6 +241,7 @@ def merge_guest_cart_on_login(
             logger.warning("Guest cart not merged at login of user %s; left for a later login", user_id)
             return
     _clear_guest_cart_cookie(response)
+
 
 _UNAVAILABLE_MESSAGES = {
     CART_LINE_PRODUCT_UNAVAILABLE: "Product no longer available",
@@ -354,16 +378,16 @@ async def get_cart_owner(
 
 async def get_cart(
     owner: CartOwner = Depends(get_cart_owner),
-    redis: RedisService = Depends(),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ) -> Cart:
     # A missing cart is answered with an empty one built in memory, not
     # stored. This used to SETEX the empty cart, unconditionally and
     # outside the WATCH/MULTI guard the mutations use: an add landing
     # between the GET and that SETEX was overwritten, and a stored cart
     # that merely failed to parse was replaced for good. The first add
-    # creates the key (RedisService._load_or_create_cart). For a guest
+    # creates the key (the cart mutations' _load_or_create_cart). For a guest
     # without an identifier there is not even a read.
-    return redis.get_cart(owner) or redis.empty_cart(owner)
+    return await redis.get_cart(owner) or redis.empty_cart(owner)
 
 @router.get("", response_model=APIResponse[CartResponse])
 async def get_user_cart(
@@ -398,7 +422,7 @@ async def add_to_cart(
     variant_id: Optional[Int32] = None,
     owner: CartOwner = Depends(get_cart_owner),
     db: AsyncSession = Depends(get_async_db),
-    redis: RedisService = Depends(),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Add a product (optionally, a specific variant) to the caller's cart,
     or increase its quantity. A given product_id+variant_id pair merges
@@ -442,7 +466,7 @@ async def add_to_cart(
             # transaction, so the cart cannot expire in between and be
             # recreated under an identifier that came from the client.
             try:
-                cart = redis.add_to_cart_atomic(owner, must_exist=True, **line)
+                cart = await redis.add_to_cart_atomic(owner, must_exist=True, **line)
                 stored = True
             except CartNotFoundError:
                 pass
@@ -452,7 +476,7 @@ async def add_to_cart(
                 # the server, in the request that stores the cart under it.
                 await _allow_new_guest_cart(request)
                 owner = CartOwner.guest(new_guest_cart_id())
-            cart = redis.add_to_cart_atomic(owner, **line)
+            cart = await redis.add_to_cart_atomic(owner, **line)
     except InsufficientStockError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -481,7 +505,7 @@ async def update_cart_item(
     variant_id: Optional[Int32] = None,
     owner: CartOwner = Depends(get_cart_owner),
     db: AsyncSession = Depends(get_async_db),
-    redis: RedisService = Depends(),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Update the quantity of an item already in the caller's cart."""
 
@@ -493,7 +517,7 @@ async def update_cart_item(
     stock_quantity = variant.stock_quantity if variant else product.stock_quantity
 
     try:
-        cart = redis.update_cart_quantity_atomic(
+        cart = await redis.update_cart_quantity_atomic(
             owner,
             product_id=product_id,
             quantity=quantity,
@@ -529,7 +553,7 @@ async def remove_from_cart(
     variant_id: Optional[Int32] = None,
     owner: CartOwner = Depends(get_cart_owner),
     db: AsyncSession = Depends(get_async_db),
-    redis: RedisService = Depends(),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Remove an item from the caller's cart. This is also how a line
     marked unavailable is cleared: the product does not need to exist.
@@ -538,7 +562,7 @@ async def remove_from_cart(
     is cleared."""
 
     try:
-        cart = redis.remove_from_cart_atomic(owner, product_id, variant_id=variant_id)
+        cart = await redis.remove_from_cart_atomic(owner, product_id, variant_id=variant_id)
     except ItemNotInCartError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -558,12 +582,12 @@ async def clear_cart(
     response: Response,
     owner: CartOwner = Depends(get_cart_owner),
     db: AsyncSession = Depends(get_async_db),
-    redis: RedisService = Depends(),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Remove all items from the caller's cart. For a guest this also ends
     the guest cart: it is deleted and its cookie cleared."""
 
-    cart = _cart_or_503(redis.clear_cart_atomic(owner))
+    cart = _cart_or_503(await redis.clear_cart_atomic(owner))
     _sync_guest_cart_cookie(response, owner, cart)
     # Priced like every other cart response; with no lines left that is no
     # query at all.

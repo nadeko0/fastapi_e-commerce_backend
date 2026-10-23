@@ -24,7 +24,7 @@ from app.schemas.product import (
     ProductResponse,
     ProductSearch,
 )
-from app.services.redis import RedisService
+from app.services.redis_async import AsyncRedisService, get_cache_service
 
 router = APIRouter(tags=["catalog"])
 
@@ -35,9 +35,9 @@ router = APIRouter(tags=["catalog"])
 #     loaded by the query itself (joinedload(Product.category) below);
 #     touching an unloaded relationship raises MissingGreenlet under asyncio
 #     instead of quietly running one more query.
-#   - RedisService is still the synchronous client, so its calls here do
-#     block the loop for one local round trip. That is the next thing to
-#     move, not an oversight.
+#   - The cache goes through AsyncRedisService (get_cache_service), awaited
+#     like the queries; a call on the synchronous RedisService would block
+#     the loop.
 
 
 async def _count(db: AsyncSession, stmt: Select) -> int:
@@ -120,11 +120,11 @@ async def list_categories(
 @router.get("/categories/tree", response_model=APIResponse[CategoryTreeResponse])
 async def get_category_tree(
     db: AsyncSession = Depends(get_async_db),
-    redis: RedisService = Depends(),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Retrieve the full category tree, nested from root categories down."""
 
-    cached_tree = redis.get_cached_category_tree()
+    cached_tree = await redis.get_cached_category_tree()
     if cached_tree:
         return APIResponse.success_response(cached_tree)
 
@@ -162,7 +162,7 @@ async def get_category_tree(
         response = CategoryTreeResponse(**response_data)
 
 
-    redis.cache_category_tree(response)
+    await redis.cache_category_tree(response)
 
     return APIResponse.success_response(response)
 
@@ -189,7 +189,6 @@ async def get_category(
 async def list_products(
     filter_params: ProductFilter = Depends(_product_filter),
     db: AsyncSession = Depends(get_async_db),
-    redis: RedisService = Depends(),
 ):
     """List products with optional filtering, sorting, and pagination."""
 
@@ -300,11 +299,11 @@ async def search_products(
 async def get_product(
     product_id: Int32,
     db: AsyncSession = Depends(get_async_db),
-    redis: RedisService = Depends(),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Retrieve a single product by ID."""
 
-    cached_product = redis.get_cached_product(product_id)
+    cached_product = await redis.get_cached_product(product_id)
     if cached_product:
         return APIResponse.success_response(cached_product)
 
@@ -323,6 +322,6 @@ async def get_product(
     response = _to_product_response(product)
 
 
-    redis.cache_product(product_id, response.model_dump())
+    await redis.cache_product(product_id, response.model_dump())
 
     return APIResponse.success_response(response)
