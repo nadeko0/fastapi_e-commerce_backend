@@ -14,12 +14,12 @@ buffering) that
 Not done on purpose: no traceparent is sent on outgoing calls or echoed back
 (the spec requires neither; there is no tracing SDK in the app), and the
 `traceresponse` header is a separate W3C draft, not implemented. Celery tasks
-do not receive the context.
+receive the context through message headers (app/core/celery_context.py).
 """
 
 import re
 import uuid
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 
 from starlette.datastructures import Headers, MutableHeaders
@@ -53,6 +53,15 @@ _context: ContextVar[RequestContext | None] = ContextVar("request_context", defa
 
 def get_request_context() -> RequestContext | None:
     return _context.get()
+
+
+def bind_request_context(context: RequestContext) -> Token:
+    """Make `context` current; pass the token to reset_request_context."""
+    return _context.set(context)
+
+
+def reset_request_context(token: Token) -> None:
+    _context.reset(token)
 
 
 def parse_traceparent(value: str) -> tuple[str, str] | None:

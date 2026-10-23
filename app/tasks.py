@@ -11,6 +11,7 @@ from sqlalchemy import String, cast, create_engine, func, literal, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload, selectinload, sessionmaker
 
+from app.core import celery_context
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.database import _build_connect_args
@@ -75,6 +76,8 @@ celery = Celery(
         settings.REDIS_PASSWORD.get_secret_value() if settings.REDIS_PASSWORD is not None else None,
     ),
 )
+
+celery_context.register()
 
 celery.conf.update(
     task_serializer='json',
