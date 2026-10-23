@@ -25,6 +25,7 @@ Per-instance api_key (passed as a request-level kwarg to every SDK call,
 never assigned to the global `stripe.api_key`) so multiple providers using
 different keys can coexist safely in the same process - relevant for tests.
 """
+import logging
 import time
 from typing import Any, Dict, List, Optional
 
@@ -48,6 +49,29 @@ from app.services.payment.types import (
     RefundStatus,
     WebhookEventData,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _provider_unavailable(error: stripe_error.StripeError) -> PaymentProviderTimeoutError:
+    """
+    What a StripeError that is none of the specific ones each method handles
+    (card, invalid request, idempotency) becomes: PaymentProviderTimeoutError,
+    the "outcome unknown, retry" error the routes answer with 503. Stripe:
+    a dropped connection, a 429 and a 5xx all leave it unknown whether the
+    request was carried out (retry with the same idempotency key; for a 5xx,
+    do not start a new operation before the first is resolved). The
+    hierarchy has no common base below StripeError for them, so this is the
+    catch-all that follows the specific clauses. A refused API key is ours to
+    fix, not the customer's to retry, so it is also logged as critical.
+    """
+    if isinstance(error, (stripe_error.AuthenticationError, stripe_error.PermissionError)):
+        logger.critical(
+            "Stripe refused our API key (%s); payments cannot be taken until it is fixed",
+            type(error).__name__,
+        )
+    return PaymentProviderTimeoutError(str(error.user_message or error))
+
 
 # Real Stripe PaymentIntent.status values this codebase doesn't otherwise
 # model (e.g. "requires_capture", used only for manual-capture intents this
@@ -214,8 +238,8 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
             )
-        except stripe_error.APIConnectionError as e:
-            raise PaymentProviderTimeoutError(str(e.user_message or e))
+        except stripe_error.StripeError as e:
+            raise _provider_unavailable(e)
         return _to_payment_intent(pi)
 
     def confirm_payment_intent(
@@ -256,8 +280,8 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
             )
-        except stripe_error.APIConnectionError as e:
-            raise PaymentProviderTimeoutError(str(e.user_message or e))
+        except stripe_error.StripeError as e:
+            raise _provider_unavailable(e)
         return _to_payment_intent(pi)
 
     def retrieve_payment_intent(self, payment_intent_id: str) -> PaymentIntent:
@@ -271,10 +295,8 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
             )
-        except stripe_error.APIConnectionError as e:
-            raise PaymentProviderTimeoutError(str(e.user_message or e))
-        except stripe_error.RateLimitError as e:
-            raise PaymentProviderTimeoutError(str(e.user_message or e))
+        except stripe_error.StripeError as e:
+            raise _provider_unavailable(e)
         return _to_payment_intent(pi)
 
     # -- Checkout Session ------------------------------------------------
@@ -323,8 +345,8 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
             )
-        except stripe_error.APIConnectionError as e:
-            raise PaymentProviderTimeoutError(str(e.user_message or e))
+        except stripe_error.StripeError as e:
+            raise _provider_unavailable(e)
         return _to_checkout_session(session)
 
     def retrieve_checkout_session(self, session_id: str) -> CheckoutSession:
@@ -338,8 +360,8 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise InvalidRequestError(
                 str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
             )
-        except stripe_error.APIConnectionError as e:
-            raise PaymentProviderTimeoutError(str(e.user_message or e))
+        except stripe_error.StripeError as e:
+            raise _provider_unavailable(e)
         return _to_checkout_session(session)
 
     def expire_checkout_session(self, session_id: str) -> CheckoutSession:
@@ -354,8 +376,8 @@ class LiveStripePaymentProvider(PaymentProvider):
             # Session via InvalidRequestError - surfaced as CardError to
             # match the mock provider's contract for the same condition.
             raise CardError(str(e.user_message or e), code=e.code or "invalid_request")
-        except stripe_error.APIConnectionError as e:
-            raise PaymentProviderTimeoutError(str(e.user_message or e))
+        except stripe_error.StripeError as e:
+            raise _provider_unavailable(e)
         return _to_checkout_session(session)
 
     # -- Refund --------------------------------------------------------
@@ -391,8 +413,8 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise CardError(str(e.user_message or e), code=e.code or "invalid_request")
         except stripe_error.CardError as e:
             raise self._translate_card_error(e)
-        except stripe_error.APIConnectionError as e:
-            raise PaymentProviderTimeoutError(str(e.user_message or e))
+        except stripe_error.StripeError as e:
+            raise _provider_unavailable(e)
         return _to_refund(refund)
 
     def list_refunds(self, payment_intent_id: str) -> List[Refund]:
@@ -409,8 +431,8 @@ class LiveStripePaymentProvider(PaymentProvider):
                 raise InvalidRequestError(
                     str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"
                 )
-            except (stripe_error.APIConnectionError, stripe_error.RateLimitError) as e:
-                raise PaymentProviderTimeoutError(str(e.user_message or e))
+            except stripe_error.StripeError as e:
+                raise _provider_unavailable(e)
             refunds.extend(_to_refund(r) for r in page.data)
             if not page.has_more:
                 return refunds
