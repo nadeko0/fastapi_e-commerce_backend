@@ -59,7 +59,7 @@ def test_preflight_allows_the_methods_and_headers_the_api_uses(client):
 def test_preflight_lists_are_explicit_not_reflected(client):
     response = _preflight(client, "GET", "Authorization")
 
-    assert response.headers["access-control-allow-methods"] == "GET, POST, PUT, DELETE"
+    assert response.headers["access-control-allow-methods"] == "GET, POST, PUT, PATCH, DELETE"
     allowed = {h.strip() for h in response.headers["access-control-allow-headers"].split(",")}
     assert {"Authorization", "Idempotency-Key", "Content-Type"} <= allowed
     assert "*" not in allowed
@@ -73,11 +73,19 @@ def test_preflight_for_a_header_the_api_does_not_read_is_refused(client):
 
 
 def test_preflight_for_a_method_the_api_does_not_serve_is_refused(client):
-    for method in ("PATCH", "QUERY"):
+    for method in ("QUERY", "TRACE"):
         response = _preflight(client, method, "Authorization")
 
         assert response.status_code == 400, method
         assert "Disallowed CORS method" in response.text
+
+
+def test_preflight_for_patch_is_allowed(client):
+    # PATCH (JSON Merge Patch, 3.3.0) must be callable from the browser frontend.
+    response = _preflight(client, "PATCH", "Content-Type")
+
+    assert response.status_code == 200
+    assert "PATCH" in response.headers["access-control-allow-methods"]
 
 
 def test_retry_after_and_deprecation_headers_are_readable_by_the_browser(client):

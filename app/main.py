@@ -98,7 +98,7 @@ app.add_middleware(
     # (Authorization, Idempotency-Key); Content-Type is always allowed by
     # Starlette, listed for the reader. Retry-After (429, 503) is exposed so
     # a browser client can back off. Starlette: credentials and "*" do not mix.
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "If-None-Match"],
     expose_headers=["Retry-After", "X-Request-ID", "RateLimit", "RateLimit-Policy", "ETag", "Deprecation", "Sunset", "Link"],
 )
