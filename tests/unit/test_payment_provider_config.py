@@ -59,7 +59,7 @@ def test_stripe_setting_selects_the_live_provider_with_the_configured_key(monkey
         provider = get_payment_provider()
 
     assert isinstance(provider, LiveStripePaymentProvider)
-    assert provider._api_key == REAL_LOOKING_SECRET_KEY
+    assert provider._client._requestor._options.api_key == REAL_LOOKING_SECRET_KEY
 
 
 def test_unknown_provider_name_is_refused():

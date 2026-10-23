@@ -204,7 +204,7 @@ class TestNotFound:
         self, provider
     ):
         # Must surface through our abstraction's CardError(code="resource_missing"),
-        # never a raw stripe.error.InvalidRequestError leaking past the provider
+        # never a raw stripe.InvalidRequestError leaking past the provider
         # boundary (that would break every caller's except clauses, which only
         # know about app.services.payment.exceptions.*).
         with pytest.raises(CardError) as exc_info:

@@ -156,7 +156,7 @@ class TestRetrieve:
 
     def test_retrieve_nonexistent_session_raises_card_error_not_raw_stripe_error(self, provider):
         # Must surface through our abstraction's CardError(code="resource_missing"),
-        # never a raw stripe.error.InvalidRequestError leaking past the
+        # never a raw stripe.InvalidRequestError leaking past the
         # provider boundary - matches retrieve_payment_intent's own contract.
         with pytest.raises(CardError) as exc_info:
             provider.retrieve_checkout_session("cs_test_does_not_exist_" + uuid.uuid4().hex[:16])
