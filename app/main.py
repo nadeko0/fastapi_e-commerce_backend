@@ -14,6 +14,7 @@ from app.core import database
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.database import async_engine, engine
+from app.core.errors import register_error_handlers
 from app.core.forwarded import ForwardedClientMiddleware
 from app.core.logging_config import setup_logging
 from app.core.overload import InFlightLimitMiddleware
@@ -71,6 +72,8 @@ app = FastAPI(
     # 500.)
     dependencies=[Depends(rate_limit)],
 )
+
+register_error_handlers(app)
 
 # Registered before everything else, so it is the innermost middleware: the
 # 413 then passes back out through the security-headers and CORS layers like
