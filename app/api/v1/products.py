@@ -1,5 +1,5 @@
 import inspect
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.exceptions import RequestValidationError
@@ -94,7 +94,7 @@ _product_filter.__signature__ = inspect.signature(ProductFilter)
 async def list_categories(
     pagination: Annotated[PaginationParams, Depends()],
     db: DbSession,
-    parent_id: Optional[Int32] = None,
+    parent_id: Int32 | None = None,
 ):
     """List categories, optionally filtered by parent, with pagination."""
 

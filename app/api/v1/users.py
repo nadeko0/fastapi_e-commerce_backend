@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Annotated, List
+from typing import Annotated, List  # noqa: UP035 - see the UP006 noqa on response_model
 
 from fastapi import (
     APIRouter,
@@ -1005,7 +1005,7 @@ async def set_default_address(
         "message": "Default address updated successfully"
     })
 
-@router.get("/orders", response_model=APIResponse[List[OrderResponse]])
+@router.get("/orders", response_model=APIResponse[List[OrderResponse]])  # noqa: UP006 - List, not list: the repr names the OpenAPI schema (contract)
 async def get_user_orders(
     pagination: Annotated[PaginationParams, Query()],
     current_user: CurrentUser,

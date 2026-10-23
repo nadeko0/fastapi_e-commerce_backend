@@ -13,7 +13,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -154,7 +154,7 @@ def _apply_dispute_event(db: Session, object_data: dict) -> dict:
     return {"status": "processed", "applied": True, "requires_manual_review": True}
 
 
-def _object_id(value) -> Optional[str]:
+def _object_id(value) -> str | None:
     """An object reference in an event payload: an id string, or the
     expanded object carrying one."""
     if isinstance(value, dict):
@@ -476,8 +476,8 @@ class EventOutcome:
     seconds from now) or "failed" (out of retries)."""
 
     state: str
-    result: Optional[dict] = None
-    retry_in: Optional[int] = None
+    result: dict | None = None
+    retry_in: int | None = None
 
 
 class _AfterCommit:
@@ -503,7 +503,7 @@ class _AfterCommit:
                 )
 
 
-def _claim_event(db: Session, event_id: str) -> Optional[WebhookEvent]:
+def _claim_event(db: Session, event_id: str) -> WebhookEvent | None:
     """The stored event, row-locked for the rest of the transaction.
     SKIP LOCKED: an event another worker is applying right now is not
     returned (None), so two workers given the same message apply it once -

@@ -1,7 +1,6 @@
 import re
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -35,19 +34,19 @@ class ConsentHistory(BaseModel):
     type: ConsentType
     granted: bool
     timestamp: datetime
-    ip_address: Optional[str] = None
-    user_agent: Optional[str] = None
+    ip_address: str | None = None
+    user_agent: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 class UserBase(BaseModel):
     email: EmailStr
-    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
-    phone: Optional[str] = Field(None, pattern=r"^\+\d{5,15}$", description="International phone number (5-15 digits)")
+    full_name: str | None = Field(None, min_length=2, max_length=100)
+    phone: str | None = Field(None, pattern=r"^\+\d{5,15}$", description="International phone number (5-15 digits)")
 
     @field_validator('phone')
     @classmethod
-    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+    def validate_phone(cls, v: str | None) -> str | None:
         if not v:
             return v
         # Remove any non-digit characters
@@ -81,7 +80,7 @@ class UserCreate(UserBase):
         return v
     gdpr_consent: bool = Field(..., description="GDPR consent is required")
     privacy_policy_accepted: bool = Field(..., description="Privacy policy must be accepted")
-    marketing_consent: Optional[bool] = Field(default=False)
+    marketing_consent: bool | None = Field(default=False)
 
     @field_validator('gdpr_consent')
     @classmethod
@@ -98,12 +97,12 @@ class UserCreate(UserBase):
         return v
 
 class UserUpdate(BaseModel):
-    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
-    phone: Optional[str] = Field(None, pattern=r"^\+\d{5,15}$", description="International phone number (5-15 digits)")
+    full_name: str | None = Field(None, min_length=2, max_length=100)
+    phone: str | None = Field(None, pattern=r"^\+\d{5,15}$", description="International phone number (5-15 digits)")
 
     @field_validator('phone')
     @classmethod
-    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+    def validate_phone(cls, v: str | None) -> str | None:
         if not v:
             return v
         # Remove any non-digit characters
@@ -112,7 +111,7 @@ class UserUpdate(BaseModel):
         if not 5 <= len(phone) <= 15:
             raise ValueError('Invalid phone number length')
         return f"+{phone}"
-    marketing_consent: Optional[bool] = None
+    marketing_consent: bool | None = None
 
     @field_validator('marketing_consent')
     @classmethod
@@ -132,7 +131,7 @@ class UserInDB(UserBase):
     marketing_consent: bool
     created_at: datetime
     updated_at: datetime
-    last_login: Optional[datetime] = None
+    last_login: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -154,7 +153,7 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 class LogoutRequest(BaseModel):
-    refresh_token: Optional[str] = None
+    refresh_token: str | None = None
 
 class TokenPayload(BaseModel):
     sub: int  # user_id
@@ -204,9 +203,9 @@ class GDPRExport(BaseModel):
 class GDPRExportData(BaseModel):
     """Schema for the actual GDPR data export content"""
     personal_data: UserInDB
-    consents: List[ConsentHistory]
-    addresses: List["AddressResponse"]
-    orders: List["OrderResponse"]
+    consents: list[ConsentHistory]
+    addresses: list["AddressResponse"]
+    orders: list["OrderResponse"]
     export_metadata: GDPRExport
     generated_at: datetime = Field(default_factory=utc_now)
 
@@ -230,7 +229,7 @@ class GDPRDelete(BaseModel):
     """Schema for GDPR account deletion"""
     confirmation: bool = Field(..., description="Confirm account deletion")
     password: str
-    reason: Optional[str] = None
+    reason: str | None = None
 
     @field_validator('confirmation')
     @classmethod

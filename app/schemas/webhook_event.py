@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -14,8 +13,8 @@ class WebhookEventResponse(BaseModel):
     event_type: str
     status: str
     attempts: int
-    last_error: Optional[str] = None
-    processed_at: Optional[datetime] = None
+    last_error: str | None = None
+    processed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -23,7 +22,7 @@ class WebhookEventResponse(BaseModel):
 
 
 class WebhookEventListResponse(BaseModel):
-    items: List[WebhookEventResponse]
+    items: list[WebhookEventResponse]
     total: int
     page: int
     size: int

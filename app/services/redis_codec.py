@@ -16,10 +16,11 @@ values read and returns what to write (a CartWrite).
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
-from typing import Any, Callable, Optional, Tuple
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -73,7 +74,7 @@ class CartFullError(Exception):
         super().__init__(f"Cart cannot hold more than {max_lines} lines")
 
 
-def cart_ttl(user_id: Optional[CartOwnerRef] = None) -> timedelta:
+def cart_ttl(user_id: CartOwnerRef | None = None) -> timedelta:
     # Read from settings on every call rather than cached in a module
     # constant: the key's TTL and Cart.expires_at both come from here,
     # so they cannot drift apart again (a hard-coded 7 used to be what
@@ -135,7 +136,7 @@ def log_redis_error(operation: str) -> None:
     logger.error(f"Redis operation failed: {operation}")
 
 
-def load_cart(owner: CartOwner, cart_data: Optional[str]) -> Optional[Cart]:
+def load_cart(owner: CartOwner, cart_data: str | None) -> Cart | None:
     """The Cart stored as `cart_data` under `owner`'s key, or None when
     there is none or it cannot be read. A value that names another
     owner than its key does (an account cart must carry that account's
@@ -162,7 +163,7 @@ def empty_cart(user_id: CartOwnerRef) -> Cart:
     )
 
 
-def load_or_create_cart(user_id: CartOwnerRef, cart_data: Optional[str]) -> Cart:
+def load_or_create_cart(user_id: CartOwnerRef, cart_data: str | None) -> Cart:
     owner = as_cart_owner(user_id)
     cart = load_cart(owner, cart_data)
     if cart is not None:
@@ -175,13 +176,13 @@ class CartWrite:
     """What a transaction body decided: store `cart` under the key with
     `ttl`, or delete the key (`cart` is None)."""
 
-    cart: Optional[Cart] = None
-    ttl: Optional[timedelta] = None
+    cart: Cart | None = None
+    ttl: timedelta | None = None
 
 
 def plan_cart_mutation(
-    owner: CartOwner, cart_data: Optional[str], mutator: Callable[[Cart], None], must_exist: bool
-) -> Tuple[CartWrite, Cart]:
+    owner: CartOwner, cart_data: str | None, mutator: Callable[[Cart], None], must_exist: bool
+) -> tuple[CartWrite, Cart]:
     """The decision half of _atomic_mutate_cart, given the value read.
 
     Returns the write to queue and the mutated cart (the method's result).
@@ -205,11 +206,11 @@ def plan_cart_mutation(
 def add_mutator(
     product_id: int,
     quantity: int,
-    price: Optional[Decimal],
-    name: Optional[str],
-    image: Optional[str],
+    price: Decimal | None,
+    name: str | None,
+    image: str | None,
     stock_quantity: int,
-    variant_id: Optional[int] = None,
+    variant_id: int | None = None,
 ) -> Callable[[Cart], None]:
     def _mutator(cart: Cart) -> None:
         str_id = cart_item_key(product_id, variant_id)
@@ -234,7 +235,7 @@ def add_mutator(
 
 
 def update_quantity_mutator(
-    product_id: int, quantity: int, stock_quantity: int, variant_id: Optional[int] = None
+    product_id: int, quantity: int, stock_quantity: int, variant_id: int | None = None
 ) -> Callable[[Cart], None]:
     def _mutator(cart: Cart) -> None:
         str_id = cart_item_key(product_id, variant_id)
@@ -247,7 +248,7 @@ def update_quantity_mutator(
     return _mutator
 
 
-def remove_item_mutator(product_id: int, variant_id: Optional[int] = None) -> Callable[[Cart], None]:
+def remove_item_mutator(product_id: int, variant_id: int | None = None) -> Callable[[Cart], None]:
     def _mutator(cart: Cart) -> None:
         str_id = cart_item_key(product_id, variant_id)
         if str_id not in cart.items:
@@ -261,7 +262,7 @@ def clear_mutator(cart: Cart) -> None:
     cart.clear()
 
 
-def plan_guest_merge_read(guest: CartOwner, guest_data: Optional[str]) -> Tuple[str, Optional[Cart]]:
+def plan_guest_merge_read(guest: CartOwner, guest_data: str | None) -> tuple[str, Cart | None]:
     """First half of merge_guest_cart: what the guest cart read says.
 
     Returns (action, guest_cart). Action is "nothing" (none stored, or not
@@ -277,7 +278,7 @@ def plan_guest_merge_read(guest: CartOwner, guest_data: Optional[str]) -> Tuple[
 
 
 def plan_merge_into_account(
-    account: CartOwner, user_id: int, guest_cart: Cart, account_data: Optional[str]
+    account: CartOwner, user_id: int, guest_cart: Cart, account_data: str | None
 ) -> CartWrite:
     cart = load_or_create_cart(account, account_data)
     left_out = cart.merge(guest_cart, settings.CART_MAX_LINES)
@@ -291,7 +292,7 @@ def plan_merge_into_account(
     return CartWrite(cart=cart, ttl=ttl)
 
 
-def plan_remove_ordered(owner: CartOwner, cart_data: Optional[str], ordered: Cart) -> CartWrite:
+def plan_remove_ordered(owner: CartOwner, cart_data: str | None, ordered: Cart) -> CartWrite:
     """Subtract the ordered quantities from the stored cart. The returned
     write has cart None (delete the key) when nothing is left."""
     cart = load_cart(owner, cart_data)

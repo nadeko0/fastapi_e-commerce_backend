@@ -1,7 +1,6 @@
 import re
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -17,7 +16,7 @@ class AddressType(str, Enum):
 # represent the same "phone number" concept and previously diverged:
 # UserBase.phone was validated (+digits, 5-15 digits) while
 # AddressBase/AddressUpdate.delivery_phone accepted any string unvalidated.
-def _validate_phone(v: Optional[str]) -> Optional[str]:
+def _validate_phone(v: str | None) -> str | None:
     if not v:
         return v
     phone = re.sub(r'\D', '', v)
@@ -33,8 +32,8 @@ class AddressBase(BaseModel):
     country: str = Field(..., min_length=2, max_length=100)
     address_type: AddressType = Field(default=AddressType.HOME)
     is_default: bool = Field(default=False)
-    delivery_instructions: Optional[str] = Field(None, max_length=500)
-    delivery_phone: Optional[str] = None
+    delivery_instructions: str | None = Field(None, max_length=500)
+    delivery_phone: str | None = None
 
     @field_validator('postal_code')
     @classmethod
@@ -60,15 +59,15 @@ class AddressCreate(AddressBase):
     pass
 
 class AddressUpdate(BaseModel):
-    street: Optional[str] = Field(None, min_length=5, max_length=255)
-    city: Optional[str] = Field(None, min_length=2, max_length=100)
-    state: Optional[str] = Field(None, min_length=2, max_length=100)
-    postal_code: Optional[str] = Field(None, min_length=3, max_length=20)
-    country: Optional[str] = Field(None, min_length=2, max_length=100)
-    address_type: Optional[AddressType] = None
-    is_default: Optional[bool] = None
-    delivery_instructions: Optional[str] = Field(None, max_length=500)
-    delivery_phone: Optional[str] = None
+    street: str | None = Field(None, min_length=5, max_length=255)
+    city: str | None = Field(None, min_length=2, max_length=100)
+    state: str | None = Field(None, min_length=2, max_length=100)
+    postal_code: str | None = Field(None, min_length=3, max_length=20)
+    country: str | None = Field(None, min_length=2, max_length=100)
+    address_type: AddressType | None = None
+    is_default: bool | None = None
+    delivery_instructions: str | None = Field(None, max_length=500)
+    delivery_phone: str | None = None
 
     @field_validator('street', 'city', 'state', 'postal_code', 'country', 'address_type', 'is_default')
     @classmethod

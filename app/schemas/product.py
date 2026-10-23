@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 from pydantic import (
     AfterValidator,
@@ -33,7 +33,7 @@ class ProductCharacteristic(BaseModel):
     """Schema for dynamic product characteristics"""
     name: str = Field(..., min_length=1, max_length=100)
     value: Any
-    unit: Optional[str] = None
+    unit: str | None = None
     filterable: bool = True
 
 class ProductBase(BaseModel):
@@ -44,8 +44,8 @@ class ProductBase(BaseModel):
     )
     stock_quantity: Int32Max = Field(..., ge=0)
     category_id: Int32
-    images: List[ImageUrl] = Field(default_factory=list)
-    characteristics: Dict[str, ProductCharacteristic] = Field(default_factory=dict)
+    images: list[ImageUrl] = Field(default_factory=list)
+    characteristics: dict[str, ProductCharacteristic] = Field(default_factory=dict)
 
     @field_validator('price')
     @classmethod
@@ -66,15 +66,15 @@ class ProductCreate(ProductBase):
     pass
 
 class ProductUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=3, max_length=200)
-    description: Optional[str] = Field(None, min_length=10)
-    price: Optional[Decimal] = Field(
+    name: str | None = Field(None, min_length=3, max_length=200)
+    description: str | None = Field(None, min_length=10)
+    price: Decimal | None = Field(
         None, ge=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
     )
-    stock_quantity: Optional[Int32Max] = Field(None, ge=0)
-    category_id: Optional[Int32] = None
-    images: Optional[List[ImageUrl]] = None
-    characteristics: Optional[Dict[str, ProductCharacteristic]] = None
+    stock_quantity: Int32Max | None = Field(None, ge=0)
+    category_id: Int32 | None = None
+    images: list[ImageUrl] | None = None
+    characteristics: dict[str, ProductCharacteristic] | None = None
 
     @field_validator('name', 'description', 'price', 'stock_quantity', 'category_id', 'images', 'characteristics')
     @classmethod
@@ -116,7 +116,7 @@ class ProductResponse(ProductInDB):
 
 class ProductListResponse(BaseModel):
     """Schema for list of products with pagination"""
-    items: List[ProductResponse]
+    items: list[ProductResponse]
     total: int
     page: int
     size: int
@@ -126,14 +126,14 @@ class ProductListResponse(BaseModel):
 
 class ProductFilter(BaseModel):
     """Schema for product filtering"""
-    category_id: Optional[Int32] = None
-    min_price: Optional[Decimal] = Field(None, ge=0)
-    max_price: Optional[Decimal] = Field(None, ge=0)
-    in_stock: Optional[bool] = None
-    characteristics: Optional[Dict[str, Any]] = None
+    category_id: Int32 | None = None
+    min_price: Decimal | None = Field(None, ge=0)
+    max_price: Decimal | None = Field(None, ge=0)
+    in_stock: bool | None = None
+    characteristics: dict[str, Any] | None = None
     # Bounded like ProductSearch.query: a search term, not a document.
-    search_query: Optional[str] = Field(None, max_length=100)
-    sort_by: Optional[str] = Field(None, pattern="^(name|price|created_at)_(asc|desc)$")
+    search_query: str | None = Field(None, max_length=100)
+    sort_by: str | None = Field(None, pattern="^(name|price|created_at)_(asc|desc)$")
     page: Int32Max = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
 
@@ -148,7 +148,7 @@ class ProductFilter(BaseModel):
 class ProductSearch(BaseModel):
     """Schema for product search"""
     query: str = Field(..., min_length=3, max_length=100)
-    category_id: Optional[Int32] = None
+    category_id: Int32 | None = None
     page: Int32Max = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
 
@@ -161,8 +161,8 @@ class ProductVariantBase(BaseModel):
     domain, not just apparel.
     """
     sku: str = Field(..., min_length=1, max_length=100)
-    attributes: Dict[str, Any] = Field(default_factory=dict)
-    price_override: Optional[Decimal] = Field(
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    price_override: Decimal | None = Field(
         None, ge=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
     )
     stock_quantity: Int32Max = Field(0, ge=0)
@@ -180,13 +180,13 @@ class ProductVariantCreate(ProductVariantBase):
 
 class ProductVariantUpdate(BaseModel):
     """Schema for updating an existing product variant. All fields optional."""
-    sku: Optional[str] = Field(None, min_length=1, max_length=100)
-    attributes: Optional[Dict[str, Any]] = None
-    price_override: Optional[Decimal] = Field(
+    sku: str | None = Field(None, min_length=1, max_length=100)
+    attributes: dict[str, Any] | None = None
+    price_override: Decimal | None = Field(
         None, ge=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
     )
-    stock_quantity: Optional[Int32Max] = Field(None, ge=0)
-    is_active: Optional[bool] = None
+    stock_quantity: Int32Max | None = Field(None, ge=0)
+    is_active: bool | None = None
 
     @field_validator('sku', 'attributes', 'stock_quantity', 'is_active')
     @classmethod
@@ -215,7 +215,7 @@ class ProductVariantResponse(ProductVariantBase):
 class ProductVariantListResponse(BaseModel):
     """Schema for a list of variants under a product (no pagination - a
     single product's variant count is expected to be small)."""
-    items: List[ProductVariantResponse]
+    items: list[ProductVariantResponse]
     total: int
 
     model_config = ConfigDict(from_attributes=True)

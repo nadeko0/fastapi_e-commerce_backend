@@ -1,18 +1,13 @@
+from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import (
     Annotated,
     Any,
-    Dict,
     Generic,
-    List,
     Literal,
-    Mapping,
-    Optional,
-    Tuple,
     TypeVar,
-    Union,
 )
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -37,7 +32,7 @@ _CENT = Decimal("0.01")
 
 class TokenPayload(BaseModel):
     """Schema for JWT token payload"""
-    sub: Union[int, str]  # Subject (user ID)
+    sub: int | str  # Subject (user ID)
     exp: datetime  # Expiration time
     type: str  # Token type (access, refresh, reset)
 DataT = TypeVar('DataT')
@@ -59,8 +54,8 @@ class ErrorDetail(BaseModel):
     """Detailed error information"""
     code: ErrorCode
     message: str
-    field: Optional[str] = None
-    details: Optional[Dict[str, Any]] = None
+    field: str | None = None
+    details: dict[str, Any] | None = None
 
 class ValidationError(BaseModel):
     """Validation error details"""
@@ -70,22 +65,22 @@ class ValidationError(BaseModel):
 
 class ValidationErrorResponse(BaseModel):
     """Response for validation errors"""
-    errors: List[ValidationError]
+    errors: list[ValidationError]
     timestamp: datetime = Field(default_factory=utc_now)
-    request_id: Optional[str] = None
+    request_id: str | None = None
 
 class APIResponse(BaseModel, Generic[DataT]):
     """Generic API response wrapper"""
     success: bool = True
-    data: Optional[DataT] = None
-    error: Optional[ErrorDetail] = None
+    data: DataT | None = None
+    error: ErrorDetail | None = None
     timestamp: datetime = Field(default_factory=utc_now)
-    request_id: Optional[str] = None
+    request_id: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
     @classmethod
-    def success_response(cls, data: DataT, request_id: Optional[str] = None) -> 'APIResponse[DataT]':
+    def success_response(cls, data: DataT, request_id: str | None = None) -> 'APIResponse[DataT]':
         return cls(success=True, data=data, request_id=request_id)
 
     @classmethod
@@ -93,8 +88,8 @@ class APIResponse(BaseModel, Generic[DataT]):
         cls,
         code: ErrorCode,
         message: str,
-        details: Optional[Dict[str, Any]] = None,
-        request_id: Optional[str] = None
+        details: dict[str, Any] | None = None,
+        request_id: str | None = None
     ) -> 'APIResponse[DataT]':
         error = ErrorDetail(code=code, message=message, details=details)
         return cls(success=False, error=error, request_id=request_id)
@@ -104,10 +99,10 @@ class PaginationParams(BaseModel):
     # offset = (page - 1) * size stays far inside a bigint
     page: Int32Max = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
-    sort_by: Optional[str] = None
-    sort_order: Optional[str] = Field(None, pattern="^(asc|desc)$")
+    sort_by: str | None = None
+    sort_order: str | None = Field(None, pattern="^(asc|desc)$")
 
-def cart_item_key(product_id: int, variant_id: Optional[int] = None) -> str:
+def cart_item_key(product_id: int, variant_id: int | None = None) -> str:
     """The Cart.items dict key for a given product/variant combination.
 
     A plain product (no variant) keeps the pre-existing "{product_id}" key
@@ -131,7 +126,7 @@ class CartItem(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     product_id: int
-    variant_id: Optional[int] = None
+    variant_id: int | None = None
     quantity: int = Field(..., gt=0)
     added_at: UTCDatetime = Field(default_factory=utc_now)
     # What the customer was shown when the line last went into the cart.
@@ -146,13 +141,13 @@ class CartItem(BaseModel):
     # price was a float, so a cart already in Redis loads unchanged. A float
     # read from such a cart becomes the exact two-decimal Decimal it was
     # written from; this code writes the price as a decimal string.
-    price_snapshot: Optional[Decimal] = None
-    name_snapshot: Optional[str] = None
-    image_snapshot: Optional[str] = None
+    price_snapshot: Decimal | None = None
+    name_snapshot: str | None = None
+    image_snapshot: str | None = None
 
     @field_validator("price_snapshot")
     @classmethod
-    def _two_decimal_places(cls, value: Optional[Decimal]) -> Optional[Decimal]:
+    def _two_decimal_places(cls, value: Decimal | None) -> Decimal | None:
         # Catalog prices are Numeric(10, 2). An old-format float such as
         # 14.5 arrives as Decimal("14.5"); this makes it print as 14.50.
         if value is None:
@@ -171,7 +166,7 @@ CART_LINE_VARIANT_UNAVAILABLE = "variant_unavailable"
 CART_LINE_INSUFFICIENT_STOCK = "insufficient_stock"
 
 
-def cart_unit_price(product: Any, variant: Optional[Any]) -> Decimal:
+def cart_unit_price(product: Any, variant: Any | None) -> Decimal:
     """The current price of one unit of a cart line: the variant's
     price_override when it has one, otherwise the product's price. The same
     rule create_order (app/api/v1/orders.py) charges by; `is not None`
@@ -185,7 +180,7 @@ def resolve_cart_line(
     item: CartItem,
     products: Mapping[int, Any],
     variants: Mapping[int, Any],
-) -> Tuple[Optional[Any], Optional[Any], Optional[str]]:
+) -> tuple[Any | None, Any | None, str | None]:
     """Match a cart line against the catalog rows loaded for the cart.
 
     Returns (product, variant, unavailable_reason). The line can be bought
@@ -212,33 +207,31 @@ class CartResponseItem(BaseModel):
     """One cart line as returned by the API, priced at the moment of the
     request."""
     product_id: int
-    variant_id: Optional[int] = None
+    variant_id: int | None = None
     quantity: int
     added_at: datetime
     # Current name and main image of the product. For a product that no
     # longer exists, what was recorded when the line was added.
-    name: Optional[str] = None
-    image: Optional[str] = None
+    name: str | None = None
+    image: str | None = None
     # False when the product or variant is gone or withdrawn from sale. The
     # line is still listed, so the customer sees what happened to it, but
     # has no price and does not count towards the total.
     available: bool
-    unavailable_reason: Optional[
-        Literal["product_unavailable", "variant_unavailable"]
-    ] = None
+    unavailable_reason: Literal["product_unavailable", "variant_unavailable"] | None = None
     # Current catalog price; None for an unavailable line.
-    unit_price: Optional[Decimal] = None
-    line_total: Optional[Decimal] = None
+    unit_price: Decimal | None = None
+    line_total: Decimal | None = None
     # The price shown when the line was added, and whether the current one
     # differs from it. Information for the customer, never an error.
-    price_when_added: Optional[Decimal] = None
+    price_when_added: Decimal | None = None
     price_changed: bool = False
 
 
 class CartResponse(BaseModel):
     """A cart as returned by the API. Money is Decimal, serialized as a
     string ("19.98"), like the order total."""
-    items: List[CartResponseItem] = Field(default_factory=list)
+    items: list[CartResponseItem] = Field(default_factory=list)
     # Sum of line_total over the available lines.
     total_amount: Decimal = Field(default=_ZERO)
     # Number of lines, unavailable ones included.
@@ -301,18 +294,18 @@ class CartResponse(BaseModel):
 class CartValidationIssue(BaseModel):
     """A reason the cart cannot be ordered as it stands."""
     product_id: int
-    variant_id: Optional[int] = None
+    variant_id: int | None = None
     code: Literal["product_unavailable", "variant_unavailable", "insufficient_stock"]
     error: str
     # Set for insufficient_stock only.
-    available: Optional[int] = None
-    requested: Optional[int] = None
+    available: int | None = None
+    requested: int | None = None
 
 
 class CartPriceChange(BaseModel):
     """A line whose price differs from the one it was added at."""
     product_id: int
-    variant_id: Optional[int] = None
+    variant_id: int | None = None
     price_when_added: Decimal
     current_price: Decimal
 
@@ -321,8 +314,8 @@ class CartValidationResponse(BaseModel):
     # True when the cart can be ordered right now: every line is available
     # and in stock. A changed price does not make it False.
     valid: bool
-    issues: List[CartValidationIssue] = Field(default_factory=list)
-    price_changes: List[CartPriceChange] = Field(default_factory=list)
+    issues: list[CartValidationIssue] = Field(default_factory=list)
+    price_changes: list[CartPriceChange] = Field(default_factory=list)
 
 
 class Cart(BaseModel):
@@ -333,8 +326,8 @@ class Cart(BaseModel):
     # An account cart is stored exactly as before, integer user_id included,
     # so carts already in Redis load and a worker still on the previous code
     # reads what this code writes for an account.
-    user_id: Optional[int] = None
-    items: Dict[str, CartItem] = Field(default_factory=dict)  # cart_item_key(product_id, variant_id) -> CartItem
+    user_id: int | None = None
+    items: dict[str, CartItem] = Field(default_factory=dict)  # cart_item_key(product_id, variant_id) -> CartItem
     created_at: UTCDatetime = Field(default_factory=utc_now)
     updated_at: UTCDatetime = Field(default_factory=utc_now)
     # When Redis will drop the cart unless it is written again: re-stamped
@@ -345,10 +338,10 @@ class Cart(BaseModel):
         self,
         product_id: int,
         quantity: int,
-        price: Optional[Decimal] = None,
-        name: Optional[str] = None,
-        image: Optional[str] = None,
-        variant_id: Optional[int] = None,
+        price: Decimal | None = None,
+        name: str | None = None,
+        image: str | None = None,
+        variant_id: int | None = None,
     ) -> None:
         """Add or update item in cart. A given product_id+variant_id pair
         merges quantities; a different variant_id (or no variant_id) for
@@ -379,14 +372,14 @@ class Cart(BaseModel):
             )
         self.updated_at = utc_now()
 
-    def remove_item(self, product_id: int, variant_id: Optional[int] = None) -> None:
+    def remove_item(self, product_id: int, variant_id: int | None = None) -> None:
         """Remove item from cart"""
         str_id = cart_item_key(product_id, variant_id)
         if str_id in self.items:
             del self.items[str_id]
             self.updated_at = utc_now()
 
-    def update_quantity(self, product_id: int, quantity: int, variant_id: Optional[int] = None) -> None:
+    def update_quantity(self, product_id: int, quantity: int, variant_id: int | None = None) -> None:
         """Update item quantity"""
         str_id = cart_item_key(product_id, variant_id)
         if str_id in self.items:

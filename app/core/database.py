@@ -1,6 +1,7 @@
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import contextmanager
-from typing import Annotated, AsyncGenerator
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import create_engine
@@ -125,7 +126,7 @@ def session_scope():
     finally:
         session.close()
 
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_async_db() -> AsyncGenerator[AsyncSession]:
     # Commit on success, roll back and answer
     # with a generic 500 on a database error (never the raw SQLAlchemy
     # message - see session_scope above for why). `async with` closes the

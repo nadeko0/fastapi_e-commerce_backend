@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from app.core.currencies import STRIPE_PRESENTMENT_CURRENCIES
 from app.services.payment.base import PaymentProvider, webhook_event_from_payload
@@ -89,7 +89,7 @@ _DECLINED = "Your card was declined."
 # Cards whose confirmation is declined: token -> (error code, decline code,
 # message). "Declined payments" table; decline code None where the guide
 # gives none.
-DECLINING_TOKENS: Dict[str, Tuple[str, Optional[str], str]] = {
+DECLINING_TOKENS: dict[str, tuple[str, str | None, str]] = {
     "pm_card_visa_chargeDeclined": ("card_declined", "generic_decline", _DECLINED),
     "pm_card_visa_chargeDeclinedInsufficientFunds": (
         "card_declined", "insufficient_funds", "Your card has insufficient funds."),
@@ -124,7 +124,7 @@ DECLINING_TOKENS: Dict[str, Tuple[str, Optional[str], str]] = {
 # customer has authenticated (a second confirm, in the mock) the payment
 # succeeds (None) or is declined with the given (code, decline code,
 # message). "3D Secure" table and "Always authenticate".
-AUTHENTICATING_TOKENS: Dict[str, Optional[Tuple[str, Optional[str], str]]] = {
+AUTHENTICATING_TOKENS: dict[str, tuple[str, str | None, str] | None] = {
     "pm_card_authenticationRequired": None,
     "pm_card_threeDSecure2Required": None,
     # "declined with a card_declined failure code after authentication";
@@ -134,7 +134,7 @@ AUTHENTICATING_TOKENS: Dict[str, Optional[Tuple[str, Optional[str], str]]] = {
 
 # Asynchronous refunds: token -> (status a refund starts in, status it ends
 # in "some time later", the event Stripe sends then). "Refunds" table.
-ASYNC_REFUND_TOKENS: Dict[str, Tuple[RefundStatus, RefundStatus, str]] = {
+ASYNC_REFUND_TOKENS: dict[str, tuple[RefundStatus, RefundStatus, str]] = {
     "pm_card_pendingRefund": (RefundStatus.PENDING, RefundStatus.SUCCEEDED, "refund.updated"),
     "pm_card_refundFail": (RefundStatus.SUCCEEDED, RefundStatus.FAILED, "refund.failed"),
 }
@@ -212,12 +212,12 @@ class StripePaymentProvider(PaymentProvider):
     cases to avoid idempotency keys leaking across tests.
     """
 
-    _intents_by_key: Dict[str, PaymentIntent] = {}
-    _intents_by_id: Dict[str, PaymentIntent] = {}
-    _sessions_by_key: Dict[str, CheckoutSession] = {}
-    _sessions_by_id: Dict[str, CheckoutSession] = {}
-    _refunds_by_key: Dict[str, Refund] = {}
-    _refunds_by_id: Dict[str, Refund] = {}
+    _intents_by_key: dict[str, PaymentIntent] = {}
+    _intents_by_id: dict[str, PaymentIntent] = {}
+    _sessions_by_key: dict[str, CheckoutSession] = {}
+    _sessions_by_id: dict[str, CheckoutSession] = {}
+    _refunds_by_key: dict[str, Refund] = {}
+    _refunds_by_id: dict[str, Refund] = {}
 
     @classmethod
     def reset_mock_state(cls) -> None:
@@ -241,8 +241,8 @@ class StripePaymentProvider(PaymentProvider):
         amount: int,
         currency: str,
         idempotency_key: str,
-        payment_method: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        payment_method: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> PaymentIntent:
         # Validate before the (simulated) network call and before touching
         # the idempotency cache: a structurally invalid request was never
@@ -286,7 +286,7 @@ class StripePaymentProvider(PaymentProvider):
         self,
         payment_intent_id: str,
         *,
-        idempotency_key: Optional[str] = None,
+        idempotency_key: str | None = None,
         return_url: str,
     ) -> PaymentIntent:
         self._simulate_network_call()
@@ -352,7 +352,7 @@ class StripePaymentProvider(PaymentProvider):
 
     @staticmethod
     def _decline(
-        intent: PaymentIntent, code: str, decline_code: Optional[str], message: str
+        intent: PaymentIntent, code: str, decline_code: str | None, message: str
     ) -> None:
         """Declines `intent` as Stripe does: the intent stays, waiting for
         another payment method, with the error recorded on it, and the
@@ -384,8 +384,8 @@ class StripePaymentProvider(PaymentProvider):
         idempotency_key: str,
         success_url: str,
         cancel_url: str,
-        description: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        description: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> CheckoutSession:
         # Same validate-before-touching-state ordering as create_payment_intent:
         # a structurally invalid request never "reached Stripe" and must not
@@ -461,8 +461,8 @@ class StripePaymentProvider(PaymentProvider):
         self,
         *,
         payment_intent_id: str,
-        amount: Optional[int] = None,
-        idempotency_key: Optional[str] = None,
+        amount: int | None = None,
+        idempotency_key: str | None = None,
     ) -> Refund:
         if amount is not None and (isinstance(amount, bool) or not isinstance(amount, int)):
             raise InvalidRequestError(
@@ -532,7 +532,7 @@ class StripePaymentProvider(PaymentProvider):
             self._refunds_by_key[idempotency_key] = refund
         return refund
 
-    def list_refunds(self, payment_intent_id: str) -> List[Refund]:
+    def list_refunds(self, payment_intent_id: str) -> list[Refund]:
         self._simulate_network_call()
         return [
             Refund(
@@ -544,7 +544,7 @@ class StripePaymentProvider(PaymentProvider):
         ]
 
     @classmethod
-    def settle_refund(cls, refund_id: str) -> Dict[str, Any]:
+    def settle_refund(cls, refund_id: str) -> dict[str, Any]:
         """Test hook for Stripe finishing an asynchronous refund "some time
         later" (docs.stripe.com/testing, "Refunds"): pm_card_pendingRefund's
         refund goes from pending to succeeded and Stripe sends
@@ -585,7 +585,7 @@ class StripePaymentProvider(PaymentProvider):
         })
 
     @staticmethod
-    def webhook_event(event_type: str, data_object: Dict[str, Any]) -> Dict[str, Any]:
+    def webhook_event(event_type: str, data_object: dict[str, Any]) -> dict[str, Any]:
         """The body of a webhook Stripe would send about `data_object`: a v1
         snapshot event (https://docs.stripe.com/api/events/object)."""
         return {
@@ -600,7 +600,7 @@ class StripePaymentProvider(PaymentProvider):
     # -- Webhooks --------------------------------------------------------
 
     @staticmethod
-    def sign_payload(payload: bytes, secret: str, timestamp: Optional[int] = None) -> str:
+    def sign_payload(payload: bytes, secret: str, timestamp: int | None = None) -> str:
         """
         Builds a Stripe-Signature header value the same way the real Stripe
         API does: HMAC-SHA256 over "{timestamp}.{payload}", formatted as
@@ -615,7 +615,7 @@ class StripePaymentProvider(PaymentProvider):
     def construct_webhook_event(
         self,
         payload: bytes,
-        sig_header: Optional[str],
+        sig_header: str | None,
         webhook_secret: str,
         tolerance_seconds: int = DEFAULT_WEBHOOK_TOLERANCE_SECONDS,
     ) -> WebhookEventData:
@@ -640,7 +640,7 @@ class StripePaymentProvider(PaymentProvider):
         # checked, so a valid event whose matching signature came second
         # was refused. Nothing is stripped, as in the library: a header with
         # spaces in it is not one Stripe sent, and the mock used to accept it.
-        timestamp_raw: Optional[str] = None
+        timestamp_raw: str | None = None
         signatures = []
         for item in sig_header.split(","):
             if "=" not in item:

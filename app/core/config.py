@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, List, Literal, Optional
+from typing import Annotated, ClassVar, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -21,7 +21,7 @@ from app.core.currencies import (
 )
 
 
-def _split_comma_separated(v: str | List[str]) -> List[str]:
+def _split_comma_separated(v: str | list[str]) -> list[str]:
     # Shared by every plain-string-list env setting (TRUSTED_PROXIES,
     # ESSENTIAL_COOKIES): see the longer NoDecode explanation on
     # BACKEND_CORS_ORIGINS below - same underlying pydantic-settings
@@ -104,11 +104,11 @@ class Settings(BaseSettings):
     # tokens. Unset in development means http://localhost:{PORT}; unset
     # anywhere else stops the application at startup - the localhost
     # default must never quietly become the link a customer gets.
-    PUBLIC_BASE_URL: Optional[str] = None
+    PUBLIC_BASE_URL: str | None = None
 
     @field_validator("PUBLIC_BASE_URL")
     @classmethod
-    def validate_public_base_url(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
+    def validate_public_base_url(cls, v: str | None, info: ValidationInfo) -> str | None:
         if v is None:
             # Only where nothing is deployed may links point at this machine.
             # A deployment gets no default: check_deployment_settings refuses
@@ -143,11 +143,11 @@ class Settings(BaseSettings):
     # comma-separated case - ever ran. Confirmed by actually deploying the
     # Docker image, not just running the local test suite (which never sets
     # this env var and so never exercised the parsing path at all).
-    BACKEND_CORS_ORIGINS: Annotated[List[str], NoDecode] = []
+    BACKEND_CORS_ORIGINS: Annotated[list[str], NoDecode] = []
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
-    def assemble_cors_origins(cls, v: str | List[str]) -> List[str]:
+    def assemble_cors_origins(cls, v: str | list[str]) -> list[str]:
         return [_to_origin(item) for item in _split_comma_separated(v)]
 
     JWT_SECRET_KEY: SecretStr
@@ -166,7 +166,7 @@ class Settings(BaseSettings):
     # far more than the cores can run, so a burst of logins slows every
     # request on the machine. Set it to about CPU count / WORKERS to keep
     # bcrypt from taking more than the cores there are.
-    BCRYPT_MAX_CONCURRENCY: Optional[int] = Field(None, ge=1)
+    BCRYPT_MAX_CONCURRENCY: int | None = Field(None, ge=1)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     # How long a password-reset link works. It was 24 hours, hard-coded: a
@@ -180,7 +180,7 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: SecretStr
     POSTGRES_DB: str
     # A SecretStr as a whole: the URL carries the database password.
-    DATABASE_URI: Optional[SecretStr] = None
+    DATABASE_URI: SecretStr | None = None
     SQL_DEBUG: bool = False
 
     DB_POOL_SIZE: int = 10
@@ -215,7 +215,7 @@ class Settings(BaseSettings):
 
     REDIS_HOST: str
     REDIS_PORT: int = 6379
-    REDIS_PASSWORD: Optional[SecretStr] = None
+    REDIS_PASSWORD: SecretStr | None = None
     REDIS_DB: int = 0
     REDIS_POOL_SIZE: int = 50
     REDIS_POOL_TIMEOUT: int = 20
@@ -258,18 +258,18 @@ class Settings(BaseSettings):
     # is the rightmost X-Forwarded-For entry that is not itself trusted (see
     # client_address in app/core/rate_limit.py). Behind a proxy this MUST be
     # set, or every visitor shares the proxy's rate-limit counters.
-    TRUSTED_PROXIES: Annotated[List[str], NoDecode] = []
+    TRUSTED_PROXIES: Annotated[list[str], NoDecode] = []
 
     @field_validator("TRUSTED_PROXIES", mode="before")
     @classmethod
-    def split_trusted_proxies(cls, v: str | List[str]) -> List[str]:
+    def split_trusted_proxies(cls, v: str | list[str]) -> list[str]:
         return _split_comma_separated(v)
     # Per worker process. Unset (the default) means no limit, which is the
     # behaviour this app always had. When set, a request arriving while this
     # many are already in progress gets an immediate 503 instead of joining
     # them - see app/core/overload.py for why that matters here and how to
     # size it against DB_POOL_SIZE + DB_MAX_OVERFLOW.
-    MAX_IN_FLIGHT_REQUESTS: Optional[int] = None
+    MAX_IN_FLIGHT_REQUESTS: int | None = None
 
     # Largest request body accepted, in bytes; bigger gets 413 (RFC 9110,
     # section 15.5.14) without being read - see app/core/body_limit.py. The
@@ -314,11 +314,11 @@ class Settings(BaseSettings):
     # Renamed: it was the per-email count, which let one address lock any
     # account. Refused rather than silently ignored, so that a deployment
     # still setting it learns that its value no longer applies.
-    RATE_LIMIT_LOGIN_FAILURES: Optional[str] = None
+    RATE_LIMIT_LOGIN_FAILURES: str | None = None
 
     @field_validator("RATE_LIMIT_LOGIN_FAILURES")
     @classmethod
-    def reject_renamed_login_failures(cls, v: Optional[str]) -> None:
+    def reject_renamed_login_failures(cls, v: str | None) -> None:
         if v is not None:
             raise ValueError(
                 "RATE_LIMIT_LOGIN_FAILURES was split into "
@@ -372,13 +372,13 @@ class Settings(BaseSettings):
     # Cookie Consent Settings
     COOKIE_CONSENT_ENABLED: bool = True
     COOKIE_CONSENT_EXPIRE_DAYS: int = 365
-    ESSENTIAL_COOKIES: Annotated[List[str], NoDecode] = [
+    ESSENTIAL_COOKIES: Annotated[list[str], NoDecode] = [
         "session", "csrf_token", "__Host-guest_cart",
     ]
 
     @field_validator("ESSENTIAL_COOKIES", mode="before")
     @classmethod
-    def split_essential_cookies(cls, v: str | List[str]) -> List[str]:
+    def split_essential_cookies(cls, v: str | list[str]) -> list[str]:
         return _split_comma_separated(v)
 
     # GDPR Email Templates

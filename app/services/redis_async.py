@@ -35,7 +35,7 @@ import logging
 import threading
 from datetime import timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional
 
 from redis.asyncio import BlockingConnectionPool, Redis
 from redis.exceptions import RedisError
@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 BLACKLIST_KEY_PREFIX = "blacklist:"
 PASSWORD_CHANGED_KEY_PREFIX = "pwd_changed:"
 
-_clients: Dict[asyncio.AbstractEventLoop, Redis] = {}
+_clients: dict[asyncio.AbstractEventLoop, Redis] = {}
 # Each loop only ever touches its own entry, but loops can live in different
 # threads (the test client runs the app in a worker thread), and the stale
 # entry sweep below walks the whole dict.
@@ -133,7 +133,7 @@ async def is_token_blacklisted(token_id: str) -> bool:
         return True
 
 
-async def is_token_superseded(user_id: Union[str, int], issued_at: Optional[Any]) -> bool:
+async def is_token_superseded(user_id: str | int, issued_at: Any | None) -> bool:
     """Whether a token of this user issued at `issued_at` (its `iat`) predates
     the user's "password changed at" watermark, written by
     invalidate_tokens_issued_before_now in app/core/security.py on a
@@ -178,7 +178,7 @@ class AsyncRedisService:
     See RedisService for the reasoning behind each operation.
     """
 
-    def __init__(self, client: Optional[Redis] = None):
+    def __init__(self, client: Redis | None = None):
         self._client = client
 
     @property
@@ -194,7 +194,7 @@ class AsyncRedisService:
 
     # -- Carts -------------------------------------------------------------
 
-    async def get_cart(self, user_id: CartOwnerRef) -> Optional[Cart]:
+    async def get_cart(self, user_id: CartOwnerRef) -> Cart | None:
         owner = as_cart_owner(user_id)
         if owner.key is None:
             # A guest without an identifier: there is nothing to look up.
@@ -224,7 +224,7 @@ class AsyncRedisService:
 
     async def _atomic_mutate_cart(
         self, user_id: CartOwnerRef, mutator, must_exist: bool = False
-    ) -> Optional[Cart]:
+    ) -> Cart | None:
         """Async twin of RedisService._atomic_mutate_cart: WATCH, read,
         decide (codec.plan_cart_mutation), MULTI, SET or DELETE, EXEC,
         retried by Redis.transaction on a WatchError. `mutator` must be safe
@@ -234,7 +234,7 @@ class AsyncRedisService:
         cart_key = owner.key
         if cart_key is None:
             raise CartNotFoundError()
-        outcome: Dict[str, Cart] = {}
+        outcome: dict[str, Cart] = {}
 
         async def _txn(pipe):
             cart_data = await pipe.get(cart_key)
@@ -258,13 +258,13 @@ class AsyncRedisService:
         user_id: CartOwnerRef,
         product_id: int,
         quantity: int,
-        price: Optional[Decimal],
-        name: Optional[str],
-        image: Optional[str],
+        price: Decimal | None,
+        name: str | None,
+        image: str | None,
         stock_quantity: int,
-        variant_id: Optional[int] = None,
+        variant_id: int | None = None,
         must_exist: bool = False,
-    ) -> Optional[Cart]:
+    ) -> Cart | None:
         mutator = codec.add_mutator(
             product_id, quantity, price, name, image, stock_quantity, variant_id
         )
@@ -276,8 +276,8 @@ class AsyncRedisService:
         product_id: int,
         quantity: int,
         stock_quantity: int,
-        variant_id: Optional[int] = None,
-    ) -> Optional[Cart]:
+        variant_id: int | None = None,
+    ) -> Cart | None:
         mutator = codec.update_quantity_mutator(product_id, quantity, stock_quantity, variant_id)
         try:
             return await self._atomic_mutate_cart(user_id, mutator, must_exist=True)
@@ -285,8 +285,8 @@ class AsyncRedisService:
             raise ItemNotInCartError(product_id)
 
     async def remove_from_cart_atomic(
-        self, user_id: CartOwnerRef, product_id: int, variant_id: Optional[int] = None
-    ) -> Optional[Cart]:
+        self, user_id: CartOwnerRef, product_id: int, variant_id: int | None = None
+    ) -> Cart | None:
         try:
             return await self._atomic_mutate_cart(
                 user_id, codec.remove_item_mutator(product_id, variant_id), must_exist=True
@@ -294,7 +294,7 @@ class AsyncRedisService:
         except CartNotFoundError:
             raise ItemNotInCartError(product_id)
 
-    async def clear_cart_atomic(self, user_id: CartOwnerRef) -> Optional[Cart]:
+    async def clear_cart_atomic(self, user_id: CartOwnerRef) -> Cart | None:
         try:
             return await self._atomic_mutate_cart(user_id, codec.clear_mutator, must_exist=True)
         except CartNotFoundError:
@@ -393,7 +393,7 @@ class AsyncRedisService:
             self._handle_redis_error(f"register_refresh_token: {str(e)}")
             return False
 
-    async def consume_refresh_token(self, jti: str) -> Optional[Dict[str, Any]]:
+    async def consume_refresh_token(self, jti: str) -> dict[str, Any] | None:
         """Atomically redeem a refresh token jti (GET + DELETE in one
         MULTI/EXEC): its {"user_id", "family"} for the first caller, None
         for a replay, an unknown or expired jti, or a Redis error."""
@@ -436,7 +436,7 @@ class AsyncRedisService:
 
     # -- Cache -------------------------------------------------------------
 
-    async def cache_product(self, product_id: int, data: Dict) -> bool:
+    async def cache_product(self, product_id: int, data: dict) -> bool:
         try:
             return await self._redis.set(
                 f"product:{product_id}", codec.serialize(data), ex=codec.PRODUCT_CACHE_TTL
@@ -474,7 +474,7 @@ class AsyncRedisService:
             self._handle_redis_error(f"get_cached_category_tree: {str(e)}")
             return None
 
-    async def get_cached_product(self, product_id: int) -> Optional[Dict]:
+    async def get_cached_product(self, product_id: int) -> dict | None:
         try:
             data = await self._redis.get(f"product:{product_id}")
             return codec.deserialize(data) if data else None
@@ -495,7 +495,7 @@ class AsyncRedisService:
     async def invalidate_product_cache(self, product_id: int) -> bool:
         return await self.delete(f"product:{product_id}")
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         try:
             data = await self._redis.get(key)
             return codec.deserialize(data) if data else None

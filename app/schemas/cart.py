@@ -11,7 +11,6 @@
 import re
 import secrets
 from dataclasses import dataclass
-from typing import Optional, Union
 
 # An account's cart: "cart:{user_id}".
 CART_KEY_PREFIX = "cart:"
@@ -47,15 +46,15 @@ class CartOwner:
     A guest that has not been issued an identifier yet has neither field
     set. Such an owner has no key and therefore no stored cart; the first
     add issues the identifier (app/api/v1/cart.py)."""
-    user_id: Optional[int] = None
-    guest_id: Optional[str] = None
+    user_id: int | None = None
+    guest_id: str | None = None
 
     @classmethod
     def account(cls, user_id: int) -> "CartOwner":
         return cls(user_id=user_id)
 
     @classmethod
-    def guest(cls, guest_id: Optional[str] = None) -> "CartOwner":
+    def guest(cls, guest_id: str | None = None) -> "CartOwner":
         if guest_id is not None and not is_guest_cart_id(guest_id):
             raise ValueError("not a guest cart identifier")
         return cls(guest_id=guest_id)
@@ -65,7 +64,7 @@ class CartOwner:
         return self.user_id is None
 
     @property
-    def key(self) -> Optional[str]:
+    def key(self) -> str | None:
         """The Redis key of this owner's cart; None for a guest without an
         identifier."""
         if self.user_id is not None:
@@ -78,7 +77,7 @@ class CartOwner:
 # What the cart methods of RedisService take as their first argument: a
 # CartOwner, or a bare user id from the callers that only ever deal with
 # accounts (checkout in app/api/v1/orders.py).
-CartOwnerRef = Union[int, CartOwner]
+CartOwnerRef = int | CartOwner
 
 
 def as_cart_owner(owner: CartOwnerRef) -> CartOwner:

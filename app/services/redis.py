@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from app.core.clock import utc_now
 
@@ -80,10 +80,10 @@ class RedisService:
     # (app/schemas/cart.py). The owner decides the key and the TTL, and
     # nothing else: the same code reads and changes both kinds of cart.
 
-    def _get_cart_key(self, user_id: CartOwnerRef) -> Optional[str]:
+    def _get_cart_key(self, user_id: CartOwnerRef) -> str | None:
         return as_cart_owner(user_id).key
 
-    def _cart_ttl(self, user_id: Optional[CartOwnerRef] = None) -> timedelta:
+    def _cart_ttl(self, user_id: CartOwnerRef | None = None) -> timedelta:
         return codec.cart_ttl(user_id)
 
     def _serialize(self, data: Any) -> str:
@@ -95,10 +95,10 @@ class RedisService:
     def _handle_redis_error(self, operation: str) -> None:
         codec.log_redis_error(operation)
 
-    def _load_cart(self, owner: CartOwner, cart_data: Optional[str]) -> Optional[Cart]:
+    def _load_cart(self, owner: CartOwner, cart_data: str | None) -> Cart | None:
         return codec.load_cart(owner, cart_data)
 
-    def get_cart(self, user_id: CartOwnerRef) -> Optional[Cart]:
+    def get_cart(self, user_id: CartOwnerRef) -> Cart | None:
         owner = as_cart_owner(user_id)
         if owner.key is None:
             # A guest without an identifier: there is nothing to look up.
@@ -165,12 +165,12 @@ class RedisService:
         is written to Redis until a mutation stores it."""
         return codec.empty_cart(user_id)
 
-    def _load_or_create_cart(self, user_id: CartOwnerRef, cart_data: Optional[str]) -> Cart:
+    def _load_or_create_cart(self, user_id: CartOwnerRef, cart_data: str | None) -> Cart:
         return codec.load_or_create_cart(user_id, cart_data)
 
     def _atomic_mutate_cart(
         self, user_id: CartOwnerRef, mutator, must_exist: bool = False
-    ) -> Optional[Cart]:
+    ) -> Cart | None:
         """Read-modify-write this owner's cart atomically.
 
         `mutator(cart)` is called with the current Cart (a fresh empty one
@@ -197,7 +197,7 @@ class RedisService:
         cart_key = owner.key
         if cart_key is None:
             raise CartNotFoundError()
-        outcome: Dict[str, Cart] = {}
+        outcome: dict[str, Cart] = {}
 
         def _txn(pipe):
             cart_data = pipe.get(cart_key)
@@ -221,13 +221,13 @@ class RedisService:
         user_id: CartOwnerRef,
         product_id: int,
         quantity: int,
-        price: Optional[Decimal],
-        name: Optional[str],
-        image: Optional[str],
+        price: Decimal | None,
+        name: str | None,
+        image: str | None,
         stock_quantity: int,
-        variant_id: Optional[int] = None,
+        variant_id: int | None = None,
         must_exist: bool = False,
-    ) -> Optional[Cart]:
+    ) -> Cart | None:
         """Atomically merge `quantity` more of product_id (optionally, a
         specific variant_id) into the cart. A given product_id+variant_id
         pair merges into one line; a different variant_id (or no
@@ -256,8 +256,8 @@ class RedisService:
         product_id: int,
         quantity: int,
         stock_quantity: int,
-        variant_id: Optional[int] = None,
-    ) -> Optional[Cart]:
+        variant_id: int | None = None,
+    ) -> Cart | None:
         """Atomically set an existing cart item's quantity.
 
         Raises ItemNotInCartError if the item isn't in the cart, or
@@ -273,8 +273,8 @@ class RedisService:
             raise ItemNotInCartError(product_id)
 
     def remove_from_cart_atomic(
-        self, user_id: CartOwnerRef, product_id: int, variant_id: Optional[int] = None
-    ) -> Optional[Cart]:
+        self, user_id: CartOwnerRef, product_id: int, variant_id: int | None = None
+    ) -> Cart | None:
         """Atomically remove an item from the cart.
 
         Raises ItemNotInCartError if the item isn't in the cart (nothing
@@ -287,7 +287,7 @@ class RedisService:
         except CartNotFoundError:
             raise ItemNotInCartError(product_id)
 
-    def clear_cart_atomic(self, user_id: CartOwnerRef) -> Optional[Cart]:
+    def clear_cart_atomic(self, user_id: CartOwnerRef) -> Cart | None:
         """Atomically remove all items from the cart. A cart that does not
         exist is already clear: an empty one is returned and none is
         stored."""
@@ -450,7 +450,7 @@ class RedisService:
             self._handle_redis_error(f"register_refresh_token: {str(e)}")
             return False
 
-    def consume_refresh_token(self, jti: str) -> Optional[Dict[str, Any]]:
+    def consume_refresh_token(self, jti: str) -> dict[str, Any] | None:
         """Atomically redeem a refresh token jti (single use).
 
         Returns the token's {"user_id", "family"} metadata if this call was
@@ -504,7 +504,7 @@ class RedisService:
             return False
 
 
-    def cache_product(self, product_id: int, data: Dict) -> bool:
+    def cache_product(self, product_id: int, data: dict) -> bool:
         try:
             key = f"product:{product_id}"
             return self._redis.set(
@@ -555,7 +555,7 @@ class RedisService:
             self._handle_redis_error(f"get_cached_category_tree: {str(e)}")
             return None
 
-    def get_cached_product(self, product_id: int) -> Optional[Dict]:
+    def get_cached_product(self, product_id: int) -> dict | None:
         try:
             data = self._redis.get(f"product:{product_id}")
             return self._deserialize(data) if data else None
@@ -564,7 +564,7 @@ class RedisService:
             return None
 
 
-    def create_session(self, user_id: int, session_data: Dict) -> str:
+    def create_session(self, user_id: int, session_data: dict) -> str:
         try:
             session_id = f"session:{user_id}:{utc_now().timestamp()}"
             self._redis.set(
@@ -577,7 +577,7 @@ class RedisService:
             self._handle_redis_error(f"create_session: {str(e)}")
             return ""
 
-    def get_session(self, session_id: str) -> Optional[Dict]:
+    def get_session(self, session_id: str) -> dict | None:
         try:
             data = self._redis.get(session_id)
             return self._deserialize(data) if data else None
@@ -613,7 +613,7 @@ class RedisService:
             self._handle_redis_error(f"invalidate_product_cache: {str(e)}")
             return False
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         try:
             data = self._redis.get(key)
             return self._deserialize(data) if data else None

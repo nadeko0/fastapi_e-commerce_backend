@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -8,12 +7,12 @@ from app.schemas.common import Int32
 
 class CategoryBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
-    description: Optional[str] = None
-    parent_id: Optional[Int32] = None
+    description: str | None = None
+    parent_id: Int32 | None = None
 
 class CategoryCreate(CategoryBase):
     """Schema for creating a new category"""
-    metadata: Optional[Dict] = Field(default_factory=dict)
+    metadata: dict | None = Field(default_factory=dict)
 
     @field_validator('parent_id')
     @classmethod
@@ -25,10 +24,10 @@ class CategoryCreate(CategoryBase):
 
 class CategoryUpdate(BaseModel):
     """Schema for updating an existing category"""
-    name: Optional[str] = Field(None, min_length=2, max_length=100)
-    description: Optional[str] = None
-    parent_id: Optional[Int32] = None
-    metadata: Optional[Dict] = None
+    name: str | None = Field(None, min_length=2, max_length=100)
+    description: str | None = None
+    parent_id: Int32 | None = None
+    metadata: dict | None = None
 
     @field_validator('parent_id')
     @classmethod
@@ -40,11 +39,11 @@ class CategoryUpdate(BaseModel):
 class CategoryInDB(CategoryBase):
     """Internal schema with all category fields"""
     id: int
-    path: List[int] = Field(default_factory=list)  # Path to root for efficient traversal
+    path: list[int] = Field(default_factory=list)  # Path to root for efficient traversal
     level: int = Field(ge=0)  # Tree level (0 for root categories)
     created_at: datetime
     updated_at: datetime
-    metadata: Dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -70,7 +69,7 @@ class CategoryResponse(CategoryInDB):
 
 class CategoryTreeNode(CategoryResponse):
     """Schema for tree-structured responses"""
-    children: List["CategoryTreeNode"] = Field(default_factory=list)
+    children: list["CategoryTreeNode"] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -79,7 +78,7 @@ CategoryTreeNode.model_rebuild()
 
 class CategoryListResponse(BaseModel):
     """Schema for paginated category list"""
-    items: List[CategoryResponse]
+    items: list[CategoryResponse]
     total: int
     page: int
     size: int
@@ -89,7 +88,7 @@ class CategoryListResponse(BaseModel):
 
 class CategoryTreeResponse(BaseModel):
     """Schema for complete category tree"""
-    tree: List[CategoryTreeNode]
+    tree: list[CategoryTreeNode]
     total_categories: int
     max_depth: int
 

@@ -16,7 +16,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
-from typing import Optional
 
 from stripe_event_support import deliver
 
@@ -316,6 +315,6 @@ def reset_provider() -> None:
     StripePaymentProvider.reset_mock_state()
 
 
-def latest_payment(shop: Shop, order_id) -> Optional[Payment]:
+def latest_payment(shop: Shop, order_id) -> Payment | None:
     payments = shop.payments(order_id)
     return payments[-1] if payments else None

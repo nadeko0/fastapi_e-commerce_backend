@@ -32,10 +32,10 @@ import inspect
 import itertools
 import textwrap
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Callable, Dict, List, Optional, Tuple
 
 import httpx2
 import pytest
@@ -98,7 +98,7 @@ def router_of(endpoint) -> str:
     return inspect.unwrap(endpoint).__module__.rsplit(".", 1)[-1]
 
 
-def body_violations(endpoint) -> List[str]:
+def body_violations(endpoint) -> list[str]:
     """Synchronous things used directly in the endpoint's source."""
     source = textwrap.dedent(inspect.getsource(inspect.unwrap(endpoint)))
     found = set()
@@ -115,7 +115,7 @@ def body_violations(endpoint) -> List[str]:
     return sorted(found)
 
 
-def route_violations(route: APIRoute) -> List[str]:
+def route_violations(route: APIRoute) -> list[str]:
     """What keeps this route from being loop-safe; empty for a sync `def`
     endpoint (FastAPI runs those in a worker thread) and for a clean one."""
     if not inspect.iscoroutinefunction(inspect.unwrap(route.endpoint)):
@@ -132,9 +132,9 @@ def route_violations(route: APIRoute) -> List[str]:
     return sorted(found) + body_violations(route.endpoint)
 
 
-def violations_by_router(routes) -> Dict[str, Dict[str, List[str]]]:
+def violations_by_router(routes) -> dict[str, dict[str, list[str]]]:
     """{router: {"METHOD path": [violations]}}, only for what fails."""
-    found: Dict[str, Dict[str, List[str]]] = {}
+    found: dict[str, dict[str, list[str]]] = {}
     seen = set()
     for route in api_routes(routes):
         seen.add(router_of(route.endpoint))
@@ -259,7 +259,7 @@ CONCURRENCY = 8
 # overlapping requests take about one pass; one at a time, N of them.
 MAX_WALL_FACTOR = 0.5
 
-Request = Tuple[str, str]  # (method, path)
+Request = tuple[str, str]  # (method, path)
 
 
 @dataclass
@@ -273,14 +273,14 @@ class RouteGroup:
     seed: Callable
     requests: Callable
     expected_status: int = 200
-    headers: Optional[Callable] = None
+    headers: Callable | None = None
 
 
 @dataclass
 class Measurement:
     max_gap: float
     wall: float
-    statuses: List[int] = field(default_factory=list)
+    statuses: list[int] = field(default_factory=list)
 
 
 def make_user_headers(db_session, email="load@example.com", role=UserRole.CLIENT):
@@ -539,7 +539,7 @@ ORDERS = RouteGroup(
 # group name -> (router that must be migrated for it to run, scenario).
 # A router task fills in the scenario of its router (None = not written
 # yet, which fails the test as soon as the router leaves PENDING_ROUTERS).
-ROUTE_GROUPS: Dict[str, Tuple[Optional[str], Optional[RouteGroup]]] = {
+ROUTE_GROUPS: dict[str, tuple[str | None, RouteGroup | None]] = {
     "catalog_reads": (None, CATALOG_READS),
     "products": ("products", PRODUCT_CACHE_READS),
     "users": ("users", USERS),
@@ -551,7 +551,7 @@ ROUTE_GROUPS: Dict[str, Tuple[Optional[str], Optional[RouteGroup]]] = {
 }
 
 
-async def _heartbeat(stop: asyncio.Event, gaps: List[float]):
+async def _heartbeat(stop: asyncio.Event, gaps: list[float]):
     loop = asyncio.get_running_loop()
     last = loop.time()
     while not stop.is_set():
@@ -561,10 +561,10 @@ async def _heartbeat(stop: asyncio.Event, gaps: List[float]):
         last = now
 
 
-async def drive(target_app, requests: List[tuple], concurrency: int, headers=None) -> Measurement:
+async def drive(target_app, requests: list[tuple], concurrency: int, headers=None) -> Measurement:
     """Send `requests` `concurrency` times at once on this loop, next to a
     heartbeat, and measure the longest time the loop went unserved."""
-    gaps: List[float] = []
+    gaps: list[float] = []
     stop = asyncio.Event()
     beat = asyncio.create_task(_heartbeat(stop, gaps))
     await asyncio.sleep(HEARTBEAT_SECONDS * 3)  # let the heartbeat settle
@@ -594,7 +594,7 @@ async def drive(target_app, requests: List[tuple], concurrency: int, headers=Non
     )
 
 
-def _normalise(requests) -> List[tuple]:
+def _normalise(requests) -> list[tuple]:
     return [request if len(request) > 2 else (*request, {}) for request in requests]
 
 

@@ -19,7 +19,7 @@ the contract tests assert only what is documented.
 import copy
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import stripe
 from stripe import error as stripe_error
@@ -27,7 +27,7 @@ from stripe import error as stripe_error
 # -- docs.stripe.com/testing --------------------------------------------------
 
 # "Simulate a declined payment": PaymentMethod -> (error code, decline code).
-DECLINES: Dict[str, Tuple[str, Optional[str]]] = {
+DECLINES: dict[str, tuple[str, str | None]] = {
     "pm_card_visa_chargeDeclined": ("card_declined", "generic_decline"),
     "pm_card_visa_chargeDeclinedInsufficientFunds": ("card_declined", "insufficient_funds"),
     "pm_card_visa_chargeDeclinedLostCard": ("card_declined", "lost_card"),
@@ -48,7 +48,7 @@ DECLINES: Dict[str, Tuple[str, Optional[str]]] = {
 # 3D Secure "Required" rows and "Always authenticate": confirming asks for
 # authentication; once the customer has authenticated, the payment succeeds
 # (None) or is declined with the given codes.
-AUTHENTICATION_REQUIRED: Dict[str, Optional[Tuple[str, Optional[str]]]] = {
+AUTHENTICATION_REQUIRED: dict[str, tuple[str, str | None] | None] = {
     "pm_card_authenticationRequired": None,
     "pm_card_threeDSecure2Required": None,
     "pm_card_threeDSecureRequiredChargeDeclined": ("card_declined", "generic_decline"),
@@ -86,10 +86,10 @@ CURRENCIES = {"usd", "eur", "gbp", "pln", "huf", "twd", "jpy"}
 class _Obj:
     """What the adapter sees of a stripe.StripeObject: it only calls to_dict()."""
 
-    def __init__(self, values: Dict[str, Any]):
+    def __init__(self, values: dict[str, Any]):
         self._values = copy.deepcopy(values)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return copy.deepcopy(self._values)
 
 
@@ -109,11 +109,11 @@ class FakeStripeAPI:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.offline = False
-        self.intents: Dict[str, Dict[str, Any]] = {}
-        self.sessions: Dict[str, Dict[str, Any]] = {}
-        self.refunds: Dict[str, Dict[str, Any]] = {}
+        self.intents: dict[str, dict[str, Any]] = {}
+        self.sessions: dict[str, dict[str, Any]] = {}
+        self.refunds: dict[str, dict[str, Any]] = {}
         # idempotency key -> (endpoint, parameters, ("ok", response) | ("error", exception))
-        self.saved: Dict[str, Tuple[str, Dict[str, Any], Tuple[str, Any]]] = {}
+        self.saved: dict[str, tuple[str, dict[str, Any], tuple[str, Any]]] = {}
 
     def install(self, monkeypatch) -> None:
         monkeypatch.setattr(stripe.PaymentIntent, "create", self.payment_intent_create)
@@ -126,7 +126,7 @@ class FakeStripeAPI:
 
     # -- plumbing ------------------------------------------------------------
 
-    def _request(self, params: Dict[str, Any]) -> Tuple[Optional[str], Dict[str, Any]]:
+    def _request(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
         if self.offline:
             raise stripe_error.APIConnectionError("Could not connect to Stripe")
         assert params.pop("api_key") == self.api_key, "every call carries the provider's key"
@@ -308,7 +308,7 @@ class FakeStripeAPI:
 
         return self._idempotent("refunds.create", key, params, execute)
 
-    def settle_refund(self, refund_id) -> Dict[str, Any]:
+    def settle_refund(self, refund_id) -> dict[str, Any]:
         """'Some time later': the asynchronous refund reaches its final
         status, and the event Stripe sends for it is returned."""
         refund = self.refunds[refund_id]
