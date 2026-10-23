@@ -120,3 +120,38 @@ def test_the_database_refuses_two_rows_that_differ_only_in_case(db_session):
     with pytest.raises(IntegrityError):
         _legacy_account(db_session, "DUP@example.com")
     db_session.rollback()
+
+
+NFD = "é@example.com"
+NFC = "é@example.com"
+
+
+def test_canonically_equivalent_emails_are_one_account(client, db_session):
+    # UAX #15: "e" + U+0301 and U+00E9 are the same text.
+    client.post(f"{USERS}/register", json=_registration(NFD))
+    client.post(f"{USERS}/register", json=_registration(NFC))
+
+    (user,) = _accounts(db_session, NFC)
+    assert user.email == NFC
+
+
+@pytest.mark.parametrize("typed", [NFD, NFC, NFD.upper(), NFC.upper()])
+def test_login_accepts_either_form_of_a_non_ascii_email(client, typed):
+    client.post(f"{USERS}/register", json=_registration(NFC))
+
+    response = client.post(f"{USERS}/login", data={"username": typed, "password": PASSWORD})
+
+    assert response.status_code == 200
+
+
+def test_password_reset_finds_the_account_by_either_form(client, monkeypatch):
+    client.post(f"{USERS}/register", json=_registration(NFC))
+    sent = []
+    monkeypatch.setattr(
+        "app.api.v1.users.send_password_reset_email",
+        lambda to_email, token: sent.append(to_email),
+    )
+
+    client.post(f"{USERS}/password/reset", json={"email": NFD})
+
+    assert sent == [NFC]

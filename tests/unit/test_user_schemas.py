@@ -99,3 +99,17 @@ def test_the_policy_is_the_blocklist_and_nothing_else(password):
 def test_registration_needs_both_consents(consent):
     with pytest.raises(ValidationError):
         UserCreate(**_registration(**{consent: False}))
+
+
+def test_normalize_email_composes_canonically_equivalent_spellings():
+    assert normalize_email("é@example.com") == normalize_email("é@example.com")
+    assert normalize_email("É@Example.com") == "é@example.com"
+    assert normalize_email("  Jane@Example.com ") == "jane@example.com"
+
+
+@given(st.text())
+def test_normalize_email_output_is_nfc(text):
+    import unicodedata
+
+    once = normalize_email(text)
+    assert unicodedata.is_normalized("NFC", once)
