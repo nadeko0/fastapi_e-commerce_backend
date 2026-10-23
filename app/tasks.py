@@ -151,7 +151,7 @@ engine = create_engine(
     echo=settings.SQL_DEBUG,
     connect_args=_build_connect_args(settings.DATABASE_URI.get_secret_value()),
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(autoflush=False, bind=engine)
 
 @contextmanager
 def task_session():
@@ -259,7 +259,7 @@ def send_order_status_update(order_id: int) -> None:
         # status changes - only a redelivery/retry of the *same* status update
         # should be deduped. order.status is a plain str here (Order.status is a
         # bare String column, not a SQLAlchemy Enum type - see
-        # app/models/enums.py's create_string_enum) rather than an OrderStatus
+        # app/models/order.py) rather than an OrderStatus
         # member, unlike OrderResponse.status (a Pydantic model, which does
         # coerce it to the enum) - handle both shapes rather than assuming
         # `.value` is always present.

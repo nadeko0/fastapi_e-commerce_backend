@@ -80,7 +80,7 @@ def send_order_status_update_email(to_email: str, order: Order) -> bool:
     # passes OrderResponse, whose Pydantic field coerces the DB string into
     # the enum) but not for the raw SQLAlchemy Order this function is
     # type-hinted to accept: Order.status is a bare String column (see
-    # app/models/enums.py's create_string_enum), so a caller handing this a
+    # app/models/order.py), so a caller handing this a
     # freshly-queried Order (e.g. app/tasks.py's send_order_status_update
     # Celery task) got a plain str back and `.value` raised AttributeError.
     status_value = order.status.value if hasattr(order.status, "value") else order.status

@@ -1,40 +1,43 @@
+from datetime import datetime
+from typing import TYPE_CHECKING
+
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     Column,
     ForeignKey,
     Index,
-    Integer,
-    String,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.clock import UTCDateTime, utc_now
+from app.core.clock import utc_now
 from app.models.base import Base
-from app.models.enums import AddressType, create_string_enum
+from app.models.enums import AddressType
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class Address(Base):
     __tablename__ = "addresses"
 
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
-    street = Column(String, nullable=False)
-    city = Column(String, nullable=False)
-    state = Column(String, nullable=False)
-    postal_code = Column(String, nullable=False)
-    country = Column(String, nullable=False)
+    street: Mapped[str]
+    city: Mapped[str]
+    state: Mapped[str]
+    postal_code: Mapped[str]
+    country: Mapped[str]
 
-    address_type = Column(create_string_enum(AddressType, "address_type"), nullable=False, server_default="home")
-    is_default = Column(Boolean, nullable=False, default=False)
-    delivery_phone = Column(String)
-    delivery_instructions = Column(String)
-    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
-    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
-    is_active = Column(Boolean, nullable=False, default=True)
+    address_type: Mapped[str] = mapped_column(server_default="home")
+    is_default: Mapped[bool] = mapped_column(default=False)
+    delivery_phone: Mapped[str | None]
+    delivery_instructions: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+    is_active: Mapped[bool] = mapped_column(default=True)
 
-    user = relationship("User", back_populates="addresses")
+    user: Mapped["User"] = relationship(back_populates="addresses")
     __table_args__ = (
         CheckConstraint(
             f"address_type IN {tuple(t.value for t in AddressType)}",

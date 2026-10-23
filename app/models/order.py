@@ -1,43 +1,52 @@
+from datetime import datetime
+from decimal import Decimal
+from typing import TYPE_CHECKING
+
 from sqlalchemy import (
     CheckConstraint,
     Column,
     ForeignKey,
     Index,
-    Integer,
-    Numeric,
     String,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.clock import UTCDateTime, utc_now
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.base import Base
-from app.models.enums import OrderStatus, PaymentStatus, create_string_enum
+from app.models.enums import OrderStatus, PaymentStatus
+
+if TYPE_CHECKING:
+    from app.models.address import Address
+    from app.models.order_items import OrderItem
+    from app.models.payment import Payment
+    from app.models.user import User
 
 
 class Order(Base):
     __tablename__ = "orders"
 
-    id = Column(Integer, primary_key=True)
-    status = Column(create_string_enum(OrderStatus, "status"), nullable=False, server_default="new")
-    payment_status = Column(create_string_enum(PaymentStatus, "payment_status"), nullable=False, server_default="pending")
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    total_amount = Column(Numeric(10, 2), nullable=False)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[str] = mapped_column(server_default="new")
+    payment_status: Mapped[str] = mapped_column(server_default="pending")
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    total_amount: Mapped[Decimal]
     # ISO 4217 code total_amount is in, fixed when the order is placed
     # (settings.STORE_CURRENCY at that moment). Every payment attempt for
     # the order is made, and every provider report of one checked, in this
     # currency; a client never chooses it.
-    currency = Column(String(3), nullable=False, default=lambda: settings.STORE_CURRENCY)
-    shipping_address_id = Column(Integer, ForeignKey("addresses.id"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default=lambda: settings.STORE_CURRENCY)
+    shipping_address_id: Mapped[int] = mapped_column(ForeignKey("addresses.id"))
     # Client-supplied key (Idempotency-Key header) for safe checkout retries.
     # Unique per user: the same key from two different users is not a clash.
-    idempotency_key = Column(String, nullable=True)
-    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
-    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
+    idempotency_key: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
 
-    user = relationship("User", back_populates="orders")
-    shipping_address = relationship("Address")
-    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+    user: Mapped["User"] = relationship(back_populates="orders")
+    shipping_address: Mapped["Address"] = relationship()
+    items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    payments: Mapped[list["Payment"]] = relationship(back_populates="order")
 
     __table_args__ = (
         # See Product.__table_args__. Zero is allowed: a product can be free.

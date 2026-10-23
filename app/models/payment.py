@@ -1,18 +1,23 @@
+from datetime import datetime
+from typing import TYPE_CHECKING
+
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
-    Column,
     ForeignKey,
     Index,
-    Integer,
     String,
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.clock import UTCDateTime, utc_now
+from app.core.clock import utc_now
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.order import Order
+    from app.models.payment_discrepancy import PaymentDiscrepancy
+    from app.models.payment_ledger import PaymentDispute, PaymentRefund
 
 
 class Payment(Base):
@@ -25,35 +30,38 @@ class Payment(Base):
 
     __tablename__ = "payments"
 
-    id = Column(Integer, primary_key=True)
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
-    provider = Column(String, nullable=False, default="stripe")
-    payment_intent_id = Column(String, nullable=False, unique=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
+    provider: Mapped[str] = mapped_column(default="stripe")
+    payment_intent_id: Mapped[str] = mapped_column(unique=True, index=True)
     # Client-supplied Idempotency-Key header for this payment attempt.
     # Unique per order: replaying the same key for the same order must
     # return the original attempt instead of creating a new PaymentIntent.
-    idempotency_key = Column(String, nullable=True)
-    amount = Column(Integer, nullable=False)  # smallest currency unit
-    amount_refunded = Column(Integer, nullable=False, default=0)
-    currency = Column(String(3), nullable=False)
-    status = Column(String, nullable=False, default="processing")
-    client_secret = Column(String, nullable=True)
+    idempotency_key: Mapped[str | None]
+    amount: Mapped[int]  # smallest currency unit
+    amount_refunded: Mapped[int] = mapped_column(default=0)
+    currency: Mapped[str] = mapped_column(String(3))
+    status: Mapped[str] = mapped_column(default="processing")
+    client_secret: Mapped[str | None]
     # Set only for the Checkout Session flow (create_checkout_session) - a
     # second, independent way to pay this attempt, distinct from the
     # PaymentIntent-based /pay flow above. NULL for every /pay attempt.
     # Unique (not composite with order_id) because Stripe session ids are
     # already globally unique - mirrors payment_intent_id's own uniqueness.
-    checkout_session_id = Column(String, nullable=True, unique=True, index=True)
-    checkout_session_url = Column(String, nullable=True)
+    checkout_session_id: Mapped[str | None] = mapped_column(unique=True, index=True)
+    checkout_session_url: Mapped[str | None]
     # Set when a webhook reports an outcome that conflicts with the current
     # order state (e.g. "succeeded" for an order already cancelled) - the
     # payment record is kept truthful but the order is NOT silently
     # overridden; this flag marks the row for manual reconciliation.
-    requires_manual_review = Column(Boolean, nullable=False, default=False)
-    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
-    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
+    requires_manual_review: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
 
-    order = relationship("Order", backref="payments")
+    order: Mapped["Order"] = relationship(back_populates="payments")
+    discrepancies: Mapped[list["PaymentDiscrepancy"]] = relationship(back_populates="payment")
+    refunds: Mapped[list["PaymentRefund"]] = relationship(back_populates="payment")
+    disputes: Mapped[list["PaymentDispute"]] = relationship(back_populates="payment")
 
     __table_args__ = (
         # See Product.__table_args__. amount >= 0 rather than > 0: the row
@@ -110,20 +118,20 @@ class WebhookEvent(Base):
 
     __tablename__ = "webhook_events"
 
-    id = Column(Integer, primary_key=True)
-    event_id = Column(String, nullable=False, unique=True, index=True)
-    event_type = Column(String, nullable=False)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[str] = mapped_column(unique=True, index=True)
+    event_type: Mapped[str]
     # The event as JSON text (id, type, created, data). NULL only for rows
     # recorded before events were stored; those are all processed.
-    payload = Column(Text, nullable=True)
-    status = Column(String, nullable=False, default=WEBHOOK_EVENT_RECEIVED)
+    payload: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(default=WEBHOOK_EVENT_RECEIVED)
     # Attempts that did not apply the event (an error, or an event that
     # overtook its payment attempt).
-    attempts = Column(Integer, nullable=False, default=0)
-    last_error = Column(Text, nullable=True)
-    processed_at = Column(UTCDateTime, nullable=True)
-    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
-    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
+    attempts: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    processed_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
 
     __table_args__ = (
         # The sweeper looks for old events still received or retrying, and

@@ -19,7 +19,7 @@ def sqlite_session_factory(monkeypatch):
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    session_local = sessionmaker(autoflush=False, bind=engine)
     monkeypatch.setattr(database_module, "SessionLocal", session_local)
     yield session_local
     engine.dispose()

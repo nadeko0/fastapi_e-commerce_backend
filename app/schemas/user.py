@@ -5,11 +5,8 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.core.clock import utc_now
+from app.models.enums import UserRole
 
-
-class UserRole(str, Enum):
-    CLIENT = "client"
-    ADMIN = "admin"
 
 class ConsentType(str, Enum):
     GDPR = "gdpr"
