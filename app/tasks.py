@@ -138,7 +138,8 @@ engine = create_engine(
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_timeout=settings.DB_POOL_TIMEOUT,
     pool_pre_ping=settings.DB_POOL_PRE_PING,
-    pool_recycle=3600,
+    pool_recycle=settings.DB_POOL_RECYCLE,
+    echo=settings.SQL_DEBUG,
     connect_args=_build_connect_args(settings.DATABASE_URI),
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

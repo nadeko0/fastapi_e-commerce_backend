@@ -59,9 +59,9 @@ _engine_kwargs = dict(
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_timeout=settings.DB_POOL_TIMEOUT,
     pool_pre_ping=settings.DB_POOL_PRE_PING,
-    pool_recycle=3600,
+    pool_recycle=settings.DB_POOL_RECYCLE,
     connect_args=_connect_args,
-    echo=False,
+    echo=settings.SQL_DEBUG,
     echo_pool=False,
     logging_name=None
 )

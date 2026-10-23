@@ -202,11 +202,6 @@ class Settings(BaseSettings):
             return max(5, v_int // 2)
         return v_int
 
-    @field_validator("SQL_DEBUG", mode="before")
-    @classmethod
-    def set_sql_debug(cls, v: bool, info: ValidationInfo) -> bool:
-        return info.data.get("DEBUG", False)
-
     @field_validator("DATABASE_URI", mode="before")
     @classmethod
     def assemble_db_connection(cls, v: str | None, info: ValidationInfo) -> str:
