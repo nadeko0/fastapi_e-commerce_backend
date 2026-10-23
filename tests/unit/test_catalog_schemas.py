@@ -46,10 +46,16 @@ def test_a_price_is_kept_to_the_cent(price):
     assert created.price.as_tuple().exponent == -2
 
 
-@pytest.mark.parametrize("price,expected", [("10", "10.00"), ("0.1", "0.10"), ("2.005", "2.00"), ("2.015", "2.02")])
-def test_a_price_is_rounded_to_two_places(price, expected):
-    # Decimal's default rounding: half to even.
+@pytest.mark.parametrize("price,expected", [("10", "10.00"), ("0.1", "0.10"), ("2.50", "2.50")])
+def test_a_price_is_written_to_two_places(price, expected):
     assert str(ProductCreate(**{**_PRODUCT, "price": price}).price) == expected
+
+
+@pytest.mark.parametrize("price", ["2.005", "2.015", "0.001"])
+def test_a_fraction_of_a_cent_is_refused_not_rounded(price):
+    # Numeric(10,2) cannot hold it; rounding it would change the price silently.
+    with pytest.raises(ValidationError):
+        ProductCreate(**{**_PRODUCT, "price": price})
 
 
 @pytest.mark.parametrize(

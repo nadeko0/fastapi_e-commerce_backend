@@ -118,6 +118,9 @@ def test_downgrade_restores_the_old_indexes_and_drops_the_new_ones():
 
 
 @pytest.mark.parametrize("step", ["upgrade", "downgrade"])
+# SQLAlchemy cannot reflect the expression index on lower(email) and says so;
+# the index names this test reads are all plain ones.
+@pytest.mark.filterwarnings("ignore:Skipped unsupported reflection of expression-based index")
 def test_on_sqlite_it_runs_plainly(step):
     engine = create_engine("sqlite://")
     with engine.begin() as connection:
