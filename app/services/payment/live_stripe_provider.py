@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 import stripe
 from stripe import error as stripe_error
 
+from app.core.config import settings
 from app.services.payment.base import PaymentProvider, webhook_event_from_payload
 from app.services.payment.exceptions import (
     CardError,
@@ -181,6 +182,38 @@ def _signed_at(sig_header: str) -> int:
                     if item.split("=", 1)[0] == "t"))
 
 
+# The HTTP client this module last installed as stripe.default_http_client,
+# and the settings it was built from (see _configure_http_client).
+_http_client: Optional[stripe.RequestsClient] = None
+_http_client_settings: Optional[tuple] = None
+
+
+def _configure_http_client() -> None:
+    """
+    Give the Stripe SDK an explicit timeout and retry count from settings.
+    The SDK reads stripe.default_http_client and stripe.max_network_retries
+    on every request, and its own default is a timeout of 80 s per try
+    (RequestsClient(timeout=80)), far longer than a worker thread should be
+    held on a hung connection. The timeout is a (connect, read) pair as in
+    `requests`. One client is shared by every provider instance (a new one is
+    made per request), so its connection pool is kept; it is rebuilt only if
+    the settings or the installed client changed.
+    """
+    global _http_client, _http_client_settings
+    wanted = (
+        settings.STRIPE_CONNECT_TIMEOUT_SECONDS,
+        settings.STRIPE_READ_TIMEOUT_SECONDS,
+        settings.STRIPE_MAX_NETWORK_RETRIES,
+    )
+    if _http_client is None or _http_client_settings != wanted or (
+        stripe.default_http_client is not _http_client
+    ):
+        _http_client = stripe.RequestsClient(timeout=(wanted[0], wanted[1]))
+        _http_client_settings = wanted
+        stripe.default_http_client = _http_client
+        stripe.max_network_retries = wanted[2]
+
+
 class LiveStripePaymentProvider(PaymentProvider):
     """Real Stripe-backed implementation. See module docstring."""
 
@@ -188,6 +221,7 @@ class LiveStripePaymentProvider(PaymentProvider):
         if not api_key:
             raise ValueError("LiveStripePaymentProvider requires a real Stripe secret key")
         self._api_key = api_key
+        _configure_http_client()
 
     # -- PaymentIntent -----------------------------------------------------
 

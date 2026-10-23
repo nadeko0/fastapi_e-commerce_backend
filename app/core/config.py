@@ -446,6 +446,18 @@ class Settings(BaseSettings):
     # or a Checkout Session the customer walked away from, does not keep
     # the order from being paid.
     PAYMENT_ATTEMPT_STALE_AFTER_MINUTES: int = Field(5, ge=1)
+    # How long a call to api.stripe.com may take before it is given up as
+    # "outcome unknown" (PaymentProviderTimeoutError, 503): seconds to open
+    # the connection, and seconds to wait for the response. The Stripe SDK's
+    # own default is 80 s per try, and each call runs in a worker thread, so
+    # a hung Stripe held threads (about 4 minutes with the SDK's retries)
+    # until the pool was used up. STRIPE_MAX_NETWORK_RETRIES is how many
+    # times the SDK repeats a call that failed on the network (same
+    # idempotency key, so safe); worst case per call is
+    # (connect + read) x (retries + 1) plus backoff.
+    STRIPE_CONNECT_TIMEOUT_SECONDS: float = Field(5.0, gt=0)
+    STRIPE_READ_TIMEOUT_SECONDS: float = Field(20.0, gt=0)
+    STRIPE_MAX_NETWORK_RETRIES: int = Field(2, ge=0)
     # Stripe events are stored by the webhook route and applied by the
     # process_stripe_event Celery task (app/services/stripe_events.py). An
     # event that could not be applied (an error, or it overtook its payment
