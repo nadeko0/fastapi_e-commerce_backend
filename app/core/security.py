@@ -40,8 +40,23 @@ redis_service = RedisService()
 # route handler must use the *_async wrappers below instead, which offload
 # the blocking call to a worker thread via run_in_threadpool so one slow
 # bcrypt call doesn't stall every other request on the same uvicorn worker.
+# bcrypt only uses the first 72 bytes of a password, and since bcrypt 5.0.0
+# checkpw/hashpw raise ValueError for anything longer instead of truncating
+# (OWASP Password Storage Cheat Sheet: "bcrypt has a maximum length input
+# length of 72 bytes"). Registration and password change refuse such
+# passwords (422), so no stored password is that long and a longer one can
+# never match: it is simply a wrong password.
+BCRYPT_MAX_PASSWORD_BYTES = 72
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    password = plain_password.encode("utf-8")
+    if len(password) > BCRYPT_MAX_PASSWORD_BYTES:
+        # Still pay for one bcrypt check (of the first 72 bytes) before
+        # answering False, so a too-long password takes as long as any other
+        # wrong one and the response time does not reveal the length check.
+        bcrypt.checkpw(password[:BCRYPT_MAX_PASSWORD_BYTES], hashed_password.encode("utf-8"))
+        return False
+    return bcrypt.checkpw(password, hashed_password.encode("utf-8"))
 
 def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(
