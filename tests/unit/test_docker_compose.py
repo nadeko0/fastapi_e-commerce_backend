@@ -45,6 +45,19 @@ def test_redis_memory_is_capped_and_never_evicted():
     assert re.search(r"--maxmemory-policy\s*\n\s*- noeviction\b", redis), redis
 
 
+def test_redis_appends_every_write_to_disk_on_the_kept_volume():
+    # The token blacklist, password-change watermarks, refresh-token state
+    # and the Celery queues live in this Redis. With RDB snapshots alone a
+    # crash (OOM kill, host loss) loses everything since the last snapshot,
+    # and revoked tokens become valid again. AOF with fsync every second
+    # bounds the loss to about one second (Redis persistence docs). The AOF
+    # directory lives under /data, which is the redis_data volume.
+    redis = _without_comments(service_block("redis"))
+    assert re.search(r'--appendonly\s*\n\s*- "yes"', redis), redis
+    assert re.search(r"--appendfsync\s*\n\s*- everysec\b", redis), redis
+    assert re.search(r"^\s*- redis_data:/data\s*$", redis, re.M), redis
+
+
 def test_redis_refuses_to_start_without_a_password():
     # ${REDIS_PASSWORD} empty or unset turned into "--requirepass" with no
     # argument (or an empty one): Redis exited with a config error, stayed

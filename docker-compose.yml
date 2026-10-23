@@ -202,6 +202,15 @@ services:
     # would not help: maxmemory is per instance. Size REDIS_MAXMEMORY below
     # the container's memory; RATE_LIMIT_GUEST_CART bounds how fast guest
     # carts can fill it.
+    # Persistence: the default is RDB snapshots only, so a crash (OOM kill,
+    # host loss) loses the writes since the last snapshot - revoked tokens
+    # and password-change watermarks come back to life. AOF with fsync every
+    # second (the default policy, stated here) loses at most about a second;
+    # RDB stays on as well (redis.io persistence docs recommend both). Files
+    # go to /data, the redis_data volume. An instance that already holds data
+    # must be switched on live first (`redis-cli config set appendonly yes`,
+    # wait for the rewrite to finish in `INFO persistence`), as just
+    # restarting with the flag can lose the data (same docs page).
     # REDIS_PASSWORD is required (:?): left empty, it used to become a bare
     # "--requirepass", Redis exited on the config error and nothing that
     # depends on it started. Now `docker compose` refuses with a message.
@@ -215,6 +224,10 @@ services:
       - ${REDIS_MAXMEMORY:-256mb}
       - --maxmemory-policy
       - noeviction
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
     ports:
       # Loopback only, as for db above.
       - "127.0.0.1:${DOCKER_REDIS_PORT:-6379}:6379"
