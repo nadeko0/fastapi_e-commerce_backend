@@ -25,7 +25,6 @@ from payment_support import (
     order_state,
     payment_rows,
     reset_provider,
-    use_production_sessions,
 )
 
 from app.models.payment import Payment
@@ -48,7 +47,6 @@ def outbox(monkeypatch):
 
 @pytest.fixture
 def shop(client, db_session, monkeypatch):
-    use_production_sessions(monkeypatch)
     return Shop(client, db_session)
 
 

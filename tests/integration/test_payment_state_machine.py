@@ -64,7 +64,6 @@ from payment_support import (
     Shop,
     cents,
     reset_provider,
-    use_production_sessions,
 )
 
 from app import tasks
@@ -341,7 +340,6 @@ def _quiet(monkeypatch):
 
 
 def test_the_payment_chain_keeps_its_invariants(client, db_session, tasks_db, monkeypatch):
-    use_production_sessions(monkeypatch)
     PaymentChain.shop = Shop(client, db_session)
     SEEN.clear()
     try:

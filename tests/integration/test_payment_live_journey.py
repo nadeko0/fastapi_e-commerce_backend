@@ -30,7 +30,6 @@ from payment_support import (
     Shop,
     order_state,
     payment_rows,
-    use_production_sessions,
 )
 from stripe_event_support import deliver
 
@@ -93,7 +92,6 @@ def stripe_sdk():
 def shop(client, db_session, monkeypatch):
     from app.services.payment.live_stripe_provider import LiveStripePaymentProvider
 
-    use_production_sessions(monkeypatch)
     monkeypatch.setitem(app.dependency_overrides, get_payment_provider,
                         lambda: LiveStripePaymentProvider(api_key=_SECRET_KEY))
     return Shop(client, db_session)

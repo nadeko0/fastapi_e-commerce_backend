@@ -25,10 +25,10 @@ review (a refund), never applied to the order a second time.
 import uuid
 
 import pytest
-from conftest import TestingSessionLocal, engine
+from conftest import TestingSessionLocal
 from sqlalchemy import event
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 from test_checkout_session import CHECKOUT_SESSION_URL, _checkout_webhook_body
 from test_payment import (
     ORDER_AMOUNT_CENTS,
@@ -47,9 +47,6 @@ from test_payment import (
     _with_idempotency_key,
 )
 
-from app.api.deps import get_db as deps_get_db
-from app.core.database import get_db as database_get_db
-from app.main import app
 from app.models.order import Order
 from app.services.payment.stripe_provider import StripePaymentProvider
 
@@ -65,29 +62,6 @@ def _reset_stripe_mock_state():
 def _stub_order_confirmation_email(monkeypatch):
     monkeypatch.setattr("app.api.v1.orders.send_order_confirmation_email", lambda *a, **k: True)
     yield
-
-
-_ProductionLikeSession = sessionmaker(
-    autocommit=False, autoflush=False, expire_on_commit=False, bind=engine
-)
-
-
-def _production_like_get_db():
-    db = _ProductionLikeSession()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-@pytest.fixture(autouse=True)
-def _sessions_configured_as_in_production(monkeypatch):
-    # The app's sessions do not expire objects on commit
-    # (app/core/database.py); the suite's default ones do, which reloads
-    # the order after every commit and would hide both a stale read and an
-    # unlocked one. Here the routes get sessions configured like the app's.
-    monkeypatch.setitem(app.dependency_overrides, database_get_db, _production_like_get_db)
-    monkeypatch.setitem(app.dependency_overrides, deps_get_db, _production_like_get_db)
 
 
 @pytest.fixture
