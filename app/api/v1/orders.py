@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core import database
 from app.core.clock import utc_now
 from app.core.config import settings
-from app.core.database import get_db
 from app.core.security import get_current_active_user, get_current_admin_user
 from app.models.address import Address
 from app.models.order import Order
@@ -497,6 +496,18 @@ async def cancel_own_order(
     return APIResponse.success_response(OrderResponse.model_validate(order))
 
 
+async def _payment_by_key(
+    db: AsyncSession, order_id: int, idempotency_key: str
+) -> Optional[Payment]:
+    """The order's payment attempt recorded under this Idempotency-Key."""
+    return (await db.execute(
+        select(Payment).where(
+            Payment.order_id == order_id,
+            Payment.idempotency_key == idempotency_key,
+        ).limit(1)
+    )).scalars().first()
+
+
 def _provider_idempotency_key(kind: str, order: Order, client_key: str) -> str:
     """
     The idempotency key sent to the payment provider for one request about
@@ -859,7 +870,7 @@ async def process_payment(
     payment: PaymentCreate,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
     provider: PaymentProvider = Depends(get_payment_provider),
     # Required, as on POST /orders and for the same reason. While it was
     # optional, two requests without it that arrived together (a double
@@ -885,10 +896,12 @@ async def process_payment(
     # lock is not held across the provider call (no transaction stays open
     # while Stripe is waited on); what can still happen after it is handled
     # where the outcome is applied (_lock_order_and_reload).
-    order = db.query(Order).filter(
-        Order.id == order_id,
-        Order.user_id == current_user.id
-    ).with_for_update().first()
+    order = (await db.execute(
+        select(Order).where(
+            Order.id == order_id,
+            Order.user_id == current_user.id,
+        ).with_for_update().limit(1)
+    )).scalars().first()
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -905,10 +918,7 @@ async def process_payment(
     # Checked *before* the "already paid" guard below: a successful retry
     # of the same key on an order that is now paid is exactly the case this
     # guard exists for, and must not be rejected as a duplicate payment.
-    existing_payment = db.query(Payment).filter(
-        Payment.order_id == order.id,
-        Payment.idempotency_key == idempotency_key,
-    ).first()
+    existing_payment = await _payment_by_key(db, order.id, idempotency_key)
     #
     # One exception: an attempt whose provider request timed out ("unknown")
     # is not an outcome to replay. Stripe's guidance for a request that may
@@ -927,8 +937,9 @@ async def process_payment(
         retried_attempt = existing_payment
 
     _guard_order_payable(order)
-    _guard_no_attempt_in_flight(
-        db, order, except_payment_id=retried_attempt.id if retried_attempt else None
+    await db.run_sync(
+        _guard_no_attempt_in_flight, order,
+        except_payment_id=retried_attempt.id if retried_attempt else None,
     )
 
     if payment.amount != order.total_amount:
@@ -947,7 +958,7 @@ async def process_payment(
         # instead of sending the provider the same request at the same time.
         payment_row = retried_attempt
         payment_row.status = "processing"
-        db.commit()
+        await db.commit()
     else:
         payment_row = Payment(
             order_id=order.id,
@@ -960,15 +971,16 @@ async def process_payment(
         )
         db.add(payment_row)
         try:
-            db.commit()
+            await db.commit()
         except IntegrityError:
             # Two concurrent requests with the same idempotency key both passed
             # the pre-check above; the unique index catches the duplicate here.
-            db.rollback()
-            existing_payment = db.query(Payment).filter(
-                Payment.order_id == order.id,
-                Payment.idempotency_key == idempotency_key,
-            ).first()
+            # The rollback expires `order`, which the replay below reads: it
+            # is reloaded (an expired attribute cannot be read on an
+            # AsyncSession).
+            await db.rollback()
+            await db.refresh(order)
+            existing_payment = await _payment_by_key(db, order.id, idempotency_key)
             if existing_payment:
                 return APIResponse.success_response(
                     _payment_row_to_response(existing_payment, order)
@@ -994,7 +1006,7 @@ async def process_payment(
         )
         payment_row.payment_intent_id = intent.id
         payment_row.client_secret = intent.client_secret
-        db.commit()
+        await db.commit()
 
         # A different key from the create call above, derived from it.
         # Stripe scopes an idempotency key to one request: reusing the
@@ -1026,17 +1038,20 @@ async def process_payment(
         # Regression test for: a transport failure silently leaving the
         # order half-updated.
         payment_row.status = "unknown"
-        db.commit()
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
         )
     except IdempotencyError:
-        db.rollback()
+        await db.rollback()
         if retried_attempt is not None:
-            # Refused before it was carried out: still not settled.
+            # Refused before it was carried out: still not settled. The
+            # rollback expired the attempt's row; it is reloaded before it
+            # is written.
+            await db.refresh(payment_row)
             payment_row.status = "unknown"
-            db.commit()
+            await db.commit()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Idempotency key already used with different payment parameters",
@@ -1048,7 +1063,7 @@ async def process_payment(
         # this attempt is a hard failure, not a retryable transport issue.
         payment_row.status = "failed"
         order.updated_at = utc_now()
-        db.commit()
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=e.message,
@@ -1060,7 +1075,7 @@ async def process_payment(
         # with a new attempt/new Idempotency-Key. Through the shared helper:
         # the order may have been paid by another attempt (a Checkout
         # Session completing) since the guard above read it.
-        _apply_payment_failure(db, order, payment_row)
+        await db.run_sync(_apply_payment_failure, order, payment_row)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=e.message,
@@ -1074,7 +1089,7 @@ async def process_payment(
         # follow-up confirm or the payment_intent.succeeded webhook
         # finalizes it.
         payment_row.status = "requires_action"
-        db.commit()
+        await db.commit()
         return APIResponse.success_response(PaymentResponse(
             order_id=order.id,
             payment_method=payment.payment_method,
@@ -1103,13 +1118,15 @@ async def process_payment(
     if intent.status != PaymentIntentStatus.SUCCEEDED:
         # Confirmed without an error and still unpaid (requires_payment_method,
         # canceled, ...): a failed attempt, like a decline.
-        _apply_payment_failure(db, order, payment_row)
+        await db.run_sync(_apply_payment_failure, order, payment_row)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="The payment was not completed; please try again or use another payment method",
         )
 
-    _apply_payment_success(db, order, payment_row, background_tasks, current_user.email)
+    await db.run_sync(
+        _apply_payment_success, order, payment_row, background_tasks, current_user.email
+    )
 
     return APIResponse.success_response(PaymentResponse(
         order_id=order.id,
@@ -1141,7 +1158,7 @@ async def create_checkout_session(
     background_tasks: BackgroundTasks,
     payload: Optional[CheckoutSessionCreate] = None,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
     provider: PaymentProvider = Depends(get_payment_provider),
     # Required like /pay's: two sessions created for one order without a
     # key can both be completed, and both charge the customer.
@@ -1164,10 +1181,12 @@ async def create_checkout_session(
     payload = payload or CheckoutSessionCreate()
 
     # Locked like /pay's read of the order, for the same reason.
-    order = db.query(Order).filter(
-        Order.id == order_id,
-        Order.user_id == current_user.id
-    ).with_for_update().first()
+    order = (await db.execute(
+        select(Order).where(
+            Order.id == order_id,
+            Order.user_id == current_user.id,
+        ).with_for_update().limit(1)
+    )).scalars().first()
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1180,15 +1199,12 @@ async def create_checkout_session(
     # one. Checked before the paid/cancelled guard below for the same
     # reason as /pay - a successful retry against an order that is now
     # paid must not be rejected as a fresh duplicate attempt.
-    existing_payment = db.query(Payment).filter(
-        Payment.order_id == order.id,
-        Payment.idempotency_key == idempotency_key,
-    ).first()
+    existing_payment = await _payment_by_key(db, order.id, idempotency_key)
     if existing_payment:
         return _replay_checkout_session(existing_payment, order)
 
     _guard_order_payable(order)
-    _guard_no_attempt_in_flight(db, order)
+    await db.run_sync(_guard_no_attempt_in_flight, order)
     _guard_currency_matches_order(payload.currency, order)
 
     amount_cents = _decimal_to_cents(order.total_amount)
@@ -1212,15 +1228,15 @@ async def create_checkout_session(
     )
     db.add(payment_row)
     try:
-        db.commit()
+        await db.commit()
     except IntegrityError:
         # Two concurrent requests with the same idempotency key both passed
         # the pre-check above; the unique index catches the duplicate here.
-        db.rollback()
-        existing_payment = db.query(Payment).filter(
-            Payment.order_id == order.id,
-            Payment.idempotency_key == idempotency_key,
-        ).first()
+        # The rollback expires `order`, which the replay reads: reloaded
+        # first (an expired attribute cannot be read on an AsyncSession).
+        await db.rollback()
+        await db.refresh(order)
+        existing_payment = await _payment_by_key(db, order.id, idempotency_key)
         if existing_payment:
             return _replay_checkout_session(existing_payment, order)
         # See the same re-raise in create_order: only the key's unique
@@ -1243,13 +1259,13 @@ async def create_checkout_session(
         # the session, so only this attempt's own Payment row is marked
         # failed - the order's payment_status/status stay untouched.
         payment_row.status = "failed"
-        db.commit()
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
         )
     except IdempotencyError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Idempotency key already used with different checkout session parameters",
@@ -1257,7 +1273,7 @@ async def create_checkout_session(
     except InvalidRequestError as e:
         payment_row.status = "failed"
         order.updated_at = utc_now()
-        db.commit()
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=e.message,
@@ -1265,7 +1281,7 @@ async def create_checkout_session(
 
     payment_row.checkout_session_id = session.id
     payment_row.checkout_session_url = session.url
-    db.commit()
+    await db.commit()
 
     return APIResponse.success_response(_checkout_session_row_to_response(payment_row, order))
 
@@ -1286,7 +1302,7 @@ async def refund_payment(
     order_id: Int32,
     refund_request: RefundCreate,
     current_user: User = Depends(get_current_admin_user),  # Refunds are a support/admin action
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
     provider: PaymentProvider = Depends(get_payment_provider),
     # Required like /pay's: without a key, a retried or double-clicked
     # partial refund was a second refund, the money returned twice.
@@ -1306,7 +1322,9 @@ async def refund_payment(
     refund request (client timeout, double-click "Refund") therefore gets
     the first one's refund back, and that refund is recorded once
     (PaymentRefund, by refund id)."""
-    order = db.query(Order).filter(Order.id == order_id).first()
+    order = (await db.execute(
+        select(Order).where(Order.id == order_id).limit(1)
+    )).scalars().first()
     if not order:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -1326,16 +1344,16 @@ async def refund_payment(
     # used to take the newest succeeded attempt whatever its flag, which
     # could be the second charge: the order was then marked refunded while
     # the charge that paid it was never returned, and could no longer be.
-    payment_row = (
-        db.query(Payment)
-        .filter(
+    payment_row = (await db.execute(
+        select(Payment)
+        .where(
             Payment.order_id == order.id,
             Payment.status == "succeeded",
             Payment.requires_manual_review.is_(False),
         )
         .order_by(Payment.id.desc())
-        .first()
-    )
+        .limit(1)
+    )).scalars().first()
     if not payment_row:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -1344,7 +1362,7 @@ async def refund_payment(
     # Stripe: refunding a disputed charge returns the money twice - the
     # disputed amount has already been taken from the balance, and a lost
     # dispute is not offset by the refund.
-    if _has_open_dispute(db, order.id, payment_row.id):
+    if await db.run_sync(_has_open_dispute, order.id, payment_row.id):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="This payment is disputed; it cannot be refunded while the dispute is open",
@@ -1360,7 +1378,7 @@ async def refund_payment(
     # idle in a transaction for the length of an external HTTP call.
     # expire_on_commit is off, so `order` and `payment_row` stay usable.
     payment_intent_id = payment_row.payment_intent_id
-    db.commit()
+    await db.commit()
 
     try:
         refund = await run_in_threadpool(
@@ -1388,7 +1406,7 @@ async def refund_payment(
     # have been recorded since. Adding to that stale copy overwrote it - two
     # refunds taken by the provider, one recorded, and an order whose
     # refunds covered the charge left "paid".
-    _lock_order_and_reload(db, order, payment_row)
+    await db.run_sync(_lock_order_and_reload, order, payment_row)
     # provider.create_refund's own idempotency cache means a retried request
     # with the same Idempotency-Key returns the *same* refund.id instead of
     # creating a new one; recording it by that id (unique) keeps the replay
@@ -1396,17 +1414,18 @@ async def refund_payment(
     # marker that failed open: with Redis down, a retried refund was added
     # to amount_refunded again, and two retries of more than half the
     # charge broke the refunded <= amount constraint and answered 500.
-    refund_row = _record_refund(
-        db, payment_row, refund.id, refund.amount, refund.status.value, source="admin"
+    refund_row = await db.run_sync(
+        _record_refund, payment_row, refund.id, refund.amount, refund.status.value,
+        source="admin",
     )
     # Refunded once the refunds that have succeeded cover the charge. A
     # partial refund leaves the order PAID (it was fulfilled - only part of
     # the charge was returned), and so does a pending one: it used to be
     # reported as completed, and the order marked refunded, as soon as the
     # provider accepted it.
-    _settle_refunds(db, order, payment_row)
+    await db.run_sync(_settle_refunds, order, payment_row)
     order.updated_at = utc_now()
-    db.commit()
+    await db.commit()
 
     return APIResponse.success_response(RefundResponse(
         id=refund.id,

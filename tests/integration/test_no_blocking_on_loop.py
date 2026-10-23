@@ -27,11 +27,14 @@ test of an enabled group without one fails.
 
 import ast
 import asyncio
+import contextvars
 import inspect
+import itertools
 import textwrap
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Callable, Dict, List, Optional, Tuple
 
 import httpx2
@@ -45,19 +48,20 @@ import app.api.deps as deps_module
 import app.core.database as database_module
 import app.services.redis_async as redis_async
 from app.core.clock import utc_now
+from app.core.config import settings
 from app.core.security import create_access_token, get_password_hash
 from app.main import app
+from app.models.address import Address
 from app.models.category import Category
+from app.models.order import Order
 from app.models.product import Product
 from app.models.user import User, UserRole
 from app.services.redis import RedisService
 
-# One router per line, a blank line between: every router task deletes its
-# own line, and the diff of two tasks never touches the same hunk.
-PENDING_ROUTERS = {
-    "orders",
-
-}
+# Every router is migrated (3.2.2). A router or route added later that blocks
+# the loop fails the guard; listing it here is the only way to defer that,
+# and the set must then name exactly the routers that still fail.
+PENDING_ROUTERS: set = set()
 
 # --- 1. The static guard ----------------------------------------------------
 
@@ -436,6 +440,96 @@ USERS = RouteGroup(
     ],
 )
 
+
+class PassIdentity(httpx2.Auth):
+    """Gives every concurrent pass its own account.
+
+    The passes of a group send the same requests, but an order can only be
+    placed once per cart and paid once, so each pass needs its own user,
+    cart and order. The first request a pass sends (httpx runs auth in the
+    pass's own task, so a ContextVar set there stays with the pass) picks
+    the next identity; it signs that request, and the later ones, as that
+    user and fills in the ids the static request list cannot know:
+    ORDER_ID in the path and ADDRESS_ID in the query."""
+
+    def __init__(self, identities):
+        self.identities = identities
+        self._next = itertools.count()
+        self._mine = contextvars.ContextVar("pass_identity", default=None)
+
+    def auth_flow(self, request):
+        index = self._mine.get()
+        if index is None:
+            index = next(self._next) % len(self.identities)
+            self._mine.set(index)
+        who = self.identities[index]
+        request.headers["Authorization"] = who["authorization"]
+        request.url = httpx2.URL(
+            str(request.url)
+            .replace("ORDER_ID", str(who["order_id"]))
+            .replace("ADDRESS_ID", str(who["address_id"]))
+        )
+        yield request
+
+
+def _seed_orders(db_session):
+    """One admin account per pass (an admin may place, read and pay its own
+    orders and list any order's payments), each with an address and an
+    unpaid order of its own for the read and payment requests."""
+    ids = _seed_catalog(db_session)
+    identities = []
+    for index in range(CONCURRENCY + 1):
+        headers, user = make_user_headers(
+            db_session, email=f"orders-load-{index}@example.com", role=UserRole.ADMIN
+        )
+        user.phone = "+15550100"
+        address = Address(
+            user_id=user.id, street="1 Main St", city="Springfield", state="IL",
+            postal_code="62701", country="US", is_default=True,
+        )
+        db_session.add(address)
+        db_session.commit()
+        order = Order(
+            user_id=user.id, status="new", payment_status="pending",
+            shipping_address_id=address.id, idempotency_key=f"seeded-order-{index}",
+            total_amount=Decimal("9.99"), currency=settings.STORE_CURRENCY,
+        )
+        db_session.add(order)
+        db_session.commit()
+        identities.append({
+            "authorization": headers["Authorization"],
+            "address_id": address.id,
+            "order_id": order.id,
+        })
+    return {**ids, "identity": PassIdentity(identities)}
+
+
+# Per pass, as its own account: fill the cart, place an order from it, read
+# a seeded order and its payments, and pay it with the mock provider. Keys
+# are fixed strings: they only have to be unique per user and per order.
+ORDERS = RouteGroup(
+    seed=_seed_orders,
+    requests=lambda ids: [
+        ("POST", f"/api/v1/cart/items?product_id={ids['product_id']}&quantity=1", {"auth": ids["identity"]}),
+        (
+            "POST",
+            "/api/v1/orders?shipping_address_id=ADDRESS_ID",
+            {"auth": ids["identity"], "headers": {"Idempotency-Key": "orders-load-create"}},
+        ),
+        ("GET", "/api/v1/orders/ORDER_ID", {"auth": ids["identity"]}),
+        ("GET", "/api/v1/orders/ORDER_ID/payments", {"auth": ids["identity"]}),
+        (
+            "POST",
+            "/api/v1/orders/ORDER_ID/pay",
+            {
+                "auth": ids["identity"],
+                "headers": {"Idempotency-Key": "orders-load-pay"},
+                "json": {"order_id": 1, "payment_method": "stripe", "amount": "9.99"},
+            },
+        ),
+    ],
+)
+
 # group name -> (router that must be migrated for it to run, scenario).
 # A router task fills in the scenario of its router (None = not written
 # yet, which fails the test as soon as the router leaves PENDING_ROUTERS).
@@ -443,7 +537,7 @@ ROUTE_GROUPS: Dict[str, Tuple[Optional[str], Optional[RouteGroup]]] = {
     "catalog_reads": (None, CATALOG_READS),
     "products": ("products", PRODUCT_CACHE_READS),
     "users": ("users", USERS),
-    "orders": ("orders", None),
+    "orders": ("orders", ORDERS),
     "admin": ("admin", ADMIN),
     "legal": ("legal", LEGAL),
     "cart": ("cart", CART_ACCOUNT),
