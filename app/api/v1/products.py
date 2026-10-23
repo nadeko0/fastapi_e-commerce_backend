@@ -95,7 +95,7 @@ _product_filter.__signature__ = inspect.signature(ProductFilter)
 async def list_categories(
     pagination: PaginationParams = Depends(),
     parent_id: Optional[Int32] = None,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """List categories, optionally filtered by parent, with pagination."""
 
@@ -119,7 +119,7 @@ async def list_categories(
 
 @router.get("/categories/tree", response_model=APIResponse[CategoryTreeResponse])
 async def get_category_tree(
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Retrieve the full category tree, nested from root categories down."""
@@ -173,7 +173,7 @@ async def get_category_tree(
 )
 async def get_category(
     category_id: Int32,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Retrieve a single category by ID."""
 
@@ -188,7 +188,7 @@ async def get_category(
 @router.get("/products", response_model=APIResponse[ProductListResponse])
 async def list_products(
     filter_params: ProductFilter = Depends(_product_filter),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """List products with optional filtering, sorting, and pagination."""
 
@@ -266,7 +266,7 @@ async def list_products(
 @router.get("/products/search", response_model=APIResponse[ProductListResponse])
 async def search_products(
     search: ProductSearch = Depends(),
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
 ):
     """Search products by name/description, optionally scoped to a category."""
 
@@ -298,7 +298,7 @@ async def search_products(
 )
 async def get_product(
     product_id: Int32,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Retrieve a single product by ID."""

@@ -241,7 +241,7 @@ class RevocationUnavailable(Exception):
 #   the row in the route's own session (see update_consent in
 #   app/api/v1/users.py) and change that one.
 async def get_current_user(
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     token: str = Depends(oauth2_scheme)
 ) -> User:
 
@@ -329,7 +329,7 @@ _optional_oauth2_scheme = OAuth2PasswordBearer(
 
 async def get_optional_active_user(
     request: Request,
-    db: AsyncSession = Depends(get_async_db),
+    db: AsyncSession = Depends(get_async_db, scope="function"),
     _declared: Optional[str] = Depends(_optional_oauth2_scheme),
 ) -> Optional[User]:
     """For a route that serves both logged-in and anonymous callers (the
