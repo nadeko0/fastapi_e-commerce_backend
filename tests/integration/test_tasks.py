@@ -372,13 +372,25 @@ def test_beat_schedule_registers_all_periodic_tasks():
     schedule = tasks.celery.conf.beat_schedule
 
     assert schedule["cleanup-inactive-accounts"]["task"] == "cleanup_inactive_accounts"
-    assert schedule["cleanup-inactive-accounts"]["schedule"] == tasks.timedelta(days=1)
+    assert schedule["cleanup-inactive-accounts"]["schedule"] == tasks.crontab(hour=2, minute=30)
 
     assert schedule["update-product-stats"]["task"] == "update_product_stats"
     assert schedule["update-product-stats"]["schedule"] == tasks.timedelta(hours=1)
 
     assert schedule["check-low-stock"]["task"] == "check_low_stock"
     assert schedule["check-low-stock"]["schedule"] == tasks.timedelta(hours=4)
+
+
+def test_daily_erasure_purge_runs_at_a_fixed_time_not_per_beat_start():
+    """A timedelta schedule counts from the start of beat ("relative to the
+    time when celery beat was started", Celery periodic-tasks docs), and
+    the schedule file sits in the container's /tmp, so every container
+    re-create (each deploy) pushed the GDPR purge a full day back. A
+    crontab is tied to the clock and does not move."""
+    entry = tasks.celery.conf.beat_schedule["cleanup-inactive-accounts"]
+
+    assert isinstance(entry["schedule"], tasks.crontab)
+    assert entry["schedule"] == tasks.crontab(hour=2, minute=30)
 
 
 def _registered_task_names():
