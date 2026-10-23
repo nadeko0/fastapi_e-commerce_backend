@@ -59,7 +59,6 @@ PENDING_ROUTERS = {
 
     "orders",
 
-    "admin",
 }
 
 # --- 1. The static guard ----------------------------------------------------
@@ -381,6 +380,38 @@ LEGAL = RouteGroup(
     ],
 )
 
+# An admin's reads (orders, statistics, webhook events, reconciliation
+# discrepancies) and two writes (a category, a product). SQLite serializes
+# the writes, which costs wall time but never blocks the loop; the full
+# write-route run is on PostgreSQL.
+ADMIN = RouteGroup(
+    seed=_seed_catalog,
+    headers=lambda db_session: make_user_headers(db_session, email="admin@example.com", role=UserRole.ADMIN)[0],
+    requests=lambda ids: [
+        ("GET", "/api/v1/admin/orders"),
+        ("GET", "/api/v1/admin/stats?period=7d"),
+        ("GET", "/api/v1/admin/webhook-events"),
+        ("GET", "/api/v1/admin/reconciliation/discrepancies"),
+        ("GET", f"/api/v1/admin/products/{ids['product_id']}/variants"),
+        ("POST", "/api/v1/admin/categories", {"json": {"name": "Added"}}),
+        (
+            "POST",
+            "/api/v1/admin/products",
+            {
+                "json": {
+                    "name": "Added widget",
+                    "description": "A widget added by the load test",
+                    "price": "5.00",
+                    "stock_quantity": 3,
+                    "images": ["https://example.com/widget.png"],
+                    "characteristics": {},
+                    "category_id": ids["category_id"],
+                }
+            },
+        ),
+    ],
+)
+
 # group name -> (router that must be migrated for it to run, scenario).
 # A router task fills in the scenario of its router (None = not written
 # yet, which fails the test as soon as the router leaves PENDING_ROUTERS).
@@ -389,7 +420,7 @@ ROUTE_GROUPS: Dict[str, Tuple[Optional[str], Optional[RouteGroup]]] = {
     "products": ("products", PRODUCT_CACHE_READS),
     "users": ("users", None),
     "orders": ("orders", None),
-    "admin": ("admin", None),
+    "admin": ("admin", ADMIN),
     "legal": ("legal", LEGAL),
     "cart": ("cart", CART_ACCOUNT),
     "cart_guest": ("cart", CART_GUEST),

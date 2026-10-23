@@ -6,12 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import Field
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload, selectinload
 
+from app.core import database
 from app.core.clock import as_utc, utc_now
-from app.core.database import get_db
 from app.core.security import get_current_admin_user
 from app.models.category import Category
 from app.models.order import Order
@@ -48,7 +49,7 @@ from app.schemas.product import (
 from app.schemas.webhook_event import WebhookEventListResponse, WebhookEventResponse
 from app.services.payment import PaymentProvider, get_payment_provider
 from app.services.reconciliation import open_discrepancies, reconcile_payments
-from app.services.redis import RedisService
+from app.services.redis_async import AsyncRedisService, get_cache_service
 from app.services.stripe_events import enqueue_event
 from app.tasks import check_payment_reconciliation
 
@@ -73,13 +74,15 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 async def create_category(
     category: CategoryCreate,
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
-    redis: RedisService = Depends(),
+    db: AsyncSession = Depends(database.get_async_db),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Create a new category, optionally nested under a parent category."""
 
     if category.parent_id:
-        parent = db.query(Category).filter(Category.id == category.parent_id).first()
+        parent = (
+            await db.execute(select(Category).where(Category.id == category.parent_id).limit(1))
+        ).scalars().first()
         if not parent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -88,7 +91,6 @@ async def create_category(
 
     db_category = Category(**category.model_dump())
     if category.parent_id:
-        parent = db.query(Category).filter(Category.id == category.parent_id).first()
         db_category.level = parent.level + 1
         db_category.path = parent.path + [parent.id]
     else:
@@ -96,11 +98,11 @@ async def create_category(
         db_category.path = []
 
     db.add(db_category)
-    db.commit()
-    db.refresh(db_category)
+    await db.commit()
+    await db.refresh(db_category)
 
 
-    redis.delete("category:tree")
+    await redis.delete("category:tree")
 
     return APIResponse.success_response(CategoryResponse.model_validate(db_category))
 
@@ -115,12 +117,14 @@ async def create_category(
 async def create_product(
     product: ProductCreate,
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
-    redis: RedisService = Depends(),
+    db: AsyncSession = Depends(database.get_async_db),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Create a new product under an existing category."""
 
-    category = db.query(Category).filter(Category.id == product.category_id).first()
+    category = (
+        await db.execute(select(Category).where(Category.id == product.category_id).limit(1))
+    ).scalars().first()
     if not category:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -130,16 +134,24 @@ async def create_product(
 
     db_product = Product(**product.model_dump())
     db.add(db_product)
-    db.commit()
-    db.refresh(db_product)
+    await db.commit()
+    await db.refresh(db_product)
 
 
-    db_product = db.query(Product).options(
-        joinedload(Product.category)
-    ).filter(Product.id == db_product.id).first()
+    # populate_existing: the product is already in the session, and its
+    # category must be loaded by this query (no lazy load under asyncio).
+    db_product = (
+        await db.execute(
+            select(Product)
+            .options(joinedload(Product.category))
+            .where(Product.id == db_product.id)
+            .limit(1)
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().first()
 
 
-    redis.invalidate_category_cache()
+    await redis.invalidate_category_cache()
 
 
     # ProductResponse requires category_name, which is not a Product column,
@@ -164,12 +176,14 @@ async def update_product(
     product_id: Int32,
     product: ProductUpdate,
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
-    redis: RedisService = Depends(),
+    db: AsyncSession = Depends(database.get_async_db),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Update fields on an existing product."""
 
-    db_product = db.query(Product).filter(Product.id == product_id).first()
+    db_product = (
+        await db.execute(select(Product).where(Product.id == product_id).limit(1))
+    ).scalars().first()
     if not db_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -182,8 +196,10 @@ async def update_product(
     # and on a database that does not enforce it a committed product whose
     # category does not exist.
     if "category_id" in update_data and not (
-        db.query(Category.id).filter(Category.id == update_data["category_id"]).first()
-    ):
+        await db.execute(
+            select(Category.id).where(Category.id == update_data["category_id"]).limit(1)
+        )
+    ).first():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Category not found"
@@ -193,17 +209,23 @@ async def update_product(
         setattr(db_product, field, value)
 
     db_product.updated_at = utc_now()
-    db.commit()
-    db.refresh(db_product)
+    await db.commit()
+    await db.refresh(db_product)
 
 
-    db_product = db.query(Product).options(
-        joinedload(Product.category)
-    ).filter(Product.id == db_product.id).first()
+    db_product = (
+        await db.execute(
+            select(Product)
+            .options(joinedload(Product.category))
+            .where(Product.id == db_product.id)
+            .limit(1)
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().first()
 
 
-    redis.invalidate_product_cache(product_id)
-    redis.invalidate_category_cache()
+    await redis.invalidate_product_cache(product_id)
+    await redis.invalidate_category_cache()
 
 
     base = ProductInDB.model_validate(db_product, from_attributes=True)
@@ -221,12 +243,14 @@ async def update_product(
 async def delete_product(
     product_id: Int32,
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
-    redis: RedisService = Depends(),
+    db: AsyncSession = Depends(database.get_async_db),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Delete a product, or soft-delete (deactivate) it if it has existing orders."""
 
-    db_product = db.query(Product).filter(Product.id == product_id).first()
+    db_product = (
+        await db.execute(select(Product).where(Product.id == product_id).limit(1))
+    ).scalars().first()
     if not db_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -234,19 +258,21 @@ async def delete_product(
         )
 
 
-    if db.query(OrderItem).filter(OrderItem.product_id == product_id).count():
+    if await db.scalar(
+        select(func.count()).select_from(OrderItem).where(OrderItem.product_id == product_id)
+    ):
 
         db_product.is_active = False
         db_product.updated_at = utc_now()
-        db.commit()
+        await db.commit()
     else:
 
-        db.delete(db_product)
-        db.commit()
+        await db.delete(db_product)
+        await db.commit()
 
 
-    redis.invalidate_product_cache(product_id)
-    redis.invalidate_category_cache()
+    await redis.invalidate_product_cache(product_id)
+    await redis.invalidate_category_cache()
 
     return APIResponse.success_response({
         "message": "Product deleted successfully"
@@ -292,7 +318,7 @@ async def list_orders(
     end_date: Optional[datetime] = None,
     pagination: AdminOrderListParams = Depends(),
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """List orders across all users, with filtering, sorting, and pagination."""
 
@@ -301,16 +327,23 @@ async def list_orders(
     # both for every order in the page, so without this each row would
     # trigger its own lazy-load queries (N+1) for shipping_address and for
     # each item's product.
-    query = db.query(Order).options(
+    # OrderResponse also reads each item's variant (variant_sku), which is
+    # loaded here too: no lazy load is possible under asyncio. The total is
+    # counted from the same filters, without the eager loading.
+    query = select(Order).options(
         joinedload(Order.shipping_address),
-        selectinload(Order.items).joinedload(OrderItem.product),
+        selectinload(Order.items).options(
+            joinedload(OrderItem.product),
+            joinedload(OrderItem.variant),
+        ),
     )
+    filters = []
 
 
     if status:
         try:
             order_status = OrderStatus(status.lower())
-            query = query.filter(Order.status == order_status)
+            filters.append(Order.status == order_status)
         except ValueError:
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -320,7 +353,7 @@ async def list_orders(
     if payment_status:
         try:
             pay_status = PaymentStatus(payment_status.lower())
-            query = query.filter(Order.payment_status == pay_status)
+            filters.append(Order.payment_status == pay_status)
         except ValueError:
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -330,9 +363,9 @@ async def list_orders(
     # them); one with an offset is converted. Either way the comparison is
     # between instants.
     if start_date:
-        query = query.filter(Order.created_at >= _request_datetime(start_date, "start_date"))
+        filters.append(Order.created_at >= _request_datetime(start_date, "start_date"))
     if end_date:
-        query = query.filter(Order.created_at <= _request_datetime(end_date, "end_date"))
+        filters.append(Order.created_at <= _request_datetime(end_date, "end_date"))
 
     # Apply sorting. AdminOrderListParams' pattern has already answered 422
     # for anything but a whitelisted field_asc/field_desc, so both lookups
@@ -349,12 +382,14 @@ async def list_orders(
     else:
         query = query.order_by(Order.created_at.desc(), Order.id.desc())
 
-    total = query.count()
+    total = await db.scalar(select(func.count()).select_from(Order).where(*filters))
     orders = (
-        query.offset((pagination.page - 1) * pagination.size)
-        .limit(pagination.size)
-        .all()
-    )
+        await db.execute(
+            query.where(*filters)
+            .offset((pagination.page - 1) * pagination.size)
+            .limit(pagination.size)
+        )
+    ).scalars().all()
 
     return APIResponse.success_response(OrderListResponse(
         items=[OrderResponse.model_validate(order) for order in orders],
@@ -375,13 +410,13 @@ async def list_orders(
 async def get_statistics(
     period: str = Query("24h", pattern="^(24h|7d|30d)$"),
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
-    redis: RedisService = Depends(),
+    db: AsyncSession = Depends(database.get_async_db),
+    redis: AsyncRedisService = Depends(get_cache_service),
 ):
     """Retrieve order/revenue statistics and popular products for a time period."""
 
     cache_key = f"admin_stats_{period}"
-    cached_stats = redis.get(cache_key)
+    cached_stats = await redis.get(cache_key)
     if cached_stats:
         return APIResponse.success_response(cached_stats)
 
@@ -395,44 +430,42 @@ async def get_statistics(
         start_date = now - timedelta(days=30)
 
 
-    base_query = db.query(Order).filter(
+    paid_in_period = (
         Order.created_at >= start_date,
         Order.status != OrderStatus.CANCELLED,
-        Order.payment_status == PaymentStatus.PAID
+        Order.payment_status == PaymentStatus.PAID,
     )
 
 
     stats = {
         "period": period,
-        "order_count": base_query.count(),
-        "total_revenue": float(base_query.with_entities(
-            func.sum(Order.total_amount)
-        ).scalar() or 0),
-        "average_order_value": float(base_query.with_entities(
-            func.avg(Order.total_amount)
-        ).scalar() or 0),
+        "order_count": await db.scalar(select(func.count()).select_from(Order).where(*paid_in_period)),
+        "total_revenue": float(
+            await db.scalar(select(func.sum(Order.total_amount)).where(*paid_in_period)) or 0
+        ),
+        "average_order_value": float(
+            await db.scalar(select(func.avg(Order.total_amount)).where(*paid_in_period)) or 0
+        ),
     }
 
 
     popular_products = (
-        db.query(
-            Product.id,
-            Product.name,
-            func.sum(OrderItem.quantity).label('total_quantity'),
-            func.sum(OrderItem.quantity * OrderItem.price_at_time).label('total_revenue')
+        await db.execute(
+            select(
+                Product.id,
+                Product.name,
+                func.sum(OrderItem.quantity).label('total_quantity'),
+                func.sum(OrderItem.quantity * OrderItem.price_at_time).label('total_revenue')
+            )
+            .select_from(Product)
+            .join(OrderItem, OrderItem.product_id == Product.id)
+            .join(Order, Order.id == OrderItem.order_id)
+            .where(*paid_in_period)
+            .group_by(Product.id)
+            .order_by(desc('total_quantity'))
+            .limit(10)
         )
-        .join(OrderItem)
-        .join(Order)
-        .filter(
-            Order.created_at >= start_date,
-            Order.status != OrderStatus.CANCELLED,
-            Order.payment_status == PaymentStatus.PAID
-        )
-        .group_by(Product.id)
-        .order_by(desc('total_quantity'))
-        .limit(10)
-        .all()
-    )
+    ).all()
 
     stats["popular_products"] = [
         {
@@ -445,7 +478,7 @@ async def get_statistics(
     ]
 
 
-    redis.setex(cache_key, 300, stats)
+    await redis.setex(cache_key, 300, stats)
 
     return APIResponse.success_response(stats)
 
@@ -460,8 +493,10 @@ async def get_statistics(
 # Product.stock_quantity.
 
 
-def _get_product_or_404(db: Session, product_id: int) -> Product:
-    product = db.query(Product).filter(Product.id == product_id).first()
+async def _get_product_or_404(db: AsyncSession, product_id: int) -> Product:
+    product = (
+        await db.execute(select(Product).where(Product.id == product_id).limit(1))
+    ).scalars().first()
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -470,7 +505,7 @@ def _get_product_or_404(db: Session, product_id: int) -> Product:
     return product
 
 
-def _variant_sku_exists(db: Session, sku: str) -> bool:
+async def _variant_sku_exists(db: AsyncSession, sku: str) -> bool:
     """Pre-check only - the real guarantee against a duplicate SKU is the
     unique constraint on ProductVariant.sku, since this read-then-write
     check has a race window between two concurrent requests (see the
@@ -478,10 +513,11 @@ def _variant_sku_exists(db: Session, sku: str) -> bool:
     this return False despite a real conflicting row already existing)
     without needing genuine thread interleaving against the test suite's
     single shared SQLite connection."""
-    return db.query(ProductVariant).filter(ProductVariant.sku == sku).first() is not None
+    found = await db.execute(select(ProductVariant.id).where(ProductVariant.sku == sku).limit(1))
+    return found.first() is not None
 
 
-def _commit_variant(db: Session, sku: Optional[str], variant_id: Optional[int] = None) -> None:
+async def _commit_variant(db: AsyncSession, sku: Optional[str], variant_id: Optional[int] = None) -> None:
     """Commit a created or updated variant, telling a SKU conflict apart
     from any other failed constraint.
 
@@ -495,14 +531,14 @@ def _commit_variant(db: Session, sku: Optional[str], variant_id: Optional[int] =
     generic detail; the database's own message, which names constraints and
     carries the statement's values, is only logged."""
     try:
-        db.commit()
+        await db.commit()
     except IntegrityError as e:
-        db.rollback()
+        await db.rollback()
         if sku is not None:
-            holder = db.query(ProductVariant.id).filter(ProductVariant.sku == sku)
+            holder = select(ProductVariant.id).where(ProductVariant.sku == sku)
             if variant_id is not None:
-                holder = holder.filter(ProductVariant.id != variant_id)
-            if holder.first() is not None:
+                holder = holder.where(ProductVariant.id != variant_id)
+            if (await db.execute(holder.limit(1))).first() is not None:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="A variant with this SKU already exists"
@@ -528,13 +564,13 @@ async def create_product_variant(
     product_id: Int32,
     variant: ProductVariantCreate,
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """Create a new variant (e.g. a size/color combination) under a product."""
 
-    _get_product_or_404(db, product_id)
+    await _get_product_or_404(db, product_id)
 
-    if _variant_sku_exists(db, variant.sku):
+    if await _variant_sku_exists(db, variant.sku):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A variant with this SKU already exists"
@@ -548,8 +584,8 @@ async def create_product_variant(
     # ProductVariant.sku, not the pre-check. _commit_variant turns the
     # loser's IntegrityError into the same 409 the pre-check path returns
     # for the sequential case, instead of a generic 500.
-    _commit_variant(db, variant.sku)
-    db.refresh(db_variant)
+    await _commit_variant(db, variant.sku)
+    await db.refresh(db_variant)
 
     return APIResponse.success_response(ProductVariantResponse.model_validate(db_variant))
 
@@ -566,18 +602,19 @@ async def list_product_variants(
     # Every route on this router needs it: this one used to answer anyone,
     # inactive variants, SKUs and exact stock levels included.
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """List all variants belonging to a product."""
 
-    _get_product_or_404(db, product_id)
+    await _get_product_or_404(db, product_id)
 
     variants = (
-        db.query(ProductVariant)
-        .filter(ProductVariant.product_id == product_id)
-        .order_by(ProductVariant.id)
-        .all()
-    )
+        await db.execute(
+            select(ProductVariant)
+            .where(ProductVariant.product_id == product_id)
+            .order_by(ProductVariant.id)
+        )
+    ).scalars().all()
 
     return APIResponse.success_response(ProductVariantListResponse(
         items=[ProductVariantResponse.model_validate(v) for v in variants],
@@ -599,16 +636,22 @@ async def update_product_variant(
     variant_id: Int32,
     variant: ProductVariantUpdate,
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """Update fields on an existing variant of a product."""
 
-    _get_product_or_404(db, product_id)
+    await _get_product_or_404(db, product_id)
 
-    db_variant = db.query(ProductVariant).filter(
-        ProductVariant.id == variant_id,
-        ProductVariant.product_id == product_id,
-    ).first()
+    db_variant = (
+        await db.execute(
+            select(ProductVariant)
+            .where(
+                ProductVariant.id == variant_id,
+                ProductVariant.product_id == product_id,
+            )
+            .limit(1)
+        )
+    ).scalars().first()
     if not db_variant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -617,7 +660,7 @@ async def update_product_variant(
 
     update_data = variant.model_dump(exclude_unset=True)
     if "sku" in update_data and update_data["sku"] != db_variant.sku:
-        if _variant_sku_exists(db, update_data["sku"]):
+        if await _variant_sku_exists(db, update_data["sku"]):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A variant with this SKU already exists"
@@ -630,8 +673,8 @@ async def update_product_variant(
     # Same read-then-write race as create_product_variant above: the
     # "sku" != db_variant.sku pre-check can be stale by the time this
     # commits if a concurrent request claimed the same SKU in between.
-    _commit_variant(db, update_data.get("sku"), variant_id)
-    db.refresh(db_variant)
+    await _commit_variant(db, update_data.get("sku"), variant_id)
+    await db.refresh(db_variant)
 
     return APIResponse.success_response(ProductVariantResponse.model_validate(db_variant))
 
@@ -647,14 +690,14 @@ async def list_reconciliation_discrepancies(
     order_id: Optional[Int32] = None,
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """The differences the payment reconciliation found between our payments
     and the provider's and that still stand, oldest first (admin only):
     which payment, what kind of difference, what each side says, and since
     when. Optionally those of one order."""
-    rows, total = open_discrepancies(
-        db, page=pagination.page, size=pagination.size, order_id=order_id
+    rows, total = await db.run_sync(
+        open_discrepancies, page=pagination.page, size=pagination.size, order_id=order_id
     )
     return APIResponse.success_response({
         "items": [
@@ -693,7 +736,7 @@ async def run_reconciliation(
     response: Response,
     order_id: Optional[Int32] = None,
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
     provider: PaymentProvider = Depends(get_payment_provider),
 ):
     """Reconcile now (admin only). With order_id: every payment of that order,
@@ -704,7 +747,7 @@ async def run_reconciliation(
         try:
             # retry=False: with the broker down, fail at once instead of
             # sitting in kombu's publish retries.
-            check_payment_reconciliation.apply_async(retry=False)
+            await run_in_threadpool(check_payment_reconciliation.apply_async, retry=False)
         except Exception as e:
             logger.warning("Could not queue the reconciliation run", exc_info=e)
             raise HTTPException(
@@ -713,13 +756,21 @@ async def run_reconciliation(
             )
         response.status_code = http_status.HTTP_202_ACCEPTED
         return APIResponse.success_response({"queued": True})
-    if not db.query(Order.id).filter(Order.id == order_id).first():
+    if not (await db.execute(select(Order.id).where(Order.id == order_id).limit(1))).first():
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Order not found",
         )
-    result = await run_in_threadpool(reconcile_payments, db, provider, order_id=order_id)
-    return APIResponse.success_response(result.as_dict())
+    # End the read transaction: nothing stays open on the route's session
+    # while the provider is called, and the thread works on a session of its
+    # own (an AsyncSession must not be handed to another thread).
+    await db.commit()
+
+    def reconcile_order():
+        with database.session_scope() as thread_db:
+            return reconcile_payments(thread_db, provider, order_id=order_id).as_dict()
+
+    return APIResponse.success_response(await run_in_threadpool(reconcile_order))
 
 
 @router.get(
@@ -735,7 +786,7 @@ async def list_webhook_events(
     status: Optional[str] = None,
     pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """
     List the Stripe webhook events the app stored, newest first, optionally
@@ -743,22 +794,25 @@ async def list_webhook_events(
     the payload: it is the provider's raw object. A "failed" event ran out
     of retries and can be replayed.
     """
-    query = db.query(WebhookEvent)
+    filters = []
     if status:
         if status not in WEBHOOK_EVENT_STATUSES:
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Invalid webhook event status. Valid values are: {', '.join(WEBHOOK_EVENT_STATUSES)}",
             )
-        query = query.filter(WebhookEvent.status == status)
+        filters.append(WebhookEvent.status == status)
 
-    total = query.count()
+    total = await db.scalar(select(func.count()).select_from(WebhookEvent).where(*filters))
     events = (
-        query.order_by(WebhookEvent.created_at.desc(), WebhookEvent.id.desc())
-        .offset((pagination.page - 1) * pagination.size)
-        .limit(pagination.size)
-        .all()
-    )
+        await db.execute(
+            select(WebhookEvent)
+            .where(*filters)
+            .order_by(WebhookEvent.created_at.desc(), WebhookEvent.id.desc())
+            .offset((pagination.page - 1) * pagination.size)
+            .limit(pagination.size)
+        )
+    ).scalars().all()
     return APIResponse.success_response(WebhookEventListResponse(
         items=[WebhookEventResponse.model_validate(event) for event in events],
         total=total,
@@ -780,7 +834,7 @@ async def list_webhook_events(
 async def replay_webhook_event(
     event_id: str,
     current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(database.get_async_db),
 ):
     """
     Send a failed Stripe event through the worker again (after the cause of
@@ -791,23 +845,28 @@ async def replay_webhook_event(
     # Locked, so two admins replaying the same event publish it once: the
     # second finds it received.
     event = (
-        db.query(WebhookEvent)
-        .filter(WebhookEvent.event_id == event_id)
-        .with_for_update()
-        .first()
-    )
+        await db.execute(
+            select(WebhookEvent)
+            .where(WebhookEvent.event_id == event_id)
+            .with_for_update()
+            .limit(1)
+        )
+    ).scalars().first()
     if event is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="Webhook event not found"
         )
     if event.status != WEBHOOK_EVENT_FAILED:
-        db.rollback()
+        # Read before the rollback: it expires the event, and an expired
+        # attribute cannot be loaded on the loop.
+        current_status = event.status
+        await db.rollback()
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail=f"Only a failed webhook event can be replayed (this one is {event.status})",
+            detail=f"Only a failed webhook event can be replayed (this one is {current_status})",
         )
     event.status = WEBHOOK_EVENT_RECEIVED
     event.attempts = 0
-    db.commit()
-    enqueue_event(event.event_id)
+    await db.commit()
+    await run_in_threadpool(enqueue_event, event.event_id)
     return APIResponse.success_response(WebhookEventResponse.model_validate(event))

@@ -584,6 +584,12 @@ def test_admin_create_variant_rejects_duplicate_sku(client, db_session):
     assert response.status_code == 409
 
 
+async def _sku_never_exists(db, sku):
+    """Stands in for _variant_sku_exists (a coroutine now) to hold the race
+    window open: the pre-check finds nothing although the SKU is taken."""
+    return False
+
+
 def test_admin_create_variant_race_returns_409_not_500(client, db_session, monkeypatch):
     # Regression test: create_product_variant's SKU-uniqueness check is a
     # plain read-then-write (query for an existing SKU, then insert) with no
@@ -615,7 +621,7 @@ def test_admin_create_variant_race_returns_409_not_500(client, db_session, monke
     )
     assert first.status_code == 200
 
-    monkeypatch.setattr("app.api.v1.admin._variant_sku_exists", lambda db, sku: False)
+    monkeypatch.setattr("app.api.v1.admin._variant_sku_exists", _sku_never_exists)
 
     second = client.post(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants",
@@ -853,7 +859,7 @@ def test_admin_update_variant_sku_race_returns_409(client, db_session, monkeypat
             headers=_auth_headers(admin_token),
         )
     other = db_session.query(ProductVariant).filter(ProductVariant.sku == "OTHER-SKU").one()
-    monkeypatch.setattr("app.api.v1.admin._variant_sku_exists", lambda db, sku: False)
+    monkeypatch.setattr("app.api.v1.admin._variant_sku_exists", _sku_never_exists)
 
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{other.id}",
