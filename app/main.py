@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1 import admin, cart, legal, orders, products, users
+from app.api.v1.cart import guest_cart_cookie_name
 from app.core import database
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
@@ -82,10 +83,31 @@ register_error_handlers(app)
 # outermost, so a request that is shed never gets this far.
 app.add_middleware(BodySizeLimitMiddleware, limit=settings.MAX_REQUEST_BODY_BYTES)
 
+# Responses of these prefixes carry tokens, personal data or a payment
+# client_secret: no cache may keep them (RFC 9111 section 5.2.2.5). So does
+# every response to a request that is authenticated (Authorization header)
+# or is a guest's own (guest-cart cookie), wherever it is routed.
+_NO_STORE_PREFIXES = tuple(
+    f"{settings.API_V1_STR}/{name}" for name in ("users", "orders", "cart", "admin")
+)
+
+
+def _needs_no_store(request: Request) -> bool:
+    path = request.url.path
+    if any(path == p or path.startswith(p + "/") for p in _NO_STORE_PREFIXES):
+        return True
+    return (
+        "authorization" in request.headers
+        or guest_cart_cookie_name() in request.cookies
+    )
+
+
 logger.debug("Adding security headers middleware")
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
+    if "cache-control" not in response.headers and _needs_no_store(request):
+        response.headers["Cache-Control"] = "no-store"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
