@@ -18,8 +18,12 @@ from app.core.database import SessionLocal
 # a route that changes the user loads the row through its own session - see
 # _load_user in app/api/v1/legal.py, the only router still on this get_db.
 def get_db() -> Generator:
+    # Created before the try, as in FastAPI's "Dependencies with yield" docs:
+    # if SessionLocal() raises, there is no session to close, and a finally
+    # that touched an unbound `db` would hide the real error behind an
+    # UnboundLocalError.
+    db = SessionLocal()
     try:
-        db = SessionLocal()
         yield db
     finally:
         db.close()
