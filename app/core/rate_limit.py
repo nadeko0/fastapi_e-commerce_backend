@@ -48,6 +48,7 @@ import ipaddress
 import logging
 import math
 import re
+import unicodedata
 from functools import lru_cache
 from typing import NamedTuple
 
@@ -382,7 +383,7 @@ def _login_keys(email: str, request: Request) -> tuple[str, str]:
     """(per email and address, per email) counter keys."""
     # Case and surrounding blanks cost a client nothing to vary, so they
     # are folded away. A digest, so that no mailbox sits in a key name.
-    normalised = email.strip().casefold().encode("utf-8", "replace")
+    normalised = unicodedata.normalize("NFC", email.strip().casefold()).encode("utf-8", "replace")
     email_key = f"rl:login-failures:{hashlib.sha256(normalised).hexdigest()[:32]}"
     return f"{email_key}:{client_address(request)}", email_key
 

@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from datetime import datetime
 from enum import Enum
 
@@ -41,8 +42,15 @@ def normalize_email(email: str) -> str:
     one mailbox. Strictly the local part of an address may be case-
     sensitive (RFC 5321), but no mail provider in use treats it so, and
     two accounts for one mailbox are the worse problem. Lookups compare
-    lower(email) as well, so rows stored before this keep working."""
-    return email.strip().lower()
+    lower(email) as well, so rows stored before this keep working.
+
+    Unicode text with more than one spelling of the same characters
+    ("e" + U+0301 and U+00E9) is composed to NFC first (UAX #15; RFC 6531
+    section 3.3 asks for NFC in internationalised local parts), so those
+    are one account too. Composing again after lower() covers the few
+    letters whose lower case is a sequence. ASCII is unchanged."""
+    composed = unicodedata.normalize("NFC", email.strip())
+    return unicodedata.normalize("NFC", composed.lower())
 
 
 class ConsentHistory(BaseModel):
