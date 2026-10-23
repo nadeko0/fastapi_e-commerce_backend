@@ -825,3 +825,106 @@ def test_update_product_stats_with_no_sales_caches_an_empty_list(
     tasks.update_product_stats()
 
     assert RedisService().get("product_stats")["popular_products"] == []
+
+
+# -- No database transaction is open while an email is handed to SMTP --------
+#
+# The SMTP send is a synchronous call to a server that may be slow. A session
+# with an open transaction holds a connection "idle in transaction" for the
+# whole wait, and PostgreSQL ends such a connection after
+# idle_in_transaction_session_timeout (30 s here): the next query of the task
+# then fails. With expire_on_commit=True, reading order.user after the commit
+# reloads it and opens a new transaction, which is how expire_unpaid_orders
+# did exactly that.
+
+def _record_session_state(monkeypatch, sender_name):
+    """Patch task_session to remember its session, and the email sender to
+    record session.in_transaction() at the moment it is called."""
+    from contextlib import contextmanager
+
+    sessions = []
+    in_transaction = []
+
+    @contextmanager
+    def recording_session():
+        db = TestingSessionLocal()
+        sessions.append(db)
+        try:
+            yield db
+        finally:
+            db.close()
+
+    monkeypatch.setattr("app.tasks.task_session", recording_session)
+    monkeypatch.setattr(
+        f"app.tasks.{sender_name}",
+        lambda *a, **k: in_transaction.append(sessions[-1].in_transaction()),
+    )
+    return in_transaction
+
+
+def test_expire_unpaid_orders_sends_no_email_inside_a_transaction(db_session, monkeypatch):
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product, payment_status="pending")
+    order_id = order.id
+    order.created_at = utc_now() - timedelta(days=2)
+    db_session.commit()
+
+    seen = []
+
+    def fake_send(to_email, order):
+        # What the email is built from, read here as the real sender does.
+        seen.append((
+            db_session.in_transaction(), to_email, order.id, order.status,
+            order.payment_status, order.total_amount, order.currency,
+            order.created_at,
+        ))
+        return True
+
+    monkeypatch.setattr("app.tasks.send_order_cancellation_email", fake_send)
+
+    assert tasks.expire_unpaid_orders(db_session) == 1
+    assert len(seen) == 1
+    in_transaction, to_email, sent_id, status, payment_status, total, currency, created = seen[0]
+    assert in_transaction is False
+    assert (to_email, sent_id) == (user.email, order_id)
+    assert (status, payment_status) == ("cancelled", "pending")
+    assert total == Decimal("19.98")
+    assert currency and created
+
+
+def test_send_order_confirmation_sends_no_email_inside_a_transaction(
+    db_session, tasks_db, monkeypatch
+):
+    in_transaction = _record_session_state(monkeypatch, "send_order_confirmation_email")
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product)
+
+    tasks.send_order_confirmation(order.id)
+
+    assert in_transaction == [False]
+
+
+def test_send_order_status_update_sends_no_email_inside_a_transaction(
+    db_session, tasks_db, monkeypatch
+):
+    in_transaction = _record_session_state(monkeypatch, "send_order_status_update_email")
+    user = _make_verified_user(db_session)
+    _, product = _make_category_and_product(db_session)
+    order = _make_order_with_item(db_session, user, product)
+
+    tasks.send_order_status_update(order.id)
+
+    assert in_transaction == [False]
+
+
+def test_check_low_stock_sends_no_email_inside_a_transaction(
+    db_session, tasks_db, monkeypatch
+):
+    in_transaction = _record_session_state(monkeypatch, "send_low_stock_alert_email")
+    _make_category_and_product(db_session, stock=2)
+
+    tasks.check_low_stock(threshold=5)
+
+    assert in_transaction == [False]
