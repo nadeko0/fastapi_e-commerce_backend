@@ -411,9 +411,9 @@ def test_password_reset_weak_new_password_is_422_with_or_without_current_passwor
 
     for body in (
         {"new_password": "short1"},
-        {"new_password": "onlyletters"},
+        {"new_password": "qwertyuiop"},
         {"new_password": "12345678"},
-        {"current_password": "x", "new_password": "onlyletters"},
+        {"current_password": "x", "new_password": "qwertyuiop"},
     ):
         response = client.post(url, json=body)
         assert response.status_code == 422, body
