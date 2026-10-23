@@ -1,3 +1,4 @@
+import logging
 from contextlib import contextmanager
 from datetime import timedelta
 from types import SimpleNamespace
@@ -34,6 +35,8 @@ from app.services.orders import (
 from app.services.payment import get_payment_provider
 from app.services.reconciliation import reconcile_payments
 from app.services.redis import RedisService
+
+logger = logging.getLogger(__name__)
 
 
 def build_redis_broker_url(
@@ -328,6 +331,12 @@ def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> i
         User.email != anonymised_email,
     ).order_by(User.id)
 
+    return _anonymise_pending(db, pending, batch_size)
+
+def _anonymise_pending(db, pending, batch_size: int, due=None) -> int:
+    """Anonymises, batch by batch, the accounts `pending` selects (ordered by
+    id), erases the stored Stripe events about their payments, and commits
+    after each batch."""
     purged_count = 0
     last_id = 0
     while True:
@@ -337,10 +346,12 @@ def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> i
         accounts = db.scalars(pending.where(User.id > last_id).limit(batch_size)).all()
         if not accounts:
             break
-        for account in accounts:
-            _anonymise_account(account)
-        purged_count += len(accounts)
         last_id = accounts[-1].id
+        erased = [a for a in accounts if due is None or due(a)]
+        for account in erased:
+            _anonymise_account(account)
+        stripe_events.redact_users_events(db, [a.id for a in erased])
+        purged_count += len(erased)
         db.commit()
         if len(accounts) < batch_size:
             break
@@ -382,6 +393,60 @@ def _anonymise_account(account) -> None:
 def cleanup_inactive_accounts() -> int:
     with task_session() as db:
         return purge_expired_deletion_requests(db)
+
+def purge_expired_retention(db, batch_size: int = PURGE_BATCH_SIZE) -> int:
+    """
+    Applies USER_DATA_RETENTION_DAYS (GDPR Art. 5(1)(e), storage limitation).
+    The privacy policy (GET /legal/privacy-policy, section 6) says "we keep
+    your data for N days unless required longer by law, you request
+    deletion, or there are legal proceedings"; it does not say from when,
+    and keeping a live customer's account for N days from sign-up would
+    delete everyone. The narrowest reading is applied: an account that is
+    deactivated (is_active false: closed, not merely quiet) and has shown no
+    activity (last_login, last_activity_date, which any change to the row
+    refreshes) for the user's own data_retention_period days (the setting's
+    value when unset) is anonymised exactly like an erasure request:
+    personal identifiers go, orders and invoices stay (Art. 17(3)(b)), and
+    the stored Stripe events about its payments are redacted. Active
+    accounts and administrators are never touched. Accounts already
+    anonymised, or being erased through a request, are left to
+    purge_expired_deletion_requests / skipped. Idempotent; commits per
+    batch.
+    """
+    anonymised_email = (
+        literal("deleted-user-") + cast(User.id, String) + literal("@deleted.invalid")
+    )
+    pending = select(User).options(selectinload(User.addresses)).where(
+        User.is_active == False,  # noqa: E712 - see purge_expired_deletion_requests
+        User.role != "admin",
+        User.email != anonymised_email,
+    ).order_by(User.id)
+    now = utc_now()
+
+    def retention_has_passed(account) -> bool:
+        # The period is per user (their own data_retention_period, the
+        # setting's value when unset), so the comparison is made here, not in
+        # SQL: the candidates are only the deactivated, not yet anonymised
+        # accounts, and every purge shrinks that set.
+        days = account.data_retention_period or settings.USER_DATA_RETENTION_DAYS
+        last_seen = max(
+            moment for moment in (
+                account.last_login, account.last_activity_date, account.created_at
+            ) if moment is not None
+        )
+        return now - last_seen > timedelta(days=days)
+
+    purged = _anonymise_pending(db, pending, batch_size, retention_has_passed)
+    logger.info("Retention purge anonymised %d account(s)", purged)
+    return purged
+
+@celery.task(
+    name="cleanup_expired_retention",
+    queue="cleanup",
+)
+def cleanup_expired_retention() -> int:
+    with task_session() as db:
+        return purge_expired_retention(db)
 
 def expire_unpaid_orders(db) -> int:
     """
@@ -598,5 +663,11 @@ celery.conf.beat_schedule = {
     'sweep-stripe-events': {
         'task': 'sweep_stripe_events',
         'schedule': timedelta(minutes=5),
+    },
+    # USER_DATA_RETENTION_DAYS (GDPR Art. 5(1)(e)); 02:45, between the
+    # erasure purge (02:30) and the reconciliation (03:15).
+    'cleanup-expired-retention': {
+        'task': 'cleanup_expired_retention',
+        'schedule': crontab(hour=2, minute=45),
     },
 }

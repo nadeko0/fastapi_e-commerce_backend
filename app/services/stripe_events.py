@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -648,3 +648,110 @@ def enqueue_stuck_events(db: Session) -> int:
     if published:
         logger.info("Enqueued %s stuck Stripe event(s)", len(published))
     return len(published)
+
+
+# -- Erasing personal data from stored events (GDPR Art. 17) ----------------------
+
+# What is kept of a stored event once its customer is erased: the ids that tie
+# it to our payment rows, the amounts and states the handlers read, and the
+# order id. Everything else a Stripe event can carry about a person
+# (customer_details, billing_details, shipping, receipt_email, customer_email,
+# payment_method_details, receipt_url, free-text descriptions ...) is dropped.
+# An allow-list, not a deny-list: a field Stripe adds later is erased too.
+_KEPT_OBJECT_FIELDS = (
+    "id", "object", "payment_intent", "amount", "amount_total", "amount_received",
+    "amount_refunded", "currency", "status", "payment_status", "reason",
+    "failure_reason",
+)
+_KEPT_EVENT_FIELDS = ("id", "object", "type", "created", "api_version", "livemode")
+
+
+def _redact_object(obj: dict) -> dict:
+    kept = {key: obj[key] for key in _KEPT_OBJECT_FIELDS if key in obj}
+    if "payment_intent" in kept:
+        kept["payment_intent"] = _object_id(kept["payment_intent"])
+    metadata = obj.get("metadata")
+    if isinstance(metadata, dict) and "order_id" in metadata:
+        kept["metadata"] = {"order_id": metadata["order_id"]}
+    refunds = obj.get("refunds")
+    if isinstance(refunds, dict) and isinstance(refunds.get("data"), list):
+        kept["refunds"] = {
+            "data": [_redact_object(r) for r in refunds["data"] if isinstance(r, dict)]
+        }
+    return kept
+
+
+def redact_event_payload(payload: str) -> str:
+    """The payload with the personal data removed (see _KEPT_OBJECT_FIELDS),
+    marked `"redacted": true`. Redacting a redacted payload changes nothing."""
+    event = json.loads(payload)
+    kept = {key: event[key] for key in _KEPT_EVENT_FIELDS if key in event}
+    data = event.get("data")
+    obj = data.get("object") if isinstance(data, dict) else None
+    kept["data"] = {"object": _redact_object(obj) if isinstance(obj, dict) else {}}
+    kept["redacted"] = True
+    return json.dumps(kept)
+
+
+def _event_references(payload: dict) -> set[str]:
+    data = payload.get("data")
+    obj = data.get("object") if isinstance(data, dict) else None
+    if not isinstance(obj, dict):
+        return set()
+    refs = {obj.get("id"), _object_id(obj.get("payment_intent"))}
+    metadata = obj.get("metadata")
+    if isinstance(metadata, dict):
+        refs.add(f"order:{metadata.get('order_id')}")
+    return {ref for ref in refs if isinstance(ref, str)}
+
+
+def redact_users_events(db: Session, user_ids: list[int]) -> int:
+    """
+    Redacts the stored payload of every webhook event about these users'
+    payments, and returns how many it changed. An event is about a user
+    when its object is, or points (payment_intent) at, one of the
+    PaymentIntents or Checkout Sessions of the user's orders, or carries one
+    of those order ids in its metadata. The event row stays, with its id,
+    type, status and timestamps, as the audit trail of what the shop did.
+    Does not commit. Safe to repeat: already redacted payloads are skipped.
+    """
+    if not user_ids:
+        return 0
+    payments = db.execute(
+        select(Payment.payment_intent_id, Payment.checkout_session_id, Payment.order_id)
+        .join(Order, Order.id == Payment.order_id)
+        .where(Order.user_id.in_(user_ids))
+    ).all()
+    wanted: set[str] = set()
+    for intent_id, session_id, order_id in payments:
+        if intent_id and not intent_id.startswith(_PENDING_INTENT_ID_PREFIX):
+            wanted.add(intent_id)
+        if session_id:
+            wanted.add(session_id)
+        wanted.add(f"order:{order_id}")
+    if not wanted:
+        return 0
+
+    needles = [ref for ref in wanted if not ref.startswith("order:")]
+    needles += [
+        f'"order_id":{sep}"{ref[6:]}"' for ref in wanted if ref.startswith("order:")
+        for sep in ("", " ")
+    ]
+    rows = db.scalars(
+        select(WebhookEvent).where(
+            WebhookEvent.payload.is_not(None),
+            or_(*(WebhookEvent.payload.contains(n, autoescape=True) for n in needles)),
+        )
+    ).all()
+    redacted = 0
+    for row in rows:
+        try:
+            payload = json.loads(row.payload)
+        except ValueError:
+            continue
+        if not isinstance(payload, dict) or payload.get("redacted"):
+            continue
+        if _event_references(payload) & wanted:
+            row.payload = redact_event_payload(row.payload)
+            redacted += 1
+    return redacted
