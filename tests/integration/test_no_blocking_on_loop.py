@@ -61,8 +61,6 @@ PENDING_ROUTERS = {
 
     "admin",
 
-    "legal",
-
     "cart",
 
     "products",
@@ -345,6 +343,19 @@ PRODUCT_CACHE_READS = RouteGroup(
     ],
 )
 
+# A logged-in user's legal routes: the two reads and a consent update (the
+# write runs as many times as the reads; SQLite serializes it, which costs
+# wall time but never blocks the loop).
+LEGAL = RouteGroup(
+    seed=lambda db_session: {},
+    headers=lambda db_session: make_user_headers(db_session)[0],
+    requests=lambda ids: [
+        ("GET", "/api/v1/legal/consent-status"),
+        ("GET", "/api/v1/legal/data-retention"),
+        ("POST", "/api/v1/legal/consent", {"json": {"marketing_consent": True, "privacy_policy_accepted": True}}),
+    ],
+)
+
 # group name -> (router that must be migrated for it to run, scenario).
 # A router task fills in the scenario of its router (None = not written
 # yet, which fails the test as soon as the router leaves PENDING_ROUTERS).
@@ -354,7 +365,7 @@ ROUTE_GROUPS: Dict[str, Tuple[Optional[str], Optional[RouteGroup]]] = {
     "users": ("users", None),
     "orders": ("orders", None),
     "admin": ("admin", None),
-    "legal": ("legal", None),
+    "legal": ("legal", LEGAL),
     "cart": ("cart", None),
 }
 
