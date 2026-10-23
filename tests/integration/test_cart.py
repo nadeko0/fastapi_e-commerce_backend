@@ -1245,6 +1245,7 @@ def test_validate_cart_reports_price_changed_since_adding(client, db_session):
         "variant_id": None,
         "price_when_added": "9.99",
         "current_price": "12.50",
+        "currency": "USD",
     }]
 
 
@@ -1270,6 +1271,7 @@ def test_validate_cart_reports_variant_price_override_changed(client, db_session
         "variant_id": variant.id,
         "price_when_added": "14.50",
         "current_price": "9.99",
+        "currency": "USD",
     }]
 
 
