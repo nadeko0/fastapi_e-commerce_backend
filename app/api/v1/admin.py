@@ -17,6 +17,7 @@ from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, DbSession, Provider
 from app.core.etag import IfMatch, etag_for, require_if_match
+from app.core.openapi import FORBIDDEN, UNAUTHORIZED, DocumentedRoute
 from app.models.category import Category
 from app.models.order import Order
 from app.models.order_items import OrderItem
@@ -62,7 +63,31 @@ def _request_datetime(value: datetime, name: str) -> datetime:
     return as_utc(value)
 
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+# The filters stay `str`, not an Enum: an Enum parameter would answer a value
+# it does not know with FastAPI's list-shaped 422, not the message these
+# routes send today (and would stop accepting "PENDING" for "pending"). The
+# schema lists the values the routes accept.
+OrderStatusFilter = Annotated[
+    Annotated[str, Field(json_schema_extra={"enum": [s.value for s in OrderStatus]})] | None,
+    Query(description="Order status (case-insensitive)."),
+]
+PaymentStatusFilter = Annotated[
+    Annotated[str, Field(json_schema_extra={"enum": [s.value for s in PaymentStatus]})] | None,
+    Query(description="Payment status (case-insensitive)."),
+]
+WebhookEventStatusFilter = Annotated[
+    Annotated[str, Field(json_schema_extra={"enum": list(WEBHOOK_EVENT_STATUSES)})] | None,
+    Query(description="Webhook event status."),
+]
+
+# Every admin operation needs a signed-in administrator. The other error
+# responses (413, 422, 500, 503) are added per operation by DocumentedRoute.
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    route_class=DocumentedRoute,
+    responses={401: UNAUTHORIZED, 403: FORBIDDEN},
+)
 @router.post(
     "/categories",
     response_model=APIResponse[CategoryResponse],
@@ -345,8 +370,8 @@ async def list_orders(
     # in orders.update_order_status - this shadows the fastapi.status
     # module within this function body, so error responses below must use
     # the http_status alias instead.
-    status: str | None = None,
-    payment_status: str | None = None,
+    status: OrderStatusFilter = None,
+    payment_status: PaymentStatusFilter = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
 ):
@@ -852,7 +877,7 @@ async def list_webhook_events(
     current_user: AdminUser,
     db: DbSession,
     # Named "status" for the public API/query param; see list_orders above.
-    status: str | None = None,
+    status: WebhookEventStatusFilter = None,
 ):
     """
     List the Stripe webhook events the app stored, newest first, optionally

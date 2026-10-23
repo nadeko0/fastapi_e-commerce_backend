@@ -1,4 +1,5 @@
 import inspect
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -10,6 +11,7 @@ from sqlalchemy.orm import joinedload
 
 from app.core.dependencies import Cache, DbSession
 from app.core.etag import IfNoneMatch, etag_for, if_none_match_hits
+from app.core.openapi import DocumentedRoute
 from app.models.category import Category
 from app.models.product import Product
 from app.schemas.category import (
@@ -26,7 +28,7 @@ from app.schemas.product import (
     ProductSearch,
 )
 
-router = APIRouter(tags=["catalog"])
+router = APIRouter(tags=["catalog"], route_class=DocumentedRoute)
 
 # This router runs on AsyncSession (app.core.database.get_async_db): every
 # query below is awaited, so the event loop keeps serving other requests
@@ -72,12 +74,33 @@ def _matches_text(text: str):
     )
 
 
+def _characteristics_filter(raw: str | None) -> dict | None:
+    """The `characteristics` query parameter: a JSON object, {"color": "red"}.
+    Anything else is a 422 like any other bad query parameter."""
+    if raw is None:
+        return None
+    problem = None
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        problem = ("json_invalid", "characteristics must be a JSON object, e.g. {\"color\": \"red\"}")
+    else:
+        if not isinstance(parsed, dict):
+            problem = ("dict_type", "characteristics must be a JSON object, e.g. {\"color\": \"red\"}")
+    if problem:
+        raise RequestValidationError([
+            {"type": problem[0], "loc": ("query", "characteristics"), "msg": problem[1]}
+        ])
+    return parsed
+
+
 def _product_filter(**params) -> ProductFilter:
     """Depends(ProductFilter), except that a check across parameters
     (ProductFilter.validate_price_range) is answered 422 like any other bad
     query parameter. FastAPI validates each parameter on its own and then
     calls the class with the results; a ValidationError raised by that call
     is not request validation to it, and came out as a 500."""
+    params["characteristics"] = _characteristics_filter(params.get("characteristics"))
     try:
         return ProductFilter(**params)
     except ValidationError as error:
@@ -87,8 +110,21 @@ def _product_filter(**params) -> ProductFilter:
         ]) from None
 
 
-# The parameters FastAPI reads from the request are the model's fields.
-_product_filter.__signature__ = inspect.signature(ProductFilter)
+# The parameters FastAPI reads from the request are the model's fields,
+# except `characteristics`: a dict is a request body to FastAPI, and GET has
+# no body to speak of (OpenAPI 3.1.0: "SHOULD be avoided"), so it is a query
+# parameter holding JSON, parsed above.
+_filter_signature = inspect.signature(ProductFilter)
+_product_filter.__signature__ = _filter_signature.replace(parameters=[
+    parameter.replace(
+        annotation=Annotated[str | None, Query(
+            max_length=1000,
+            description='Match on characteristics: a JSON object of name to value, e.g. {"color": "red"}.',
+        )],
+        default=None,
+    ) if parameter.name == "characteristics" else parameter
+    for parameter in _filter_signature.parameters.values()
+])
 
 
 @router.get("/categories", response_model=APIResponse[CategoryListResponse])
