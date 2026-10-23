@@ -128,9 +128,7 @@ class Settings(BaseSettings):
     @field_validator("DEBUG", "RELOAD", mode="before")
     @classmethod
     def set_debug_settings(cls, v: bool, info: ValidationInfo) -> bool:
-        if info.data.get("ENVIRONMENT") == "development":
-            return True
-        return False
+        return info.data.get("ENVIRONMENT") == "development"
 
     # NoDecode: pydantic-settings' default env-var handling for any "complex"
     # (list/dict/etc) field type is to run the raw env string through

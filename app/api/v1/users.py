@@ -413,6 +413,11 @@ async def refresh_access_token(
         token_type="bearer"
     ))
 
+# One shared default: pydantic models are mutable, so a call in the signature is
+# flagged (B008); logout only reads it.
+_NO_LOGOUT_BODY = LogoutRequest()
+
+
 @router.post(
     "/logout",
     response_model=APIResponse[dict],
@@ -421,7 +426,7 @@ async def refresh_access_token(
 async def logout(
     token: BearerToken,
     current_user: CurrentUser,
-    logout_in: LogoutRequest = LogoutRequest(),
+    logout_in: LogoutRequest = _NO_LOGOUT_BODY,
 ):
     """Log out the current user: blacklist the access token in use and,
     if a refresh token is supplied, revoke its whole token family so it
@@ -505,7 +510,7 @@ async def update_consent(
     # a plain JSON column, and SQLAlchemy does not detect in-place mutations
     # of mutable values on JSON columns, so an in-place append here silently
     # fails to persist.
-    user.consent_history = user.consent_history + [{
+    user.consent_history = [*user.consent_history, {
         "type": consent_type.value,
         "granted": granted,
         "timestamp": utc_now().isoformat(),

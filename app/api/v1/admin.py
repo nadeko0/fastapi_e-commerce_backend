@@ -89,7 +89,7 @@ async def create_category(
     db_category = Category(**category.model_dump())
     if category.parent_id:
         db_category.level = parent.level + 1
-        db_category.path = parent.path + [parent.id]
+        db_category.path = [*parent.path, parent.id]
     else:
         db_category.level = 0
         db_category.path = []
@@ -656,12 +656,15 @@ async def update_product_variant(
         )
 
     update_data = variant.model_dump(exclude_unset=True)
-    if "sku" in update_data and update_data["sku"] != db_variant.sku:
-        if await _variant_sku_exists(db, update_data["sku"]):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="A variant with this SKU already exists"
-            )
+    if (
+        "sku" in update_data
+        and update_data["sku"] != db_variant.sku
+        and await _variant_sku_exists(db, update_data["sku"])
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A variant with this SKU already exists"
+        )
 
     for field, value in update_data.items():
         setattr(db_variant, field, value)
