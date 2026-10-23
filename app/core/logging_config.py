@@ -5,6 +5,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from app.core.config import settings
+from app.core.request_context import get_request_context
 
 log_dir = Path("logs")
 log_dir.mkdir(exist_ok=True)
@@ -36,6 +37,11 @@ class JSONFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+        context = get_request_context()
+        if context is not None:
+            payload["request_id"] = context.request_id
+            if context.trace_id:
+                payload["trace_id"] = context.trace_id
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
 
