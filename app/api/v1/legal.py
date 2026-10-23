@@ -337,7 +337,11 @@ async def request_personal_data(
         # delete_user_data in app/api/v1/users.py. The schema has already
         # refused a deletion request without a password (422).
         if not await verify_password_async(request_data.password, current_user.hashed_password):
-            raise HTTPException(status_code=401, detail="Incorrect password")
+            raise HTTPException(
+                status_code=401,
+                detail="Incorrect password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         # Deactivates the user and commits `db`, so it needs the row loaded
         # through `db` (see _load_user).
         request_id = await gdpr_service.process_data_deletion(

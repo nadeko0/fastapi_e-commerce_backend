@@ -117,7 +117,7 @@ def test_token_blacklisted_through_the_sync_service_is_rejected(client):
     response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
     assert response.status_code == 401
     assert response.json()["detail"] == "Could not validate credentials"
-    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.headers["www-authenticate"] == 'Bearer error="invalid_token"'
 
 
 def test_token_blacklisted_through_the_async_client_is_seen_by_the_sync_service(client):

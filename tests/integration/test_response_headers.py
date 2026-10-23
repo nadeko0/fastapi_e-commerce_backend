@@ -135,3 +135,78 @@ def test_a_cache_control_set_by_the_route_is_kept(client, monkeypatch):
         app.router.routes.pop()
 
     assert response.headers["cache-control"] == "private, max-age=5"
+
+
+# --- WWW-Authenticate on every 401 -------------------------------------------
+
+BEARER = "Bearer"
+INVALID_TOKEN = 'Bearer error="invalid_token"'
+
+
+def test_login_with_wrong_credentials_is_401_with_a_challenge(client):
+    _registered_login(client)
+
+    wrong_password = _login(client, password="Wr0ngPass1")
+    unknown_email = _login(client, email="nobody@example.com")
+
+    assert wrong_password.status_code == 401
+    assert unknown_email.status_code == 401
+    assert wrong_password.headers["www-authenticate"] == BEARER
+    assert unknown_email.headers["www-authenticate"] == BEARER
+
+
+def test_token_presented_and_rejected_names_invalid_token(client):
+    from app.core.security import create_access_token
+
+    login = _registered_login(client)
+    good = login.json()["data"]["access_token"]
+    refresh = login.json()["data"]["refresh_token"]
+    garbage = {"Authorization": "Bearer not-a-jwt"}
+    wrong_type = {"Authorization": f"Bearer {refresh}"}
+    tampered = {"Authorization": f"Bearer {good[:-3]}abc"}
+    no_user = {"Authorization": f"Bearer {create_access_token(subject='999999')}"}
+
+    for headers in (garbage, wrong_type, tampered, no_user):
+        response = client.get(f"{USERS}/me", headers=headers)
+        assert response.status_code == 401
+        assert response.headers["www-authenticate"] == INVALID_TOKEN
+
+    # A logged-out (blacklisted) token is presented and rejected too.
+    auth = {"Authorization": f"Bearer {good}"}
+    assert client.post(f"{USERS}/logout", headers=auth).status_code == 200
+    again = client.get(f"{USERS}/me", headers=auth)
+    assert again.status_code == 401
+    assert again.headers["www-authenticate"] == INVALID_TOKEN
+
+
+def test_missing_token_keeps_the_bare_challenge(client):
+    for response in (
+        client.get(f"{USERS}/me"),
+        client.get(f"{USERS}/me", headers={"Authorization": "Basic abc"}),
+        client.get(f"{ADMIN}/orders"),
+    ):
+        assert response.status_code == 401
+        assert response.headers["www-authenticate"] == BEARER
+
+
+def test_every_401_the_app_sends_carries_a_challenge(client):
+    """Walks the places that raise 401: login, refresh, the bearer
+    dependency (missing and rejected token) and the two password
+    re-confirmations (status unchanged, header added)."""
+    headers = _bearer(_registered_login(client))
+    responses = [
+        _login(client, password="Wr0ngPass1"),
+        client.post(f"{USERS}/refresh", json={"refresh_token": "nope"}),
+        client.get(f"{USERS}/me"),
+        client.get(f"{USERS}/me", headers={"Authorization": "Bearer nope"}),
+        client.post(f"{USERS}/data/delete", json={"confirmation": True, "password": "Wr0ngPass1"}, headers=headers),
+        client.post(
+            "/api/v1/legal/data-request",
+            json={"request_type": "deletion", "password": "Wr0ngPass1"},
+            headers=headers,
+        ),
+    ]
+
+    for response in responses:
+        assert response.status_code == 401, response.text
+        assert response.headers["www-authenticate"].startswith(BEARER)
