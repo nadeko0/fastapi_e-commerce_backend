@@ -413,6 +413,7 @@ async def get_user_cart(
 
 @router.post(
     "/items",
+    deprecated=True,
     response_model=APIResponse[CartResponse],
     responses={
         400: {"description": "Not enough stock available, or the cart already holds the maximum number of different items"},
@@ -500,6 +501,7 @@ async def add_to_cart(
 
 @router.put(
     "/items/{product_id}",
+    deprecated=True,
     response_model=APIResponse[CartResponse],
     responses={
         400: {"description": "Not enough stock available"},
