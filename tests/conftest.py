@@ -347,6 +347,28 @@ def fake_redis(monkeypatch):
     yield fake
 
 
+@pytest.fixture(autouse=True)
+def _session_local_is_the_test_database(monkeypatch):
+    """app.core.database.SessionLocal (what session_scope() opens, e.g. for
+    reconcile_payments run in a worker thread) is built from the production
+    DATABASE_URI. Point it at the test database, like the dependency
+    overrides do for get_db and the factory swap does for AsyncSessionLocal;
+    otherwise code that opens its own sync session would reach (or fail to
+    reach) a real database."""
+    monkeypatch.setattr(database_module, "SessionLocal", TestingSessionLocal)
+
+
+@pytest.fixture
+def async_session_factory():
+    """The async sessionmaker the app uses, bound to the test database:
+    `async with async_session_factory() as session:` inside a coroutine run
+    by asyncio.run(). A session must be opened and closed on one loop (the
+    engine has no pool, so nothing outlives it). Use it for setup or checks
+    that must go through the same driver as the routes; db_session (sync)
+    remains the way to seed rows."""
+    return database_module.AsyncSessionLocal
+
+
 @pytest.fixture
 def client(monkeypatch, fake_redis):
     monkeypatch.setattr("app.api.v1.users.send_welcome_email", lambda *a, **k: True)
