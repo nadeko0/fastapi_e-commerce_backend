@@ -97,6 +97,10 @@ services:
     # "celerybeat-schedule" in the working directory. /app is owned by root
     # in the image and the process runs as appuser, so the default location
     # is not writable and beat would exit on startup. /tmp is.
+    # The file is lost with the container, which is fine: the daily job uses
+    # a crontab (fixed clock time), and the timedelta ones (5 min to 4 h)
+    # just restart their interval. A volume for it would need a directory
+    # owned by appuser in the image for no gain.
     command:
       - celery
       - -A

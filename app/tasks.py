@@ -540,9 +540,12 @@ def check_low_stock(threshold: int = 5) -> None:
 # guest-cart keys itself. The hourly cleanup_expired_carts task sent one TTL
 # request per key looking for keys without an expiry, which nothing creates.
 celery.conf.beat_schedule = {
+    # Daily at a fixed time, not timedelta(days=1): that counts from the
+    # start of beat, so every container re-create moved the next run a full
+    # day back. 02:30 keeps clear of the 03:15 reconciliation.
     'cleanup-inactive-accounts': {
         'task': 'cleanup_inactive_accounts',
-        'schedule': timedelta(days=1),
+        'schedule': crontab(hour=2, minute=30),
     },
     'update-product-stats': {
         'task': 'update_product_stats',
