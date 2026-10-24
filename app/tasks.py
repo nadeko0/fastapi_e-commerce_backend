@@ -18,7 +18,6 @@ from app.core.database import _build_connect_args
 from app.core.security import get_password_hash
 from app.models.order import Order
 from app.models.order_items import OrderItem
-from app.models.payment import Payment
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.order import OrderStatus, PaymentStatus
@@ -682,55 +681,48 @@ celery.conf.beat_schedule = {
 }
 
 
-# Payment attempts whose outcome is settled. Anything else (processing,
-# requires_action, unknown) may still be retried with its key, so it keeps it.
-_SETTLED_PAYMENT_STATUSES = ("succeeded", "failed")
-
-
 def clear_expired_idempotency_keys(db, batch_size: int = PURGE_BATCH_SIZE) -> int:
     """
-    Expires Idempotency-Keys older than IDEMPOTENCY_KEY_TTL_HOURS
+    Expires the Idempotency-Keys of orders older than IDEMPOTENCY_KEY_TTL_HOURS
     (draft-ietf-httpapi-idempotency-key-header-08, section 2.3). The key and
-    its fingerprint are set to NULL on the order, or on the payment attempt
-    when it is settled (succeeded, failed); the unique indexes on (user, key)
-    and (order, key) then accept the same value again, as a new key. Nothing
-    is deleted and updated_at is left as it was (expiring a key is not a
-    change of the order).
+    its fingerprint are set to NULL; the unique index on (user, key) then
+    accepts the same value again, as a new key. Nothing is deleted and
+    updated_at is left as it was (expiring a key is not a change of the order).
 
     Done by clearing, not by comparing created_at at lookup time, because the
-    unique indexes would still refuse a second row under the old value.
-    Attempts still in flight or of unknown outcome keep their key at any age:
-    the retry of an "unknown" attempt (3.2.1) is sent with it. The sweep is
-    daily, so a key lives up to the TTL plus a day; it is never shorter.
+    unique index would still refuse a second row under the old value.
+
+    Only ORDER keys expire: POST /orders sends nothing to a provider. The key
+    of a payment attempt (/pay, /checkout-session) is never cleared: it is
+    forwarded to Stripe (_provider_idempotency_key), which keeps keys for at
+    least 24 hours with no upper bound, and replays the old PaymentIntent or
+    Session for a reused key; a new local attempt under it would then collide
+    with the unique payment_intent_id. The sweep is daily, so an order key
+    lives up to the TTL plus a day; it is never shorter.
     Idempotent; commits per batch of `batch_size` rows.
 
     Returns the number of keys cleared.
     """
     cutoff = utc_now() - timedelta(hours=settings.IDEMPOTENCY_KEY_TTL_HOURS)
     cleared = 0
-    for model, extra in (
-        (Order, ()),
-        (Payment, (Payment.status.in_(_SETTLED_PAYMENT_STATUSES),)),
-    ):
-        while True:
-            ids = db.execute(
-                select(model.id).where(
-                    model.idempotency_key.isnot(None),
-                    model.created_at < cutoff,
-                    *extra,
-                ).order_by(model.id).limit(batch_size)
-            ).scalars().all()
-            if not ids:
-                break
-            db.execute(
-                update(model).where(model.id.in_(ids)).values(
-                    idempotency_key=None,
-                    idempotency_fingerprint=None,
-                    updated_at=model.updated_at,
-                )
+    while True:
+        ids = db.execute(
+            select(Order.id).where(
+                Order.idempotency_key.isnot(None),
+                Order.created_at < cutoff,
+            ).order_by(Order.id).limit(batch_size)
+        ).scalars().all()
+        if not ids:
+            break
+        db.execute(
+            update(Order).where(Order.id.in_(ids)).values(
+                idempotency_key=None,
+                idempotency_fingerprint=None,
+                updated_at=Order.updated_at,
             )
-            db.commit()
-            cleared += len(ids)
+        )
+        db.commit()
+        cleared += len(ids)
     logger.info("Idempotency sweep cleared %d expired key(s)", cleared)
     return cleared
 

@@ -5,10 +5,9 @@ SHOULD define such expiration policy and publish it in the documentation").
 
 Inside the TTL a key replays (same request) or is answered 422 (another
 request) as before. After it, the daily sweep clears the key and fingerprint
-of orders and of settled payment attempts (succeeded, failed) so the same
-value is a new key again; the business rows stay. An attempt still in flight
-or of unknown outcome keeps its key at any age: the safe retry of an
-"unknown" attempt (3.2.1) needs it.
+of ORDERS so the same value is a new key again; the rows stay. The key of a
+payment attempt (pay, checkout) is forwarded to Stripe, which may keep it
+longer than 24 hours, so it is never cleared, whatever the status or age.
 """
 import logging
 from datetime import timedelta
@@ -101,48 +100,9 @@ def test_an_expired_order_key_creates_a_new_order(shop):
     assert shop.db.query(Order).count() == 2
 
 
-def test_an_expired_key_is_no_longer_a_422_for_another_body(shop):
-    product = shop.product(price="39.98")
-    buyer = shop.buyer()
-    order = shop.order_of(buyer, product)
-    key = new_key()
-    assert shop.pay(buyer, order["id"], key=key).status_code == 200
-    _age(shop, *shop.db.query(Payment).all(), by=TTL + timedelta(hours=1))
-
-    assert tasks.cleanup_expired_idempotency_keys() == 1
-
-    payment = shop.db.query(Payment).one()
-    assert payment.idempotency_key is None and payment.idempotency_fingerprint is None
-    assert payment.status == "succeeded"
-    # The order is paid: the new attempt is refused for that reason (neither a
-    # 422 nor a replay), which shows the key was treated as new.
-    again = shop.pay(buyer, order["id"], token=PAY_3DS, key=key)
-    assert again.status_code not in (200, 422), again.text
-    assert shop.db.query(Payment).count() == 1
-
-
-def test_a_failed_attempt_key_is_freed_and_a_new_attempt_is_made(shop):
-    product = shop.product(price="39.98")
-    buyer = shop.buyer()
-    order = shop.order_of(buyer, product)
-    key = new_key()
-    assert shop.pay(buyer, order["id"], token=PAY_DECLINED, key=key).status_code != 500
-    failed = shop.db.query(Payment).one()
-    assert failed.status == "failed"
-    _age(shop, failed, by=TTL + timedelta(minutes=1))
-
-    assert tasks.cleanup_expired_idempotency_keys() == 1
-    # The provider prunes its own copy of the key too (Stripe: at least 24
-    # hours old); the mock keeps it until it is reset.
-    reset_provider()
-
-    retry = shop.pay(buyer, order["id"], key=key)
-    assert retry.status_code == 200, retry.text
-    assert shop.db.query(Payment).count() == 2
-
-
-@pytest.mark.parametrize("state", ["processing", "requires_action", "unknown"])
-def test_an_attempt_not_settled_keeps_its_key_whatever_its_age(shop, state):
+@pytest.mark.parametrize("state", ["succeeded", "failed", "processing",
+                                   "requires_action", "unknown"])
+def test_a_payment_attempt_keeps_its_key_whatever_its_status_and_age(shop, state):
     product = shop.product(price="39.98")
     buyer = shop.buyer()
     order = shop.order_of(buyer, product)
@@ -157,6 +117,66 @@ def test_an_attempt_not_settled_keeps_its_key_whatever_its_age(shop, state):
     payment = _fresh(shop, payment)
     assert payment.idempotency_key == key
     assert payment.idempotency_fingerprint is not None
+
+
+def test_a_reused_pay_key_after_the_sweep_replays_never_500(shop):
+    # Before the fix the sweep freed the key of a settled attempt; the reuse
+    # made a new local attempt, the provider replayed the old PaymentIntent
+    # and the unique payment_intent_id answered 500.
+    product = shop.product(price="39.98")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    first = shop.pay(buyer, order["id"], key=key)
+    assert first.status_code == 200
+    _age(shop, *shop.db.query(Order).all(), *shop.db.query(Payment).all(),
+         by=TTL + timedelta(days=3))
+
+    tasks.cleanup_expired_idempotency_keys()
+
+    again = shop.pay(buyer, order["id"], key=key)
+    assert again.status_code == 200, again.text
+    assert again.json()["data"]["id"] == first.json()["data"]["id"]
+    other = shop.pay(buyer, order["id"], token=PAY_3DS, key=key)
+    assert other.status_code == 422
+    assert shop.db.query(Payment).count() == 1
+
+
+def test_a_reused_failed_pay_key_after_the_sweep_answers_as_before(shop):
+    product = shop.product(price="39.98")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    first = shop.pay(buyer, order["id"], token=PAY_DECLINED, key=key)
+    assert first.status_code != 500
+    before = shop.pay(buyer, order["id"], token=PAY_DECLINED, key=key)
+    _age(shop, *shop.db.query(Payment).all(), by=TTL + timedelta(days=3))
+
+    tasks.cleanup_expired_idempotency_keys()
+
+    again = shop.pay(buyer, order["id"], token=PAY_DECLINED, key=key)
+    assert again.status_code == before.status_code != 500, again.text
+    assert again.json()["data"]["id"] == before.json()["data"]["id"]
+    assert shop.db.query(Payment).count() == 1
+
+
+def test_a_reused_checkout_key_after_the_sweep_replays_never_500(shop):
+    product = shop.product(price="39.98")
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product)
+    key = new_key()
+    first = shop.checkout_session(buyer, order["id"], key=key)
+    assert first.status_code == 200, first.text
+    _age(shop, *shop.db.query(Order).all(), *shop.db.query(Payment).all(),
+         by=TTL + timedelta(days=3))
+
+    tasks.cleanup_expired_idempotency_keys()
+
+    again = shop.checkout_session(buyer, order["id"], key=key)
+    assert again.status_code == 200, again.text
+    for field in ("payment_id", "checkout_session_id", "url"):
+        assert again.json()["data"][field] == first.json()["data"][field]
+    assert shop.db.query(Payment).count() == 1
 
 
 def test_the_task_is_idempotent_and_batched(shop, caplog):
@@ -189,12 +209,17 @@ def test_a_row_without_a_key_is_left_alone(shop):
     assert tasks.cleanup_expired_idempotency_keys() == 0
 
 
-def test_the_key_header_documents_the_expiry(client):
+def test_the_key_header_documents_the_policy_of_each_endpoint(client):
     spec = client.get("/api/v1/openapi.json").json()
     hours = settings.IDEMPOTENCY_KEY_TTL_HOURS
-    for path in ("/api/v1/orders", "/api/v1/orders/{order_id}/pay",
-                 "/api/v1/orders/{order_id}/checkout-session",
-                 "/api/v1/orders/{order_id}/refund"):
+
+    def description(path):
         parameters = spec["paths"][path]["post"]["parameters"]
-        header = next(p for p in parameters if p["name"] == "Idempotency-Key")
-        assert f"{hours} hours" in header["description"], path
+        return next(p for p in parameters if p["name"] == "Idempotency-Key")["description"]
+
+    assert f"{hours} hours" in description("/api/v1/orders")
+    for path in ("/api/v1/orders/{order_id}/pay",
+                 "/api/v1/orders/{order_id}/checkout-session"):
+        text = description(path)
+        assert "does not expire" in text and "hours" not in text, path
+    assert "provider" in description("/api/v1/orders/{order_id}/refund")
