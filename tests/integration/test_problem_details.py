@@ -12,6 +12,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from route_support import probe_routes
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
@@ -236,14 +237,12 @@ def test_503_of_the_in_flight_limit_has_the_type_and_retry_after():
 
 @pytest.fixture
 def exploding_route():
-    @app.get("/_explode_problem")
-    def explode():
-        raise RuntimeError(SECRET)
+    with probe_routes():
+        @app.get("/_explode_problem")
+        def explode():
+            raise RuntimeError(SECRET)
 
-    try:
         yield "/_explode_problem"
-    finally:
-        app.router.routes.pop()
 
 
 def test_500_for_an_unhandled_exception_leaks_nothing(client, exploding_route):
@@ -259,17 +258,15 @@ def test_500_for_an_unhandled_exception_leaks_nothing(client, exploding_route):
 
 @pytest.fixture
 def typed_route():
-    @app.get("/_typed_problem")
-    def typed():
-        raise Problem(
-            409, type=ProblemType.IDEMPOTENCY_KEY_IN_USE, detail="Key is in use",
-            headers={"X-Extra": "kept"},
-        )
+    with probe_routes():
+        @app.get("/_typed_problem")
+        def typed():
+            raise Problem(
+                409, type=ProblemType.IDEMPOTENCY_KEY_IN_USE, detail="Key is in use",
+                headers={"X-Extra": "kept"},
+            )
 
-    try:
         yield "/_typed_problem"
-    finally:
-        app.router.routes.pop()
 
 
 def test_a_typed_problem_reaches_the_handler_and_keeps_its_headers(client, typed_route):

@@ -4,6 +4,7 @@ and the interactive docs pages."""
 
 import pytest
 from fastapi.testclient import TestClient
+from route_support import probe_routes
 
 from app.main import app
 
@@ -47,15 +48,13 @@ def test_404_carries_the_exact_headers(client):
 
 
 def test_500_carries_the_exact_headers():
-    @app.get("/_explode_values")
-    def explode():
-        raise RuntimeError("boom")
+    with probe_routes():
+        @app.get("/_explode_values")
+        def explode():
+            raise RuntimeError("boom")
 
-    try:
         with TestClient(app, raise_server_exceptions=False) as lenient:
             response = lenient.get("/_explode_values")
-    finally:
-        app.router.routes.pop()
 
     assert response.status_code == 500
     _assert_headers(response, API_HEADERS)

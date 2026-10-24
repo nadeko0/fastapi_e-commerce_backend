@@ -124,15 +124,13 @@ def test_public_catalog_response_is_unchanged(client):
 def test_a_cache_control_set_by_the_route_is_kept(client, monkeypatch):
     from app.main import app
 
-    @app.get(f"{USERS}/_cache_probe")
-    def probe():
-        from fastapi.responses import JSONResponse
-        return JSONResponse({}, headers={"Cache-Control": "private, max-age=5"})
+    with probe_routes():
+        @app.get(f"{USERS}/_cache_probe")
+        def probe():
+            from fastapi.responses import JSONResponse
+            return JSONResponse({}, headers={"Cache-Control": "private, max-age=5"})
 
-    try:
         response = client.get(f"{USERS}/_cache_probe")
-    finally:
-        app.router.routes.pop()
 
     assert response.headers["cache-control"] == "private, max-age=5"
 
@@ -216,6 +214,7 @@ def test_every_401_the_app_sends_carries_a_challenge(client):
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from route_support import probe_routes  # noqa: E402
 from starlette.applications import Starlette  # noqa: E402
 from starlette.responses import PlainTextResponse  # noqa: E402
 from starlette.routing import Route  # noqa: E402
@@ -234,14 +233,12 @@ SECURITY_HEADERS = (
 
 @pytest.fixture
 def exploding_route():
-    @app.get("/_explode")
-    def explode():
-        raise RuntimeError("boom")
+    with probe_routes():
+        @app.get("/_explode")
+        def explode():
+            raise RuntimeError("boom")
 
-    try:
         yield "/_explode"
-    finally:
-        app.router.routes.pop()
 
 
 def test_unhandled_exception_500_carries_the_security_headers(client, exploding_route):
@@ -258,15 +255,13 @@ def test_unhandled_exception_500_carries_the_security_headers(client, exploding_
 
 
 def test_500_on_a_private_route_is_no_store_too(client):
-    @app.get(f"{USERS}/_explode")
-    def explode():
-        raise RuntimeError("boom")
+    with probe_routes():
+        @app.get(f"{USERS}/_explode")
+        def explode():
+            raise RuntimeError("boom")
 
-    try:
         with TestClient(app, raise_server_exceptions=False) as lenient:
             response = lenient.get(f"{USERS}/_explode")
-    finally:
-        app.router.routes.pop()
 
     assert response.status_code == 500
     assert response.headers["cache-control"] == "no-store"

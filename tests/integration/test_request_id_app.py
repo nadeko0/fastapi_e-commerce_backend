@@ -1,6 +1,7 @@
 """X-Request-ID on the real application stack (404, 500, CORS exposure)."""
 
 from fastapi.testclient import TestClient
+from route_support import probe_routes
 
 from app.main import app
 
@@ -15,15 +16,13 @@ def test_real_app_returns_a_request_id_on_200_and_404(client):
 
 
 def test_real_app_500_carries_the_request_id():
-    @app.get("/_explode_rid")
-    def explode():
-        raise RuntimeError("boom")
+    with probe_routes():
+        @app.get("/_explode_rid")
+        def explode():
+            raise RuntimeError("boom")
 
-    try:
         with TestClient(app, raise_server_exceptions=False) as lenient:
             response = lenient.get("/_explode_rid", headers={"X-Request-ID": "r500"})
-    finally:
-        app.router.routes.pop()
 
     assert response.status_code == 500
     assert response.headers["X-Request-ID"] == "r500"

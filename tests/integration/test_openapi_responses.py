@@ -7,6 +7,7 @@ declaration (the webhook header, the admin filters, GET /products).
 
 import pytest
 from payment_support import Shop, reset_provider
+from route_support import probe_routes
 
 from app.api.v1.cart import guest_cart_cookie_name
 from app.models.category import Category
@@ -238,14 +239,12 @@ def test_a_document_rebuilt_after_the_routes_changed_still_says_problem_json(cli
 
     app.openapi()
 
-    @app.get(f"{API}/_openapi_probe")
-    def probe():
-        return {}
+    with probe_routes():
+        @app.get(f"{API}/_openapi_probe")
+        def probe():
+            return {}
 
-    try:
         rebuilt = app.openapi()
-    finally:
-        app.router.routes.pop()
 
     for path in rebuilt["paths"].values():
         for operation in path.values():
