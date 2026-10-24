@@ -30,11 +30,18 @@ from app.models.payment import (
 )
 from app.models.payment_discrepancy import PaymentDiscrepancy
 from app.models.product import Product, ProductVariant
+from app.schemas.admin import (
+    DiscrepancyListResponse,
+    DiscrepancyResponse,
+    OrderStatistics,
+    ReconciliationQueued,
+    ReconciliationRunResult,
+)
 from app.schemas.category import (
     CategoryCreate,
     CategoryResponse,
 )
-from app.schemas.common import APIResponse, Int32, PaginationParams, sortable_pagination
+from app.schemas.common import Int32, Message, PaginationParams, sortable_pagination
 from app.schemas.order import (
     OrderListResponse,
     OrderResponse,
@@ -92,7 +99,7 @@ router = APIRouter(
 )
 @router.post(
     "/categories",
-    response_model=APIResponse[CategoryResponse],
+    response_model=CategoryResponse,
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Parent category not found"},
@@ -131,11 +138,11 @@ async def create_category(
 
     await redis.delete("category:tree")
 
-    return APIResponse.success_response(CategoryResponse.model_validate(db_category))
+    return CategoryResponse.model_validate(db_category)
 
 @router.post(
     "/products",
-    response_model=APIResponse[ProductResponse],
+    response_model=ProductResponse,
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Category not found"},
@@ -189,12 +196,12 @@ async def create_product(
     # _sa_instance_state) into the Pydantic constructor.
     base = ProductInDB.model_validate(db_product, from_attributes=True)
     response = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
-    return APIResponse.success_response(response)
+    return response
 
 # PATCH shares the PUT handler: same schema, checks, side effects, response.
 @router.patch(
     "/products/{product_id}",
-    response_model=APIResponse[ProductResponse],
+    response_model=ProductResponse,
     summary="Patch Product",
     description=PATCH_DESCRIPTION,
     openapi_extra=merge_patch_body("ProductUpdate"),
@@ -205,7 +212,7 @@ async def create_product(
 )
 @router.put(
     "/products/{product_id}",
-    response_model=APIResponse[ProductResponse],
+    response_model=ProductResponse,
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or category not found"},
@@ -287,11 +294,11 @@ async def update_product(
     base = ProductInDB.model_validate(db_product, from_attributes=True)
     result = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
     response.headers["ETag"] = etag_for(result)
-    return APIResponse.success_response(result)
+    return result
 
 @router.delete(
     "/products/{product_id}",
-    response_model=APIResponse[dict],
+    response_model=Message,
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Product not found"},
@@ -331,9 +338,7 @@ async def delete_product(
     await redis.invalidate_product_cache(product_id)
     await redis.invalidate_category_cache()
 
-    return APIResponse.success_response({
-        "message": "Product deleted successfully"
-    })
+    return Message(message="Product deleted successfully")
 
 # The columns the admin order list can be sorted by. sort_by used to accept
 # any attribute of the Order class (hasattr): relationships such as "user"
@@ -358,7 +363,7 @@ class AdminOrderListParams(PaginationParams):
 
 @router.get(
     "/orders",
-    response_model=APIResponse[OrderListResponse],
+    response_model=OrderListResponse,
     responses={
         403: {"description": "Admin privileges required"},
         422: {"description": "Invalid status, payment_status, or sort_by value"},
@@ -448,17 +453,17 @@ async def list_orders(
         )
     ).scalars().all()
 
-    return APIResponse.success_response(OrderListResponse(
+    return OrderListResponse(
         items=[OrderResponse.model_validate(order) for order in orders],
         total=total,
         page=pagination.page,
         size=pagination.size,
         has_more=total > pagination.page * pagination.size,
-    ))
+    )
 
 @router.get(
     "/stats",
-    response_model=APIResponse[dict],
+    response_model=OrderStatistics,
     responses={
         403: {"description": "Admin privileges required"},
         422: {"description": "Invalid period value"},
@@ -479,7 +484,7 @@ async def get_statistics(
         cached_stats.setdefault("currency", settings.STORE_CURRENCY)
         for entry in cached_stats.get("popular_products", []):
             entry.setdefault("currency", settings.STORE_CURRENCY)
-        return APIResponse.success_response(cached_stats)
+        return cached_stats
 
 
     now = utc_now()
@@ -543,7 +548,7 @@ async def get_statistics(
 
     await redis.setex(cache_key, 300, stats)
 
-    return APIResponse.success_response(stats)
+    return stats
 
 # --- Product variants -------------------------------------------------
 #
@@ -615,7 +620,7 @@ async def _commit_variant(db: AsyncSession, sku: str | None, variant_id: int | N
 
 @router.post(
     "/products/{product_id}/variants",
-    response_model=APIResponse[ProductVariantResponse],
+    response_model=ProductVariantResponse,
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Product not found"},
@@ -650,11 +655,11 @@ async def create_product_variant(
     await _commit_variant(db, variant.sku)
     await db.refresh(db_variant)
 
-    return APIResponse.success_response(ProductVariantResponse.model_validate(db_variant))
+    return ProductVariantResponse.model_validate(db_variant)
 
 @router.get(
     "/products/{product_id}/variants",
-    response_model=APIResponse[ProductVariantListResponse],
+    response_model=ProductVariantListResponse,
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Product not found"},
@@ -679,14 +684,14 @@ async def list_product_variants(
         )
     ).scalars().all()
 
-    return APIResponse.success_response(ProductVariantListResponse(
+    return ProductVariantListResponse(
         items=[ProductVariantResponse.model_validate(v) for v in variants],
         total=len(variants),
-    ))
+    )
 
 @router.get(
     "/products/{product_id}/variants/{variant_id}",
-    response_model=APIResponse[ProductVariantResponse],
+    response_model=ProductVariantResponse,
     responses={
         304: {"description": "Not modified: If-None-Match matches the variant's current ETag"},
         403: {"description": "Admin privileges required"},
@@ -725,13 +730,13 @@ async def get_product_variant(
     if if_none_match_hits(if_none_match, etag):
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
     response.headers["ETag"] = etag
-    return APIResponse.success_response(result)
+    return result
 
 
 # PATCH shares the PUT handler: same schema, checks, side effects, response.
 @router.patch(
     "/products/{product_id}/variants/{variant_id}",
-    response_model=APIResponse[ProductVariantResponse],
+    response_model=ProductVariantResponse,
     summary="Patch Product Variant",
     description=PATCH_DESCRIPTION,
     openapi_extra=merge_patch_body("ProductVariantUpdate"),
@@ -744,7 +749,7 @@ async def get_product_variant(
 )
 @router.put(
     "/products/{product_id}/variants/{variant_id}",
-    response_model=APIResponse[ProductVariantResponse],
+    response_model=ProductVariantResponse,
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or variant not found"},
@@ -812,7 +817,7 @@ async def update_product_variant(
 
     result = ProductVariantResponse.model_validate(db_variant)
     response.headers["ETag"] = etag_for(result)
-    return APIResponse.success_response(result)
+    return result
 
 
 # -- Payment reconciliation ----------------------------------------------------------
@@ -834,7 +839,7 @@ WebhookEventListParams = sortable_pagination("WebhookEventListParams", tuple(WEB
 
 @router.get(
     "/reconciliation/discrepancies",
-    response_model=APIResponse[dict],
+    response_model=DiscrepancyListResponse,
     responses={403: {"description": "Admin privileges required"}},
 )
 async def list_reconciliation_discrepancies(
@@ -859,34 +864,34 @@ async def list_reconciliation_discrepancies(
             PaymentDiscrepancy.id, [PaymentDiscrepancy.detected_at, PaymentDiscrepancy.id],
         ),
     )
-    return APIResponse.success_response({
-        "items": [
-            {
-                "id": d.id,
-                "order_id": p.order_id,
-                "payment_id": p.id,
-                "transaction_id": p.payment_intent_id,
-                "kind": d.kind,
-                "subject": d.subject,
-                "ours": d.ours,
-                "theirs": d.theirs,
-                "detected_at": d.detected_at,
-                "last_seen_at": d.last_seen_at,
-            }
+    return DiscrepancyListResponse(
+        items=[
+            DiscrepancyResponse(
+                id=d.id,
+                order_id=p.order_id,
+                payment_id=p.id,
+                transaction_id=p.payment_intent_id,
+                kind=d.kind,
+                subject=d.subject,
+                ours=d.ours,
+                theirs=d.theirs,
+                detected_at=d.detected_at,
+                last_seen_at=d.last_seen_at,
+            )
             for d, p in rows
         ],
-        "total": total,
-        "page": pagination.page,
-        "size": pagination.size,
-        "has_more": total > pagination.page * pagination.size,
-    })
+        total=total,
+        page=pagination.page,
+        size=pagination.size,
+        has_more=total > pagination.page * pagination.size,
+    )
 
 
 @router.post(
     "/reconciliation/run",
-    response_model=APIResponse[dict],
+    response_model=ReconciliationRunResult | ReconciliationQueued,
     responses={
-        202: {"description": "The full run is queued (no order_id)"},
+        202: {"description": "The full run is queued (no order_id)", "model": ReconciliationQueued},
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
         503: {"description": "Task queue unavailable, the full run was not queued"},
@@ -916,7 +921,7 @@ async def run_reconciliation(
                 headers={"Retry-After": "5"},
             ) from e
         response.status_code = http_status.HTTP_202_ACCEPTED
-        return APIResponse.success_response({"queued": True})
+        return ReconciliationQueued(queued=True)
     if not (await db.execute(select(Order.id).where(Order.id == order_id).limit(1))).first():
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -931,12 +936,12 @@ async def run_reconciliation(
         with database.session_scope() as thread_db:
             return reconcile_payments(thread_db, provider, order_id=order_id).as_dict()
 
-    return APIResponse.success_response(await run_in_threadpool(reconcile_order))
+    return await run_in_threadpool(reconcile_order)
 
 
 @router.get(
     "/webhook-events",
-    response_model=APIResponse[WebhookEventListResponse],
+    response_model=WebhookEventListResponse,
     responses={
         403: {"description": "Admin privileges required"},
         422: {"description": "Invalid status value"},
@@ -981,18 +986,18 @@ async def list_webhook_events(
             .limit(pagination.size)
         )
     ).scalars().all()
-    return APIResponse.success_response(WebhookEventListResponse(
+    return WebhookEventListResponse(
         items=[WebhookEventResponse.model_validate(event) for event in events],
         total=total,
         page=pagination.page,
         size=pagination.size,
         has_more=total > pagination.page * pagination.size,
-    ))
+    )
 
 
 @router.post(
     "/webhook-events/{event_id}/replay",
-    response_model=APIResponse[WebhookEventResponse],
+    response_model=WebhookEventResponse,
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Unknown webhook event"},
@@ -1037,4 +1042,4 @@ async def replay_webhook_event(
     event.attempts = 0
     await db.commit()
     await run_in_threadpool(enqueue_event, event.event_id)
-    return APIResponse.success_response(WebhookEventResponse.model_validate(event))
+    return WebhookEventResponse.model_validate(event)
