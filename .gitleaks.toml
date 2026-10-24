@@ -1,0 +1,32 @@
+# gitleaks configuration (CI job "secrets", and `gitleaks git` / `gitleaks dir`
+# locally). Starts from the default rules; the allowlist below covers only
+# findings that are not secrets.
+title = "fastapi-e-commerce-backend gitleaks config"
+
+[extend]
+useDefault = true
+
+# The generic-api-key rule matches any key-like assignment with enough entropy.
+# In this repository that is test data and the CI stub, none of it a credential:
+#   tests/                    throwaway passwords and tokens the tests generate
+#                             or send (a fake whsec-shaped value in
+#                             tests/unit/test_payment_provider_config.py
+#                             included, and the setdefault() values in
+#                             tests/conftest.py)
+#   .github/workflows/ci.yml  JWT_SECRET_KEY, a stub that exists only inside
+#                             the CI job
+# Scoped to generic-api-key: every other rule (private keys, cloud and Stripe
+# tokens, ...) still scans these files.
+[[allowlists]]
+description = "test data and the CI JWT stub are not credentials"
+targetRules = ["generic-api-key"]
+paths = [
+    '''(^|/)tests/.*\.py$''',
+    '''(^|/)\.github/workflows/ci\.yml$''',
+]
+
+# `gitleaks dir` does not read .gitignore: a developer's virtual environment
+# is third-party code, not this repository's.
+[[allowlists]]
+description = "the local virtual environment"
+paths = ['''(^|/)\.venv/''']
