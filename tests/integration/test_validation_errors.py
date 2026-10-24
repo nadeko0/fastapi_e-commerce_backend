@@ -79,8 +79,8 @@ def test_weak_password_422_does_not_echo_it(client):
 def test_short_password_422_keeps_constraint_context(client):
     # PasswordUpdate.new_password has min_length=8; ctx carries the 8, not the input.
     response = _assert_same_but_input(
-        client, "POST", f"{USERS}/password/reset/sometoken",
-        secret="sh0rt", json={"current_password": "x", "new_password": "sh0rt"},
+        client, "POST", f"{USERS}/password/reset/confirm",
+        secret="sh0rt", json={"token": "sometoken", "current_password": "x", "new_password": "sh0rt"},
     )
     ctxs = [e["ctx"] for e in response.json()["detail"] if "ctx" in e]
     assert {"min_length": 8} in ctxs
@@ -98,8 +98,8 @@ def test_missing_field_422_does_not_echo_the_body(client):
 def test_password_reset_422_does_not_echo_new_password(client):
     # new_password is on the blocklist (no composition rules since 3.3.0): refused.
     _assert_same_but_input(
-        client, "POST", f"{USERS}/password/reset/sometoken",
-        secret="qwertyuiop", json={"new_password": "qwertyuiop"},
+        client, "POST", f"{USERS}/password/reset/confirm",
+        secret="qwertyuiop", json={"token": "sometoken", "new_password": "qwertyuiop"},
     )
 
 

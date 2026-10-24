@@ -1,6 +1,7 @@
 """4.0.0 removed what 3.3.0 deprecated: five operations, and the query
 parameters of four actions that now take only the JSON body."""
 import pytest
+from test_auth import _reset_token_for
 from test_orders import (
     CART_PREFIX,
     ORDERS_PREFIX,
@@ -37,12 +38,55 @@ def test_removed_route_is_a_404(client, method, url):
     assert client.request(method, url).status_code == 404
 
 
-def test_reset_token_get_is_gone_but_the_path_still_answers_post(client):
-    response = client.get(f"{USERS}/password/reset/sometoken")
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_reset_token_path_is_gone_for_every_method(client, method):
+    response = client.request(
+        method, f"{USERS}/password/reset/sometoken",
+        json={"new_password": "NewStr0ngPass"} if method == "POST" else None,
+    )
 
-    # The path still exists for POST (reset by token), so routing answers 405.
-    assert response.status_code == 405
-    assert response.headers["Allow"] == "POST"
+    # No route has this path any more (the token moved to the body of
+    # POST /password/reset/confirm), so routing answers 404, not 405: 405
+    # would mean the path still existed for another method.
+    assert response.status_code == 404
+
+
+def test_reset_confirm_takes_the_token_from_the_body_only(client):
+    # A missing token is a validation error, not an invalid-token 400.
+    missing = client.post(f"{USERS}/password/reset/confirm", json={"new_password": "NewStr0ngPass"})
+    assert missing.status_code == 422
+    assert missing.json()["detail"][0]["loc"] == ["body", "token"]
+
+    empty = client.post(
+        f"{USERS}/password/reset/confirm", json={"token": "", "new_password": "NewStr0ngPass"}
+    )
+    assert empty.status_code == 422
+
+    # A token in the query string is not read.
+    in_query = client.post(
+        f"{USERS}/password/reset/confirm?token=sometoken", json={"new_password": "NewStr0ngPass"}
+    )
+    assert in_query.status_code == 422
+
+    bad = client.post(
+        f"{USERS}/password/reset/confirm", json={"token": "sometoken", "new_password": "NewStr0ngPass"}
+    )
+    assert bad.status_code == 400
+
+
+def test_reset_token_never_appears_in_the_request_line(client, valid_registration_payload):
+
+    client.post(f"{USERS}/register", json=valid_registration_payload)
+    token = _reset_token_for(valid_registration_payload["email"])
+
+    response = client.post(
+        f"{USERS}/password/reset/confirm", json={"token": token, "new_password": "NewStr0ngPass"}
+    )
+
+    assert response.status_code == 200
+    assert token not in str(response.request.url)
+    assert token not in response.request.url.path
+    assert token in response.request.content.decode()
 
 
 def test_openapi_has_no_deprecated_anywhere(client):

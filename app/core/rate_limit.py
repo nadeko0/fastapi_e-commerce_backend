@@ -76,7 +76,7 @@ _ROUTE_LIMITS = {
     ("POST", "/users/register"): "RATE_LIMIT_AUTH",
     ("POST", "/users/login"): "RATE_LIMIT_AUTH",
     ("POST", "/users/password/reset"): "RATE_LIMIT_AUTH",
-    ("POST", "/users/password/reset/{token}"): "RATE_LIMIT_AUTH",
+    ("POST", "/users/password/reset/confirm"): "RATE_LIMIT_AUTH",
     ("POST", "/users/verify-email"): "RATE_LIMIT_AUTH",
     ("POST", "/users/password/reset-token/validate"): "RATE_LIMIT_AUTH",
     ("POST", "/users/verify-email/resend"): "RATE_LIMIT_AUTH",

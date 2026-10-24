@@ -15,7 +15,8 @@ if TYPE_CHECKING:
 # The pages the frontend must serve: the links in the verification and
 # reset emails open them, and each reads the token from its query string
 # and sends it in the JSON body of POST /users/verify-email and
-# POST /users/password/reset/{token}. The API has no GET for a token.
+# POST /users/password/reset/confirm (with the new password). The API has no
+# GET for a token.
 VERIFY_EMAIL_PAGE_PATH = "/verify-email"
 RESET_PASSWORD_PAGE_PATH = "/reset-password"
 

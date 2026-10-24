@@ -186,10 +186,7 @@ class TokenBody(BaseModel):
     token: str = Field(..., min_length=1)
 
 
-class PasswordResetConfirm(BaseModel):
-    """Body of the reset-by-token route: the token proves the right to set
-    a password, so only the new one is sent. Extra fields (an old client
-    still sending current_password) are ignored, the Pydantic default."""
+class NewPassword(BaseModel):
     new_password: str = Field(..., min_length=8)
 
     @field_validator('new_password')
@@ -197,7 +194,16 @@ class PasswordResetConfirm(BaseModel):
     def validate_new_password_strength(cls, v):
         return validate_new_password(v)
 
-class PasswordUpdate(PasswordResetConfirm):
+
+class PasswordResetConfirm(TokenBody, NewPassword):
+    """Body of the reset-by-token route: the token proves the right to set
+    a password, so the current one is not sent. Both travel in the body:
+    a token in the path would end up in access logs. Extra fields (an old
+    client still sending current_password) are ignored, the Pydantic
+    default."""
+
+
+class PasswordUpdate(NewPassword):
     current_password: str
 
 class GDPRExport(BaseModel):

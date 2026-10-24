@@ -374,8 +374,8 @@ def test_password_reset_needs_only_new_password(client, valid_registration_paylo
     reset_token = _reset_token_for(valid_registration_payload["email"])
 
     response = client.post(
-        f"{API_PREFIX}/password/reset/{reset_token}",
-        json={"new_password": "NewStr0ngPass"},
+        f"{API_PREFIX}/password/reset/confirm",
+        json={"token": reset_token, "new_password": "NewStr0ngPass"},
     )
 
     assert response.status_code == 200
@@ -395,8 +395,8 @@ def test_password_reset_still_accepts_and_ignores_current_password(
     reset_token = _reset_token_for(valid_registration_payload["email"])
 
     response = client.post(
-        f"{API_PREFIX}/password/reset/{reset_token}",
-        json={"current_password": "wrong-on-purpose", "new_password": "NewStr0ngPass"},
+        f"{API_PREFIX}/password/reset/confirm",
+        json={"token": reset_token, "current_password": "wrong-on-purpose", "new_password": "NewStr0ngPass"},
     )
 
     assert response.status_code == 200
@@ -407,7 +407,7 @@ def test_password_reset_weak_new_password_is_422_with_or_without_current_passwor
 ):
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
     reset_token = _reset_token_for(valid_registration_payload["email"])
-    url = f"{API_PREFIX}/password/reset/{reset_token}"
+    url = f"{API_PREFIX}/password/reset/confirm"
 
     for body in (
         {"new_password": "short1"},
@@ -415,11 +415,11 @@ def test_password_reset_weak_new_password_is_422_with_or_without_current_passwor
         {"new_password": "12345678"},
         {"current_password": "x", "new_password": "qwertyuiop"},
     ):
-        response = client.post(url, json=body)
+        response = client.post(url, json={"token": reset_token, **body})
         assert response.status_code == 422, body
         assert response.json()["detail"][0]["loc"][:2] == ["body", "new_password"]
 
-    assert client.post(url, json={}).status_code == 422
+    assert client.post(url, json={"token": reset_token}).status_code == 422
 
 
 def test_password_reset_flow_allows_login_with_new_password(client, valid_registration_payload):
@@ -430,8 +430,8 @@ def test_password_reset_flow_allows_login_with_new_password(client, valid_regist
     assert validate_response.status_code == 200
 
     reset_response = client.post(
-        f"{API_PREFIX}/password/reset/{reset_token}",
-        json={"current_password": "unused", "new_password": "NewStr0ngPass"},
+        f"{API_PREFIX}/password/reset/confirm",
+        json={"token": reset_token, "current_password": "unused", "new_password": "NewStr0ngPass"},
     )
     assert reset_response.status_code == 200
 
@@ -456,8 +456,8 @@ def test_password_reset_flow_allows_login_with_new_password(client, valid_regist
 
 def test_password_reset_rejects_invalid_token(client):
     response = client.post(
-        f"{API_PREFIX}/password/reset/not-a-real-token",
-        json={"current_password": "unused", "new_password": "NewStr0ngPass"},
+        f"{API_PREFIX}/password/reset/confirm",
+        json={"token": "not-a-real-token", "current_password": "unused", "new_password": "NewStr0ngPass"},
     )
 
     assert response.status_code == 400
@@ -479,8 +479,8 @@ def _emailed_reset_token(client, monkeypatch, email):
 
 def _reset(client, token, new_password):
     return client.post(
-        f"{API_PREFIX}/password/reset/{token}",
-        json={"current_password": "unused", "new_password": new_password},
+        f"{API_PREFIX}/password/reset/confirm",
+        json={"token": token, "current_password": "unused", "new_password": new_password},
     )
 
 
@@ -681,8 +681,8 @@ def test_reset_password_invalidates_previously_issued_access_token(
 
         reset_token = _reset_token_for(valid_registration_payload["email"])
         reset_response = client.post(
-            f"{API_PREFIX}/password/reset/{reset_token}",
-            json={"current_password": "unused", "new_password": "NewStr0ngPass"},
+            f"{API_PREFIX}/password/reset/confirm",
+            json={"token": reset_token, "current_password": "unused", "new_password": "NewStr0ngPass"},
         )
         assert reset_response.status_code == 200
 

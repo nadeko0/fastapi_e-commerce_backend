@@ -927,14 +927,14 @@ async def _check_reset_token(token: str, db: AsyncSession):
         # Already used, or the password has changed since it was issued.
         raise _invalid_reset_token()
 
-    # No email in the answer: the token travels in a URL, and whoever sees
-    # it must not learn whose account it opens just by checking it.
+    # No email in the answer: whoever holds the token (it was in an emailed
+    # link) must not learn whose account it opens just by checking it.
     return APIResponse.success_response({
         "message": "Token is valid"
     })
 
 @router.post(
-    "/password/reset/{token}",
+    "/password/reset/confirm",
     response_model=APIResponse[dict],
     responses={
         400: {"description": "Invalid or expired reset token"},
@@ -944,14 +944,13 @@ async def _check_reset_token(token: str, db: AsyncSession):
     },
 )
 async def reset_password(
-    token: str,
-    new_password: PasswordResetConfirm,
+    payload: PasswordResetConfirm,
     request: Request,
     db: DbSession,
 ):
-    """Reset a user's password using a valid reset token."""
+    """Reset a user's password using a valid reset token, both sent in the body."""
 
-    claims = verify_password_reset_token(token)
+    claims = verify_password_reset_token(payload.token)
     if not claims:
         raise _invalid_reset_token()
     email = claims.email
@@ -978,13 +977,13 @@ async def reset_password(
     if not claims.matches(old_hashed_password):
         raise _invalid_reset_token()
 
-    if is_blocked_password(new_password.new_password, email):
+    if is_blocked_password(payload.new_password, email):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=BLOCKED_MESSAGE,
         )
 
-    new_hashed_password = await get_password_hash_async(new_password.new_password)
+    new_hashed_password = await get_password_hash_async(payload.new_password)
 
     # Invalidate any token issued before this reset so a token held by
     # an attacker (the reason the user is resetting) stops working

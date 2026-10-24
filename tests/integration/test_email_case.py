@@ -94,8 +94,8 @@ def test_password_reset_finds_the_account_in_any_case(client, db_session, monkey
     # The mail goes to the address on the account, not to the spelling typed.
     assert sent[0][0] == "Legacy.User@Example.com"
     reset = client.post(
-        f"{USERS}/password/reset/{sent[0][1]}",
-        json={"current_password": "unused", "new_password": "NewStr0ngPass"},
+        f"{USERS}/password/reset/confirm",
+        json={"token": sent[0][1], "current_password": "unused", "new_password": "NewStr0ngPass"},
     )
     assert reset.status_code == 200
 
