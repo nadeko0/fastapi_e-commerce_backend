@@ -104,7 +104,7 @@ def test_a_refund_amount_must_be_positive(amount):
 
 def test_amounts_are_normalised_to_cents():
     assert RefundCreate(amount="5").amount == Decimal("5.00")
-    assert PaymentCreate(order_id=1, payment_method="stripe", amount=5).amount == Decimal("5.00")
+    assert PaymentCreate(order_id=1, payment_method="stripe", amount="5").amount == Decimal("5.00")
 
 
 def test_checkout_redirects_may_be_left_out_or_null():

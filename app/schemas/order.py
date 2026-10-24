@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
@@ -7,8 +8,10 @@ from urllib.parse import urlsplit
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
+    WithJsonSchema,
     field_validator,
     model_validator,
 )
@@ -35,30 +38,77 @@ def _to_cents(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"))
 
 
+# What a client may send for an amount: digits, and at most two fraction
+# digits after a point (trailing zeros do not count: 10.500 is 10.50, as
+# ORDER_AMOUNT_DECIMAL_PLACES says). A sign is let through so that a negative
+# amount is refused by its bound (with the message of the bound).
+_MONEY_UNSIGNED = r"\d+(\.\d{1,2}0*)?"
+_MONEY_PATTERN = "-?" + _MONEY_UNSIGNED
+_MONEY_INPUT = re.compile(_MONEY_PATTERN)
+
+
+def _decimal_string_only(value):
+    """A JSON number is a binary float in most clients (0.1 + 0.2 is
+    0.30000000000000004), and an integer is a money amount whose unit the
+    client may have got wrong, so an amount is accepted only as a decimal
+    string ("10.50"). A Decimal instance passes: it is what a database row
+    or the code itself hands to the model, and JSON cannot produce one.
+    Pydantic offers no switch for "string but not number" on a Decimal: its
+    strict mode accepts only Decimal instances in Python mode and has no
+    effect on JSON input (conversion table, Decimal), hence a before
+    validator, the documented hook for checking the raw input."""
+    if isinstance(value, bool | int | float):
+        raise ValueError('must be a decimal string such as "10.50", not a JSON number')
+    if isinstance(value, str) and not _MONEY_INPUT.fullmatch(value):
+        raise ValueError('must be a decimal string with at most two fraction digits, such as "10.50"')
+    return value
+
+
+def _money_input_schema(pattern: str, description: str) -> WithJsonSchema:
+    # What a client may send, as OpenAPI sees it: Pydantic's own schema for a
+    # Decimal in input mode is "number or string". Responses keep Pydantic's
+    # (a string).
+    return WithJsonSchema(
+        {"type": "string", "pattern": pattern, "examples": ["10.50"], "description": description},
+        mode="validation",
+    )
+
+
 # An amount of money: at most ORDER_AMOUNT_MAX_DIGITS digits and whole cents
 # (both checked before the AfterValidator, so quantize never sees a value it
 # cannot handle), then written with exactly two decimal places (10.5 -> 10.50).
+# On input it is a decimal string only (_decimal_string_only).
 # A bound (ge/gt) has to sit before the AfterValidator, where pydantic can
 # still fold it into the decimal schema; after it, it would not be enforced
 # and would leak into the OpenAPI schema. Hence one alias per bound.
 Money = Annotated[
     Decimal,
     Field(max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES),
+    BeforeValidator(_decimal_string_only),
     AfterValidator(_to_cents),
+    _money_input_schema(f"^{_MONEY_PATTERN}$", "Decimal string, at most two fraction digits."),
 ]
 NonNegativeMoney = Annotated[
     Decimal,
     Field(
         ge=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
     ),
+    BeforeValidator(_decimal_string_only),
     AfterValidator(_to_cents),
+    _money_input_schema(
+        f"^{_MONEY_UNSIGNED}$", "Decimal string, at most two fraction digits, not negative."
+    ),
 ]
 PositiveMoney = Annotated[
     Decimal,
     Field(
         gt=0, max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES
     ),
+    BeforeValidator(_decimal_string_only),
     AfterValidator(_to_cents),
+    _money_input_schema(
+        f"^{_MONEY_UNSIGNED}$", "Decimal string, at most two fraction digits, greater than zero."
+    ),
 ]
 
 

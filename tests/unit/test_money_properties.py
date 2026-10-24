@@ -83,13 +83,16 @@ def test_the_boundaries_convert_exactly(amount, cents):
 
 
 @given(amount=st.floats(min_value=0.01, max_value=99999999.99, allow_nan=False))
-def test_a_json_number_is_taken_by_its_shortest_form(amount):
-    # A client sends JSON numbers, which arrive as floats. One whose
-    # shortest form has at most two decimals is that many cents, never the
-    # float's binary neighbour; any other is refused (422), not rounded.
+def test_an_amount_is_a_decimal_string_never_a_json_number(amount):
+    # A JSON number arrives as a float (0.1 + 0.2), so no number is accepted
+    # whatever it is. The same value written as a string is that many cents,
+    # never the float's binary neighbour, if its shortest form has at most
+    # two decimals; any other is refused (422), not rounded.
+    with pytest.raises(ValidationError):
+        _pay(amount)
     text = repr(amount)
     try:
-        accepted = _pay(amount)
+        accepted = _pay(text)
     except ValidationError:
         assert Decimal(text).normalize().as_tuple().exponent < -2
     else:

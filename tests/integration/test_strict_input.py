@@ -203,3 +203,100 @@ def test_the_form_login_is_not_affected(client, valid_registration_payload):
     assert response.status_code != 422
 
 
+# --- money: a decimal string, never a JSON number ------------------------------------
+
+def _create_product(w, price):
+    return w.client.post(f"{API}/admin/products", headers=w.admin,
+                         json=_product_body(w.product.category_id, price=price))
+
+
+def _update_product(w, price):
+    return w.client.put(f"{API}/admin/products/{w.product.id}", headers=w.admin,
+                        json={"price": price})
+
+
+def _create_variant(w, price):
+    return w.client.post(f"{API}/admin/products/{w.product.id}/variants", headers=w.admin,
+                         json={"sku": f"M-{new_key()[:8]}", "price_override": price})
+
+
+def _update_variant(w, price):
+    variant = w.shop.variant(w.product)
+    return w.client.put(f"{API}/admin/products/{w.product.id}/variants/{variant.id}",
+                        headers=w.admin, json={"price_override": price})
+
+
+def _pay(w, amount):
+    return w.client.post(
+        f"{API}/orders/{w.order['id']}/pay", headers=_with_key(w.buyer.headers),
+        json={"order_id": w.order["id"], "payment_method": "stripe", "amount": amount,
+              "payment_method_token": PAY_OK})
+
+
+def _refund(w, amount):
+    assert _pay(w, "25.00").status_code == 200
+    return w.client.post(f"{API}/orders/{w.order['id']}/refund",
+                         headers=_with_key(w.admin), json={"amount": amount})
+
+
+MONEY_WRITES = [
+    pytest.param(_create_product, id="product-create"),
+    pytest.param(_update_product, id="product-update"),
+    pytest.param(_create_variant, id="variant-create"),
+    pytest.param(_update_variant, id="variant-update"),
+    pytest.param(_pay, id="payment"),
+    pytest.param(_refund, id="refund"),
+]
+
+
+@pytest.mark.parametrize("write", MONEY_WRITES)
+@pytest.mark.parametrize("number", [10.5, 10, 0.1, 1e3, True])
+def test_money_as_a_json_number_is_a_422(world, write, number):
+    response = write(world, number)
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["type"].endswith("/validation-error")
+    assert body["errors"][0]["loc"][0] == "body"
+
+
+@pytest.mark.parametrize("text", ["1e1", " 10.50", "10.50 ", "NaN", "Infinity", "10.", ".5", "1,5"])
+def test_money_that_is_not_a_plain_decimal_string_is_a_422(world, text):
+    assert _create_product(world, text).status_code == 422
+
+
+@pytest.mark.parametrize("write,expect", [
+    pytest.param(_create_product, 201, id="product-create"),
+    pytest.param(_update_product, 200, id="product-update"),
+    pytest.param(_create_variant, 201, id="variant-create"),
+    pytest.param(_update_variant, 200, id="variant-update"),
+])
+def test_money_as_a_decimal_string_is_accepted(world, write, expect):
+    response = write(world, "10.5")
+
+    assert response.status_code == expect, response.text
+
+
+def test_a_payment_and_a_refund_take_money_as_strings(world):
+    assert _pay(world, "25.00").status_code == 200
+    refund = world.client.post(
+        f"{API}/orders/{world.order['id']}/refund", headers=_with_key(world.admin),
+        json={"amount": "5.00"})
+
+    assert refund.status_code == 200, refund.text
+
+
+def test_openapi_describes_money_inputs_as_strings(client):
+    schemas = client.get(f"{API}/openapi.json").json()["components"]["schemas"]
+
+    for model, field in [("ProductCreate", "price"), ("PaymentCreate", "amount"),
+                         ("ProductVariantCreate", "price_override")]:
+        prop = schemas[model]["properties"][field]
+        variants = prop.get("anyOf", [prop])
+        typed = [v for v in variants if v.get("type") != "null"]
+        assert len(typed) == 1 and typed[0]["type"] == "string", (model, prop)
+        assert "pattern" in typed[0]
+    refund = schemas["RefundCreate"]["properties"]["amount"]
+    assert any(v.get("type") == "string" and "pattern" in v for v in refund["anyOf"])
+
+

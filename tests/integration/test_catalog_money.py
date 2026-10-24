@@ -12,13 +12,13 @@ API = "/api/v1"
 # (what the client sends, what the API answers)
 ACCEPTED = [
     ("19.99", "19.99"),
-    (19.99, "19.99"),
     ("19.9", "19.90"),
     ("10.500", "10.50"),
-    (0, "0.00"),
+    ("0", "0.00"),
     ("99999999.99", "99999999.99"),
 ]
-# JSON numbers and strings both: too many digits, too many places.
+# Too many digits, too many places; and a JSON number, whatever it says (a
+# price is a decimal string since 4.0.0, see test_strict_input.py).
 REFUSED = [1e30, "1e30", "100000000000", 123456789.01, 10.999, "10.999", "0.001", 99999999.999]
 
 
