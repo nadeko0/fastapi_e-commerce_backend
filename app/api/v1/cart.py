@@ -28,7 +28,6 @@ from app.schemas.common import (
     CART_LINE_INSUFFICIENT_STOCK,
     CART_LINE_PRODUCT_UNAVAILABLE,
     CART_LINE_VARIANT_UNAVAILABLE,
-    APIResponse,
     Cart,
     CartPriceChange,
     CartResponse,
@@ -403,7 +402,7 @@ async def get_cart(
 
 CurrentCart = Annotated[Cart, Depends(get_cart)]
 
-@router.get("", response_model=APIResponse[CartResponse])
+@router.get("", response_model=CartResponse)
 async def get_user_cart(
     cart: CurrentCart,
     db: DbSession,
@@ -414,11 +413,11 @@ async def get_user_cart(
     whose product or variant is no longer on sale is returned with
     `available: false` and is not part of `total_amount`."""
 
-    return APIResponse.success_response(await _priced_cart(db, cart))
+    return await _priced_cart(db, cart)
 
 @router.post(
     "/items",
-    response_model=APIResponse[CartResponse],
+    response_model=CartResponse,
     responses={
         400: {"description": "Not enough stock available, or the cart already holds the maximum number of different items"},
         404: {"description": "Product not found or inactive, or variant_id doesn't belong to product_id / isn't active"},
@@ -507,11 +506,11 @@ async def add_to_cart(
 
     cart = _cart_or_503(cart)
     _sync_guest_cart_cookie(response, owner, cart)
-    return APIResponse.success_response(await _priced_cart(db, cart))
+    return await _priced_cart(db, cart)
 
 @router.put(
     "/items/{product_id}",
-    response_model=APIResponse[CartResponse],
+    response_model=CartResponse,
     responses={
         400: {"description": "Not enough stock available"},
         404: {"description": "Product not found or inactive, item not in cart, or variant_id invalid for this product"},
@@ -561,11 +560,11 @@ async def update_cart_item(
 
     cart = _cart_or_503(cart)
     _sync_guest_cart_cookie(response, owner, cart)
-    return APIResponse.success_response(await _priced_cart(db, cart))
+    return await _priced_cart(db, cart)
 
 @router.delete(
     "/items/{product_id}",
-    response_model=APIResponse[CartResponse],
+    response_model=CartResponse,
     responses={
         404: {"description": "Item not in cart"},
         503: {"description": "Cart store unavailable, nothing was changed"},
@@ -595,11 +594,11 @@ async def remove_from_cart(
 
     cart = _cart_or_503(cart)
     _sync_guest_cart_cookie(response, owner, cart)
-    return APIResponse.success_response(await _priced_cart(db, cart))
+    return await _priced_cart(db, cart)
 
 @router.delete(
     "",
-    response_model=APIResponse[CartResponse],
+    response_model=CartResponse,
     responses={503: {"description": "Cart store unavailable, nothing was changed"}},
 )
 async def clear_cart(
@@ -615,9 +614,9 @@ async def clear_cart(
     _sync_guest_cart_cookie(response, owner, cart)
     # Priced like every other cart response; with no lines left that is no
     # query at all.
-    return APIResponse.success_response(await _priced_cart(db, cart))
+    return await _priced_cart(db, cart)
 
-@router.post("/validate", response_model=APIResponse[CartValidationResponse])
+@router.post("/validate", response_model=CartValidationResponse)
 async def validate_cart(
     cart: CurrentCart,
     db: DbSession,
@@ -670,8 +669,8 @@ async def validate_cart(
         if line.price_changed
     ]
 
-    return APIResponse.success_response(CartValidationResponse(
+    return CartValidationResponse(
         valid=len(issues) == 0,
         issues=issues,
         price_changes=price_changes,
-    ))
+    )
