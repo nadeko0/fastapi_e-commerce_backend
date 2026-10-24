@@ -135,7 +135,7 @@ def test_add_item_rejects_quantity_over_stock(client, db_session):
         headers=_auth_headers(token),
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 409
 
 
 def test_update_cart_item_quantity(client, db_session):
@@ -174,7 +174,7 @@ def test_update_cart_item_rejects_quantity_over_stock(client, db_session):
         headers=_auth_headers(token),
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 409
 
 
 def test_update_item_not_in_cart_returns_404(client, db_session):
@@ -629,7 +629,7 @@ def test_stock_limit_enforced_under_concurrent_adds(client, db_session):
     for t in threads:
         t.join()
 
-    assert all(code in (200, 400) for code in results)
+    assert all(code in (200, 409) for code in results)
     succeeded = sum(1 for code in results if code == 200)
     assert succeeded == 10
 
@@ -733,7 +733,7 @@ def test_add_variant_rejects_quantity_over_variant_stock(client, db_session):
         headers=_auth_headers(token),
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 409
 
 
 def test_add_variant_rejects_id_belonging_to_different_product(client, db_session):

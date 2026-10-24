@@ -95,7 +95,7 @@ def test_an_expired_order_key_creates_a_new_order(shop):
     assert old.updated_at == updated
     assert shop.add_to_cart(buyer, product, 1).status_code == 200
     second = shop.place_order(buyer, key=key)
-    assert second.status_code == 200
+    assert second.status_code == 201
     assert second.json()["id"] != first
     assert shop.db.query(Order).count() == 2
 

@@ -121,8 +121,8 @@ def test_a_lost_dispute_refunds_the_order(shop, paid, outbox):
     assert payment_rows(shop, order_id) == [("succeeded", 1999, 0, "USD", False)]
     assert _disputes(shop) == [("du_test_1", "lost", True)]
     # Nothing more to refund, and the order cannot be paid again.
-    assert shop.refund(paid["admin"], order_id).status_code == 400
-    assert shop.pay(paid["buyer"], order_id).status_code == 400
+    assert shop.refund(paid["admin"], order_id).status_code == 409
+    assert shop.pay(paid["buyer"], order_id).status_code == 409
     # Stock is not returned: the goods may well have been shipped.
     assert shop.stock(paid["product"]) == 3
 

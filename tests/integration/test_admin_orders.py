@@ -418,7 +418,7 @@ def test_admin_status_change_follows_the_order_lifecycle(client, db_session, old
         assert response.json()["status"] == new
         assert stored == new
     else:
-        assert response.status_code == 400
+        assert response.status_code == 409
         assert stored == old
 
 
@@ -485,7 +485,7 @@ def test_admin_refund_needs_a_succeeded_payment(client, db_session):
         f"{ORDERS}/{order.id}/refund", json={}, headers=_with_idempotency_key(_admin_headers(client, db_session))
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert response.json()["detail"] == "No successful payment found for this order"
     db_session.expire_all()
     assert db_session.get(Order, order.id).payment_status == "paid"

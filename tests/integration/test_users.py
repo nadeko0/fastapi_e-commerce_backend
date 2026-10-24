@@ -341,7 +341,7 @@ def test_delete_address_promotes_another_to_default(client, valid_registration_p
         f"{API_PREFIX}/addresses/{first['id']}", headers=_auth_headers(access_token)
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 204
 
     listing = client.get(f"{API_PREFIX}/addresses", headers=_auth_headers(access_token))
     remaining_ids = {item["id"] for item in listing.json()["items"]}

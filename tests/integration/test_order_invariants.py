@@ -162,7 +162,7 @@ def test_order_total_is_the_exact_decimal_sum_of_its_lines(client, db_session, l
 
     response = _checkout(client, headers, address_id)
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 201, response.text
     body = response.json()
     assert Decimal(body["total_amount"]) == expected_total
     db_session.expire_all()
@@ -239,13 +239,13 @@ def test_stock_equals_start_minus_live_orders_whatever_happens(
             response = client.post(f"{CART}/items",
                                    json={"product_id": product.id, "quantity": op[2]},
                                    headers=headers)
-            assert response.status_code in (200, 400), response.text
+            assert response.status_code in (200, 409), response.text
         if kind in ("checkout", "order"):
             headers, address_id = buyers[op[1]]
             response = _checkout(client, headers, address_id)
-            # 400: empty cart, or not enough stock left for the cart.
-            assert response.status_code in (200, 400), response.text
-            if response.status_code == 200:
+            # 400: empty cart. 409: not enough stock left for the cart.
+            assert response.status_code in (201, 400, 409), response.text
+            if response.status_code == 201:
                 placed.append((response.json()["id"], op[1]))
         if placed and kind in ("pay", "cancel_by_customer", "cancel_by_admin"):
             order_id, owner = placed[op[1] % len(placed)]
@@ -263,7 +263,7 @@ def test_stock_equals_start_minus_live_orders_whatever_happens(
             else:
                 response = client.put(f"{ORDERS}/{order_id}/status",
                                       json={"status": "cancelled"}, headers=admin_headers)
-            assert response.status_code in (200, 400), response.text
+            assert response.status_code in (200, 409), response.text
         if kind == "expire":
             for order_id, _ in placed:
                 db_session.get(Order, order_id).created_at = utc_now() - timedelta(

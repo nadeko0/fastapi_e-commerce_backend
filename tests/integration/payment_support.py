@@ -175,7 +175,7 @@ class Shop:
         added = self.add_to_cart(buyer, product, quantity)
         assert added.status_code == 200, added.text
         response = self.place_order(buyer)
-        assert response.status_code == 200, response.text
+        assert response.status_code == 201, response.text
         return response.json()
 
     def pay(self, buyer: Buyer, order_id, token=PAY_OK, amount=None, currency=None, key=None):

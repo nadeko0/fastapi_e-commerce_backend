@@ -131,7 +131,7 @@ def _ready_buyer(shop, catalog):
     assert shop.add_to_cart(buyer, widget, 2).status_code == 200
     assert shop.add_to_cart(buyer, shirt, 1, variant=shirt_xl).status_code == 200
     response = shop.place_order(buyer)
-    assert response.status_code == 200, response.text
+    assert response.status_code == 201, response.text
     return buyer, response.json()
 
 
@@ -153,7 +153,7 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     assert (Decimal(cart["total_amount"]), cart["items_count"]) == (Decimal("32.25"), 2)
     # Cart validation: no more than the stock, nothing that is not for sale.
     too_many = visitor.post(f"{CART}/items", json={"product_id": widget.id, "quantity": 9})
-    assert too_many.status_code == 400
+    assert too_many.status_code == 409
     assert visitor.post(f"{CART}/items", json={"product_id": 999999}).status_code == 404
     assert shop.stock(widget) == 10  # a cart reserves nothing
 
@@ -165,7 +165,7 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     registered = visitor.post(f"{USERS}/register", json={
         "email": email, "password": "Str0ngPass1", "full_name": "Journey Buyer",
         "gdpr_consent": True, "privacy_policy_accepted": True, "marketing_consent": False})
-    assert registered.status_code == 200, registered.text
+    assert registered.status_code == 202, registered.text
     login = visitor.post(f"{USERS}/login", data={"username": email, "password": "Str0ngPass1"})
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -186,7 +186,7 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     # 3. Places the order from the cart (retried with the same key).
     key = new_key()
     placed = guest.place_order(buyer, key=key)
-    assert placed.status_code == 200, placed.text
+    assert placed.status_code == 201, placed.text
     order = placed.json()
     order_id = order["id"]
     assert guest.place_order(buyer, key=key).json()["id"] == order_id
@@ -204,7 +204,7 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     wrong = guest.pay(buyer, order_id, currency=other)
     assert wrong.status_code == 400
     declined = guest.pay(buyer, order_id, token=PAY_DECLINED, currency=currency)
-    assert declined.status_code == 402
+    assert declined.status_code == 422
     assert declined.json()["detail"] == "Your card was declined."
     assert order_state(shop, order_id) == ("new", "failed")
     paid = guest.pay(buyer, order_id, currency=currency)
@@ -219,13 +219,13 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     assert _emails(outbox) == [("status_update", "confirmed", "paid")]
 
     # 5. An admin fulfils it, one step at a time.
-    assert shop.set_status(admin, order_id, "delivered").status_code == 400
+    assert shop.set_status(admin, order_id, "delivered").status_code == 409
     for status in ("processing", "sent", "delivered"):
         moved = shop.set_status(admin, order_id, status)
         assert moved.status_code == 200, moved.text
         assert _customer_sees(guest, buyer, order_id)["status"] == status
         assert _emails(outbox) == [("status_update", status, "paid")]
-    assert shop.set_status(admin, order_id, "cancelled").status_code == 400
+    assert shop.set_status(admin, order_id, "cancelled").status_code == 409
 
     # 6. Refunds: part, a retry of it, too much, then the rest.
     refund_key = new_key()
@@ -254,8 +254,8 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
         (1000, None), (1000, None), (3000, None), (None, None)]
     seen = _customer_sees(guest, buyer, order_id)
     assert (seen["status"], seen["payment_status"], seen["total"]) == ("delivered", "refunded", total)
-    assert shop.refund(admin, order_id, amount="0.01").status_code == 400
-    assert guest.pay(buyer, order_id).status_code == 400
+    assert shop.refund(admin, order_id, amount="0.01").status_code == 409
+    assert guest.pay(buyer, order_id).status_code == 409
     # Refunds return money, not goods: stock is as the order left it.
     assert (shop.stock(widget), shop.stock(shirt), shop.stock(shirt_xl)) == (8, 8, 4)
     assert cents(seen["total"]) == 3225
@@ -393,10 +393,10 @@ def test_customer_cancels_an_unpaid_order(shop, outbox, currency):
     assert _customer_sees(shop, buyer, order["id"])["status"] == "cancelled"
     assert (shop.stock(widget), shop.stock(shirt), shop.stock(shirt_xl)) == (10, 8, 5)
     assert _emails(outbox) == [("cancellation", "cancelled", "pending")]
-    assert shop.cancel(buyer, order["id"]).status_code == 400
-    assert shop.pay(buyer, order["id"]).status_code == 400
-    assert shop.checkout_session(buyer, order["id"]).status_code == 400
-    assert shop.refund(admin, order["id"]).status_code == 400
+    assert shop.cancel(buyer, order["id"]).status_code == 409
+    assert shop.pay(buyer, order["id"]).status_code == 409
+    assert shop.checkout_session(buyer, order["id"]).status_code == 409
+    assert shop.refund(admin, order["id"]).status_code == 409
     assert (shop.stock(widget), shop.stock(shirt_xl)) == (10, 5)
     assert shop.payments(order["id"]) == []
 
@@ -407,7 +407,7 @@ def test_admin_cancels_a_paid_order_then_refunds_it(shop, outbox, currency):
     buyer, order = _ready_buyer(shop, catalog)
     admin = shop.admin()
     shop.pay(buyer, order["id"])
-    assert shop.cancel(buyer, order["id"]).status_code == 400  # paid: support's job
+    assert shop.cancel(buyer, order["id"]).status_code == 409  # paid: support's job
     outbox.take()
 
     cancelled = shop.set_status(admin, order["id"], "cancelled")
@@ -499,7 +499,7 @@ def test_a_full_refund_in_one_go_at_each_status(shop, path, allowed):
         if step == "pay":
             assert shop.pay(buyer, order["id"]).status_code == 200
         elif step == "decline":
-            assert shop.pay(buyer, order["id"], token=PAY_DECLINED).status_code == 402
+            assert shop.pay(buyer, order["id"], token=PAY_DECLINED).status_code == 422
         elif step == "cancel":
             assert shop.cancel(buyer, order["id"]).status_code == 200
         else:
@@ -515,7 +515,7 @@ def test_a_full_refund_in_one_go_at_each_status(shop, path, allowed):
         assert order_state(shop, order["id"]) == (status_before, "refunded")
         assert payment_rows(shop, order["id"])[-1][:3] == ("succeeded", 3225, 3225)
     else:
-        assert response.status_code == 400
+        assert response.status_code == 409
         assert response.json()["detail"] == "Only a paid order can be refunded"
         assert order_state(shop, order["id"]) == (status_before, payment_before)
         assert all(row[2] == 0 for row in payment_rows(shop, order["id"]))

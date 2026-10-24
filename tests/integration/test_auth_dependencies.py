@@ -308,7 +308,7 @@ def test_token_for_a_user_that_no_longer_exists_is_rejected(client, db_session):
     assert response.status_code == 401
 
 
-def test_inactive_user_is_rejected_with_400(client, db_session):
+def test_inactive_user_is_rejected_with_403(client, db_session):
     token = _register_and_login(client)
     db_session.query(User).filter(User.email == "auth.user@example.com").update(
         {User.is_active: False}
@@ -317,7 +317,7 @@ def test_inactive_user_is_rejected_with_400(client, db_session):
 
     response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
 
-    assert response.status_code == 400
+    assert response.status_code == 403
     assert response.json()["detail"] == "Inactive user"
 
 
@@ -347,7 +347,7 @@ def test_inactive_admin_is_rejected_before_the_role_check(client, db_session):
 
     response = client.get(f"{ADMIN_PREFIX}/stats", headers=_auth_headers(token))
 
-    assert response.status_code == 400
+    assert response.status_code == 403
 
 
 # --- Nothing synchronous left on the request path ---------------------------
@@ -444,7 +444,7 @@ def test_the_optional_caller_is_held_to_every_check_of_the_required_one(client, 
     db_session.query(User).filter(User.id == user_id).update({User.is_active: False})
     db_session.commit()
     inactive = client.get(CART_PREFIX, headers=_auth_headers(token))
-    assert inactive.status_code == 400
+    assert inactive.status_code == 403
     assert inactive.json()["detail"] == "Inactive user"
 
 
@@ -605,7 +605,7 @@ def test_create_order_finds_the_users_own_shipping_address(client, db_session):
 
     response = _place_order(client, token, address_id)
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json()["shipping_address"]["id"] == address_id
 
 

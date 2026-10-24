@@ -26,7 +26,7 @@ def test_an_admin_sees_every_attempt_with_its_refunds_and_disputes(shop):
     buyer = shop.buyer()
     admin = shop.admin()
     order = shop.order_of(buyer, product)
-    assert shop.pay(buyer, order["id"], token=PAY_DECLINED).status_code == 402
+    assert shop.pay(buyer, order["id"], token=PAY_DECLINED).status_code == 422
     assert shop.pay(buyer, order["id"]).status_code == 200
     paying = shop.payments(order["id"])[1]
     refund_id = shop.refund(admin, order["id"], amount="5.00").json()["id"]

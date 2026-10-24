@@ -103,7 +103,7 @@ def test_admin_status_change_for_every_pair(client, db_session, old, new):
         # Into cancelled returns the order's 3 units; nothing else touches stock.
         assert stock == (10 if new == "cancelled" else 7)
     else:
-        assert response.status_code == 400, response.text
+        assert response.status_code == 409, response.text
         assert response.json()["detail"] == "Invalid status transition"
         assert order.status == old
         assert stock == 7

@@ -73,7 +73,7 @@ def _place(client, db_session, email="buyer@example.com", quantity=3, variant_qu
         json={"shipping_address_id": address_id},
         headers=_with_idempotency_key(_auth_headers(token)),
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code == 201, response.text
     return token, response.json(), product, variant
 
 
@@ -138,7 +138,7 @@ def test_cancelling_twice_returns_the_stock_once(client, db_session):
 
     again = _cancel(client, token, order["id"])
 
-    assert again.status_code == 400
+    assert again.status_code == 409
     assert _stock(db_session, product) == 10
 
 
@@ -150,7 +150,7 @@ def test_customer_cannot_cancel_a_paid_order(client, db_session):
 
     response = _cancel(client, token, order["id"])
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert _order(db_session, order["id"]).status == "confirmed"
     assert _stock(db_session, product) == 7
 
@@ -177,7 +177,7 @@ def test_a_cancelled_order_cannot_be_paid(client, db_session):
 
     response = _pay(client, token, order)
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert _order(db_session, order["id"]).payment_status == "pending"
 
 
@@ -193,7 +193,7 @@ def test_admin_cancel_after_customer_cancel_does_not_restock_again(client, db_se
         headers=_auth_headers(admin_token),
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert _stock(db_session, product) == 10
 
 

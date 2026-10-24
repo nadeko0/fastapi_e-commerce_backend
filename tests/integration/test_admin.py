@@ -211,7 +211,7 @@ def test_admin_creates_category(client, db_session):
         headers=_auth_headers(admin_token),
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json()["name"] == "New Category"
     assert response.json()["level"] == 0
 
@@ -227,7 +227,7 @@ def test_admin_creates_subcategory_with_correct_level_and_path(client, db_sessio
         headers=_auth_headers(admin_token),
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     body = response.json()
     assert body["level"] == 1
     assert body["path"] == [parent.id]
@@ -246,7 +246,7 @@ def test_admin_creates_grandchild_category_with_correct_level_and_path(client, d
         json={"name": "Child", "parent_id": root.id},
         headers=_auth_headers(admin_token),
     )
-    assert child_response.status_code == 200
+    assert child_response.status_code == 201
     child = child_response.json()
     assert child["level"] == 1
     assert child["path"] == [root.id]
@@ -256,7 +256,7 @@ def test_admin_creates_grandchild_category_with_correct_level_and_path(client, d
         json={"name": "Grandchild", "parent_id": child["id"]},
         headers=_auth_headers(admin_token),
     )
-    assert grandchild_response.status_code == 200
+    assert grandchild_response.status_code == 201
     grandchild = grandchild_response.json()
     assert grandchild["level"] == 2
     assert grandchild["path"] == [root.id, child["id"]]
@@ -289,7 +289,7 @@ def test_admin_creates_product(client, db_session):
         headers=_auth_headers(admin_token),
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     body = response.json()
     assert body["name"] == "Test Widget"
     assert body["category_name"] == category.name
@@ -381,7 +381,7 @@ def test_admin_deletes_product_with_no_orders(client, db_session):
         headers=_auth_headers(admin_token),
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 204
 
     get_response = client.get(f"{CATALOG_PREFIX}/products/{created['id']}")
     assert get_response.status_code == 404
@@ -542,7 +542,7 @@ def test_admin_creates_product_variant(client, db_session):
         headers=_auth_headers(admin_token),
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     body = response.json()
     assert body["sku"] == "WIDGET-RED-M"
     assert body["attributes"] == {"size": "M", "color": "red"}
@@ -619,7 +619,7 @@ def test_admin_create_variant_race_returns_409_not_500(client, db_session, monke
         json={"sku": "RACE-SKU"},
         headers=_auth_headers(admin_token),
     )
-    assert first.status_code == 200
+    assert first.status_code == 201
 
     monkeypatch.setattr("app.api.v1.admin._variant_sku_exists", _sku_never_exists)
 
@@ -984,7 +984,7 @@ def test_admin_delete_product_with_orders_deactivates_instead_of_deleting(
         f"{ADMIN_PREFIX}/products/{product['id']}", headers=_auth_headers(admin_token)
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 204
     db_session.expire_all()
     kept = db_session.get(Product, product["id"])
     assert kept is not None and kept.is_active is False

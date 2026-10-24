@@ -81,7 +81,10 @@ def _out_of_range_errors(response, where, name, rule):
 
 @pytest.fixture
 def admin_headers(client, db_session):
-    return Shop(client, db_session).admin()
+    # With an Idempotency-Key: the routes that require one answer its absence
+    # with 400 before they look at anything else, and these cases are about
+    # the integers.
+    return {**Shop(client, db_session).admin(), "Idempotency-Key": "int-bounds-key-0001"}
 
 
 def test_the_derivation_found_the_endpoints():

@@ -114,6 +114,8 @@ REGISTRATION_RECEIVED = (
 @router.post(
     "/register",
     response_model=Message,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={202: {"description": "Registration received, whether or not the email already had an account"}},
 )
 async def register_user(
     user_in: UserCreate,
@@ -123,7 +125,8 @@ async def register_user(
 ):
     """Register a new user account and queue a welcome/verification email.
 
-    Answers exactly the same whether or not the email already has an
+    Answers 202 (RFC 9110 15.3.3: accepted for processing, the outcome is
+    in the email), exactly the same whether or not the email already has an
     account, so that registration cannot be used to find out which emails
     are registered (login and password reset already take care not to).
     For an existing account nothing is created or changed; its owner gets
@@ -245,7 +248,7 @@ async def _confirm_email(token: str, db: AsyncSession):
 @router.post(
     "/verify-email/resend",
     response_model=Message,
-    responses={400: {"description": "Email already verified"}},
+    responses={409: {"description": "Email already verified"}},
 )
 async def resend_verification_email(
     current_user: CurrentUser,
@@ -255,7 +258,7 @@ async def resend_verification_email(
 
     if current_user.is_email_verified:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail="Email already verified"
         )
 
@@ -646,16 +649,16 @@ async def create_address(
     description=PATCH_DESCRIPTION,
     openapi_extra=merge_patch_body("AddressUpdate"),
     responses={
-        400: {"description": "Address is not active"},
         404: {"description": "Address not found"},
+        409: {"description": "Address is not active"},
     },
 )
 @router.put(
     "/addresses/{address_id}",
     response_model=AddressResponse,
     responses={
-        400: {"description": "Address is not active"},
         404: {"description": "Address not found"},
+        409: {"description": "Address is not active"},
     },
 )
 async def update_address(
@@ -683,7 +686,7 @@ async def update_address(
 
     if not address.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail=f"Address {address_id} is not active"
         )
 
@@ -713,18 +716,19 @@ async def update_address(
 
 @router.delete(
     "/addresses/{address_id}",
-    response_model=Message,
-    responses={
-        400: {"description": "Address is not active"},
-        404: {"description": "Address not found"},
-    },
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    responses={404: {"description": "Address not found, or already deleted"}},
 )
 async def delete_address(
     address_id: Int32,
     current_user: CurrentUser,
     db: DbSession,
 ):
-    """Deactivate one of the current user's addresses."""
+    """Deactivate one of the current user's addresses.
+
+    A deactivated address is gone for the client, so deleting it again is a
+    404 like any other address that does not exist."""
 
     address = (await db.execute(
         select(Address).where(
@@ -735,16 +739,10 @@ async def delete_address(
 
     logger.info(f"Processing deletion request for address {address_id} from user {current_user.id}")
 
-    if not address:
+    if not address or not address.is_active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Address {address_id} not found"
-        )
-
-    if not address.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Address {address_id} is not active"
         )
 
 
@@ -764,14 +762,12 @@ async def delete_address(
 
     await db.commit()
 
-    return Message(message="Address deleted successfully")
-
 @router.post(
     "/addresses/default",
     response_model=Message,
     responses={
-        400: {"description": "Address is not active"},
         404: {"description": "Address not found"},
+        409: {"description": "Address is not active"},
     },
 )
 async def set_default_address(
@@ -798,7 +794,7 @@ async def set_default_address(
 
     if not address.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail=f"Address {default_address.address_id} is not active"
         )
 

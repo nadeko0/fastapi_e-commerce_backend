@@ -121,9 +121,9 @@ class PaymentChain(RuleBasedStateMachine):
     @precondition(lambda self: len(self.orders) < MAX_ORDERS)
     @rule(quantity=st.integers(1, 6))
     def create_order(self, quantity):
-        self._ok(self.shop.add_to_cart(self.buyer, self.product, quantity), 200, 400)
-        response = self._ok(self.shop.place_order(self.buyer), 200, 400)
-        if response.status_code == 200:
+        self._ok(self.shop.add_to_cart(self.buyer, self.product, quantity), 200, 409)
+        response = self._ok(self.shop.place_order(self.buyer), 201, 400, 409)
+        if response.status_code == 201:
             self.orders.append(response.json()["id"])
         self.shop.client.delete("/api/v1/cart", headers=self.buyer.headers)
 
@@ -131,24 +131,24 @@ class PaymentChain(RuleBasedStateMachine):
     @rule(index=st.integers(0, 10), card=st.sampled_from([PAY_OK, PAY_DECLINED, PAY_3DS]))
     def pay(self, index, card):
         self._ok(self.shop.pay(self.buyer, self._order_id(index), token=card),
-                 200, 400, 402, 409)
+                 200, 409, 422)
 
     @precondition(lambda self: self.orders)
     @rule(index=st.integers(0, 10))
     def pay_with_a_good_card(self, index):
         # The common case, as a rule of its own so that it is drawn as
         # often as all the card variants together.
-        self._ok(self.shop.pay(self.buyer, self._order_id(index)), 200, 400, 409)
+        self._ok(self.shop.pay(self.buyer, self._order_id(index)), 200, 409)
 
     @precondition(lambda self: self.orders)
     @rule(index=st.integers(0, 10))
     def open_checkout_session(self, index):
-        self._ok(self.shop.checkout_session(self.buyer, self._order_id(index)), 200, 400, 409)
+        self._ok(self.shop.checkout_session(self.buyer, self._order_id(index)), 200, 409)
 
     @precondition(lambda self: self.orders)
     @rule(index=st.integers(0, 10))
     def customer_cancels(self, index):
-        self._ok(self.shop.cancel(self.buyer, self._order_id(index)), 200, 400)
+        self._ok(self.shop.cancel(self.buyer, self._order_id(index)), 200, 409)
 
     # -- Stripe --------------------------------------------------------------------
 
@@ -260,7 +260,7 @@ class PaymentChain(RuleBasedStateMachine):
     def admin_refunds(self, index, amount):
         value = None if amount is None else Decimal(amount) / 100
         self._ok(self.shop.refund(self.admin, self._order_id(index), amount=value),
-                 200, 400, 409)
+                 200, 409)
 
     @precondition(lambda self: self.orders)
     @rule(index=st.integers(0, 10),
@@ -268,10 +268,11 @@ class PaymentChain(RuleBasedStateMachine):
     def admin_sets_status(self, index, status):
         order_id = self._order_id(index)
         before = self.shop.order(order_id).status
-        response = self._ok(self.shop.set_status(self.admin, order_id, status), 200, 400, 409)
+        response = self._ok(self.shop.set_status(self.admin, order_id, status), 200, 409)
         if response.status_code == 409:
-            assert self._open_dispute(order_id) and status != "cancelled"
             assert self.shop.order(order_id).status == before
+            if response.json()["detail"] != "Invalid status transition":
+                assert self._open_dispute(order_id) and status != "cancelled"
 
     @precondition(lambda self: self.orders)
     @rule(index=st.integers(0, 10))
@@ -354,5 +355,5 @@ def test_the_payment_chain_keeps_its_invariants(client, db_session, tasks_db, mo
     # A floor, not a target: the run did place, pay and report on orders
     # (refusals alone would satisfy the invariants trivially). Rarer
     # outcomes vary from run to run and are not required.
-    for outcome in ("orders 200", "pay 200", "stripe 200"):
+    for outcome in ("orders 201", "pay 200", "stripe 200"):
         assert SEEN[outcome] > 0, (outcome, SEEN)

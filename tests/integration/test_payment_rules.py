@@ -119,7 +119,7 @@ def test_a_refunded_order_cannot_be_refunded_again(client, db_session, paid):
 
     again = _refund(client, order_id, paid["admin"])
 
-    assert again.status_code == 400
+    assert again.status_code == 409
     payment = _get_payments(db_session, order_id)[0]
     assert payment.amount_refunded == payment.amount
 
@@ -183,7 +183,7 @@ def test_a_new_key_for_a_paid_order_is_refused_not_charged(client, db_session):
 
     second = _pay(client, setup, key="attempt-2")
 
-    assert second.status_code == 400
+    assert second.status_code == 409
     assert second.json()["detail"] == "Order already paid"
     assert len(_get_payments(db_session, setup["order"]["id"])) == 1
     assert len(StripePaymentProvider._intents_by_id) == 1
@@ -259,7 +259,7 @@ def test_a_finished_attempt_does_not_block_the_next_one(client, db_session):
         json=_payment_payload(setup["order"], token=TOKEN_DECLINE),
         headers={**setup["headers"], "Idempotency-Key": "attempt-1"},
     )
-    assert declined.status_code == 402
+    assert declined.status_code == 422
 
     assert _pay(client, setup, key="attempt-2").status_code == 200
 
@@ -280,7 +280,7 @@ def test_replaying_a_checkout_session_after_the_order_was_paid_returns_it(client
 
     assert replay.status_code == 200
     assert replay.json()["checkout_session_id"] == first.json()["checkout_session_id"]
-    assert fresh.status_code == 400
+    assert fresh.status_code == 409
 
 
 # -- Webhook signature and replay ----------------------------------------------

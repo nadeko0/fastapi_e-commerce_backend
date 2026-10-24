@@ -59,10 +59,10 @@ def test_erasure_schedules_the_account_and_ends_its_sessions(client, db_session,
     user = _stored(db_session)
     assert (user.is_active, user.data_deletion_requested) == (False, True)
     assert user.data_deletion_date is not None
-    assert client.get(f"{USERS}/me", headers=headers).status_code == 400
+    assert client.get(f"{USERS}/me", headers=headers).status_code == 403
     # A second request is refused: the account is no longer active.
     again = client.post(f"{LEGAL}/data-request", json=request, headers=headers)
-    assert again.status_code == 400
+    assert again.status_code == 403
     # Logging in again is refused like a wrong password.
     login = client.post(f"{USERS}/login", data={"username": EMAIL, "password": PASSWORD})
     assert login.status_code == 401

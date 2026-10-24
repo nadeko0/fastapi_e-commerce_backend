@@ -237,7 +237,7 @@ class TestCreateCheckoutSessionEndpoint:
         assert pay_response.json()["status"] == "paid"
 
         response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"]))
-        assert response.status_code == 400
+        assert response.status_code == 409
         assert "already paid" in response.json()["detail"].lower()
 
     def test_rejects_cancelled_order(self, client, db_session):
@@ -253,7 +253,7 @@ class TestCreateCheckoutSessionEndpoint:
         assert cancel_response.status_code == 200
 
         response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"]))
-        assert response.status_code == 400
+        assert response.status_code == 409
         assert "cancelled" in response.json()["detail"].lower()
 
     def test_session_is_created_in_the_orders_currency(self, client, db_session):

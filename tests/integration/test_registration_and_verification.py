@@ -181,13 +181,13 @@ def test_resend_queues_a_fresh_link_for_an_unverified_account(client, monkeypatc
     assert client.post(f"{USERS}/verify-email", json={"token": sent[0][1]}).status_code == 200
 
 
-def test_resend_for_a_verified_account_is_400(client):
+def test_resend_for_a_verified_account_is_409(client):
     client.post(f"{USERS}/register", json=_registration())
     client.post(f"{USERS}/verify-email", json={"token": generate_email_verification_token('new.person@example.com')})
 
     response = client.post(f"{USERS}/verify-email/resend", headers=_login(client))
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert response.json()["detail"] == "Email already verified"
 
 

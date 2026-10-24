@@ -5,7 +5,16 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Body, Header, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select, update
@@ -24,7 +33,8 @@ from app.core.idempotency import (
     order_key_header_description,
     request_fingerprint,
 )
-from app.core.openapi import DocumentedRoute
+from app.core.location import set_location
+from app.core.openapi import LOCATION_HEADER, RETRY_AFTER_HEADER, DocumentedRoute
 from app.models.address import Address
 from app.models.order import Order
 from app.models.order_items import OrderItem
@@ -106,17 +116,33 @@ async def _order_by_idempotency_key(
     )).scalars().first()
 
 
+def _created_order(request: Request, response: Response, order: Order) -> OrderResponse:
+    """The 201 answer for `order`, the same for the request that created it
+    and for a replay of its Idempotency-Key: the order and its Location."""
+    set_location(request, response, "get_order", order_id=order.id)
+    return OrderResponse.model_validate(order)
+
+
 @router.post(
     "",
     response_model=OrderResponse,
+    status_code=status.HTTP_201_CREATED,
     responses={
-        400: {"description": "Cart is empty, profile incomplete, or a cart item is out of stock"},
+        201: {
+            "description": "Order created; Location is its URL. A replay of the same "
+                           "Idempotency-Key answers the same 201 and Location.",
+            "headers": LOCATION_HEADER,
+        },
+        400: {"description": "Cart is empty, profile incomplete, or the Idempotency-Key header is missing or malformed"},
         403: {"description": "Email verification required before placing orders"},
         404: {"description": "Shipping address not found"},
-        422: {"description": "Missing or malformed Idempotency-Key header, or the key was already used with a different shipping_address_id"},
+        409: {"description": "A cart item is out of stock or no longer on sale"},
+        422: {"description": "The key was already used with a different shipping_address_id"},
     },
 )
 async def create_order(
+    request: Request,
+    response: Response,
     background_tasks: BackgroundTasks,
     current_user: CurrentUser,
     db: DbSession,
@@ -140,6 +166,7 @@ async def create_order(
     Requires an `Idempotency-Key` header. Repeating a request with a key
     already used by this user returns the order created the first time;
     a key already used with a different `shipping_address_id` is answered 422.
+    The answer to a replay is the first one, 201 and Location included.
     """
 
     shipping_address_id = body.shipping_address_id
@@ -167,7 +194,7 @@ async def create_order(
     existing = await _order_by_idempotency_key(db, current_user.id, idempotency_key)
     if existing:
         ensure_same_request(existing.idempotency_fingerprint, fingerprint)
-        return OrderResponse.model_validate(existing)
+        return _created_order(request, response, existing)
 
     cart = await redis.get_cart(current_user.id)
     if not cart or not cart.items:
@@ -231,7 +258,7 @@ async def create_order(
         existing = await _order_by_idempotency_key(db, current_user.id, idempotency_key)
         if existing:
             ensure_same_request(existing.idempotency_fingerprint, fingerprint)
-            return OrderResponse.model_validate(existing)
+            return _created_order(request, response, existing)
         # Only the key's unique index can fail a bare order INSERT (its
         # foreign keys were just read and nothing deletes orders' users or
         # addresses mid-request); re-raised rather than mistaken for a
@@ -257,7 +284,7 @@ async def create_order(
         if not product or not product.is_active:
             await db.rollback()
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_409_CONFLICT,
                 detail=f"Product {item.product_id} not available in requested quantity"
             )
 
@@ -272,7 +299,7 @@ async def create_order(
             if not variant or not variant.is_active:
                 await db.rollback()
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                    status_code=status.HTTP_409_CONFLICT,
                     detail=f"Product {item.product_id} not available in requested quantity"
                 )
 
@@ -309,9 +336,10 @@ async def create_order(
             )
         if stock_update.rowcount == 0:
             await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Product {item.product_id} not available in requested quantity"
+            raise Problem(
+                status.HTTP_409_CONFLICT,
+                type=ProblemType.INSUFFICIENT_STOCK,
+                detail=f"Product {item.product_id} not available in requested quantity",
             )
 
         order_item = OrderItem(
@@ -356,7 +384,7 @@ async def create_order(
         OrderResponse.model_validate(order)
     )
 
-    return OrderResponse.model_validate(order)
+    return _created_order(request, response, order)
 
 @router.get(
     "/{order_id}",
@@ -390,9 +418,9 @@ async def get_order(
     "/{order_id}/status",
     response_model=OrderResponse,
     responses={
-        400: {"description": "Invalid status transition"},
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
+        409: {"description": "Invalid status transition, or the order is on hold for a payment dispute"},
     },
 )
 async def update_order_status(
@@ -434,7 +462,7 @@ async def update_order_status(
 
     if not _is_valid_status_transition(order.status, new_status):
         raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="Invalid status transition"
         )
 
@@ -465,8 +493,8 @@ async def update_order_status(
     "/{order_id}/cancel",
     response_model=OrderResponse,
     responses={
-        400: {"description": "Order is paid, or no longer new"},
         404: {"description": "Order not found"},
+        409: {"description": "Order is paid, or no longer new"},
     },
 )
 async def cancel_own_order(
@@ -500,7 +528,7 @@ async def cancel_own_order(
 
     if not is_unpaid_and_new(order):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail="Only a new, unpaid order can be cancelled; contact support for a paid one"
         )
 
@@ -615,6 +643,36 @@ def _ensure_same_request_in_flow(
         ensure_same_request(payment_row.idempotency_fingerprint, fingerprint)
 
 
+# What a request is told to wait (Retry-After, seconds) when its
+# Idempotency-Key belongs to an attempt that is still being processed; the
+# same wait a provider timeout asks for.
+_ATTEMPT_RETRY_AFTER = 5
+
+
+def _replay_payment(payment_row: Payment, order: Order) -> PaymentResponse:
+    """
+    /pay's answer to a key this order has already used with the same
+    request: the outcome the first request ended with. An attempt still
+    "processing" has none yet - its request is waiting on the provider, or
+    the provider has not settled the payment (the webhook then does) - and
+    the draft answers a request that repeats one still being processed with
+    409 (draft-ietf-httpapi-idempotency-key-header, section 2.7), with a
+    Retry-After so the client asks again. Replayed after it settled, the
+    stored result is returned, as before.
+    """
+    if payment_row.status == "processing":
+        raise Problem(
+            status.HTTP_409_CONFLICT,
+            type=ProblemType.IDEMPOTENCY_KEY_IN_USE,
+            detail=(
+                "A request with this Idempotency-Key is still being processed; "
+                "repeat it later with the same key"
+            ),
+            retry_after=_ATTEMPT_RETRY_AFTER,
+        )
+    return _payment_row_to_response(payment_row, order)
+
+
 def _replay_checkout_session(payment_row: Payment, order: Order):
     """
     /checkout-session's answer to a key this order has already used. An
@@ -624,7 +682,9 @@ def _replay_checkout_session(payment_row: Payment, order: Order):
     CheckoutSessionResponse could describe, and the key cannot be used for
     a second attempt: the unique index on (order, key) refuses the row.
     Such a retry used to go on and hit that index, answering 500; it is a
-    409 telling the client to start a new attempt with a new key.
+    409 (the draft's answer to a request still being processed, section
+    2.7, for the twin that is: it carries a Retry-After) telling the client
+    to retry later, or to start a new attempt with a new key.
     """
     if payment_row.checkout_session_id:
         return _checkout_session_row_to_response(payment_row, order)
@@ -636,6 +696,7 @@ def _replay_checkout_session(payment_row: Payment, order: Order):
             "session (still in progress, or failed); retry later, or start a new "
             "attempt with a new Idempotency-Key"
         ),
+        retry_after=_ATTEMPT_RETRY_AFTER if payment_row.status == "processing" else None,
     )
 
 
@@ -756,7 +817,7 @@ def _guard_order_payable(order: Order) -> None:
     """
     if order.payment_status == PaymentStatus.PAID:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail="Order already paid"
         )
     # Refunded is not "unpaid again": it was paid and the money returned.
@@ -764,7 +825,7 @@ def _guard_order_payable(order: Order) -> None:
     # the order back to paid for goods already refunded.
     if order.payment_status == PaymentStatus.REFUNDED:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail="Order has been refunded"
         )
 
@@ -775,7 +836,7 @@ def _guard_order_payable(order: Order) -> None:
     # silently applied); here we simply refuse to start one.
     if order.status == OrderStatus.CANCELLED:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail="Cannot pay for a cancelled order"
         )
 
@@ -903,11 +964,15 @@ _MANUAL_REVIEW_RESPONSE = {"status": "processed", "applied": False, "requires_ma
     "/{order_id}/pay",
     response_model=PaymentResponse,
     responses={
-        400: {"description": "Order already paid, cancelled, or amount mismatch"},
-        402: {"description": "Card declined by the payment provider"},
+        400: {"description": "Amount or currency does not match the order, or the Idempotency-Key header is missing or malformed"},
         404: {"description": "Order not found"},
-        409: {"description": "Another attempt for this order is in progress, or idempotency key already used with different payment parameters"},
-        422: {"description": "Missing or malformed Idempotency-Key header, or the key was already used with a different request body"},
+        409: {
+            "description": "Order already paid, refunded or cancelled; another attempt for this order is in progress; "
+                           "the Idempotency-Key belongs to an attempt still being processed; "
+                           "or the key was already used with different payment parameters",
+            "headers": RETRY_AFTER_HEADER,
+        },
+        422: {"description": "Card declined by the payment provider (payment-declined), or the key was already used with a different request body"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
 )
@@ -985,7 +1050,7 @@ async def process_payment(
     retried_attempt = None
     if existing_payment:
         if existing_payment.status != "unknown":
-            return _payment_row_to_response(existing_payment, order)
+            return _replay_payment(existing_payment, order)
         if _is_checkout_attempt(existing_payment):
             # Sending it as a PaymentIntent would be a second way to
             # charge the order; only /checkout-session settles it.
@@ -1048,7 +1113,7 @@ async def process_payment(
             existing_payment = await _payment_by_key(db, order.id, idempotency_key)
             if existing_payment:
                 _ensure_same_request_in_flow(existing_payment, fingerprint, checkout=False)
-                return _payment_row_to_response(existing_payment, order)
+                return _replay_payment(existing_payment, order)
             raise
 
     # Every provider call in this module goes through run_in_threadpool.
@@ -1143,7 +1208,7 @@ async def process_payment(
         # Session completing) since the guard above read it.
         await db.run_sync(_apply_payment_failure, order, payment_row)
         raise Problem(
-            status.HTTP_402_PAYMENT_REQUIRED,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             type=ProblemType.PAYMENT_DECLINED,
             detail=e.message,
         ) from e
@@ -1187,7 +1252,7 @@ async def process_payment(
         # canceled, ...): a failed attempt, like a decline.
         await db.run_sync(_apply_payment_failure, order, payment_row)
         raise Problem(
-            status.HTTP_402_PAYMENT_REQUIRED,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             type=ProblemType.PAYMENT_DECLINED,
             detail="The payment was not completed; please try again or use another payment method",
         )
@@ -1214,10 +1279,15 @@ async def process_payment(
     "/{order_id}/checkout-session",
     response_model=CheckoutSessionResponse,
     responses={
-        400: {"description": "Order already paid or cancelled"},
+        400: {"description": "Currency does not match the order, or the Idempotency-Key header is missing or malformed"},
         404: {"description": "Order not found"},
-        409: {"description": "Another attempt for this order is in progress, or idempotency key already used with different checkout session parameters"},
-        422: {"description": "Missing or malformed Idempotency-Key header, or the key was already used with a different request body"},
+        409: {
+            "description": "Order already paid, refunded or cancelled; another attempt for this order is in progress; "
+                           "the Idempotency-Key belongs to an attempt still being processed; "
+                           "or the key was already used with different checkout session parameters",
+            "headers": RETRY_AFTER_HEADER,
+        },
+        422: {"description": "The key was already used with a different request body"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
 )
@@ -1395,11 +1465,10 @@ async def create_checkout_session(
     "/{order_id}/refund",
     response_model=RefundResponse,
     responses={
-        400: {"description": "Order not paid, or no successful payment found"},
+        400: {"description": "The provider refused the refund as invalid, or the Idempotency-Key header is missing or malformed"},
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
-        409: {"description": "Idempotency key already used with different refund parameters"},
-        422: {"description": "Missing or malformed Idempotency-Key header"},
+        409: {"description": "Order not paid, no successful payment found, payment disputed, or idempotency key already used with different refund parameters"},
         503: {"description": "Payment provider unavailable, retry the request"},
     },
 )
@@ -1438,7 +1507,7 @@ async def refund_payment(
 
     if order.payment_status != PaymentStatus.PAID:
         raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="Only a paid order can be refunded"
         )
 
@@ -1461,7 +1530,7 @@ async def refund_payment(
     )).scalars().first()
     if not payment_row:
         raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="No successful payment found for this order"
         )
     # Stripe: refunding a disputed charge returns the money twice - the

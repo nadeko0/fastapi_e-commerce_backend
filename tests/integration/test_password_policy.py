@@ -37,7 +37,7 @@ def _login(client, password, email=EMAIL):
     "Str0ngPass1",
 ])
 def test_any_composition_is_accepted(client, password):
-    assert client.post(f"{USERS}/register", json=_payload(password)).status_code == 200
+    assert client.post(f"{USERS}/register", json=_payload(password)).status_code == 202
     assert _login(client, password).status_code == 200
 
 
@@ -78,7 +78,7 @@ def test_composed_and_decomposed_forms_are_the_same_password(client):
     decomposed = unicodedata.normalize("NFD", composed)
     assert composed != decomposed
 
-    assert client.post(f"{USERS}/register", json=_payload(composed)).status_code == 200
+    assert client.post(f"{USERS}/register", json=_payload(composed)).status_code == 202
 
     assert _login(client, composed).status_code == 200
     assert _login(client, decomposed).status_code == 200
@@ -88,7 +88,7 @@ def test_decomposed_registration_logs_in_with_composed(client):
     composed = "café au lait 42"
     decomposed = unicodedata.normalize("NFD", composed)
 
-    assert client.post(f"{USERS}/register", json=_payload(decomposed)).status_code == 200
+    assert client.post(f"{USERS}/register", json=_payload(decomposed)).status_code == 202
 
     assert _login(client, composed).status_code == 200
 

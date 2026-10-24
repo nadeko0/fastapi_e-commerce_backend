@@ -272,7 +272,9 @@ class RouteGroup:
 
     seed: Callable
     requests: Callable
-    expected_status: int = 200
+    # The statuses the requests answer: one number, or the set of them when the
+    # group mixes reads (200) with creating POSTs (201).
+    expected_status: int | frozenset[int] = 200
     headers: Callable | None = None
 
 
@@ -399,6 +401,7 @@ LEGAL = RouteGroup(
 # write-route run is on PostgreSQL.
 ADMIN = RouteGroup(
     seed=_seed_catalog,
+    expected_status=frozenset({200, 201}),
     headers=lambda db_session: make_user_headers(db_session, email="admin@example.com", role=UserRole.ADMIN)[0],
     requests=lambda ids: [
         ("GET", "/api/v1/admin/orders"),
@@ -520,6 +523,7 @@ def _seed_orders(db_session):
 # are fixed strings: they only have to be unique per user and per order.
 ORDERS = RouteGroup(
     seed=_seed_orders,
+    expected_status=frozenset({200, 201}),
     requests=lambda ids: [
         (
             "POST",
@@ -671,7 +675,8 @@ def assert_loop_stays_free(target_app, requests, headers=None, expected_status=2
     alone = _run(target_app, requests, 1, headers)
     together = _run(target_app, requests, CONCURRENCY, headers)
 
-    assert set(alone.statuses + together.statuses) == {expected_status}, (
+    expected = {expected_status} if isinstance(expected_status, int) else set(expected_status)
+    assert set(alone.statuses + together.statuses) == expected, (
         alone.statuses,
         together.statuses,
     )

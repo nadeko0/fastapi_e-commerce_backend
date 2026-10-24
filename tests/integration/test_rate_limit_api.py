@@ -47,7 +47,7 @@ def limits(monkeypatch):
 
 def register(client, payload, email=None):
     payload = {**payload, "email": email or payload["email"]}
-    assert client.post(f"{API}/users/register", json=payload).status_code == 200
+    assert client.post(f"{API}/users/register", json=payload).status_code == 202
     return payload
 
 
@@ -151,9 +151,9 @@ def test_checkout_is_limited_per_user(client, limits, valid_registration_payload
     limits(RATE_LIMIT_CHECKOUT="1/minute")
 
     # No Idempotency-Key, so the route itself answers 422: it was reached.
-    assert client.post(f"{API}/orders", json={}, headers=alice).status_code == 422
+    assert client.post(f"{API}/orders", json={}, headers=alice).status_code == 400
     assert client.post(f"{API}/orders", json={}, headers=alice).status_code == 429
-    assert client.post(f"{API}/orders", json={}, headers=bob).status_code == 422
+    assert client.post(f"{API}/orders", json={}, headers=bob).status_code == 400
 
 
 def test_auth_routes_are_limited_per_address_whoever_is_named(client, limits):

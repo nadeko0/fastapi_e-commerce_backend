@@ -100,7 +100,7 @@ def test_each_address_has_its_own_budget(client, limits, product):
 
 
 def test_account_carts_are_not_counted(client, limits, product, valid_registration_payload):
-    assert client.post(f"{settings.API_V1_STR}/users/register", json=valid_registration_payload).status_code == 200
+    assert client.post(f"{settings.API_V1_STR}/users/register", json=valid_registration_payload).status_code == 202
     token = client.post(
         f"{settings.API_V1_STR}/users/login",
         data={"username": valid_registration_payload["email"], "password": valid_registration_payload["password"]},

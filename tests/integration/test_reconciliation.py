@@ -120,7 +120,7 @@ def test_a_refunded_payment_that_agrees_is_not_reported(shop, provider):
 def test_a_failed_and_a_declined_attempt_agree_with_a_waiting_intent(shop, provider):
     buyer = shop.buyer()
     order = shop.order_of(buyer, shop.product())
-    assert shop.pay(buyer, order["id"], token="pm_card_visa_chargeDeclined").status_code == 402
+    assert shop.pay(buyer, order["id"], token="pm_card_visa_chargeDeclined").status_code == 422
 
     result = run(shop.db, provider)
 

@@ -199,7 +199,7 @@ def _create_verified_buyer_with_order(client, db_session, email="buyer@example.c
         json={"shipping_address_id": address.id},
         headers=_with_idempotency_key(headers),
     )
-    assert order_resp.status_code == 200, order_resp.text
+    assert order_resp.status_code == 201, order_resp.text
     order = order_resp.json()
 
     return {"user": user, "headers": headers, "order": order, "product": product}
@@ -455,7 +455,7 @@ def test_declined_payment_marks_order_failed_not_paid(client, db_session):
         headers=_with_idempotency_key(setup["headers"]),
     )
 
-    assert response.status_code == 402
+    assert response.status_code == 422
     db_order = _get_order(db_session, order["id"])
     assert db_order.payment_status == "failed"
     # Declining a payment must not advance the order's fulfillment status.
@@ -549,7 +549,7 @@ def test_retry_after_decline_succeeds_without_side_effects_from_failed_attempt(
         json=_payment_payload(order, token=TOKEN_DECLINE),
         headers={**setup["headers"], "Idempotency-Key": "attempt-1"},
     )
-    assert declined.status_code == 402
+    assert declined.status_code == 422
 
     retried = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
@@ -615,7 +615,7 @@ def test_a_payment_attempt_requires_an_idempotency_key(client, db_session, flow,
 
     response = client.post(url, json=body, headers={**setup["headers"], **bad_headers})
 
-    assert response.status_code == 422
+    assert response.status_code == 400
     assert "Idempotency-Key" in response.text
     assert _get_payments(db_session, order["id"]) == []
     assert StripePaymentProvider._intents_by_id == {}
@@ -644,7 +644,7 @@ def test_a_refund_requires_an_idempotency_key(client, db_session, bad_headers):
         headers={**admin["headers"], **bad_headers},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 400
     assert "Idempotency-Key" in response.text
     assert [i.amount_refunded for i in StripePaymentProvider._intents_by_id.values()] == [0]
     assert _get_payments(db_session, order["id"])[0].amount_refunded == 0
@@ -959,7 +959,7 @@ def test_late_payment_failed_for_another_attempt_does_not_unpay_the_order(client
         json=_payment_payload(order),
         headers=_with_idempotency_key(setup["headers"]),
     )
-    assert again.status_code == 400
+    assert again.status_code == 409
 
 
 def test_late_payment_failed_does_not_turn_a_refunded_order_into_failed(client, db_session):
@@ -1008,7 +1008,7 @@ def test_cannot_start_a_payment_on_an_already_cancelled_order(client, db_session
         json=_payment_payload(order),
         headers=_with_idempotency_key(setup["headers"]),
     )
-    assert response.status_code == 400
+    assert response.status_code == 409
 
 
 # -- Refunds --------------------------------------------------------------
@@ -1095,7 +1095,7 @@ def test_a_fully_refunded_order_cannot_be_paid_again(client, db_session, flow):
             f"{ORDERS_PREFIX}/{order['id']}/checkout-session", headers=_with_idempotency_key(setup["headers"])
         )
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert "refunded" in response.json()["detail"].lower()
     assert _get_order(db_session, order["id"]).payment_status == "refunded"
     assert len(_get_payments(db_session, order["id"])) == 1
@@ -1178,7 +1178,7 @@ def test_refund_requires_a_paid_order(client, db_session):
         headers=_with_idempotency_key(admin["headers"]),
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 409
 
 
 # =============================================================================

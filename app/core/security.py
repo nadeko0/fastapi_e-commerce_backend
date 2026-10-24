@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.database import DbSession
+from app.core.errors import Problem, ProblemType
 from app.core.passwords import normalize_password
 from app.models.user import User, UserRole
 from app.services.redis_async import AsyncRedisService, is_token_blacklisted, is_token_superseded
@@ -313,10 +314,22 @@ async def get_current_user(
 async def get_current_active_user(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
+    # A deactivated account whose token is still valid is a 403, not a 401.
+    # RFC 9110 15.5.2: a 401 says the request "lacks valid authentication
+    # credentials" and invites the client to repeat it with new ones; RFC
+    # 6750 section 3.1 ties invalid_token (401) to a token that is expired,
+    # revoked, malformed or otherwise invalid, and one that is none of
+    # those, so the client would refresh the token and be refused again.
+    # RFC 9110 15.5.4: a 403 means the server understood the request and
+    # refuses it, and "a request might be forbidden for reasons unrelated
+    # to the credentials". The token is good; the account may not act. The
+    # `account-inactive` type lets a client tell it from the 403 of a
+    # missing role.
     if not current_user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
+        raise Problem(
+            status.HTTP_403_FORBIDDEN,
+            type=ProblemType.ACCOUNT_INACTIVE,
+            detail="Inactive user",
         )
     return current_user
 
@@ -351,7 +364,7 @@ async def get_optional_active_user(
     is authenticated by the very dependencies above, called in the same
     order with the same arguments, so every way they reject a caller
     applies unchanged: a missing, malformed, expired, blacklisted or
-    superseded token is a 401 and an inactive user a 400. It is never
+    superseded token is a 401 and an inactive user a 403. It is never
     quietly treated as "nobody": a client whose token has just expired must
     be told so, not be shown some other, empty cart as if its own had
     vanished.

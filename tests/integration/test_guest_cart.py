@@ -65,7 +65,7 @@ def _registration_payload(email="guest.buyer@example.com"):
 
 
 def _register(visitor, email="guest.buyer@example.com"):
-    assert visitor.post(f"{USERS_PREFIX}/register", json=_registration_payload(email)).status_code == 200
+    assert visitor.post(f"{USERS_PREFIX}/register", json=_registration_payload(email)).status_code == 202
 
 
 def _login(visitor, email="guest.buyer@example.com", password=PASSWORD):
@@ -226,10 +226,10 @@ def test_guest_gets_the_same_rejections_as_an_account(browser, db_session):
     guest = browser()
 
     assert _add(guest, 999999).status_code == 404
-    assert _add(guest, product.id, 3).status_code == 400
+    assert _add(guest, product.id, 3).status_code == 409
     assert _add(guest, product.id, 0).status_code == 422
     assert _add(guest, product.id, 1).status_code == 200
-    assert guest.put(f"{CART_PREFIX}/items/{product.id}", json={"quantity": 9}).status_code == 400
+    assert guest.put(f"{CART_PREFIX}/items/{product.id}", json={"quantity": 9}).status_code == 409
 
     db_session.query(Product).filter(Product.id == product.id).update({"stock_quantity": 0})
     db_session.commit()
@@ -273,7 +273,7 @@ def test_looking_at_an_empty_cart_as_a_guest_stores_nothing_and_issues_no_identi
         _add(guest, product.id, 999),
     ]
 
-    assert [response.status_code for response in responses] == [200, 200, 200, 404, 404, 404, 400]
+    assert [response.status_code for response in responses] == [200, 200, 200, 404, 404, 404, 409]
     assert responses[0].json()["items"] == []
     assert responses[0].json()["total_amount"] == "0.00"
     assert responses[2].json()["items"] == []
@@ -560,7 +560,7 @@ def test_a_bad_authorization_header_is_a_401_on_every_cart_route_never_a_guest_c
     assert _account_keys(fake_redis) == []
 
 
-def test_an_inactive_account_is_rejected_on_cart_routes_as_before(browser, db_session):
+def test_an_inactive_account_is_rejected_on_cart_routes_with_403(browser, db_session):
     (product,) = _products(db_session, 1)
     visitor = browser()
     _register(visitor)
@@ -570,7 +570,7 @@ def test_an_inactive_account_is_rejected_on_cart_routes_as_before(browser, db_se
 
     responses = _cart_calls(visitor, product.id, _auth_headers(token))
 
-    assert [response.status_code for response in responses] == [400] * 6
+    assert [response.status_code for response in responses] == [403] * 6
     assert responses[0].json()["detail"] == "Inactive user"
 
 
@@ -1038,9 +1038,9 @@ def test_guest_cart_refuses_a_line_beyond_the_cap(browser, db_session, fake_redi
     # A variant of a product already in the cart is a line of its own.
     refused_variant = _add(guest, products[0].id, 1, variant_id=variant.id)
 
-    assert refused.status_code == 400
+    assert refused.status_code == 409
     assert refused.json()["detail"] == "Cart cannot hold more than 3 different items"
-    assert refused_variant.status_code == 400
+    assert refused_variant.status_code == 409
     assert _cart(guest)["items_count"] == 3
     # More of a line already there is not a new line.
     assert _add(guest, products[0].id, 2).status_code == 200
@@ -1060,7 +1060,7 @@ def test_account_cart_refuses_a_line_beyond_the_cap(browser, db_session, monkeyp
 
     refused = _add(visitor, third.id, 1, headers=headers)
 
-    assert refused.status_code == 400
+    assert refused.status_code == 409
     assert refused.json()["detail"] == "Cart cannot hold more than 2 different items"
     assert _add(visitor, first.id, 1, headers=headers).status_code == 200
     assert _quantities(_cart(visitor, headers=headers)) == {(first.id, None): 2, (second.id, None): 1}
@@ -1155,7 +1155,7 @@ def test_after_login_the_order_contains_the_merged_cart(browser, db_session, fak
         headers={"Idempotency-Key": uuid.uuid4().hex, **_auth_headers(token)},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     order = response.json()
     assert {item["product_id"]: item["quantity"] for item in order["items"]} == {
         in_both.id: 3,

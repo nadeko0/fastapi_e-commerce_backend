@@ -341,7 +341,7 @@ async def _allow_new_guest_cart(request: Request) -> None:
 
 def _cart_full(error: CartFullError) -> HTTPException:
     return HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
+        status_code=status.HTTP_409_CONFLICT,
         detail=f"Cart cannot hold more than {error.max_lines} different items"
     )
 
@@ -420,7 +420,7 @@ async def get_user_cart(
     "/items",
     response_model=CartResponse,
     responses={
-        400: {"description": "Not enough stock available, or the cart already holds the maximum number of different items"},
+        409: {"description": "Not enough stock available, or the cart already holds the maximum number of different items"},
         404: {"description": "Product not found or inactive, or variant_id doesn't belong to product_id / isn't active"},
         429: {"description": "This address has opened too many guest carts (RATE_LIMIT_GUEST_CART)"},
         503: {"description": "Cart store unavailable, nothing was changed"},
@@ -499,7 +499,7 @@ async def add_to_cart(
             cart = await redis.add_to_cart_atomic(owner, **line)
     except InsufficientStockError:
         raise Problem(
-            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_409_CONFLICT,
             type=ProblemType.INSUFFICIENT_STOCK,
             detail="Not enough stock available",
         ) from None
@@ -514,7 +514,7 @@ async def add_to_cart(
     "/items/{product_id}",
     response_model=CartResponse,
     responses={
-        400: {"description": "Not enough stock available"},
+        409: {"description": "Not enough stock available"},
         404: {"description": "Product not found or inactive, item not in cart, or variant_id invalid for this product"},
         503: {"description": "Cart store unavailable, nothing was changed"},
     },
@@ -556,7 +556,7 @@ async def update_cart_item(
         ) from None
     except InsufficientStockError:
         raise Problem(
-            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_409_CONFLICT,
             type=ProblemType.INSUFFICIENT_STOCK,
             detail="Not enough stock available",
         ) from None

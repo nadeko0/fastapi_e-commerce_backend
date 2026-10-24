@@ -66,10 +66,17 @@ class ValidationProblem(Problem):
     errors: list[ValidationErrorItem]
 
 
-_RETRY_AFTER = {
+RETRY_AFTER_HEADER = {
     "Retry-After": {
         "description": "Seconds to wait before repeating the request.",
         "schema": {"type": "integer", "minimum": 0},
+    }
+}
+# On the 201 of a POST (app/core/location.py).
+LOCATION_HEADER = {
+    "Location": {
+        "description": "The URL of the resource that was created (RFC 9110 10.2.2).",
+        "schema": {"type": "string"},
     }
 }
 _WWW_AUTHENTICATE = {
@@ -107,12 +114,12 @@ VALIDATION_ERROR = {
 TOO_MANY_REQUESTS = {
     "description": "Too many requests",
     "model": Problem,
-    "headers": _RETRY_AFTER,
+    "headers": RETRY_AFTER_HEADER,
 }
 SERVICE_UNAVAILABLE = {
     "description": "Temporarily unavailable, or the server is at capacity",
     "model": Problem,
-    "headers": _RETRY_AFTER,
+    "headers": RETRY_AFTER_HEADER,
 }
 SERVER_ERROR = {"description": "Server error", "model": Problem}
 
@@ -200,7 +207,7 @@ class DocumentedRoute(APIRoute):
             if code in merged:
                 merged[code].setdefault("model", model)
         if 429 in merged:
-            merged[429].setdefault("headers", _RETRY_AFTER)
+            merged[429].setdefault("headers", RETRY_AFTER_HEADER)
         # A second pass with the full list: FastAPI builds the response
         # fields (the models) in the constructor.
         super().__init__(path, endpoint, responses=merged, **kwargs)

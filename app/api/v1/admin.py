@@ -2,9 +2,10 @@ import logging
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from pydantic import Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
@@ -17,7 +18,8 @@ from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, DbSession, Provider
 from app.core.etag import IfMatch, IfNoneMatch, etag_for, if_none_match_hits, require_if_match
-from app.core.openapi import FORBIDDEN, UNAUTHORIZED, DocumentedRoute
+from app.core.location import set_location
+from app.core.openapi import FORBIDDEN, LOCATION_HEADER, UNAUTHORIZED, DocumentedRoute
 from app.core.sorting import order_clauses
 from app.models.category import Category
 from app.models.order import Order
@@ -41,7 +43,7 @@ from app.schemas.category import (
     CategoryCreate,
     CategoryResponse,
 )
-from app.schemas.common import Int32, Message, PaginationParams, sortable_pagination
+from app.schemas.common import Int32, PaginationParams, sortable_pagination
 from app.schemas.order import (
     OrderListResponse,
     OrderResponse,
@@ -100,13 +102,17 @@ router = APIRouter(
 @router.post(
     "/categories",
     response_model=CategoryResponse,
+    status_code=status.HTTP_201_CREATED,
     responses={
+        201: {"description": "Category created", "headers": LOCATION_HEADER},
         403: {"description": "Admin privileges required"},
         404: {"description": "Parent category not found"},
     },
 )
 async def create_category(
     category: CategoryCreate,
+    request: Request,
+    response: Response,
     current_user: AdminUser,
     db: DbSession,
     redis: Cache,
@@ -138,18 +144,23 @@ async def create_category(
 
     await redis.delete("category:tree")
 
+    set_location(request, response, "get_category", category_id=db_category.id)
     return CategoryResponse.model_validate(db_category)
 
 @router.post(
     "/products",
     response_model=ProductResponse,
+    status_code=status.HTTP_201_CREATED,
     responses={
+        201: {"description": "Product created", "headers": LOCATION_HEADER},
         403: {"description": "Admin privileges required"},
         404: {"description": "Category not found"},
     },
 )
 async def create_product(
     product: ProductCreate,
+    request: Request,
+    response: Response,
     current_user: AdminUser,
     db: DbSession,
     redis: Cache,
@@ -195,8 +206,8 @@ async def create_product(
     # spreading Product.__dict__ (which includes SQLAlchemy's internal
     # _sa_instance_state) into the Pydantic constructor.
     base = ProductInDB.model_validate(db_product, from_attributes=True)
-    response = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
-    return response
+    set_location(request, response, "get_product", product_id=db_product.id)
+    return ProductResponse(**base.model_dump(), category_name=db_product.category.name)
 
 # PATCH shares the PUT handler: same schema, checks, side effects, response.
 @router.patch(
@@ -298,7 +309,8 @@ async def update_product(
 
 @router.delete(
     "/products/{product_id}",
-    response_model=Message,
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Product not found"},
@@ -337,8 +349,6 @@ async def delete_product(
 
     await redis.invalidate_product_cache(product_id)
     await redis.invalidate_category_cache()
-
-    return Message(message="Product deleted successfully")
 
 # The columns the admin order list can be sorted by. sort_by used to accept
 # any attribute of the Order class (hasattr): relationships such as "user"
@@ -621,7 +631,9 @@ async def _commit_variant(db: AsyncSession, sku: str | None, variant_id: int | N
 @router.post(
     "/products/{product_id}/variants",
     response_model=ProductVariantResponse,
+    status_code=status.HTTP_201_CREATED,
     responses={
+        201: {"description": "Variant created", "headers": LOCATION_HEADER},
         403: {"description": "Admin privileges required"},
         404: {"description": "Product not found"},
         409: {"description": "SKU already in use"},
@@ -631,6 +643,8 @@ async def _commit_variant(db: AsyncSession, sku: str | None, variant_id: int | N
 async def create_product_variant(
     product_id: Int32,
     variant: ProductVariantCreate,
+    request: Request,
+    response: Response,
     current_user: AdminUser,
     db: DbSession,
 ):
@@ -655,6 +669,10 @@ async def create_product_variant(
     await _commit_variant(db, variant.sku)
     await db.refresh(db_variant)
 
+    set_location(
+        request, response, "get_product_variant",
+        product_id=product_id, variant_id=db_variant.id,
+    )
     return ProductVariantResponse.model_validate(db_variant)
 
 @router.get(
@@ -889,7 +907,7 @@ async def list_reconciliation_discrepancies(
 
 @router.post(
     "/reconciliation/run",
-    response_model=ReconciliationRunResult | ReconciliationQueued,
+    response_model=ReconciliationRunResult,
     responses={
         202: {"description": "The full run is queued (no order_id)", "model": ReconciliationQueued},
         403: {"description": "Admin privileges required"},
@@ -898,7 +916,6 @@ async def list_reconciliation_discrepancies(
     },
 )
 async def run_reconciliation(
-    response: Response,
     current_user: AdminUser,
     db: DbSession,
     provider: Provider,
@@ -920,8 +937,10 @@ async def run_reconciliation(
                 detail="Task queue unavailable; reconciliation was not queued",
                 headers={"Retry-After": "5"},
             ) from e
-        response.status_code = http_status.HTTP_202_ACCEPTED
-        return ReconciliationQueued(queued=True)
+        return JSONResponse(
+            ReconciliationQueued(queued=True).model_dump(),
+            status_code=http_status.HTTP_202_ACCEPTED,
+        )
     if not (await db.execute(select(Order.id).where(Order.id == order_id).limit(1))).first():
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,

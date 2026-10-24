@@ -242,10 +242,11 @@ def test_password_reset_request_answers_with_a_message(client):
     assert body == {"message": "If the email exists, a password reset link will be sent"}
 
 
-def test_deleting_an_address_answers_with_a_message(client, buyer, address):
-    body = _ok(client.delete(f"{API}/users/addresses/{address.id}", headers=buyer[1]))
+def test_deleting_an_address_answers_with_no_content(client, buyer, address):
+    response = client.delete(f"{API}/users/addresses/{address.id}", headers=buyer[1])
 
-    assert body == {"message": "Address deleted successfully"}
+    assert response.status_code == 204
+    assert response.content == b""
 
 
 def test_data_retention_is_an_object_with_named_fields(client, buyer):

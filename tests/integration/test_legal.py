@@ -406,7 +406,7 @@ def test_data_request_deletion_actually_deactivates_the_account(client, db_sessi
 
     # The account is deactivated for every later request with this token.
     later = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
-    assert later.status_code == 400
+    assert later.status_code == 403
     assert later.json()["detail"] == "Inactive user"
 
 

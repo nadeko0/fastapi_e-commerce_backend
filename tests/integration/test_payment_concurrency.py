@@ -313,6 +313,6 @@ def test_decline_whose_order_is_paid_while_the_provider_call_is_in_flight_keeps_
         f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
 
-    assert response.status_code == 402
+    assert response.status_code == 422
     assert _get_order(db_session, order["id"]).payment_status == "paid"
     assert [p.status for p in _get_payments(db_session, order["id"])] == ["failed"]

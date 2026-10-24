@@ -153,7 +153,7 @@ def test_order_racing_a_twin_with_the_same_key_returns_the_twins_order(
 
     response = shop.place_order(buyer, key=key)
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 201, response.text
     assert response.json()["id"] == twin["id"]
     assert [o.id for o in shop.db.query(Order).all()] == [twin["id"]]
     # The loser took no stock (the twin row was inserted directly, so it
@@ -185,7 +185,7 @@ def test_pay_with_an_amount_other_than_the_total_is_refused_before_the_provider(
 
 
 @_needs_no_row_locks
-def test_pay_racing_a_twin_with_the_same_key_returns_the_twins_attempt(
+def test_pay_racing_a_twin_with_the_same_key_is_told_the_twin_is_in_flight(
     shop, outbox, monkeypatch
 ):
     product = shop.product(price="19.99")
@@ -210,11 +210,11 @@ def test_pay_racing_a_twin_with_the_same_key_returns_the_twins_attempt(
 
     response = shop.pay(buyer, order["id"], key=key)
 
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["id"] == twin["id"]
-    assert body["status"] == "pending"
-    assert body["transaction_id"] == "pi_twin_attempt"
+    # The twin's request is still being processed (draft-ietf-httpapi-
+    # idempotency-key-header, section 2.7): 409, asking to retry.
+    assert response.status_code == 409, response.text
+    assert response.json()["type"].endswith("/idempotency-key-in-use")
+    assert response.headers["Retry-After"] == "5"
     # The loser never reached the provider: one attempt, one charge at most.
     assert created == []
     assert payment_rows(shop, order["id"]) == [("processing", 1999, 0, "USD", False)]
@@ -294,7 +294,7 @@ def test_pay_whose_intent_ends_unpaid_without_an_error_fails_the_attempt(
 
     response = shop.pay(buyer, order["id"])
 
-    assert response.status_code == 402, response.text
+    assert response.status_code == 422, response.text
     assert order_state(shop, order["id"]) == ("new", "failed")
     assert payment_rows(shop, order["id"]) == [("failed", 1999, 0, "USD", False)]
     assert outbox.take() == []
@@ -456,7 +456,7 @@ def test_checkout_session_retry_refused_by_the_provider_as_a_reused_key_leaves_i
     assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
 
 
-def test_checkout_session_retry_of_an_unknown_attempt_whose_order_was_cancelled_answers_400(
+def test_checkout_session_retry_of_an_unknown_attempt_whose_order_was_cancelled_answers_409(
     shop, monkeypatch
 ):
     product = shop.product(price="19.99")
@@ -473,7 +473,7 @@ def test_checkout_session_retry_of_an_unknown_attempt_whose_order_was_cancelled_
 
     response = shop.checkout_session(buyer, order["id"], key=key)
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
 
 
@@ -604,7 +604,7 @@ def test_checkout_session_with_the_key_of_a_declined_pay_attempt_answers_409_not
     buyer = shop.buyer()
     order = shop.order_of(buyer, product)
     key = new_key()
-    assert shop.pay(buyer, order["id"], token=PAY_DECLINED, key=key).status_code == 402
+    assert shop.pay(buyer, order["id"], token=PAY_DECLINED, key=key).status_code == 422
 
     response = shop.checkout_session(buyer, order["id"], key=key)
 
@@ -908,7 +908,7 @@ def test_pay_retry_that_times_out_again_stays_unknown(shop, monkeypatch):
     assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
 
 
-def test_pay_retry_of_an_unknown_attempt_whose_order_was_cancelled_answers_400(
+def test_pay_retry_of_an_unknown_attempt_whose_order_was_cancelled_answers_409(
     shop, monkeypatch
 ):
     product = shop.product(price="19.99")
@@ -926,7 +926,7 @@ def test_pay_retry_of_an_unknown_attempt_whose_order_was_cancelled_answers_400(
 
     response = shop.pay(buyer, order["id"], key=key)
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert [p.status for p in shop.payments(order["id"])] == ["unknown"]
 
 

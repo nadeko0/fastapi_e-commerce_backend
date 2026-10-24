@@ -42,7 +42,9 @@ Statuses are the ones HTTP defines for the situation. Two requests that used
 to be a 422 are not: a body that is not JSON at all is a 400 (RFC 9110
 15.5.1: malformed syntax), and a body sent with a Content-Type that is not
 JSON is a 415 (15.5.16), with `Accept` naming the media type that would have
-been accepted. A request that parses but breaks a rule stays 422.
+been accepted. A request that parses but breaks a rule stays 422. A missing
+or malformed Idempotency-Key header is a 400 (draft-ietf-httpapi-idempotency-
+key-header, section 2.7), not the 422 of validation: see IDEMPOTENCY_KEY_LOC.
 
 Input is never echoed: see _CONSTRAINT_KEYS (OWASP REST Security Cheat
 Sheet, "Respond with generic error messages"; FastAPI's default 422 put the
@@ -79,10 +81,12 @@ class ProblemType(StrEnum):
     BODY_TOO_LARGE = _TYPE_BASE + "body-too-large"
     RATE_LIMITED = _TYPE_BASE + "rate-limited"
     SERVICE_OVERLOADED = _TYPE_BASE + "service-overloaded"
+    IDEMPOTENCY_KEY_MISSING = _TYPE_BASE + "idempotency-key-missing"
     IDEMPOTENCY_KEY_REUSED = _TYPE_BASE + "idempotency-key-reused"
     IDEMPOTENCY_KEY_IN_USE = _TYPE_BASE + "idempotency-key-in-use"
     PAYMENT_DECLINED = _TYPE_BASE + "payment-declined"
     INSUFFICIENT_STOCK = _TYPE_BASE + "insufficient-stock"
+    ACCOUNT_INACTIVE = _TYPE_BASE + "account-inactive"
 
 
 PROBLEM_TITLES = {
@@ -92,10 +96,12 @@ PROBLEM_TITLES = {
     ProblemType.BODY_TOO_LARGE: "Request body too large",
     ProblemType.RATE_LIMITED: "Too many requests",
     ProblemType.SERVICE_OVERLOADED: "Service overloaded",
+    ProblemType.IDEMPOTENCY_KEY_MISSING: "Idempotency-Key missing or invalid",
     ProblemType.IDEMPOTENCY_KEY_REUSED: "Idempotency key reused with a different request",
     ProblemType.IDEMPOTENCY_KEY_IN_USE: "Idempotency key in use",
     ProblemType.PAYMENT_DECLINED: "Payment declined",
     ProblemType.INSUFFICIENT_STOCK: "Insufficient stock",
+    ProblemType.ACCOUNT_INACTIVE: "Account inactive",
 }
 
 
@@ -191,6 +197,16 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
     return problem_response(request.scope, exc)
 
 
+# Where validation reports the Idempotency-Key header of a route that
+# requires it (declared required, with min_length and max_length, so that the
+# document keeps saying so). The draft answers a missing key with 400
+# (section 2.7): this is the one place that turns the header's validation
+# errors, whichever route declared it, into that 400. The value is never
+# echoed. A header problem is reported ahead of a body problem: the key is
+# checked first, and a client has to fix it before the body means anything.
+IDEMPOTENCY_KEY_LOC = ("header", "Idempotency-Key")
+
+
 def _unsupported_media_type(request: Request) -> Problem:
     accepted = "application/json"
     if request.method == "PATCH":
@@ -206,7 +222,15 @@ async def request_validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> Response:
     errors = exc.errors()
-    if any(error["type"] == "json_invalid" and error["loc"][0] == "body" for error in errors):
+    if any(tuple(error["loc"]) == IDEMPOTENCY_KEY_LOC for error in errors):
+        problem = Problem(
+            400, type=ProblemType.IDEMPOTENCY_KEY_MISSING,
+            detail=(
+                "The Idempotency-Key header is required: send a value of 8 to 255 "
+                "characters that is unique per attempt, and the same on every retry of it"
+            ),
+        )
+    elif any(error["type"] == "json_invalid" and error["loc"][0] == "body" for error in errors):
         problem = Problem(
             400, type=ProblemType.MALFORMED_REQUEST,
             detail="The request body is not valid JSON",

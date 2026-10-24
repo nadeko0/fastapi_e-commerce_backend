@@ -33,7 +33,7 @@ def _login(client, email="headers@example.com", password=PASSWORD):
 
 
 def _registered_login(client, email="headers@example.com"):
-    assert client.post(f"{USERS}/register", json=_payload(email)).status_code == 200
+    assert client.post(f"{USERS}/register", json=_payload(email)).status_code == 202
     response = _login(client, email)
     assert response.status_code == 200
     return response

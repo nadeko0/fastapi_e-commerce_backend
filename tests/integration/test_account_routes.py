@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
+from app.core.errors import ProblemType
 from app.core.security import get_password_hash
 from app.main import app
 from app.models.address import Address
@@ -99,14 +100,15 @@ def test_a_token_for_another_application_is_401(client, method, path):
 
 
 @pytest.mark.parametrize("method,path", PROTECTED)
-def test_a_deactivated_account_is_400_everywhere(client, db_session, method, path):
+def test_a_deactivated_account_is_403_account_inactive_everywhere(client, db_session, method, path):
     headers = _auth(client)
     db_session.query(User).update({User.is_active: False})
     db_session.commit()
 
     response = _call(client, method, path, headers)
 
-    assert response.status_code == 400
+    assert response.status_code == 403
+    assert response.json()["type"] == ProblemType.ACCOUNT_INACTIVE
     assert response.json()["detail"] == "Inactive user"
 
 
@@ -183,15 +185,16 @@ def test_the_same_address_twice_is_409(client):
 def test_a_deleted_address_can_be_neither_changed_nor_deleted_nor_made_default(client):
     headers = _auth(client)
     address = _create(client, headers)
-    assert client.delete(f"{USERS}/addresses/{address['id']}", headers=headers).status_code == 200
+    assert client.delete(f"{USERS}/addresses/{address['id']}", headers=headers).status_code == 204
 
     assert client.put(
         f"{USERS}/addresses/{address['id']}", json={"city": "Elsewhere"}, headers=headers
-    ).status_code == 400
-    assert client.delete(f"{USERS}/addresses/{address['id']}", headers=headers).status_code == 400
+    ).status_code == 409
+    # Gone for the client: a second DELETE is a 404, not a conflict.
+    assert client.delete(f"{USERS}/addresses/{address['id']}", headers=headers).status_code == 404
     assert client.post(
         f"{USERS}/addresses/default", json={"address_id": address["id"]}, headers=headers
-    ).status_code == 400
+    ).status_code == 409
 
 
 def test_an_unknown_or_foreign_address_cannot_be_made_default(client):

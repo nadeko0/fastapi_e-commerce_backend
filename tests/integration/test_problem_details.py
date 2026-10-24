@@ -295,7 +295,8 @@ def test_every_problem_type_is_a_stable_uri_with_a_title():
 
     assert {t.value.removeprefix(BASE) for t in ProblemType} == {
         "validation-error", "malformed-request", "unsupported-media-type", "body-too-large",
-        "rate-limited", "service-overloaded", "idempotency-key-reused",
-        "idempotency-key-in-use", "payment-declined", "insufficient-stock",
+        "rate-limited", "service-overloaded", "idempotency-key-missing",
+        "idempotency-key-reused", "idempotency-key-in-use", "payment-declined",
+        "insufficient-stock", "account-inactive",
     }
     assert set(PROBLEM_TITLES) == set(ProblemType)

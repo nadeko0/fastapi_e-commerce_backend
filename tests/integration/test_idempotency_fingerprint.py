@@ -105,7 +105,7 @@ def test_order_key_reused_with_another_address_answers_422(shop):
     buyer = shop.buyer()
     assert shop.add_to_cart(buyer, product, 2).status_code == 200
     key = new_key()
-    assert shop.place_order(buyer, key=key).status_code == 200
+    assert shop.place_order(buyer, key=key).status_code == 201
     other = _second_address(shop, buyer)
 
     response = shop.client.post(
@@ -125,7 +125,7 @@ def test_order_key_reused_with_the_same_address_replays(shop):
     key = new_key()
     first = shop.place_order(buyer, key=key)
     second = shop.place_order(buyer, key=key)
-    assert second.status_code == 200
+    assert second.status_code == 201
     assert second.json()["id"] == first.json()["id"]
     assert shop.db.query(Order).one().idempotency_fingerprint is not None
 
@@ -144,7 +144,7 @@ def test_order_stored_without_a_fingerprint_replays_for_any_address(shop):
         headers={**buyer.headers, "Idempotency-Key": key},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json()["id"] == first.json()["id"]
 
 

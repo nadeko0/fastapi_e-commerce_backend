@@ -73,7 +73,7 @@ def test_register_creates_the_account(client, valid_registration_payload, db_ses
 
     response = client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert "hashed_password" not in response.text
     user = db_session.query(UserModel).filter(
         UserModel.email == valid_registration_payload["email"]
@@ -97,7 +97,7 @@ def test_registering_an_existing_email_answers_exactly_like_a_new_one(
         json={**valid_registration_payload, "password": "Different1", "full_name": "Someone Else"},
     )
 
-    assert new.status_code == again.status_code == 200
+    assert new.status_code == again.status_code == 202
     assert new.json() == again.json()
     assert email not in new.text
     assert sent == {"welcome": [email], "exists": [email]}
