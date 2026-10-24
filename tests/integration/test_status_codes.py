@@ -642,3 +642,12 @@ def test_the_queued_reconciliation_run_answers_202(shop, monkeypatch):
 
     assert response.status_code == 202
     assert response.json() == {"queued": True}
+
+
+def test_get_on_the_default_address_route_is_405_not_a_bad_address_id(client):
+    # /addresses/default is a POST route; the id route only matches integers,
+    # so a GET falls through to the method check of the literal route.
+    response = client.get(f"{API}/users/addresses/default")
+
+    assert response.status_code == 405
+    assert response.headers["allow"] == "POST"

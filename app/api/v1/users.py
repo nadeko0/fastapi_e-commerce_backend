@@ -17,6 +17,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
+from starlette.convertors import Convertor, register_url_convertor
 
 from app.api.merge_patch import PATCH_DESCRIPTION, merge_patch_body
 from app.api.v1.cart import merge_guest_cart_on_login_async
@@ -84,6 +85,23 @@ from app.services.email import (
 )
 
 logger = logging.getLogger(__name__)
+
+class SignedIntConvertor(Convertor[int]):
+    """Starlette's `int` matches digits only, so a negative id would no longer
+    reach the route and answer 422 (the Int32 bound) but 404. This one still
+    refuses what is not a number, which is what lets the literal
+    /addresses/default fall through to its own route."""
+
+    regex = "-?[0-9]+"
+
+    def convert(self, value: str) -> int:
+        return int(value)
+
+    def to_string(self, value: int) -> str:
+        return str(int(value))
+
+
+register_url_convertor("sint", SignedIntConvertor())
 
 router = APIRouter(prefix="/users", tags=["users"], route_class=DocumentedRoute)
 # oauth2_scheme is imported from app.core.security rather than redefined here
@@ -572,7 +590,7 @@ async def list_addresses(
     )
 
 @router.get(
-    "/addresses/{address_id}",
+    "/addresses/{address_id:sint}",
     response_model=AddressResponse,
     responses={404: {"description": "Address not found, deleted, or not the current user's"}},
 )
@@ -680,7 +698,7 @@ async def create_address(
 
 # PATCH shares the PUT handler: same schema, checks, side effects, response.
 @router.patch(
-    "/addresses/{address_id}",
+    "/addresses/{address_id:sint}",
     response_model=AddressResponse,
     summary="Patch Address",
     description=PATCH_DESCRIPTION,
@@ -691,7 +709,7 @@ async def create_address(
     },
 )
 @router.put(
-    "/addresses/{address_id}",
+    "/addresses/{address_id:sint}",
     response_model=AddressResponse,
     responses={
         404: {"description": "Address not found"},
@@ -752,7 +770,7 @@ async def update_address(
     return AddressResponse.model_validate(address)
 
 @router.delete(
-    "/addresses/{address_id}",
+    "/addresses/{address_id:sint}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     responses={404: {"description": "Address not found, or already deleted"}},
