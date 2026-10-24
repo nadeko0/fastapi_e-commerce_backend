@@ -186,6 +186,17 @@ def test_ci_tests_against_the_postgres_image_production_runs():
     assert "test-postgres" in needs
 
 
+def test_ci_runs_the_real_redis_tests_on_the_redis_image_production_runs():
+    compose_image = re.search(r"^\s*image: (redis:\S+)", service_block("redis"), re.M).group(1)
+    ci = _read(".github/workflows/ci.yml")
+    job = ci[ci.index("\n  test-redis:"):]
+    job = job[: job.index("\n  audit:")]
+    assert re.search(rf"^\s*image: {re.escape(compose_image)}\s*$", job, re.M)
+    assert "REAL_REDIS_URL: redis://localhost:6379/0" in job
+    assert "-m real_redis" in job
+    assert "test-redis" in re.search(r"docker-build:.*?needs: \[([^\]]*)\]", ci, re.S).group(1)
+
+
 def test_celery_worker_gets_time_to_finish_its_task_on_stop():
     # `docker stop` sends SIGTERM (Celery: warm shutdown, running tasks
     # finish) and SIGKILL after stop_grace_period, 10 s by default. A task

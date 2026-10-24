@@ -85,6 +85,7 @@ filterwarnings = [
 markers = [
     "timing_sensitive: asserts on elapsed time or event-loop latency; run alone, not beside other xdist workers (-m timing_sensitive)",
     "db_sensitive: outcome depends on the database (locks, constraints, indexes, migrations); applied by file name in tests/conftest.py, run on PostgreSQL in CI",
+    "real_redis: runs on the Redis server named by REAL_REDIS_URL (parametrization backend=real of tests/integration/test_real_redis_parity.py); skipped without it, run by CI job test-redis",
 ]
 
 [tool.coverage.run]

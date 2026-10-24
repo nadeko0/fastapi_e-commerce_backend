@@ -242,6 +242,42 @@ jobs:
           EMAILS_FROM_NAME: CI
         run: uv run pytest tests/ -m "db_sensitive and timing_sensitive" -q -p no:cacheprovider -rs
 
+  test-redis:
+    # The suite runs on fakeredis (tests/conftest.py). The tests marked
+    # real_redis are the parametrizations of tests/integration/
+    # test_real_redis_parity.py that run on a real server instead: the
+    # rate-limit Lua script, token revocation, SET NX guards, WATCH/MULTI
+    # against a competing writer, expiry and the stored JSON. The same tests
+    # run on fakeredis in the other jobs, so a difference between emulator and
+    # server shows up as one failing parametrization. The image is the one
+    # docker-compose.yml runs (test_docker_compose.py keeps them equal).
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Set up Python
+        run: uv python install
+      - name: Install dependencies
+        run: uv sync --locked --group dev
+      - name: Redis-semantics tests on a real Redis
+        env:
+          REAL_REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
+        run: uv run pytest tests/ -m real_redis -q -p no:cacheprovider -rs
+
   audit:
     # Fails the build when a package pinned in uv.lock has a known
     # vulnerability (PyPI Advisory Database, via pip-audit). The requirements
@@ -301,7 +337,7 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
-    needs: [lint, audit, secrets, test, test-timezones, test-postgres]
+    needs: [lint, audit, secrets, test, test-timezones, test-postgres, test-redis]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build metadata for the OCI labels
