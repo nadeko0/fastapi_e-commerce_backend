@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated, List  # noqa: UP035 - see the UP006 noqa on response_model
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
@@ -57,8 +57,8 @@ from app.schemas.address import (
     SetDefaultAddress,
 )
 from app.schemas.common import (
-    APIResponse,
     Int32,
+    Message,
     sortable_pagination,
 )
 from app.schemas.order import OrderResponse
@@ -113,7 +113,7 @@ REGISTRATION_RECEIVED = (
 
 @router.post(
     "/register",
-    response_model=APIResponse[dict],
+    response_model=Message,
 )
 async def register_user(
     user_in: UserCreate,
@@ -198,11 +198,11 @@ async def register_user(
         logger.info("Registration for an existing account; owner notified")
         background_tasks.add_task(send_account_exists_email, existing_email)
 
-    return APIResponse.success_response({"message": REGISTRATION_RECEIVED})
+    return Message(message=REGISTRATION_RECEIVED)
 
 @router.post(
     "/verify-email",
-    response_model=APIResponse[dict],
+    response_model=Message,
     responses={
         400: {"description": "Invalid or expired verification token"},
         404: {"description": "User not found"},
@@ -234,21 +234,17 @@ async def _confirm_email(token: str, db: AsyncSession):
         )
 
     if user.is_email_verified:
-        return APIResponse.success_response({
-            "message": "Email already verified"
-        })
+        return Message(message="Email already verified")
 
     user.is_email_verified = True
     user.email_verification_date = utc_now()
     await db.commit()
 
-    return APIResponse.success_response({
-        "message": "Email verified successfully"
-    })
+    return Message(message="Email verified successfully")
 
 @router.post(
     "/verify-email/resend",
-    response_model=APIResponse[dict],
+    response_model=Message,
     responses={400: {"description": "Email already verified"}},
 )
 async def resend_verification_email(
@@ -272,13 +268,11 @@ async def resend_verification_email(
     )
     logger.info(f"Verification email resend task queued for user {current_user.id}")
 
-    return APIResponse.success_response({
-        "message": "Verification email sent"
-    })
+    return Message(message="Verification email sent")
 
 @router.post(
     "/login",
-    response_model=APIResponse[Token],
+    response_model=Token,
     responses={
         401: {"description": "Incorrect email or password"},
         429: {"description": "Too many failed login attempts"},
@@ -377,15 +371,15 @@ async def login(
     # cart. Only an active account gets this far (see the refusal above).
     await merge_guest_cart_on_login_async(request, response, user_id, redis)
 
-    return APIResponse.success_response(Token(
+    return Token(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer"
-    ))
+    )
 
 @router.post(
     "/refresh",
-    response_model=APIResponse[Token],
+    response_model=Token,
     responses={401: {"description": "Invalid, expired, or already-used refresh token"}},
 )
 async def refresh_access_token(
@@ -410,11 +404,11 @@ async def refresh_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
 
-    return APIResponse.success_response(Token(
+    return Token(
         access_token=new_access_token,
         refresh_token=new_refresh_token,
         token_type="bearer"
-    ))
+    )
 
 # One shared default: pydantic models are mutable, so a call in the signature is
 # flagged (B008); logout only reads it.
@@ -423,7 +417,7 @@ _NO_LOGOUT_BODY = LogoutRequest()
 
 @router.post(
     "/logout",
-    response_model=APIResponse[dict],
+    response_model=Message,
     responses={503: {"description": "Tokens could not be revoked, retry the request"}},
 )
 async def logout(
@@ -447,20 +441,20 @@ async def logout(
             detail="Logout is temporarily unavailable, please retry",
             headers={"Retry-After": "5"},
         ) from e
-    return APIResponse.success_response({"message": "Logged out successfully"})
+    return Message(message="Logged out successfully")
 
-@router.get("/me", response_model=APIResponse[UserResponse])
+@router.get("/me", response_model=UserResponse)
 async def get_current_user_data(
     current_user: CurrentUser,
 ):
     """Retrieve the current authenticated user's profile."""
 
-    return APIResponse.success_response(UserResponse.model_validate(current_user))
+    return UserResponse.model_validate(current_user)
 
 # PATCH shares the PUT handler: same schema, checks, side effects, response.
 @router.patch(
     "/me",
-    response_model=APIResponse[UserResponse],
+    response_model=UserResponse,
     summary="Patch Current User",
     description=PATCH_DESCRIPTION,
     openapi_extra=merge_patch_body("UserUpdate"),
@@ -472,7 +466,7 @@ async def get_current_user_data(
 )
 @router.put(
     "/me",
-    response_model=APIResponse[UserResponse],
+    response_model=UserResponse,
     responses={
         400: {"description": "No fields to update"},
         404: {"description": "User not found"},
@@ -520,7 +514,7 @@ async def update_current_user(
 
 
         await db.refresh(user)
-        return APIResponse.success_response(UserResponse.model_validate(user))
+        return UserResponse.model_validate(user)
 
     except Exception as e:
         await db.rollback()
@@ -537,7 +531,7 @@ ORDER_SORT_COLUMNS = {"id": Order.id, "created_at": Order.created_at, "total_amo
 UserOrderListParams = sortable_pagination("UserOrderListParams", tuple(ORDER_SORT_COLUMNS))
 
 
-@router.get("/addresses", response_model=APIResponse[AddressListResponse])
+@router.get("/addresses", response_model=AddressListResponse)
 async def list_addresses(
     pagination: Annotated[AddressListParams, Query()],
     current_user: CurrentUser,
@@ -565,17 +559,17 @@ async def list_addresses(
         .limit(pagination.size)
     )).scalars().all()
 
-    return APIResponse.success_response(AddressListResponse(
+    return AddressListResponse(
         items=addresses,
         total=total,
         page=pagination.page,
         size=pagination.size,
         has_more=total > (pagination.page * pagination.size)
-    ))
+    )
 
 @router.post(
     "/addresses",
-    response_model=APIResponse[AddressResponse],
+    response_model=AddressResponse,
     responses={
         409: {"description": "This address already exists for the current user"},
         422: {"description": "Invalid address data"},
@@ -629,7 +623,7 @@ async def create_address(
         created = await db.get(Address, address.id)
         logger.info(f"Verified address exists: {created and created.id} for user {current_user.id}")
 
-        return APIResponse.success_response(AddressResponse.model_validate(address))
+        return AddressResponse.model_validate(address)
     except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -648,7 +642,7 @@ async def create_address(
 # PATCH shares the PUT handler: same schema, checks, side effects, response.
 @router.patch(
     "/addresses/{address_id}",
-    response_model=APIResponse[AddressResponse],
+    response_model=AddressResponse,
     summary="Patch Address",
     description=PATCH_DESCRIPTION,
     openapi_extra=merge_patch_body("AddressUpdate"),
@@ -659,7 +653,7 @@ async def create_address(
 )
 @router.put(
     "/addresses/{address_id}",
-    response_model=APIResponse[AddressResponse],
+    response_model=AddressResponse,
     responses={
         400: {"description": "Address is not active"},
         404: {"description": "Address not found"},
@@ -716,11 +710,11 @@ async def update_address(
     await db.commit()
     await db.refresh(address)
 
-    return APIResponse.success_response(AddressResponse.model_validate(address))
+    return AddressResponse.model_validate(address)
 
 @router.delete(
     "/addresses/{address_id}",
-    response_model=APIResponse[dict],
+    response_model=Message,
     responses={
         400: {"description": "Address is not active"},
         404: {"description": "Address not found"},
@@ -771,13 +765,11 @@ async def delete_address(
 
     await db.commit()
 
-    return APIResponse.success_response({
-        "message": "Address deleted successfully"
-    })
+    return Message(message="Address deleted successfully")
 
 @router.post(
     "/addresses/default",
-    response_model=APIResponse[dict],
+    response_model=Message,
     responses={
         400: {"description": "Address is not active"},
         404: {"description": "Address not found"},
@@ -828,11 +820,9 @@ async def set_default_address(
 
     await db.commit()
 
-    return APIResponse.success_response({
-        "message": "Default address updated successfully"
-    })
+    return Message(message="Default address updated successfully")
 
-@router.get("/orders", response_model=APIResponse[List[OrderResponse]])  # noqa: UP006 - List, not list: the repr names the OpenAPI schema (contract)
+@router.get("/orders", response_model=list[OrderResponse])
 async def get_user_orders(
     pagination: Annotated[UserOrderListParams, Query()],
     current_user: CurrentUser,
@@ -859,9 +849,7 @@ async def get_user_orders(
         .offset((pagination.page - 1) * pagination.size)
         .limit(pagination.size)
     )).scalars().all()
-    return APIResponse.success_response([
-        OrderResponse.model_validate(order) for order in orders
-    ])
+    return [OrderResponse.model_validate(order) for order in orders]
 
 def _invalid_reset_token() -> HTTPException:
     return HTTPException(
@@ -869,7 +857,7 @@ def _invalid_reset_token() -> HTTPException:
         detail="Invalid or expired reset token"
     )
 
-@router.post("/password/reset", response_model=APIResponse[dict])
+@router.post("/password/reset", response_model=Message)
 async def request_password_reset(
     reset_request: PasswordReset,
     db: DbSession,
@@ -889,13 +877,11 @@ async def request_password_reset(
         logger.info(f"Password reset email task queued for user {user.id}")
 
 
-    return APIResponse.success_response({
-        "message": "If the email exists, a password reset link will be sent"
-    })
+    return Message(message="If the email exists, a password reset link will be sent")
 
 @router.post(
     "/password/reset-token/validate",
-    response_model=APIResponse[dict],
+    response_model=Message,
     responses={
         400: {"description": "Invalid or expired reset token"},
         404: {"description": "User not found"},
@@ -929,13 +915,11 @@ async def _check_reset_token(token: str, db: AsyncSession):
 
     # No email in the answer: whoever holds the token (it was in an emailed
     # link) must not learn whose account it opens just by checking it.
-    return APIResponse.success_response({
-        "message": "Token is valid"
-    })
+    return Message(message="Token is valid")
 
 @router.post(
     "/password/reset/confirm",
-    response_model=APIResponse[dict],
+    response_model=Message,
     responses={
         400: {"description": "Invalid or expired reset token"},
         404: {"description": "User not found"},
@@ -1023,6 +1007,4 @@ async def reset_password(
     # connection is held across it.
     await clear_login_failures(email, request)
 
-    return APIResponse.success_response({
-        "message": "Password has been reset successfully"
-    })
+    return Message(message="Password has been reset successfully")
