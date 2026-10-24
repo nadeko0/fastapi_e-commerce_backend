@@ -81,11 +81,6 @@ def test_head_gets_the_same_304_as_get(client, db_session):
     assert conditional.status_code == 304 and conditional.content == b""
 
 
-def test_head_carries_deprecation_headers_of_the_get(client):
-    _, head = assert_head_matches_get(client, f"{API}/users/verify-email/sometoken")
-    assert "deprecation" in head.headers and "sunset" in head.headers
-
-
 def test_head_carries_security_headers_and_request_id(client):
     head = client.head(f"{API}/categories", headers={"X-Request-ID": "head-1"})
     assert head.headers["x-request-id"] == "head-1"

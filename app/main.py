@@ -10,7 +10,6 @@ from app.core import probes, telemetry
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.database import async_engine, engine
-from app.core.deprecation import DeprecationMiddleware
 from app.core.errors import register_error_handlers
 from app.core.forwarded import ForwardedClientMiddleware
 from app.core.head import HeadMiddleware
@@ -86,10 +85,6 @@ app.add_middleware(HeadMiddleware)
 # outside it, so a request that is shed never gets this far.
 app.add_middleware(BodySizeLimitMiddleware, limit=settings.MAX_REQUEST_BODY_BYTES)
 
-# Deprecation/Sunset/Link on the routes flagged deprecated=True
-# (app/core/deprecation.py); inside CORS so the browser may read them.
-app.add_middleware(DeprecationMiddleware)
-
 logger.debug(f"Configuring CORS with origins: {settings.BACKEND_CORS_ORIGINS}")
 app.add_middleware(
     CORSMiddleware,
@@ -101,7 +96,7 @@ app.add_middleware(
     # a browser client can back off. Starlette: credentials and "*" do not mix.
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "If-None-Match"],
-    expose_headers=["Retry-After", "X-Request-ID", "RateLimit", "RateLimit-Policy", "ETag", "Deprecation", "Sunset", "Link"],
+    expose_headers=["Retry-After", "X-Request-ID", "RateLimit", "RateLimit-Policy", "ETag"],
 )
 
 # X-Forwarded-For -> request.client, by TRUSTED_PROXIES and nothing else,

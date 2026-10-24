@@ -9,7 +9,7 @@ rate-limit counter. Instead this middleware runs a HEAD request as the GET it
 stands for - same route, same dependencies, same status, same headers - and
 drops the body. Consequences:
 
-- Rate limiting, deprecation headers, ETag/If-None-Match (304) and the
+- Rate limiting, ETag/If-None-Match (304) and the
   request id all see a GET: HEAD counts against the budget of its GET, so it
   neither escapes the limit nor is counted twice. (The probes keep their own
   explicit HEAD routes and are passed through untouched.)
