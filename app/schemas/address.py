@@ -30,6 +30,20 @@ def _validate_input_phone(v: str | None) -> str | None:
     return v
 
 
+def _normalise_country(v: str) -> str:
+    """A two-letter code is upper-cased, anything else title-cased. Case
+    mapping can change a length ("ß" upper-cases to "SS"), and the schema
+    runs on input and again on every read of the stored row, so the rule has
+    to give the same answer the second time: a value that upper-cases to more
+    than two characters is title-cased in the same step, which is what the
+    second pass would have done to it."""
+    if len(v) == 2:
+        v = v.upper()
+        if len(v) == 2:
+            return v
+    return v.title()
+
+
 class AddressBase(BaseModel):
     street: str = Field(..., min_length=5, max_length=255)
     city: str = Field(..., min_length=2, max_length=100)
@@ -52,9 +66,7 @@ class AddressBase(BaseModel):
     @field_validator('country')
     @classmethod
     def validate_country(cls, v):
-        if len(v) == 2:
-            return v.upper()
-        return v.title()
+        return _normalise_country(v)
 
     @field_validator('delivery_phone')
     @classmethod
@@ -103,9 +115,7 @@ class AddressUpdate(RequestBody):
         if v is None:
             return v
         # Basic country code validation (can be enhanced with a proper country list)
-        if len(v) == 2:
-            return v.upper()
-        return v.title()
+        return _normalise_country(v)
 
     @field_validator('delivery_phone')
     @classmethod

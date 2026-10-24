@@ -33,7 +33,7 @@ from enum import Enum
 
 import pytest
 from fastapi.routing import APIRoute
-from hypothesis import HealthCheck, given, reject, settings
+from hypothesis import HealthCheck, example, given, reject, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, EmailStr, ValidationError
 from pydantic.fields import FieldInfo
@@ -230,3 +230,52 @@ def test_an_order_writes_money_with_two_decimals_and_timestamps_with_z(raw):
     wire = order.model_dump(mode="json")
     assert re.fullmatch(r"-?\d+\.\d{2}", wire["total_amount"]), wire["total_amount"]
     assert wire["created_at"].endswith("Z"), wire["created_at"]
+
+
+# --- the example Hypothesis found (4.0.x) -----------------------------------
+# HYPOTHESIS_PROFILE=explore, a run in the full suite: an OrderResponse whose
+# shipping address has the country "0ß". The country validator upper-cased a
+# two-character value ("0ß".upper() is "0SS", three characters) and the same
+# validator, run again on the way back in, title-cased the three-character
+# result ("0Ss"). Not a flaw of the strategy: the validator runs on input and
+# again on every read of a stored row, so a country that is not a fixed point
+# of it comes out of the API as something other than what was stored.
+
+
+def _order_with_country(country):
+    stamp = dt.datetime(2000, 1, 1, tzinfo=dt.UTC)
+    address = KNOWN["AddressResponse"]
+    return MODELS["OrderResponse"].model_construct(
+        shipping_address_id=0, delivery_instructions="", id=0, user_id=0,
+        status=KNOWN["OrderResponse"].model_fields["status"].annotation.NEW,
+        payment_status=KNOWN["OrderResponse"].model_fields["payment_status"].annotation.PENDING,
+        total_amount=Decimal("0.00"), currency="", created_at=stamp, updated_at=stamp, items=[],
+        shipping_address=address.model_construct(
+            street="00000", city="00", state="00", postal_code="000", country=country,
+            address_type=address.model_fields["address_type"].annotation.HOME,
+            is_default=False, delivery_instructions=None, delivery_phone=None,
+            id=0, created_at=stamp, updated_at=stamp),
+    )
+
+
+@pytest.mark.parametrize("country", ["0ß", "ß1", "ŉa", "ﬁa", "US", "germany", "0SS"])
+def test_an_order_survives_its_json_for_a_country_whose_case_changes_its_length(country):
+    model = MODELS["OrderResponse"]
+    once = model.model_validate_json(_order_with_country(country).model_dump_json())
+    assert model.model_validate_json(once.model_dump_json()) == once
+
+
+@settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
+@example("0ß")
+@example("ß1")
+@given(st.text(min_size=2, max_size=100))
+def test_a_country_read_twice_is_the_country_read_once(country):
+    address = KNOWN["AddressResponse"]
+    fields = dict(street="00000", city="00", state="00", postal_code="000",
+                  created_at=dt.datetime(2000, 1, 1, tzinfo=dt.UTC),
+                  updated_at=dt.datetime(2000, 1, 1, tzinfo=dt.UTC), id=1)
+    try:
+        once = address(country=country, **fields)
+    except ValidationError:
+        reject()
+    assert address(**{**fields, "country": once.country}).country == once.country

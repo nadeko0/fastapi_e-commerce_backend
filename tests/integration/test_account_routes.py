@@ -302,3 +302,17 @@ def test_a_country_that_outgrows_the_limit_when_title_cased_is_422_without_echoi
     for error in problem["errors"]:
         assert "input" not in error
         assert set(error) <= {"type", "loc", "msg", "ctx", "url"}
+
+
+def test_a_country_that_changes_length_in_upper_case_is_stored_as_it_is_answered(client, db_session):
+    """'ß1' upper-cases to 'SS1' (three characters). The schema runs again when
+    the stored row is read into the response; it used to title-case that
+    second time, so the row held 'SS1' while the API answered 'Ss1'."""
+    headers = _auth(client)
+
+    created = _create(client, headers, country="ß1")
+
+    stored = db_session.get(Address, created["id"]).country
+    assert created["country"] == stored
+    listed = client.get(f"{USERS}/addresses", headers=headers).json()["items"]
+    assert [item["country"] for item in listed] == [stored]
