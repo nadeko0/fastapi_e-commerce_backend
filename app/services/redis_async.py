@@ -58,6 +58,13 @@ logger = logging.getLogger(__name__)
 BLACKLIST_KEY_PREFIX = "blacklist:"
 PASSWORD_CHANGED_KEY_PREFIX = "pwd_changed:"
 
+class TokenStateUnavailable(Exception):
+    """Whether a token has been revoked could not be found out: Redis did not
+    answer. Not "revoked" and not "not revoked" - the caller decides what to do
+    with a token it cannot check (app/core/security.py refuses the request
+    with a 503, never a 401)."""
+
+
 _clients: dict[asyncio.AbstractEventLoop, Redis] = {}
 # Each loop only ever touches its own entry, but loops can live in different
 # threads (the test client runs the app in a worker thread), and the stale
@@ -121,16 +128,20 @@ async def close_async_redis() -> None:
 
 
 async def is_token_blacklisted(token_id: str) -> bool:
-    """Async counterpart of RedisService.is_blacklisted (same `token_id`,
-    from app.core.security._blacklist_id), with the same failure mode: if
-    Redis cannot be asked, the token is treated as blacklisted. Rejecting a
-    valid token for the length of an outage is the safer mistake than
-    accepting a logged-out one."""
+    """Whether the token (`token_id`, from app.core.security._blacklist_id)
+    has been logged out: True or False.
+
+    If Redis cannot be asked it is neither, and TokenStateUnavailable is
+    raised. This used to answer True ("safer to assume blacklisted"), which
+    kept the fail-closed refusal but made it indistinguishable from a
+    revoked token, so the caller answered 401 and a client with a good token
+    dropped it during a Redis blip. The caller still refuses the request;
+    it now says why (503, see get_current_user)."""
     try:
         return bool(await get_async_redis().exists(f"{BLACKLIST_KEY_PREFIX}{token_id}"))
     except RedisError as e:
         logger.error(f"Redis operation failed: is_token_blacklisted: {str(e)}")
-        return True
+        raise TokenStateUnavailable from e
 
 
 async def is_token_superseded(user_id: str | int, issued_at: Any | None) -> bool:
@@ -140,16 +151,18 @@ async def is_token_superseded(user_id: str | int, issued_at: Any | None) -> bool
     password change and on signing out everywhere.
 
     Fails closed, like is_token_blacklisted: both ask whether a token has
-    been revoked, and when Redis cannot be asked - or the watermark cannot
-    be read - the token is treated as revoked. This used to read the
-    watermark the way RedisService.get does, as None on any error, so a
-    token issued before a password reset was accepted again whenever the
-    read failed. A token without an `iat` predates every watermark."""
+    been revoked. When Redis cannot be asked, TokenStateUnavailable is
+    raised (never "not superseded": this used to read the watermark the way
+    RedisService.get does, as None on any error, so a token issued before a
+    password reset was accepted again whenever the read failed). A
+    watermark that is there but unreadable is a stored value that is wrong,
+    not an outage: the token is treated as superseded. A token without an
+    `iat` predates every watermark."""
     try:
         data = await get_async_redis().get(f"{PASSWORD_CHANGED_KEY_PREFIX}{user_id}")
     except RedisError as e:
         logger.error(f"Redis operation failed: is_token_superseded: {str(e)}")
-        return True
+        raise TokenStateUnavailable from e
     if not data:
         return False
     try:
@@ -167,7 +180,10 @@ async def is_token_superseded(user_id: str | int, issued_at: Any | None) -> bool
 class AsyncRedisService:
     """RedisService for coroutines: the same operations, key formats and
     failure mapping (RedisError -> False/None, a blacklist read failure
-    means blacklisted), awaiting redis.asyncio instead of blocking.
+    means blacklisted), awaiting redis.asyncio instead of blocking. The
+    exception is consume_refresh_token, which raises TokenStateUnavailable:
+    nothing but token redemption uses it, and "cannot tell" must not read as
+    "replay".
 
     What gets stored, and the rules for changing a cart, are not here but in
     app/services/redis_codec.py, shared with the sync RedisService; this
@@ -396,7 +412,9 @@ class AsyncRedisService:
     async def consume_refresh_token(self, jti: str) -> dict[str, Any] | None:
         """Atomically redeem a refresh token jti (GET + DELETE in one
         MULTI/EXEC): its {"user_id", "family"} for the first caller, None
-        for a replay, an unknown or expired jti, or a Redis error."""
+        for a replay, an unknown or expired jti. A Redis error is neither a
+        replay nor an unknown jti: TokenStateUnavailable, so that the caller
+        neither burns the token's family nor reports it as invalid."""
         try:
             key = f"refresh_active:{jti}"
             async with self._redis.pipeline() as pipe:
@@ -408,7 +426,7 @@ class AsyncRedisService:
             return json.loads(data)
         except RedisError as e:
             self._handle_redis_error(f"consume_refresh_token: {str(e)}")
-            return None
+            raise TokenStateUnavailable from e
 
     async def revoke_refresh_family(self, family_id: str) -> bool:
         try:

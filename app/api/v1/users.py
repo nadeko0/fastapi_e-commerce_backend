@@ -39,6 +39,7 @@ from app.core.security import (
     invalidate_tokens_issued_before_now,
     issue_refresh_token,
     rotate_refresh_token,
+    token_check_unavailable,
     verify_email_token,
     verify_password_async,
     verify_password_reset_token,
@@ -83,6 +84,7 @@ from app.services.email import (
     send_password_reset_email,
     send_welcome_email,
 )
+from app.services.redis_async import TokenStateUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -425,6 +427,10 @@ async def refresh_access_token(
             detail="Could not validate refresh token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
+    except TokenStateUnavailable as e:
+        # Redis cannot say whether the token is good: not a 401, which would
+        # make the client discard a refresh token that has not been spent.
+        raise token_check_unavailable() from e
 
     return Token(
         access_token=new_access_token,

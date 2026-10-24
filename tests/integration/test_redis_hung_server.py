@@ -9,10 +9,11 @@ client). Nothing here is mocked below the socket.
 - The clients give up with redis.exceptions.TimeoutError after the
   configured socket_timeout (redis-py 8 default, 5 s), not never. Both
   clients, each with the pool settings the application builds.
-- The application turns that into its documented answers: a token check
-  fails closed (401, the same as a revoked token), the login count that
-  cannot be made answers 503 with Retry-After, and the services degrade the
-  way their docstrings say.
+- The application turns that into its documented answers: a token that
+  cannot be checked is refused with 503 and Retry-After (never served, and
+  never the 401 of a revoked token), the login count that cannot be made
+  answers 503 with Retry-After, and the services degrade the way their
+  docstrings say.
 
 The first two tests wait the real 5 s each. The rest shorten the socket
 timeout of the already-built client (the pool's connection kwargs) to a
@@ -24,16 +25,25 @@ import socket
 import threading
 import time
 
+import fakeredis
 import pytest
 import redis
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 import app.services.redis_async as redis_async
 from app.core.config import settings
+from app.core.security import get_password_hash
 from app.models.category import Category
+from app.models.enums import UserRole
 from app.models.product import Product
+from app.models.user import User
 from app.services.redis import RedisService
-from app.services.redis_async import AsyncRedisService, _create_client, is_token_blacklisted
+from app.services.redis_async import (
+    AsyncRedisService,
+    TokenStateUnavailable,
+    _create_client,
+    is_token_blacklisted,
+)
 
 API = settings.API_V1_STR
 SHORT = 0.3  # seconds: the socket timeout of the fast tests
@@ -163,17 +173,20 @@ def test_the_async_service_degrades_as_documented_when_redis_hangs(hung_redis):
     assert time.monotonic() - started < 4 * (SHORT + MARGIN)
 
 
-def test_the_token_checks_fail_closed_when_redis_hangs(hung_redis):
+def test_the_token_checks_cannot_tell_when_redis_hangs(hung_redis):
     async def scenario():
         client = _create_client()
         _shorten(client.connection_pool)
         redis_async._clients[asyncio.get_running_loop()] = client
         try:
-            return await is_token_blacklisted("tok"), await redis_async.is_token_superseded(7, 1.0)
+            with pytest.raises(TokenStateUnavailable):
+                await is_token_blacklisted("tok")
+            with pytest.raises(TokenStateUnavailable):
+                await redis_async.is_token_superseded(7, 1.0)
         finally:
             await redis_async.close_async_redis()
 
-    assert asyncio.run(scenario()) == (True, True)
+    asyncio.run(scenario())
 
 
 @pytest.fixture
@@ -203,6 +216,20 @@ def _redis_now_hangs(monkeypatch):
     monkeypatch.setattr(redis_async, "_clients", {})
 
 
+def _assert_unavailable(response):
+    """The answer for a token that cannot be checked: a problem+json 503 with
+    the same Retry-After as the login's, and no 401 challenge."""
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "30"
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert "WWW-Authenticate" not in response.headers
+    body = response.json()
+    assert body["type"] == "about:blank"
+    assert body["status"] == 503
+    assert body["retry_after"] == 30
+    assert body["detail"] == "Token verification is temporarily unavailable, please retry"
+
+
 def test_an_authenticated_request_is_refused_not_failed_when_redis_hangs(
     client, signed_in, hung_redis, monkeypatch, caplog
 ):
@@ -213,10 +240,10 @@ def test_an_authenticated_request_is_refused_not_failed_when_redis_hangs(
     started = time.monotonic()
     response = client.get(f"{API}/users/me", headers=headers)
 
-    # Whether the token was revoked cannot be known, so it is treated as revoked:
-    # the same 401 as for a blacklisted token (not a 500, not a 200).
-    assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"].startswith("Bearer")
+    # Whether the token was revoked cannot be known, so it is not served; but
+    # its credentials are not at fault either, so it is not the 401 of a
+    # revoked one: 503 with Retry-After (RFC 9110 15.6.4), not a 500, not a 200.
+    _assert_unavailable(response)
     assert "is_token_blacklisted: Timeout reading from" in caplog.text
     assert time.monotonic() - started < 2 * (SHORT + MARGIN)
     assert hung_redis.accepted >= 1
@@ -261,10 +288,134 @@ def test_a_cart_change_answers_503_with_retry_after_when_redis_hangs(
     headers = {"Authorization": f"Bearer {signed_in}"}
     _redis_now_hangs(monkeypatch)
 
-    # The token check comes first and fails closed, so a signed-in cart
-    # request is a 401; the cart's own 503 is reached by the guest.
-    assert client.post(f"{API}/cart/items", json={"product_id": product.id, "quantity": 1}, headers=headers).status_code == 401
+    # The token check comes first and cannot be made, so a signed-in cart
+    # request is the token check's 503; the cart's own 503 is the guest's.
+    _assert_unavailable(
+        client.post(f"{API}/cart/items", json={"product_id": product.id, "quantity": 1}, headers=headers)
+    )
     response = client.post(f"{API}/cart/items", json={"product_id": product.id, "quantity": 1})
 
     assert response.status_code == 503
     assert response.headers["Retry-After"] == "5"
+
+
+# --- A token that cannot be checked is 503 whatever the outage looks like -------------------
+
+
+def _refuse_connections(monkeypatch):
+    """From the next request on, the app's async client is refused
+    (redis.exceptions.ConnectionError), as with Redis stopped."""
+    server = fakeredis.FakeServer()
+    server.connected = False
+    monkeypatch.setattr(
+        redis_async,
+        "_create_client",
+        lambda: fakeredis.FakeAsyncRedis(server=server, decode_responses=True),
+    )
+    monkeypatch.setattr(redis_async, "_clients", {})
+
+
+@pytest.fixture(params=["hung", "refused"])
+def redis_outage(request, monkeypatch):
+    """A function that makes Redis unusable from the next request on: a
+    server that accepts and says nothing, or one that refuses the connection."""
+    if request.param == "hung":
+        request.getfixturevalue("hung_redis")
+        return lambda: _redis_now_hangs(monkeypatch)
+    return lambda: _refuse_connections(monkeypatch)
+
+
+@pytest.fixture
+def signed_in_tokens(client, valid_registration_payload):
+    client.post(f"{API}/users/register", json=valid_registration_payload)
+    return client.post(
+        f"{API}/users/login",
+        data={"username": valid_registration_payload["email"], "password": valid_registration_payload["password"]},
+    ).json()
+
+
+def _bearer(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_an_authenticated_request_is_503_when_redis_is_down(client, signed_in_tokens, redis_outage):
+    redis_outage()
+
+    _assert_unavailable(client.get(f"{API}/users/me", headers=_bearer(signed_in_tokens["access_token"])))
+
+
+def test_a_refresh_is_503_when_redis_is_down(client, signed_in_tokens, redis_outage):
+    redis_outage()
+
+    response = client.post(f"{API}/users/refresh", json={"refresh_token": signed_in_tokens["refresh_token"]})
+
+    _assert_unavailable(response)
+
+
+def test_a_logout_is_503_when_redis_is_down(client, signed_in_tokens, redis_outage):
+    redis_outage()
+
+    response = client.post(
+        f"{API}/users/logout",
+        headers=_bearer(signed_in_tokens["access_token"]),
+        json={"refresh_token": signed_in_tokens["refresh_token"]},
+    )
+
+    _assert_unavailable(response)
+
+
+def test_a_cart_request_with_a_token_is_503_not_a_guest_cart_when_redis_is_down(
+    client, signed_in_tokens, redis_outage
+):
+    redis_outage()
+
+    _assert_unavailable(client.get(f"{API}/cart", headers=_bearer(signed_in_tokens["access_token"])))
+
+
+def test_an_admin_route_is_503_when_redis_is_down(client, db_session, redis_outage):
+    db_session.add(
+        User(
+            email="admin@example.com",
+            hashed_password=get_password_hash("Str0ngPass"),
+            full_name="Admin User",
+            role=UserRole.ADMIN,
+            gdpr_consent=True,
+            privacy_policy_accepted=True,
+            marketing_consent=False,
+            consent_history=[],
+            is_active=True,
+        )
+    )
+    db_session.commit()
+    token = client.post(
+        f"{API}/users/login", data={"username": "admin@example.com", "password": "Str0ngPass"}
+    ).json()["access_token"]
+    assert client.get(f"{API}/admin/stats", headers=_bearer(token)).status_code == 200
+    redis_outage()
+
+    _assert_unavailable(client.get(f"{API}/admin/stats", headers=_bearer(token)))
+
+
+def test_a_refresh_token_is_not_spent_by_an_outage(client, signed_in_tokens, monkeypatch):
+    """The 503 comes before the token is redeemed, so the client keeps it and
+    retries once Redis is back instead of being logged out."""
+    create_client = redis_async._create_client
+    _refuse_connections(monkeypatch)
+    refresh = {"refresh_token": signed_in_tokens["refresh_token"]}
+    assert client.post(f"{API}/users/refresh", json=refresh).status_code == 503
+
+    monkeypatch.setattr(redis_async, "_create_client", create_client)
+    monkeypatch.setattr(redis_async, "_clients", {})
+
+    assert client.post(f"{API}/users/refresh", json=refresh).status_code == 200
+
+
+def test_a_revoked_token_is_still_401_and_a_good_one_200_when_redis_is_up(client, signed_in_tokens):
+    headers = _bearer(signed_in_tokens["access_token"])
+    assert client.get(f"{API}/users/me", headers=headers).status_code == 200
+
+    assert client.post(f"{API}/users/logout", headers=headers, json={}).status_code == 200
+
+    response = client.get(f"{API}/users/me", headers=headers)
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == 'Bearer error="invalid_token"'

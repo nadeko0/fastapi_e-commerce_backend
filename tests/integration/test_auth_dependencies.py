@@ -251,9 +251,10 @@ def test_password_change_of_one_user_does_not_invalidate_another_users_token(cli
     assert response.status_code == 200
 
 
-def test_token_is_rejected_while_redis_is_unreachable(client, monkeypatch):
-    # The blacklist cannot be consulted, so the token cannot be trusted:
-    # same fail-closed behaviour as RedisService.is_blacklisted.
+def test_token_is_refused_with_503_while_redis_is_unreachable(client, monkeypatch):
+    # The blacklist cannot be consulted, so the token cannot be trusted and
+    # is not served; but it is not a 401 either (the credentials are fine,
+    # the server cannot check them): 503 with Retry-After.
     token = _register_and_login(client)
     down_server = fakeredis.FakeServer()
     down_server.connected = False
@@ -266,7 +267,8 @@ def test_token_is_rejected_while_redis_is_unreachable(client, monkeypatch):
 
     response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
 
-    assert response.status_code == 401
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "30"
 
 
 class _WatermarkReadsFail(fakeredis.FakeAsyncRedis):
@@ -277,13 +279,14 @@ class _WatermarkReadsFail(fakeredis.FakeAsyncRedis):
         raise RedisConnectionError("GET failed")
 
 
-def test_token_is_rejected_when_the_password_change_watermark_cannot_be_read(
+def test_token_is_refused_when_the_password_change_watermark_cannot_be_read(
     client, monkeypatch
 ):
     # The blacklist already failed closed; the watermark did not, so a token
     # issued before a password reset was accepted whenever its read failed.
     # Both are the same question - has this token been revoked? - and get
-    # the same answer when it cannot be asked.
+    # the same answer when it cannot be asked: not served, and 503 since
+    # the credentials are not what is wrong.
     token = _register_and_login(client)
     server = fakeredis.FakeServer()
     monkeypatch.setattr(
@@ -295,7 +298,8 @@ def test_token_is_rejected_when_the_password_change_watermark_cannot_be_read(
 
     response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
 
-    assert response.status_code == 401
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "30"
 
 
 def test_token_for_a_user_that_no_longer_exists_is_rejected(client, db_session):

@@ -1195,7 +1195,7 @@ def _redis_command_fails(monkeypatch, fake_redis, *commands):
     monkeypatch.setattr(redis_async_module, "_clients", {})
 
 
-def test_refresh_is_refused_when_the_password_change_watermark_cannot_be_read(
+def test_refresh_is_503_when_the_password_change_watermark_cannot_be_read(
     client, monkeypatch, fake_redis, valid_registration_payload
 ):
     tokens = _login_tokens(client, valid_registration_payload)
@@ -1205,7 +1205,10 @@ def test_refresh_is_refused_when_the_password_change_watermark_cannot_be_read(
         f"{API_PREFIX}/refresh", json={"refresh_token": tokens["refresh_token"]}
     )
 
-    assert response.status_code == 401
+    # Refused, and not as a bad token: the 503 of a token that cannot be
+    # checked (RFC 9110 15.6.4), so the client keeps its refresh token.
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "30"
 
 
 def test_password_reset_that_cannot_revoke_old_tokens_changes_nothing(

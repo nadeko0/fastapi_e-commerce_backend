@@ -23,7 +23,12 @@ from app.core.database import DbSession
 from app.core.errors import Problem, ProblemType
 from app.core.passwords import normalize_password
 from app.models.user import User, UserRole
-from app.services.redis_async import AsyncRedisService, is_token_blacklisted, is_token_superseded
+from app.services.redis_async import (
+    AsyncRedisService,
+    TokenStateUnavailable,
+    is_token_blacklisted,
+    is_token_superseded,
+)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
 
@@ -235,6 +240,36 @@ class RevocationUnavailable(Exception):
     working is worse than one the user knows to retry."""
 
 
+# How long a client is told to wait when a token cannot be checked: the
+# login's value for the same outage (LOGIN_UNAVAILABLE_RETRY_AFTER in
+# app/core/rate_limit.py, which imports this module and so cannot be
+# imported here). A Redis outage is rarely over in a second.
+TOKEN_CHECK_UNAVAILABLE_RETRY_AFTER = 30
+
+
+def token_check_unavailable() -> Problem:
+    """The answer for a request whose token cannot be checked because Redis,
+    where revocation lives, does not answer: 503 with Retry-After, never 401.
+
+    The request is refused all the same (decision F-06 of the 3.0.0 security
+    review: serving a token that may have been logged out is the worse
+    mistake), but the status must say why. RFC 9110 15.5.2: a 401 says the
+    request "lacks valid authentication credentials" and the client "MAY
+    repeat the request with a new or replaced Authorization header"; RFC
+    6750 section 3.1 ties invalid_token to a token that is "expired,
+    revoked, malformed, or invalid for other reasons". The credentials here
+    are fine and the server cannot check them, which is RFC 9110 15.6.4: 503
+    is "currently unable to handle the request due to a temporary overload
+    or scheduled maintenance, which will likely be alleviated after some
+    delay", with Retry-After to suggest the wait. A 401 made real clients
+    drop their tokens and log the user out during a Redis blip."""
+    return Problem(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Token verification is temporarily unavailable, please retry",
+        retry_after=TOKEN_CHECK_UNAVAILABLE_RETRY_AFTER,
+    )
+
+
 # The three dependencies below run on the event loop for every authenticated
 # request, so nothing in them may block: the Redis lookups go through the
 # async client (app/services/redis_async.py) and the user is loaded through
@@ -285,11 +320,17 @@ async def get_current_user(
     except jwt.PyJWTError:
         raise credentials_exception from None
 
-    if await is_token_blacklisted(_blacklist_id(token, payload)):
-        raise credentials_exception
+    # Revoked (True), not revoked (False) or cannot be told (Redis down):
+    # the first two are the answers of the token's own state, the third is
+    # not the client's doing and is not a 401 (token_check_unavailable).
+    try:
+        if await is_token_blacklisted(_blacklist_id(token, payload)):
+            raise credentials_exception
 
-    if await is_token_superseded(user_id, issued_at):
-        raise credentials_exception
+        if await is_token_superseded(user_id, issued_at):
+            raise credentials_exception
+    except TokenStateUnavailable as e:
+        raise token_check_unavailable() from e
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -364,10 +405,13 @@ async def get_optional_active_user(
     is authenticated by the very dependencies above, called in the same
     order with the same arguments, so every way they reject a caller
     applies unchanged: a missing, malformed, expired, blacklisted or
-    superseded token is a 401 and an inactive user a 403. It is never
-    quietly treated as "nobody": a client whose token has just expired must
-    be told so, not be shown some other, empty cart as if its own had
-    vanished.
+    superseded token is a 401, a token that cannot be checked because Redis
+    is down a 503, and an inactive user a 403. It is never quietly treated
+    as "nobody": a client whose token has just expired must be told so, not
+    be shown some other, empty cart as if its own had vanished - and the
+    same holds for a token that merely cannot be checked right now, whose
+    owner would be shown (and could write to) a guest cart instead of
+    their own for the length of the outage.
 
     The user returned is the same detached snapshot get_current_user
     documents.
@@ -436,6 +480,10 @@ async def rotate_refresh_token(token: str, db: AsyncSession) -> tuple[str, str]:
     redeemed by its legitimate owner, or vice versa - that is treated as a
     stolen-token signal and the entire token family is revoked, forcing
     re-login instead of silently issuing more tokens on a compromised chain.
+
+    Raises RefreshTokenError for a token that is not good, and
+    TokenStateUnavailable when Redis could not say (it is neither a replay
+    nor a bad token: the caller answers 503, see token_check_unavailable).
     """
     try:
         payload = jwt.decode(
@@ -457,15 +505,20 @@ async def rotate_refresh_token(token: str, db: AsyncSession) -> tuple[str, str]:
     if user_id is None or jti is None or family is None:
         raise RefreshTokenError("Could not validate refresh token")
 
+    # Asked before the token is redeemed, so that a Redis that stops answering
+    # between the two cannot leave the client with a spent token and a 503
+    # (TokenStateUnavailable, which propagates: the route answers 503 and the
+    # client retries with the same token). A superseded token is refused
+    # whether or not it is spent first.
+    if await is_token_superseded(user_id, issued_at):
+        raise RefreshTokenError("Refresh token no longer valid")
+
     consumed = await async_redis_service.consume_refresh_token(jti)
     if consumed is None:
         # Unknown jti or a replay of an already-rotated token: burn the rest
         # of the chain either way; if it was not tracked this is a no-op.
         await async_redis_service.revoke_refresh_family(family)
         raise RefreshTokenError("Refresh token already used or invalid")
-
-    if await is_token_superseded(user_id, issued_at):
-        raise RefreshTokenError("Refresh token no longer valid")
 
     user = (await db.execute(select(User).where(User.id == user_id).limit(1))).scalar_one_or_none()
     if user is None or not user.is_active:

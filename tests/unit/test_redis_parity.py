@@ -18,7 +18,7 @@ import app.services.redis_codec as codec
 from app.schemas.cart import CartOwner, new_guest_cart_id
 from app.schemas.common import Cart
 from app.services.redis import RedisService
-from app.services.redis_async import AsyncRedisService, get_cache_service
+from app.services.redis_async import AsyncRedisService, TokenStateUnavailable, get_cache_service
 from app.services.redis_codec import (
     CartFullError,
     CartNotFoundError,
@@ -376,7 +376,6 @@ def broken(monkeypatch):
         (lambda s: s.is_blacklisted("t"), True),  # fail closed
         (lambda s: s.mark_once("k", 60), True),  # fail open
         (lambda s: s.register_refresh_token("j", 7, "f", 60), False),
-        (lambda s: s.consume_refresh_token("j"), None),
         (lambda s: s.revoke_refresh_family("f"), False),
         (lambda s: s.revoke_user_refresh_families(7), False),
         (lambda s: s.cache_product(1, {}), False),
@@ -390,6 +389,19 @@ def broken(monkeypatch):
 )
 def test_a_redis_error_maps_to_the_same_result_on_both(svc, broken, call, expected):
     assert call(svc) == expected
+
+
+def test_consume_refresh_token_on_a_redis_error_is_none_for_celery_and_cannot_tell_for_routes(
+    svc, broken
+):
+    # The one deliberate difference: the sync service (Celery) keeps its
+    # "None", the async one (token redemption) must not let an outage read
+    # as a replay, which would burn the token's family and answer 401.
+    if svc.is_async:
+        with pytest.raises(TokenStateUnavailable):
+            svc.consume_refresh_token("j")
+    else:
+        assert svc.consume_refresh_token("j") is None
 
 
 def test_remove_ordered_items_reports_failure_on_a_redis_error(svc, broken):
