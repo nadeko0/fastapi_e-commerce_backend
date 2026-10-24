@@ -60,6 +60,10 @@ class TokenPayload(BaseModel):
     type: str  # Token type (access, refresh, reset)
 DataT = TypeVar('DataT')
 
+class Message(BaseModel):
+    """The answer of a route that only confirms what it did."""
+    message: str
+
 class ErrorCode(str, Enum):
     """Standard error codes"""
     VALIDATION_ERROR = "VALIDATION_ERROR"

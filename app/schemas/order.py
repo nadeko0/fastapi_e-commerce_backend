@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -286,6 +286,47 @@ class RefundResponse(BaseModel):
     payment_status: PaymentStatus
 
     model_config = ConfigDict(from_attributes=True)
+
+class OrderPaymentRefund(BaseModel):
+    id: str
+    amount: Decimal
+    currency: str
+    status: str
+    source: str
+    failure_reason: str | None = None
+    requires_manual_review: bool
+    created_at: datetime
+
+class OrderPaymentDispute(BaseModel):
+    id: str
+    amount: Decimal
+    currency: str
+    status: str
+    reason: str | None = None
+    closed_at: datetime | None = None
+    created_at: datetime
+
+class OrderPayment(BaseModel):
+    """One payment attempt of an order with its refunds and disputes (admin view)."""
+    id: int
+    status: str
+    amount: Decimal
+    amount_refunded: Decimal
+    currency: str
+    transaction_id: str | None = None
+    checkout_session_id: str | None = None
+    requires_manual_review: bool
+    created_at: datetime
+    refunds: list[OrderPaymentRefund]
+    disputes: list[OrderPaymentDispute]
+
+class OrderPaymentList(BaseModel):
+    """Every payment attempt of an order. Not paginated: an order has few."""
+    items: list[OrderPayment]
+
+class StripeWebhookAck(BaseModel):
+    """What Stripe is told about an event it delivered."""
+    status: Literal["received", "already_processed"]
 
 # Circular imports are resolved at runtime
 from app.schemas.address import AddressResponse  # noqa: E402

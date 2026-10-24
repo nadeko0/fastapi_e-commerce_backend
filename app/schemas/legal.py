@@ -105,3 +105,7 @@ class ConsentUpdateResponse(BaseModel):
             }]
         }
     )
+
+class DataRetentionStatus(BaseModel):
+    within_retention_period: bool
+    retention_days: int
