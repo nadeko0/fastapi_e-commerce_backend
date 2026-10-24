@@ -589,6 +589,29 @@ def test_the_openapi_operation_lists_the_new_statuses(client, method, path, docu
     assert not gone & codes
 
 
+@pytest.mark.parametrize("method, path", [
+    ("get", "/users/me"),
+    ("post", "/admin/products"),
+    ("get", "/cart"),
+    ("get", "/users/addresses/{address_id}"),
+])
+def test_operations_that_need_an_active_user_document_the_403_account_inactive(client, method, path):
+    response = _operation(client, method, path)["responses"]["403"]
+
+    assert "account-inactive" in response["description"]
+    schema = response["content"]["application/problem+json"]["schema"]
+    assert schema == {"$ref": "#/components/schemas/Problem"}
+
+
+@pytest.mark.parametrize("method, path", [
+    ("get", "/products"),
+    ("post", "/users/register"),
+    ("post", "/users/login"),
+])
+def test_public_operations_do_not_document_the_403_account_inactive(client, method, path):
+    assert "403" not in _operation(client, method, path)["responses"]
+
+
 def test_a_delete_204_response_has_no_content_in_the_document(client):
     for path in ("/users/addresses/{address_id}", "/admin/products/{product_id}"):
         assert "content" not in _operation(client, "delete", path)["responses"]["204"]
