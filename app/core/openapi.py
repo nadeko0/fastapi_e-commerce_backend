@@ -237,20 +237,22 @@ class DocumentedRoute(APIRoute):
 def install_problem_media_type(app: FastAPI) -> None:
     """Make the document say application/problem+json for every error
     response (status 400 and up): FastAPI puts a response's model under the
-    route's own media type, application/json."""
+    route's own media type, application/json.
+
+    FastAPI rebuilds its cached document whenever the router's routes change,
+    so the conversion runs on every document handed out, not only on the
+    first build. It is idempotent: a converted response has no
+    application/json left to move."""
     build = app.openapi
 
     def openapi() -> dict[str, Any]:
-        built = app.openapi_schema is not None
         schema = build()
-        if not built:
-            for path in schema["paths"].values():
-                for operation in path.values():
-                    for code, response in operation.get("responses", {}).items():
-                        content = response.get("content", {})
-                        if code.isdigit() and int(code) >= 400 and "application/json" in content:
-                            content[PROBLEM_MEDIA_TYPE] = content.pop("application/json")
+        for path in schema["paths"].values():
+            for operation in path.values():
+                for code, response in operation.get("responses", {}).items():
+                    content = response.get("content", {})
+                    if code.isdigit() and int(code) >= 400 and "application/json" in content:
+                        content[PROBLEM_MEDIA_TYPE] = content.pop("application/json")
         return schema
 
     app.openapi = openapi
-

@@ -228,3 +228,27 @@ def test_characteristics_must_be_a_json_object(client, value):
     (error,) = response.json()["errors"]
     assert error["loc"] == ["query", "characteristics"]
     assert "input" not in error
+
+
+def test_a_document_rebuilt_after_the_routes_changed_still_says_problem_json(client):
+    # FastAPI rebuilds the cached document when the router's routes change
+    # (tests add and pop a probe route on the shared app); the rebuilt
+    # document must be converted like the first one.
+    from app.main import app
+
+    app.openapi()
+
+    @app.get(f"{API}/_openapi_probe")
+    def probe():
+        return {}
+
+    try:
+        rebuilt = app.openapi()
+    finally:
+        app.router.routes.pop()
+
+    for path in rebuilt["paths"].values():
+        for operation in path.values():
+            for code, response in operation["responses"].items():
+                if int(code) >= 400 and "application/json" in response.get("content", {}):
+                    pytest.fail(f"{code} still documents application/json")
