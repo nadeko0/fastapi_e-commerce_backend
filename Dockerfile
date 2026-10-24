@@ -46,9 +46,18 @@ RUN adduser --disabled-password --gecos '' --no-create-home appuser && \
 
 COPY --from=builder /app/.venv /app/.venv
 
-COPY . .
+# Only what runs: the code, the migrations Alembic applies and pyproject.toml,
+# which app/__init__.py reads for the version. Tests, docs, compose files,
+# .env.example and uv.lock stay out of the image.
+COPY pyproject.toml alembic.ini main.py ./
+COPY app ./app
+COPY migrations ./migrations
 
 USER appuser
+
+# The port the app listens on (PORT in app/core/config.py, 8000 by default).
+# Documentation only: publishing it is up to `docker run -p` or compose.
+EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)" || exit 1
