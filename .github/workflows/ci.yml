@@ -234,13 +234,13 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - name: Export the locked dependencies
         run: >-
-          uv export --locked --all-groups --no-emit-project --no-header
+          uv export --locked --all-groups --all-extras --no-emit-project --no-header
           --format requirements-txt --output-file "$RUNNER_TEMP/requirements-audit.txt"
       - name: Generate the CycloneDX SBOM of the locked dependencies
         # uv's own CycloneDX 1.5 export of uv.lock (all groups, as the audit).
         # Runs before the audit and is uploaded even when the audit fails.
         run: >-
-          uv export --locked --all-groups --no-emit-project --no-header
+          uv export --locked --all-groups --all-extras --no-emit-project --no-header
           --format cyclonedx1.5 --output-file "$RUNNER_TEMP/bom.cdx.json"
       - name: Upload the SBOM
         if: always()
