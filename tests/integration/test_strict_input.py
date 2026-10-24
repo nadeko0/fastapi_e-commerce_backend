@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 import pytest
 from payment_support import PAY_OK, Shop, new_key, reset_provider
+from test_admin_orders import _admin_headers, _customer, _order, _product
 
 API = "/api/v1"
 MERGE_PATCH = {"Content-Type": "application/merge-patch+json"}
@@ -298,5 +299,32 @@ def test_openapi_describes_money_inputs_as_strings(client):
         assert "pattern" in typed[0]
     refund = schemas["RefundCreate"]["properties"]["amount"]
     assert any(v.get("type") == "string" and "pattern" in v for v in refund["anyOf"])
+
+
+# --- GET /admin/stats: amounts like every other money output ---------------------------
+
+def test_admin_stats_amounts_are_decimal_strings(client, db_session):
+    customer = _customer(db_session)
+    widget = _product(db_session, "Widget")
+    _order(db_session, customer, lines=[(widget, 2, "10.50")],
+           total="21.00", payment_status="paid", status="confirmed")
+    _order(db_session, customer, lines=[(widget, 1, "10.50")],
+           total="10.50", payment_status="paid", status="confirmed")
+    headers = _admin_headers(client, db_session)
+
+    for _ in range(2):  # the second answer comes from the cache
+        stats = client.get(f"{API}/admin/stats", headers=headers).json()
+        assert stats["currency"] == "USD"
+        assert stats["total_revenue"] == "31.50"
+        assert stats["average_order_value"] == "15.75"
+        (popular,) = stats["popular_products"]
+        assert popular["total_revenue"] == "31.50"
+        assert popular["currency"] == "USD"
+
+
+def test_admin_stats_without_orders_are_zero_strings(client, db_session):
+    stats = client.get(f"{API}/admin/stats", headers=_admin_headers(client, db_session)).json()
+
+    assert (stats["total_revenue"], stats["average_order_value"]) == ("0.00", "0.00")
 
 

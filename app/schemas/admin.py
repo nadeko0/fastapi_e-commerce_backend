@@ -2,12 +2,14 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.order import OutputMoney
+
 
 class PopularProduct(BaseModel):
     id: int
     name: str
     total_quantity: int
-    total_revenue: float
+    total_revenue: OutputMoney
     currency: str
 
 
@@ -17,8 +19,8 @@ class OrderStatistics(BaseModel):
     period: str
     currency: str
     order_count: int
-    total_revenue: float
-    average_order_value: float
+    total_revenue: OutputMoney
+    average_order_value: OutputMoney
     popular_products: list[PopularProduct]
 
 

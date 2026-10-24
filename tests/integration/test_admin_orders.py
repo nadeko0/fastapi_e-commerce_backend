@@ -332,11 +332,11 @@ def test_admin_stats_count_only_paid_live_orders_inside_each_window(client, db_s
 
         day, week, month = (_stats(client, headers, p) for p in ("24h", "7d", "30d"))
 
-    assert (day["order_count"], day["total_revenue"]) == (2, 30.0)
-    assert day["average_order_value"] == 15.0
-    assert (week["order_count"], week["total_revenue"]) == (4, 150.0)
-    assert (month["order_count"], month["total_revenue"]) == (5, 310.0)
-    assert month["average_order_value"] == 62.0
+    assert (day["order_count"], day["total_revenue"]) == (2, "30.00")
+    assert day["average_order_value"] == "15.00"
+    assert (week["order_count"], week["total_revenue"]) == (4, "150.00")
+    assert (month["order_count"], month["total_revenue"]) == (5, "310.00")
+    assert month["average_order_value"] == "62.00"
     assert [s["period"] for s in (day, week, month)] == ["24h", "7d", "30d"]
 
 
@@ -355,9 +355,9 @@ def test_admin_stats_popular_products_sum_quantity_and_revenue(client, db_sessio
     popular = _stats(client, _admin_headers(client, db_session), "24h")["popular_products"]
 
     assert popular == [
-        {"id": gadget.id, "name": "Gadget", "total_quantity": 5, "total_revenue": 15.0,
+        {"id": gadget.id, "name": "Gadget", "total_quantity": 5, "total_revenue": "15.00",
          "currency": "USD"},
-        {"id": widget.id, "name": "Widget", "total_quantity": 3, "total_revenue": 32.0,
+        {"id": widget.id, "name": "Widget", "total_quantity": 3, "total_revenue": "32.00",
          "currency": "USD"},
     ]
 
@@ -374,7 +374,7 @@ def test_admin_stats_are_cached_per_period(client, db_session, fake_redis):
     assert _stats(client, headers, "24h") == first
     assert 0 < fake_redis.ttl("admin_stats_24h") <= 300
     # ...but the cache is per period, so another period sees it.
-    assert _stats(client, headers, "7d")["total_revenue"] == 100.0
+    assert _stats(client, headers, "7d")["total_revenue"] == "100.00"
 
 
 def test_admin_stats_reject_an_unknown_period(client, db_session):

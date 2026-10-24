@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -72,6 +73,14 @@ def _request_datetime(value: datetime, name: str) -> datetime:
     if value.tzinfo is None:
         logger.debug("%s has no UTC offset, taking it as UTC", name)
     return as_utc(value)
+
+
+def _cents(value) -> Decimal:
+    """A sum or an average of order amounts as whole cents, halves rounded up
+    (an average such as 10.005 is 10.01, the way a shop rounds). SQLite
+    answers an average as a float, PostgreSQL as a numeric; str() reads the
+    float by its shortest form, not its binary expansion."""
+    return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 # The filters stay `str`, not an Enum: an Enum parameter would answer a value
@@ -517,11 +526,11 @@ async def get_statistics(
         "period": period,
         "currency": settings.STORE_CURRENCY,
         "order_count": await db.scalar(select(func.count()).select_from(Order).where(*paid_in_period)),
-        "total_revenue": float(
-            await db.scalar(select(func.sum(Order.total_amount)).where(*paid_in_period)) or 0
+        "total_revenue": _cents(
+            await db.scalar(select(func.sum(Order.total_amount)).where(*paid_in_period))
         ),
-        "average_order_value": float(
-            await db.scalar(select(func.avg(Order.total_amount)).where(*paid_in_period)) or 0
+        "average_order_value": _cents(
+            await db.scalar(select(func.avg(Order.total_amount)).where(*paid_in_period))
         ),
     }
 
@@ -549,16 +558,17 @@ async def get_statistics(
             "id": p.id,
             "name": p.name,
             "total_quantity": p.total_quantity,
-            "total_revenue": float(p.total_revenue),
+            "total_revenue": _cents(p.total_revenue),
             "currency": settings.STORE_CURRENCY,
         }
         for p in popular_products
     ]
 
+    statistics = OrderStatistics(**stats)
+    # JSON mode: the amounts are cached as the strings the client gets.
+    await redis.setex(cache_key, 300, statistics.model_dump(mode="json"))
 
-    await redis.setex(cache_key, 300, stats)
-
-    return stats
+    return statistics
 
 # --- Product variants -------------------------------------------------
 #

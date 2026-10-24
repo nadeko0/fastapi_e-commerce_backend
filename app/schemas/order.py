@@ -110,6 +110,10 @@ PositiveMoney = Annotated[
         f"^{_MONEY_UNSIGNED}$", "Decimal string, at most two fraction digits, greater than zero."
     ),
 ]
+# An amount in a response: a Decimal with exactly two places, serialized by
+# Pydantic as a string ("10.50"). No input rules: rows and cache entries
+# written before 4.0.0 are read through it.
+OutputMoney = Annotated[Decimal, AfterValidator(_to_cents)]
 
 
 class PaymentStatus(str, Enum):
@@ -188,7 +192,7 @@ class OrderInDB(OrderBase):
     user_id: int
     status: OrderStatus
     payment_status: PaymentStatus
-    total_amount: Annotated[Decimal, AfterValidator(_to_cents)]
+    total_amount: OutputMoney
     currency: str
     created_at: datetime
     updated_at: datetime

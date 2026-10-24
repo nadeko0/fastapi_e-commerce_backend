@@ -509,7 +509,7 @@ def test_admin_stats_returns_zeroed_stats_when_no_orders(client, db_session):
     assert response.status_code == 200
     body = response.json()
     assert body["order_count"] == 0
-    assert body["total_revenue"] == 0
+    assert body["total_revenue"] == "0.00"
 
 
 # --- Admin product variant CRUD -------------------------------------------
