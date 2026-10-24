@@ -106,7 +106,7 @@ def test_email_verification_finds_the_account_whatever_case_the_token_carries(
     _legacy_account(db_session, "Legacy.User@Example.com")
     token = generate_email_verification_token("legacy.user@EXAMPLE.com")
 
-    response = client.get(f"{USERS}/verify-email/{token}")
+    response = client.post(f"{USERS}/verify-email", json={"token": token})
 
     assert response.status_code == 200
     (user,) = _accounts(db_session, "legacy.user@example.com")

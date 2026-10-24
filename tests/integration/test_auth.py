@@ -345,14 +345,14 @@ def test_verify_email_activates_account(client, valid_registration_payload):
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
     token = generate_email_verification_token(valid_registration_payload["email"])
 
-    response = client.get(f"{API_PREFIX}/verify-email/{token}")
+    response = client.post(f"{API_PREFIX}/verify-email", json={"token": token})
 
     assert response.status_code == 200
     assert response.json()["data"]["message"] == "Email verified successfully"
 
 
 def test_verify_email_rejects_invalid_token(client):
-    response = client.get(f"{API_PREFIX}/verify-email/not-a-real-token")
+    response = client.post(f"{API_PREFIX}/verify-email", json={"token": "not-a-real-token"})
 
     assert response.status_code == 400
 
@@ -360,9 +360,9 @@ def test_verify_email_rejects_invalid_token(client):
 def test_verify_email_twice_reports_already_verified(client, valid_registration_payload):
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
     token = generate_email_verification_token(valid_registration_payload["email"])
-    client.get(f"{API_PREFIX}/verify-email/{token}")
+    client.post(f"{API_PREFIX}/verify-email", json={"token": token})
 
-    response = client.get(f"{API_PREFIX}/verify-email/{token}")
+    response = client.post(f"{API_PREFIX}/verify-email", json={"token": token})
 
     assert response.status_code == 200
     assert response.json()["data"]["message"] == "Email already verified"
@@ -426,7 +426,7 @@ def test_password_reset_flow_allows_login_with_new_password(client, valid_regist
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
     reset_token = _reset_token_for(valid_registration_payload["email"])
 
-    validate_response = client.get(f"{API_PREFIX}/password/reset/{reset_token}")
+    validate_response = client.post(f"{API_PREFIX}/password/reset-token/validate", json={"token": reset_token})
     assert validate_response.status_code == 200
 
     reset_response = client.post(
@@ -500,7 +500,7 @@ def test_checking_a_reset_token_does_not_reveal_whose_it_is(
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
     token = _emailed_reset_token(client, monkeypatch, email)
 
-    response = client.get(f"{API_PREFIX}/password/reset/{token}")
+    response = client.post(f"{API_PREFIX}/password/reset-token/validate", json={"token": token})
 
     assert response.status_code == 200
     assert response.json()["data"] == {"message": "Token is valid"}
@@ -519,7 +519,7 @@ def test_a_used_password_reset_token_cannot_be_used_again(
 
     assert _reset(client, token, "NewStr0ngPass").status_code == 200
 
-    assert client.get(f"{API_PREFIX}/password/reset/{token}").status_code == 400
+    assert client.post(f"{API_PREFIX}/password/reset-token/validate", json={"token": token}).status_code == 400
     replay = _reset(client, token, "Hijacked123")
     assert replay.status_code == 400
     assert replay.json()["detail"] == "Invalid or expired reset token"
@@ -539,7 +539,7 @@ def test_a_reset_token_issued_before_the_last_password_change_is_refused(
 
     assert _reset(client, newer, "NewStr0ngPass").status_code == 200
 
-    assert client.get(f"{API_PREFIX}/password/reset/{older}").status_code == 400
+    assert client.post(f"{API_PREFIX}/password/reset-token/validate", json={"token": older}).status_code == 400
     assert _reset(client, older, "Hijacked123").status_code == 400
     assert _can_log_in(client, email, "NewStr0ngPass")
 
@@ -552,10 +552,10 @@ def test_a_reset_link_lives_an_hour_by_default(client, monkeypatch, valid_regist
     with freeze_time("2026-01-01 12:00:00") as clock:
         token = _emailed_reset_token(client, monkeypatch, email)
         clock.tick(timedelta(minutes=60, seconds=-1))
-        assert client.get(f"{API_PREFIX}/password/reset/{token}").status_code == 200
+        assert client.post(f"{API_PREFIX}/password/reset-token/validate", json={"token": token}).status_code == 200
 
         clock.tick(timedelta(seconds=2))
-        assert client.get(f"{API_PREFIX}/password/reset/{token}").status_code == 400
+        assert client.post(f"{API_PREFIX}/password/reset-token/validate", json={"token": token}).status_code == 400
         assert _reset(client, token, "Hijacked123").status_code == 400
 
 
@@ -566,10 +566,10 @@ def test_a_reset_link_lives_as_long_as_configured(client, monkeypatch, valid_reg
     with freeze_time("2026-01-01 12:00:00") as clock:
         token = _emailed_reset_token(client, monkeypatch, email)
         clock.tick(timedelta(minutes=5, seconds=-1))
-        assert client.get(f"{API_PREFIX}/password/reset/{token}").status_code == 200
+        assert client.post(f"{API_PREFIX}/password/reset-token/validate", json={"token": token}).status_code == 200
 
         clock.tick(timedelta(seconds=2))
-        assert client.get(f"{API_PREFIX}/password/reset/{token}").status_code == 400
+        assert client.post(f"{API_PREFIX}/password/reset-token/validate", json={"token": token}).status_code == 400
 
 
 # --- Adversarial scenarios ---------------------------------------------
@@ -1486,3 +1486,19 @@ def test_sync_password_helpers_still_work_outside_an_event_loop():
     assert hashed.startswith("$2b$")
     assert verify_password("Str0ngPass", hashed) is True
     assert verify_password("wrong-password", hashed) is False
+
+
+def test_reset_token_check_only_checks_and_validates_its_body(client, valid_registration_payload):
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    token = _reset_token_for(valid_registration_payload["email"])
+    url = f"{API_PREFIX}/password/reset-token/validate"
+
+    ok = client.post(url, json={"token": token})
+    bad = client.post(url, json={"token": "garbage"})
+
+    assert ok.status_code == 200
+    assert bad.status_code == 400
+    assert bad.json()["detail"] == "Invalid or expired reset token"
+    assert client.post(url, json={}).status_code == 422
+    # It only checks: the token is still good afterwards.
+    assert client.post(url, json={"token": token}).status_code == 200

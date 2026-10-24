@@ -192,7 +192,7 @@ def test_missing_token_keeps_the_bare_challenge(client):
 
 def test_every_401_the_app_sends_carries_a_challenge(client):
     """Walks the places that raise 401: login, refresh, the bearer
-    dependency (missing and rejected token) and the two password
+    dependency (missing and rejected token) and the password
     re-confirmations (status unchanged, header added)."""
     headers = _bearer(_registered_login(client))
     responses = [
@@ -200,7 +200,6 @@ def test_every_401_the_app_sends_carries_a_challenge(client):
         client.post(f"{USERS}/refresh", json={"refresh_token": "nope"}),
         client.get(f"{USERS}/me"),
         client.get(f"{USERS}/me", headers={"Authorization": "Bearer nope"}),
-        client.post(f"{USERS}/data/delete", json={"confirmation": True, "password": "Wr0ngPass1"}, headers=headers),
         client.post(
             "/api/v1/legal/data-request",
             json={"request_type": "deletion", "password": "Wr0ngPass1"},

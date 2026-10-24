@@ -37,10 +37,9 @@ class UserConsent(BaseModel):
 class DataRequest(BaseModel):
     request_type: str  # "export" or "deletion"
     reason: str | None = None
-    # The account's current password. Required for "deletion", as on
-    # POST /users/data/delete: erasure cannot be undone after the grace
-    # period, and a bearer token alone (a stolen session) must not be
-    # enough for it. Not needed for "export".
+    # The account's current password. Required for "deletion": erasure
+    # cannot be undone after the grace period, and a bearer token alone (a
+    # stolen session) must not be enough for it. Not needed for "export".
     password: str | None = None
 
     @model_validator(mode="after")

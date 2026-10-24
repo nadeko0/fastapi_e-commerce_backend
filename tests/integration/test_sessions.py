@@ -280,7 +280,7 @@ def test_an_expired_reset_link_is_refused(client, db_session):
     with freeze_time("2026-01-01 12:00:00") as clock:
         token = generate_password_reset_token(user.email, user.hashed_password)
         clock.tick(timedelta(hours=24, seconds=1))
-        check = client.get(f"{USERS}/password/reset/{token}")
+        check = client.post(f"{USERS}/password/reset-token/validate", json={"token": token})
         reset = client.post(
             f"{USERS}/password/reset/{token}",
             json={"current_password": "unused", "new_password": "NewStr0ngPass"},
@@ -293,7 +293,7 @@ def test_a_verification_token_is_not_a_reset_token(client):
     _register(client)
     token = generate_email_verification_token(EMAIL)
 
-    assert client.get(f"{USERS}/password/reset/{token}").status_code == 400
+    assert client.post(f"{USERS}/password/reset-token/validate", json={"token": token}).status_code == 400
     assert client.post(
         f"{USERS}/password/reset/{token}",
         json={"current_password": "unused", "new_password": "NewStr0ngPass"},
@@ -303,7 +303,7 @@ def test_a_verification_token_is_not_a_reset_token(client):
 def test_a_reset_link_for_an_account_that_is_gone_is_404(client):
     token = generate_password_reset_token("gone@example.com", "$2b$04$whatever")
 
-    assert client.get(f"{USERS}/password/reset/{token}").status_code == 404
+    assert client.post(f"{USERS}/password/reset-token/validate", json={"token": token}).status_code == 404
     assert client.post(
         f"{USERS}/password/reset/{token}",
         json={"current_password": "unused", "new_password": "NewStr0ngPass"},
@@ -321,7 +321,7 @@ def test_a_reset_with_a_weak_new_password_is_422_and_spends_nothing(client, db_s
     )
 
     assert weak.status_code == 422
-    assert client.get(f"{USERS}/password/reset/{token}").status_code == 200
+    assert client.post(f"{USERS}/password/reset-token/validate", json={"token": token}).status_code == 200
 
 
 def test_a_reset_request_for_an_unknown_email_looks_like_any_other(client, monkeypatch):

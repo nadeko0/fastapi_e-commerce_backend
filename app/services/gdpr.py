@@ -34,9 +34,8 @@ class GDPRService:
         # Create consent history entry
         consent_entries = []
 
-        # Entry shape matches app/api/v1/users.py::update_consent so that
-        # consent_history is consistent (and demonstrable per Art. 7(1))
-        # regardless of which endpoint the client used.
+        # Entry shape matches the ones register_user writes so that
+        # consent_history is consistent (and demonstrable per Art. 7(1)).
         # Handle marketing consent
         if user.marketing_consent != consent_update.marketing_consent:
             consent_entries.append({
@@ -100,8 +99,7 @@ class GDPRService:
 
             # In production, the export payload would be assembled here and
             # stored in a secure location with a signed, expiring download
-            # link (the synchronous GET /users/data/export endpoint already
-            # returns the full export inline instead - see users.py).
+            # link.
             from app.services.email import send_gdpr_export_email
             export_data = GDPRExport(
                 request_id=request_id,
@@ -132,8 +130,8 @@ class GDPRService:
                 send_gdpr_request_received, user.email, "deletion", request_id
             )
 
-            # Mark user for deletion and deactivate immediately, matching
-            # POST /users/data/delete. The scheduled cleanup_inactive_accounts
+            # Mark user for deletion and deactivate immediately, as
+            # an erasure request always does. The scheduled cleanup_inactive_accounts
             # Celery task (app/tasks.py) performs the actual hard delete once
             # DATA_DELETION_GRACE_PERIOD_DAYS has passed.
             user.is_active = False

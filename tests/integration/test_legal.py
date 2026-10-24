@@ -173,7 +173,7 @@ def test_data_request_deletion_without_the_password_changes_nothing(
 ):
     # Erasure is irreversible once the grace period is over. A bearer token
     # alone (15 minutes of a stolen session) must not be enough for it:
-    # /users/data/delete asks for the password, and so must this route.
+    # this route asks for the password.
     _quiet_gdpr_mail(monkeypatch)
     token = _register_and_login(client, _valid_registration_payload())
 
@@ -481,23 +481,6 @@ def test_the_policies_name_the_controller_and_how_to_reach_the_dpo(client):
     # Nothing left unfilled.
     for content in (privacy, terms, cookies):
         assert "{" not in content and "}" not in content
-
-
-def test_a_consent_change_through_legal_is_visible_through_users(client):
-    token = _register_and_login(client, _valid_registration_payload())
-
-    client.post(
-        f"{LEGAL_PREFIX}/consent",
-        json={"marketing_consent": True, "privacy_policy_accepted": True},
-        headers=_auth_headers(token),
-    )
-    status_after = client.get(f"{LEGAL_PREFIX}/consent-status", headers=_auth_headers(token))
-    export = client.get(f"{USERS_PREFIX}/data/export", headers=_auth_headers(token))
-
-    assert status_after.json()["data"]["marketing_consent"] is True
-    assert export.json()["data"]["personal_data"]["marketing_consent"] is True
-    # One history, whichever route wrote it.
-    assert [c["type"] for c in export.json()["data"]["consents"]][-1] == "marketing"
 
 
 def test_a_consent_update_with_a_missing_field_is_422(client):

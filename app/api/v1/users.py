@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timedelta
 from typing import Annotated, List  # noqa: UP035 - see the UP006 noqa on response_model
 
 from fastapi import (
@@ -21,8 +20,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.merge_patch import PATCH_DESCRIPTION, merge_patch_body
 from app.api.v1.cart import merge_guest_cart_on_login_async
-from app.core.clock import as_utc, utc_now
-from app.core.config import settings
+from app.core.clock import utc_now
 from app.core.dependencies import BearerToken, Cache, CurrentUser, DbSession
 from app.core.errors import sanitized_errors
 from app.core.openapi import DocumentedRoute
@@ -65,11 +63,7 @@ from app.schemas.common import (
 )
 from app.schemas.order import OrderResponse
 from app.schemas.user import (
-    ConsentHistory,
     ConsentType,
-    GDPRDelete,
-    GDPRExport,
-    GDPRExportData,
     LogoutRequest,
     PasswordReset,
     PasswordResetConfirm,
@@ -84,7 +78,6 @@ from app.schemas.user import (
 from app.services.email import (
     send_account_exists_email,
     send_email_verification,
-    send_gdpr_export_email,
     send_password_reset_email,
     send_welcome_email,
 )
@@ -207,27 +200,6 @@ async def register_user(
 
     return APIResponse.success_response({"message": REGISTRATION_RECEIVED})
 
-@router.get(
-    "/verify-email/{token}",
-    deprecated=True,
-    response_model=APIResponse[dict],
-    responses={
-        400: {"description": "Invalid or expired verification token"},
-        404: {"description": "User not found"},
-    },
-)
-async def verify_email(
-    token: str,
-    db: DbSession,
-):
-    """Confirm a user's email address using a verification token.
-
-    Deprecated: the token is in the URL. Use `POST /users/verify-email` with
-    the token in the body."""
-
-    return await _confirm_email(token, db)
-
-
 @router.post(
     "/verify-email",
     response_model=APIResponse[dict],
@@ -241,8 +213,7 @@ async def verify_email_by_body(
     db: DbSession,
 ):
     """Confirm a user's email address using a verification token sent in the
-    body (the successor of `GET /users/verify-email/{token}`; same effect and
-    responses)."""
+    body."""
 
     return await _confirm_email(payload.token, db)
 
@@ -477,224 +448,6 @@ async def logout(
             headers={"Retry-After": "5"},
         ) from e
     return APIResponse.success_response({"message": "Logged out successfully"})
-
-# Where each consent type is stored on User: (flag, date). Spelled out
-# rather than derived from the type's name, which is what this route used
-# to do - f"{type}_consent" - and "privacy_policy_consent" is no column
-# (the column is privacy_policy_accepted), nor is "cookies_consent": the
-# flag was set on a plain Python attribute and lost, while the history
-# recorded the change and the route answered 200. Cookie consent has no
-# column at all; it is the cookie banner's business, and refused here.
-_CONSENT_COLUMNS = {
-    ConsentType.GDPR: ("gdpr_consent", "gdpr_consent_date"),
-    ConsentType.MARKETING: ("marketing_consent", "marketing_consent_date"),
-    ConsentType.PRIVACY_POLICY: ("privacy_policy_accepted", "privacy_policy_accepted_date"),
-}
-
-@router.post(
-    "/consent",
-    deprecated=True,
-    response_model=APIResponse[UserResponse],
-    responses={
-        400: {
-            "description": "GDPR consent cannot be revoked via this endpoint; "
-                           "cookie consent is not stored on the account"
-        },
-    },
-)
-async def update_consent(
-    consent_type: ConsentType,
-    granted: bool,
-    request: Request,
-    current_user: CurrentUser,
-    db: DbSession,
-):
-    """Update the current user's consent for a given consent type."""
-
-    if consent_type == ConsentType.GDPR and not granted:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GDPR consent cannot be revoked. Use data deletion instead."
-        )
-    columns = _CONSENT_COLUMNS.get(consent_type)
-    if columns is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cookie consent is not stored on the account. Use the cookie banner."
-        )
-    flag_column, date_column = columns
-
-    # current_user comes from get_current_active_user -> get_current_user
-    # (app/core/security.py). That dependency and this route's `db` are the
-    # same callable (get_async_db), so they share one AsyncSession, but
-    # get_current_user expunges the user it returns (and commits), so what
-    # the route receives is a detached snapshot: mutating it and committing
-    # `db` would write nothing. Re-loading the row through `db` attaches it
-    # to the session this route commits.
-    user = await db.get(User, current_user.id)
-
-    setattr(user, flag_column, granted)
-    setattr(user, date_column, utc_now())
-
-    # Add to consent history (Art. 7(1): controller must be able to
-    # demonstrate consent was given). Shape matches
-    # GDPRService.update_user_consent so the audit trail is consistent
-    # regardless of which endpoint (this one, or POST /legal/consent) was used.
-    # Reassigning (not .append()-ing in place) is required: consent_history is
-    # a plain JSON column, and SQLAlchemy does not detect in-place mutations
-    # of mutable values on JSON columns, so an in-place append here silently
-    # fails to persist.
-    user.consent_history = [*user.consent_history, {
-        "type": consent_type.value,
-        "granted": granted,
-        "timestamp": utc_now().isoformat(),
-        "ip_address": request.client.host if request.client else None,
-        "user_agent": request.headers.get("user-agent"),
-    }]
-
-    await db.commit()
-    # Refreshed because the INSERT/UPDATE does not read server-side defaults
-    # back and UserResponse reads them (e.g. role); an AsyncSession cannot
-    # load them lazily.
-    await db.refresh(user)
-    return APIResponse.success_response(UserResponse.model_validate(user))
-
-@router.get(
-    "/data/export",
-    deprecated=True,
-    response_model=APIResponse[GDPRExportData],
-    responses={400: {"description": "Too much data for an inline export (GDPR_EXPORT_MAX_RECORDS)"}},
-)
-async def export_user_data(
-    current_user: CurrentUser,
-    db: DbSession,
-    background_tasks: BackgroundTasks,
-):
-    """Export the current user's personal data, consents, addresses, and orders (GDPR)."""
-
-    consents = [
-        ConsentHistory(
-            type=entry["type"],
-            granted=entry["granted"],
-            timestamp=as_utc(datetime.fromisoformat(entry["timestamp"])),
-            ip_address=entry.get("ip_address"),
-            user_agent=entry.get("user_agent"),
-        )
-        for entry in current_user.consent_history
-    ]
-
-    now = utc_now()
-    export_metadata = GDPRExport(
-        request_id=f"export_{current_user.id}_{now.timestamp()}",
-        request_date=now,
-        expires_at=now + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS),
-        status="completed",
-    )
-    # Loaded here, eagerly, through this route's own session - not read off
-    # current_user.addresses / current_user.orders (an AsyncSession cannot
-    # lazy-load them anyway). Those lazy relationships
-    # cost one query per order, per item, per product and per variant when
-    # OrderResponse serialized them: 165 queries for one export of an account
-    # with a handful of orders (measured by tracing, scripts/loadtest/
-    # FINDINGS.md). It also depended on current_user still being attached to
-    # a live session, which is the auth dependency's business, not this
-    # route's.
-    #
-    # Counted first, in one query, and refused past GDPR_EXPORT_MAX_RECORDS:
-    # the export is assembled in this worker's memory and sent as one
-    # response, so its size must have a ceiling. Past it the holder is told
-    # where to get the data instead - the request itself (Art. 15) still has
-    # to be answered, just not inline.
-    records = await db.scalar(select(
-        select(func.count()).select_from(Address)
-        .where(Address.user_id == current_user.id).scalar_subquery()
-        + select(func.count()).select_from(Order)
-        .where(Order.user_id == current_user.id).scalar_subquery()
-        + select(func.count()).select_from(OrderItem)
-        .join(Order, OrderItem.order_id == Order.id)
-        .where(Order.user_id == current_user.id).scalar_subquery()
-    ))
-    if records > settings.GDPR_EXPORT_MAX_RECORDS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": (
-                    "Your data is too large for an export here. Contact "
-                    f"{settings.DPO_EMAIL} and it will be sent to you."
-                ),
-                "records": records,
-                "limit": settings.GDPR_EXPORT_MAX_RECORDS,
-            },
-        )
-    addresses = (await db.execute(
-        select(Address).where(Address.user_id == current_user.id)
-    )).scalars().all()
-    orders = (await db.execute(
-        select(Order)
-        .options(
-            joinedload(Order.shipping_address),
-            selectinload(Order.items).joinedload(OrderItem.product),
-            selectinload(Order.items).joinedload(OrderItem.variant),
-        )
-        .where(Order.user_id == current_user.id)
-    )).scalars().all()
-    export = GDPRExportData(
-        personal_data=current_user,
-        consents=consents,
-        addresses=addresses,
-        orders=orders,
-        export_metadata=export_metadata,
-    )
-
-
-    logger.info(f"Queuing GDPR data export email for user {current_user.id}")
-    background_tasks.add_task(
-        send_gdpr_export_email,
-        current_user.email,
-        export_metadata
-    )
-    logger.info(f"GDPR data export email task queued for user {current_user.id}")
-
-    return APIResponse.success_response(export)
-
-@router.post(
-    "/data/delete",
-    deprecated=True,
-    response_model=APIResponse[dict],
-    responses={401: {"description": "Incorrect password"}},
-)
-async def delete_user_data(
-    deletion: GDPRDelete,
-    current_user: CurrentUser,
-    db: DbSession,
-):
-    """Request deletion of the current user's account and data (GDPR)."""
-
-    if not await verify_password_async(deletion.password, current_user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # See the identical note in update_consent above: current_user is a
-    # detached snapshot (get_current_user expunges it), so mutating it and
-    # committing `db` would discard the deactivation/deletion flags. Re-load
-    # it through `db`. (The former `current_user.deletion_reason = ...` line
-    # is also dropped: User has no deletion_reason column, so it only ever
-    # set a transient, non-persisted Python attribute.)
-    user = await db.get(User, current_user.id)
-    user.is_active = False
-    user.data_deletion_requested = True
-    user.data_deletion_date = utc_now()
-    await db.commit()
-
-    logger.info(f"Scheduling hard delete for user {user.id} after 1 day")
-
-    return APIResponse.success_response({
-        "message": "Account will be permanently deleted within 24 hours",
-        "deletion_date": user.data_deletion_date
-    })
 
 @router.get("/me", response_model=APIResponse[UserResponse])
 async def get_current_user_data(
@@ -1140,27 +893,6 @@ async def request_password_reset(
         "message": "If the email exists, a password reset link will be sent"
     })
 
-@router.get(
-    "/password/reset/{token}",
-    deprecated=True,
-    response_model=APIResponse[dict],
-    responses={
-        400: {"description": "Invalid or expired reset token"},
-        404: {"description": "User not found"},
-    },
-)
-async def validate_reset_token(
-    token: str,
-    db: DbSession,
-):
-    """Check whether a password reset token is still valid.
-
-    Deprecated: the token is in the URL. Use
-    `POST /users/password/reset-token/validate` with the token in the body."""
-
-    return await _check_reset_token(token, db)
-
-
 @router.post(
     "/password/reset-token/validate",
     response_model=APIResponse[dict],
@@ -1173,9 +905,8 @@ async def validate_reset_token_by_body(
     payload: TokenBody,
     db: DbSession,
 ):
-    """Check whether a password reset token, sent in the body, is still valid
-    (the successor of `GET /users/password/reset/{token}`; same effect and
-    responses). It changes nothing."""
+    """Check whether a password reset token, sent in the body, is still valid.
+    It changes nothing."""
 
     return await _check_reset_token(payload.token, db)
 

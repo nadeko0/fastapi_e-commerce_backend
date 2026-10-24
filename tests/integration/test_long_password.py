@@ -85,12 +85,12 @@ def test_erasure_with_a_too_long_password_is_answered_like_a_wrong_one(
     client, db_session, headers, password
 ):
     wrong = client.post(
-        f"{USERS}/data/delete", json={"confirmation": True, "password": "Wr0ngPassword"},
+        f"{LEGAL}/data-request", json={"request_type": "deletion", "password": "Wr0ngPassword"},
         headers=headers,
     )
 
     response = client.post(
-        f"{USERS}/data/delete", json={"confirmation": True, "password": password},
+        f"{LEGAL}/data-request", json={"request_type": "deletion", "password": password},
         headers=headers,
     )
 

@@ -353,12 +353,6 @@ class Settings(BaseSettings):
     # that old (https://docs.stripe.com/api/idempotent_requests). Past it the
     # same value is a new key; see app.tasks.clear_expired_idempotency_keys.
     IDEMPOTENCY_KEY_TTL_HOURS: int = Field(24, ge=1)
-    # The most records GET /users/data/export assembles in one response:
-    # addresses + orders + order items of the account. The export is built
-    # in the worker's memory and sent whole; past this it is refused with a
-    # pointer to DPO_EMAIL instead. Far above any real customer's history
-    # (an order holds at most CART_MAX_LINES items).
-    GDPR_EXPORT_MAX_RECORDS: int = Field(5000, ge=1)
     INACTIVE_ACCOUNT_DELETE_DAYS: int = 730  # 2 years
     # Grace period between a user requesting erasure (Art. 17) and the
     # scheduled hard delete. Distinct from INACTIVE_ACCOUNT_DELETE_DAYS,

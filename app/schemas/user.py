@@ -5,7 +5,6 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
-from app.core.clock import utc_now
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password, normalize_password
 from app.models.enums import UserRole
 from app.schemas.common import E164_PHONE_PATTERN
@@ -147,20 +146,6 @@ class UserUpdate(BaseModel):
             raise ValueError('may be omitted but cannot be null')
         return v
 
-class UserInDB(UserBase):
-    id: int
-    role: UserRole
-    is_active: bool
-    is_email_verified: bool
-    gdpr_consent: bool
-    privacy_policy_accepted: bool
-    marketing_consent: bool
-    created_at: datetime
-    updated_at: datetime
-    last_login: datetime | None = None
-
-    model_config = ConfigDict(from_attributes=True)
-
 class UserResponse(UserBase):
     id: int
     role: UserRole
@@ -196,8 +181,8 @@ class PasswordReset(BaseModel):
 
 class TokenBody(BaseModel):
     """Body of the routes that take an emailed token (email verification,
-    reset-token check): the successors of the GET routes that carried it in
-    the URL, where it ends up in access logs, browser history and Referer."""
+    reset-token check): in the body rather than the URL, where it would end
+    up in access logs, browser history and Referer."""
     token: str = Field(..., min_length=1)
 
 
@@ -230,45 +215,3 @@ class GDPRExport(BaseModel):
                 "status": "processing"
             }]
         })
-
-class GDPRExportData(BaseModel):
-    """Schema for the actual GDPR data export content"""
-    personal_data: UserInDB
-    consents: list[ConsentHistory]
-    addresses: list["AddressResponse"]
-    orders: list["OrderResponse"]
-    export_metadata: GDPRExport
-    generated_at: datetime = Field(default_factory=utc_now)
-
-    model_config = ConfigDict(json_schema_extra={
-            "examples": [{
-                "personal_data": {},
-                "consents": [],
-                "addresses": [],
-                "orders": [],
-                "export_metadata": {
-                    "request_id": "export_123_1642161234",
-                    "request_date": "2025-01-14T19:21:32.388Z",
-                    "expires_at": "2025-01-15T19:21:32.388Z",
-                    "status": "completed"
-                },
-                "generated_at": "2025-01-14T19:21:32.388Z"
-            }]
-        })
-
-class GDPRDelete(BaseModel):
-    """Schema for GDPR account deletion"""
-    confirmation: bool = Field(..., description="Confirm account deletion")
-    password: str
-    reason: str | None = None
-
-    @field_validator('confirmation')
-    @classmethod
-    def validate_confirmation(cls, v):
-        if not v:
-            raise ValueError('You must confirm account deletion')
-        return v
-
-# Circular imports are resolved at runtime
-from app.schemas.address import AddressResponse  # noqa: E402
-from app.schemas.order import OrderResponse  # noqa: E402

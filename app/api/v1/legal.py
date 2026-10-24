@@ -256,8 +256,7 @@ async def _load_user(db: AsyncSession, user_id: int) -> User:
     callable get_current_user uses, so FastAPI's per-request dependency cache
     hands both the same AsyncSession (idle at route start): loading the row
     here attaches it to that session, and the service's commit stores the
-    change. Same pattern as update_consent / delete_user_data in
-    app/api/v1/users.py.
+    change. Same pattern as update_current_user in app/api/v1/users.py.
     """
     user = await db.get(User, user_id)
     if user is None:
@@ -291,7 +290,7 @@ async def update_user_consent(
         consent_update=consent_update,
         # request.client can be None (e.g. some ASGI transports/test
         # clients don't set it) - every other endpoint in this codebase that
-        # records an IP address (see register_user/update_consent in
+        # records an IP address (see register_user in
         # app/api/v1/users.py) guards against that instead of assuming
         # .client is always present, which would otherwise raise
         # AttributeError and turn a routine consent update into a 500.
@@ -324,7 +323,7 @@ async def request_personal_data(
     This endpoint allows users to:
     * Request export of their personal data
     * Request deletion of their account and personal data - with the
-      account's current password, as on POST /users/data/delete
+      account's current password
 
     The process is asynchronous and returns a request ID for tracking.
     """
@@ -334,9 +333,8 @@ async def request_personal_data(
         # Reads user.id and user.email only - the detached snapshot will do.
         request_id = await gdpr_service.process_data_export(current_user)
     elif request_data.request_type == "deletion":
-        # Re-authentication, same check and same answer as
-        # delete_user_data in app/api/v1/users.py. The schema has already
-        # refused a deletion request without a password (422).
+        # Re-authentication. The schema has already refused a deletion
+        # request without a password (422).
         if not await verify_password_async(request_data.password, current_user.hashed_password):
             raise HTTPException(
                 status_code=401,

@@ -124,9 +124,7 @@ def test_a_missing_required_field_is_422(client):
 def test_verification_marks_the_account_verified_with_a_date(client, db_session):
     client.post(f"{USERS}/register", json=_registration())
 
-    response = client.get(
-        f"{USERS}/verify-email/{generate_email_verification_token('new.person@example.com')}"
-    )
+    response = client.post(f"{USERS}/verify-email", json={"token": generate_email_verification_token('new.person@example.com')})
 
     assert response.status_code == 200
     user = _stored(db_session)
@@ -139,7 +137,7 @@ def test_an_expired_verification_link_is_refused(client, db_session):
     with freeze_time("2026-01-01 12:00:00") as clock:
         token = generate_email_verification_token("new.person@example.com")
         clock.tick(timedelta(hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS, seconds=1))
-        response = client.get(f"{USERS}/verify-email/{token}")
+        response = client.post(f"{USERS}/verify-email", json={"token": token})
 
     assert response.status_code == 400
     assert _stored(db_session).is_email_verified is False
@@ -155,14 +153,14 @@ def test_another_kind_of_token_does_not_verify_an_email(client, db_session, kind
         else generate_password_reset_token(user.email, user.hashed_password)
     )
 
-    assert client.get(f"{USERS}/verify-email/{token}").status_code == 400
+    assert client.post(f"{USERS}/verify-email", json={"token": token}).status_code == 400
     assert _stored(db_session).is_email_verified is False
 
 
 def test_a_verification_link_for_an_account_that_is_gone_is_404(client):
     token = generate_email_verification_token("nobody@example.com")
 
-    response = client.get(f"{USERS}/verify-email/{token}")
+    response = client.post(f"{USERS}/verify-email", json={"token": token})
 
     assert response.status_code == 404
 
@@ -180,14 +178,12 @@ def test_resend_queues_a_fresh_link_for_an_unverified_account(client, monkeypatc
     assert response.status_code == 200
     assert [to for to, _ in sent] == ["new.person@example.com"]
     # The link in it works.
-    assert client.get(f"{USERS}/verify-email/{sent[0][1]}").status_code == 200
+    assert client.post(f"{USERS}/verify-email", json={"token": sent[0][1]}).status_code == 200
 
 
 def test_resend_for_a_verified_account_is_400(client):
     client.post(f"{USERS}/register", json=_registration())
-    client.get(
-        f"{USERS}/verify-email/{generate_email_verification_token('new.person@example.com')}"
-    )
+    client.post(f"{USERS}/verify-email", json={"token": generate_email_verification_token('new.person@example.com')})
 
     response = client.post(f"{USERS}/verify-email/resend", headers=_login(client))
 
@@ -197,3 +193,17 @@ def test_resend_for_a_verified_account_is_400(client):
 
 def test_resend_needs_a_login(client):
     assert client.post(f"{USERS}/verify-email/resend").status_code == 401
+
+
+def test_verification_is_idempotent_and_the_body_is_validated(client):
+    client.post(f"{USERS}/register", json=_registration())
+    token = generate_email_verification_token("new.person@example.com")
+
+    first = client.post(f"{USERS}/verify-email", json={"token": token})
+    again = client.post(f"{USERS}/verify-email", json={"token": token})
+
+    assert first.json()["data"]["message"] == "Email verified successfully"
+    assert again.json()["data"]["message"] == "Email already verified"
+    assert client.post(f"{USERS}/verify-email", json={"token": "garbage"}).status_code == 400
+    assert client.post(f"{USERS}/verify-email", json={}).status_code == 422
+    assert client.post(f"{USERS}/verify-email", json={"token": ""}).status_code == 422

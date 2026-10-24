@@ -42,8 +42,7 @@ def _login(client):
 
 
 def test_the_account_lifecycle_logs_no_personal_data(client, every_log_line, monkeypatch):
-    for name in ("send_gdpr_export_email", "send_password_reset_email"):
-        monkeypatch.setattr(f"app.api.v1.users.{name}", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.users.send_password_reset_email", lambda *a, **k: True)
     client.post(f"{USERS}/register", json={
         "email": EMAIL, "password": PASSWORD, "full_name": NAME, "phone": PHONE,
         "gdpr_consent": True, "privacy_policy_accepted": True,
@@ -58,7 +57,7 @@ def test_the_account_lifecycle_logs_no_personal_data(client, every_log_line, mon
         f"{USERS}/me", json={"full_name": NEW_NAME, "phone": "+15550002222"}, headers=headers
     ).status_code == 200
     client.post(f"{USERS}/verify-email/resend", headers=headers)
-    client.get(f"{USERS}/verify-email/{generate_email_verification_token(EMAIL)}")
+    client.post(f"{USERS}/verify-email", json={"token": generate_email_verification_token(EMAIL)})
     address = client.post(f"{USERS}/addresses", headers=headers, json={
         "street": "1 Main Street", "city": "Springfield", "state": "Illinois",
         "postal_code": "62701", "country": "US",
@@ -66,10 +65,9 @@ def test_the_account_lifecycle_logs_no_personal_data(client, every_log_line, mon
     client.put(f"{USERS}/addresses/{address['id']}", json={"city": "Shelbyville"}, headers=headers)
     client.post(f"{USERS}/addresses/default", json={"address_id": address["id"]}, headers=headers)
     client.delete(f"{USERS}/addresses/{address['id']}", headers=headers)
-    client.get(f"{USERS}/data/export", headers=headers)
     client.post(f"{USERS}/password/reset", json={"email": EMAIL})
     client.post(
-        f"{USERS}/data/delete", json={"confirmation": True, "password": PASSWORD}, headers=headers
+        "/api/v1/legal/data-request", json={"request_type": "deletion", "password": PASSWORD}, headers=headers
     )
 
     _assert_no_personal_data(every_log_line)
