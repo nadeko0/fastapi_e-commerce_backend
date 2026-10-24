@@ -1,39 +1,54 @@
 """What the OpenAPI document says about the errors the API sends.
 
-FastAPI describes only the 200 and a generic 422 by itself. The bodies the
-API really answers with are these (OpenAPI 3.1.0, Operation Object:
-"responses" maps an HTTP status code to a Response Object, with its
-headers and its content per media type):
+FastAPI describes only the 200 and a generic 422 by itself. Every error the
+API answers with is an RFC 9457 problem details object, media type
+application/problem+json (app/core/errors.py): the `Problem` schema, or
+`ValidationProblem` where the 422 carries the error list. DocumentedRoute
+adds them to each operation they apply to (OpenAPI 3.1.0, Operation Object:
+"responses" maps an HTTP status code to a Response Object, with its headers
+and its content per media type); a route's own `responses=` entry keeps its
+description and gains the body and headers.
 
-- {"detail": "..."}: every HTTPException (400, 401, 402, 403, 404, 409,
-  422 for a bad filter value, 503), the 413 of the body size limit, the
-  503 of the in-flight limit and the 500 for a database error.
-- {"detail": {"error": "...", "retry_after": 30}}: the 429 of the rate
-  limits and the login 503, both with a Retry-After header.
-- {"detail": [{"type", "loc", "msg", "url"}, ...]}: the 422 of request
-  validation (app/core/errors.py: the error list without `input`).
-- plain text "Internal Server Error": the 500 for any other exception
-  (app/core/security_headers.py).
-
-DocumentedRoute adds them to each operation they apply to; a route's own
-`responses=` entry keeps its description and gains the body and headers.
+FastAPI files an additional response's model under the route's own media
+type (application/json), and the 422 it adds by itself, with its
+HTTPValidationError, only when the route lists none; install_problem_media_type
+moves every error response to application/problem+json once the document is
+built. The 422 is always listed here, so the default one never appears.
 Additional Responses: https://fastapi.tiangolo.com/advanced/additional-responses/
 """
 
 from typing import Any
 
+from fastapi import FastAPI, params
 from fastapi.routing import APIRoute
 from fastapi.security.base import SecurityBase
 from pydantic import BaseModel, Field
 
-
-class ErrorMessage(BaseModel):
-    """The error body of an HTTPException."""
-
-    detail: str
+from app.core.errors import PROBLEM_MEDIA_TYPE, ProblemType
 
 
-class ValidationError(BaseModel):
+class Problem(BaseModel):
+    """An error, as RFC 9457 problem details."""
+
+    type: str = Field(
+        "about:blank",
+        description=(
+            '"about:blank" when the problem has no meaning beyond its status code, '
+            "else one of the problem types, which are identifiers, not links: "
+            + ", ".join(problem_type.value for problem_type in ProblemType)
+        ),
+    )
+    title: str = Field(description="The status phrase for about:blank, else a fixed title of the type.")
+    status: int = Field(description="The HTTP status code.")
+    detail: str | None = Field(None, description="This occurrence, for a human to read; absent on a 500.")
+    instance: str = Field(description="The request path, without the query string.")
+    request_id: str = Field(description="The X-Request-ID of the response, to quote to support.")
+    retry_after: int | None = Field(
+        None, description="Seconds until the request can be repeated; also the Retry-After header."
+    )
+
+
+class ValidationErrorItem(BaseModel):
     """One request validation error, without the submitted value."""
 
     type: str
@@ -45,21 +60,10 @@ class ValidationError(BaseModel):
     )
 
 
-class HTTPValidationError(BaseModel):
+class ValidationProblem(Problem):
     """The 422 of request validation."""
 
-    detail: list[ValidationError]
-
-
-class RateLimitDetail(BaseModel):
-    error: str
-    retry_after: int = Field(description="Seconds until the request can be repeated.")
-
-
-class RateLimitMessage(BaseModel):
-    """The body of a 429, and of the 503 of the login check."""
-
-    detail: RateLimitDetail
+    errors: list[ValidationErrorItem]
 
 
 _RETRY_AFTER = {
@@ -74,53 +78,58 @@ _WWW_AUTHENTICATE = {
         "schema": {"type": "string"},
     }
 }
+_ACCEPT = {
+    "Accept": {
+        "description": "The media type the request body can be sent as (RFC 9110, section 15.5.16).",
+        "schema": {"type": "string"},
+    }
+}
 
-BAD_REQUEST = {"description": "The request cannot be served as sent", "model": ErrorMessage}
+BAD_REQUEST = {"description": "The request cannot be served as sent", "model": Problem}
 UNAUTHORIZED = {
     "description": "Missing, invalid, expired or revoked access token",
-    "model": ErrorMessage,
+    "model": Problem,
     "headers": _WWW_AUTHENTICATE,
 }
-FORBIDDEN = {"description": "Not allowed for this account", "model": ErrorMessage}
-NOT_FOUND = {"description": "Not found", "model": ErrorMessage}
-CONFLICT = {"description": "Conflicts with the current state", "model": ErrorMessage}
-PAYLOAD_TOO_LARGE = {"description": "Request body is too large", "model": ErrorMessage}
+FORBIDDEN = {"description": "Not allowed for this account", "model": Problem}
+NOT_FOUND = {"description": "Not found", "model": Problem}
+CONFLICT = {"description": "Conflicts with the current state", "model": Problem}
+PAYLOAD_TOO_LARGE = {"description": "Request body is too large", "model": Problem}
+UNSUPPORTED_MEDIA_TYPE = {
+    "description": "The request body is not sent as JSON",
+    "model": Problem,
+    "headers": _ACCEPT,
+}
 VALIDATION_ERROR = {
     "description": "Validation Error: the error list, or a message for a value rejected by the route",
-    "model": HTTPValidationError | ErrorMessage,
+    "model": ValidationProblem | Problem,
 }
 TOO_MANY_REQUESTS = {
     "description": "Too many requests",
-    "model": RateLimitMessage,
+    "model": Problem,
     "headers": _RETRY_AFTER,
 }
 SERVICE_UNAVAILABLE = {
     "description": "Temporarily unavailable, or the server is at capacity",
-    "model": ErrorMessage | RateLimitMessage,
+    "model": Problem,
     "headers": _RETRY_AFTER,
 }
-SERVER_ERROR = {
-    "description": (
-        "Server error: a JSON message for a database error, plain text "
-        '"Internal Server Error" for anything else'
-    ),
-    "model": ErrorMessage,
-    "content": {"text/plain": {"schema": {"type": "string"}}},
-}
+SERVER_ERROR = {"description": "Server error", "model": Problem}
 
 # The status codes the model of a response with no body of its own gets
 # when a route lists only a description.
 _MODEL_FOR_EXISTING = {
-    400: ErrorMessage,
-    401: ErrorMessage,
-    402: ErrorMessage,
-    403: ErrorMessage,
-    404: ErrorMessage,
-    409: ErrorMessage,
-    413: ErrorMessage,
-    422: HTTPValidationError | ErrorMessage,
-    429: RateLimitMessage,
-    503: ErrorMessage | RateLimitMessage,
+    400: Problem,
+    401: Problem,
+    402: Problem,
+    403: Problem,
+    404: Problem,
+    409: Problem,
+    412: Problem,
+    413: Problem,
+    422: ValidationProblem | Problem,
+    429: Problem,
+    503: Problem,
 }
 
 
@@ -159,7 +168,8 @@ class DocumentedRoute(APIRoute):
     that never rejects makes the operation's security optional, `{}`), 413 where
     a body is accepted, 422 where there is anything to validate, 429 and
     503 bodies where the route lists them, and 503 and 500 everywhere (the
-    in-flight limit and the unhandled exception can answer any route)."""
+    in-flight limit and the unhandled exception can answer any route), and
+    400 and 415 where a JSON body is accepted."""
 
     def __init__(self, path: str, endpoint, *, responses=None, **kwargs) -> None:
         super().__init__(path, endpoint, responses=responses, **kwargs)
@@ -177,6 +187,11 @@ class DocumentedRoute(APIRoute):
             _merge(merged, 401, UNAUTHORIZED)
         if self.methods & {"POST", "PUT", "PATCH"}:
             _merge(merged, 413, PAYLOAD_TOO_LARGE)
+        if self.body_field is not None and not isinstance(self.body_field.field_info, params.Form):
+            # A JSON body: a text that is not JSON is a 400, another
+            # Content-Type a 415 (app/core/errors.py).
+            _merge(merged, 400, BAD_REQUEST)
+            _merge(merged, 415, UNSUPPORTED_MEDIA_TYPE)
         if self.body_field is not None or _has_parameters(self.dependant):
             _merge(merged, 422, VALIDATION_ERROR)
         _merge(merged, 503, SERVICE_UNAVAILABLE)
@@ -189,3 +204,25 @@ class DocumentedRoute(APIRoute):
         # A second pass with the full list: FastAPI builds the response
         # fields (the models) in the constructor.
         super().__init__(path, endpoint, responses=merged, **kwargs)
+
+
+def install_problem_media_type(app: FastAPI) -> None:
+    """Make the document say application/problem+json for every error
+    response (status 400 and up): FastAPI puts a response's model under the
+    route's own media type, application/json."""
+    build = app.openapi
+
+    def openapi() -> dict[str, Any]:
+        built = app.openapi_schema is not None
+        schema = build()
+        if not built:
+            for path in schema["paths"].values():
+                for operation in path.values():
+                    for code, response in operation.get("responses", {}).items():
+                        content = response.get("content", {})
+                        if code.isdigit() and int(code) >= 400 and "application/json" in content:
+                            content[PROBLEM_MEDIA_TYPE] = content.pop("application/json")
+        return schema
+
+    app.openapi = openapi
+

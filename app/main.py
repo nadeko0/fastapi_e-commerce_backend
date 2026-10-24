@@ -14,6 +14,7 @@ from app.core.errors import register_error_handlers
 from app.core.forwarded import ForwardedClientMiddleware
 from app.core.head import HeadMiddleware
 from app.core.logging_config import setup_logging
+from app.core.openapi import install_problem_media_type
 from app.core.overload import InFlightLimitMiddleware
 from app.core.rate_limit import rate_limit
 from app.core.request_context import RequestContextMiddleware
@@ -74,6 +75,7 @@ app = FastAPI(
 )
 
 register_error_handlers(app)
+install_problem_media_type(app)
 
 # HEAD runs as GET without a body (RFC 9110 9.3.2); innermost (app/core/head.py).
 app.add_middleware(HeadMiddleware)

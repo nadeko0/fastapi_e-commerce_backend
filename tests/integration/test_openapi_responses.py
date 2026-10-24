@@ -27,13 +27,14 @@ def _op(spec, method, path):
 
 
 def _ref(response):
-    return response["content"]["application/json"]["schema"]["$ref"].rsplit("/", 1)[1]
+    assert list(response["content"]) == ["application/problem+json"]
+    return response["content"]["application/problem+json"]["schema"]["$ref"].rsplit("/", 1)[1]
 
 
 def test_secured_operations_document_401_with_the_challenge(spec):
     for method, path in [("get", "/users/me"), ("get", "/admin/stats"), ("post", "/orders")]:
         response = _op(spec, method, path)["responses"]["401"]
-        assert _ref(response) == "ErrorMessage"
+        assert _ref(response) == "Problem"
         assert "WWW-Authenticate" in response["headers"]
 
 
@@ -44,22 +45,28 @@ def test_public_operations_do_not_document_a_token_401(spec):
 
 
 def test_admin_operations_document_403(spec):
-    assert _ref(_op(spec, "get", "/admin/stats")["responses"]["403"]) == "ErrorMessage"
+    assert _ref(_op(spec, "get", "/admin/stats")["responses"]["403"]) == "Problem"
 
 
-def test_error_bodies_are_models(spec):
+def test_error_bodies_are_problem_models(spec):
     schemas = spec["components"]["schemas"]
-    assert schemas["ErrorMessage"]["properties"]["detail"]["type"] == "string"
-    assert set(schemas["RateLimitDetail"]["properties"]) == {"error", "retry_after"}
-    item = schemas["ValidationError"]["properties"]
+    assert {"type", "title", "status", "detail", "instance", "request_id", "retry_after"} == set(
+        schemas["Problem"]["properties"]
+    )
+    # `type` defaults to about:blank (RFC 9457 section 3.1.1).
+    assert set(schemas["Problem"]["required"]) == {"title", "status", "instance", "request_id"}
+    assert "errors" in schemas["ValidationProblem"]["properties"]
+    item = schemas["ValidationErrorItem"]["properties"]
     assert "input" not in item
     assert {"type", "loc", "msg"} <= set(item)
+    for old in ("ErrorMessage", "RateLimitMessage", "RateLimitDetail", "HTTPValidationError", "ValidationError"):
+        assert old not in schemas
 
 
 def test_validation_error_is_the_sanitised_list_or_a_message(spec):
-    schema = _op(spec, "post", "/users/register")["responses"]["422"]["content"]["application/json"]["schema"]
+    schema = _op(spec, "post", "/users/register")["responses"]["422"]["content"]["application/problem+json"]["schema"]
     assert {ref["$ref"].rsplit("/", 1)[1] for ref in schema["anyOf"]} == {
-        "HTTPValidationError", "ErrorMessage"}
+        "ValidationProblem", "Problem"}
 
 
 def test_429_and_503_document_retry_after(spec):
@@ -67,13 +74,30 @@ def test_429_and_503_document_retry_after(spec):
                                ("post", "/users/login", "503"), ("get", "/products", "503")]:
         response = _op(spec, method, path)["responses"][code]
         assert "Retry-After" in response["headers"], (path, code)
-    assert _ref(_op(spec, "post", "/users/login")["responses"]["429"]) == "RateLimitMessage"
+    assert _ref(_op(spec, "post", "/users/login")["responses"]["429"]) == "Problem"
 
 
-def test_500_is_json_or_plain_text(spec):
+def test_500_is_a_problem(spec):
     content = _op(spec, "get", "/products")["responses"]["500"]["content"]
-    assert content["application/json"]["schema"]["$ref"].endswith("/ErrorMessage")
-    assert content["text/plain"]["schema"] == {"type": "string"}
+    assert list(content) == ["application/problem+json"]
+    assert content["application/problem+json"]["schema"]["$ref"].endswith("/Problem")
+
+
+def test_json_body_operations_document_400_and_415_with_accept(spec):
+    operation = _op(spec, "post", "/users/register")["responses"]
+    assert _ref(operation["400"]) == "Problem"
+    assert _ref(operation["415"]) == "Problem"
+    assert "Accept" in operation["415"]["headers"]
+    # A form body (the login) has no JSON to get wrong.
+    assert "415" not in _op(spec, "post", "/users/login")["responses"]
+
+
+def test_no_error_response_is_application_json(spec):
+    for path in spec["paths"].values():
+        for operation in path.values():
+            for code, response in operation["responses"].items():
+                if int(code) >= 400:
+                    assert list(response["content"]) == ["application/problem+json"], code
 
 
 def test_413_on_operations_that_take_a_body_only(spec):
@@ -85,7 +109,7 @@ def test_413_on_operations_that_take_a_body_only(spec):
 def test_a_routes_own_description_is_kept(spec):
     response = _op(spec, "post", "/cart/items")["responses"]["429"]
     assert "guest carts" in response["description"]
-    assert _ref(response) == "RateLimitMessage"
+    assert _ref(response) == "Problem"
 
 
 def test_cart_security_is_optional_and_the_guest_cookie_is_documented(spec):
@@ -149,7 +173,7 @@ def test_a_missing_signature_is_still_a_400_not_a_422(client):
     response = client.post(f"{API}/orders/webhooks/stripe", content=b"{}")
 
     assert response.status_code == 400
-    assert response.json() == {"detail": "Invalid webhook signature"}
+    assert response.json()["detail"] == "Invalid webhook signature"
 
 
 def test_products_list_has_no_request_body(spec):
@@ -201,20 +225,6 @@ def test_characteristics_must_be_a_json_object(client, value):
     response = client.get(f"{API}/products", params={"characteristics": value})
 
     assert response.status_code == 422
-    (error,) = response.json()["detail"]
+    (error,) = response.json()["errors"]
     assert error["loc"] == ["query", "characteristics"]
     assert "input" not in error
-
-
-def test_default_validation_error_component_names_are_kept(spec):
-    """Clients generated types from these names before the 422 was documented."""
-    schemas = spec["components"]["schemas"]
-    assert {"HTTPValidationError", "ValidationError"} <= set(schemas)
-    assert schemas["HTTPValidationError"]["required"] == ["detail"]
-    detail = schemas["HTTPValidationError"]["properties"]["detail"]
-    assert detail["items"]["$ref"].endswith("/ValidationError")
-    assert set(schemas["ValidationError"]["required"]) == {"type", "loc", "msg"}
-    for path in ("/users/register", "/products"):
-        method = "post" if path.endswith("register") else "get"
-        schema = _op(spec, method, path)["responses"]["422"]["content"]["application/json"]["schema"]
-        assert any(ref["$ref"].endswith("/HTTPValidationError") for ref in schema["anyOf"])
