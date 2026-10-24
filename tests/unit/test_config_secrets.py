@@ -33,7 +33,6 @@ def _settings(environment="production", **overrides):
         ENVIRONMENT=environment,
         PAYMENT_PROVIDER="stripe",
         FRONTEND_URL="https://shop.example",
-        PUBLIC_BASE_URL="https://api.shop.example",
         # conftest lowers the cost to 4; a deployment must run at 12 or more.
         **{"BCRYPT_ROUNDS": 12, **_GOOD_SECRETS, **overrides},
     )

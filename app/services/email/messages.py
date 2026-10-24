@@ -1,5 +1,6 @@
 import html
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 import app.services.email as email
 from app.core.clock import utc_now
@@ -10,6 +11,26 @@ from app.models.product import Product
 if TYPE_CHECKING:
     from app.schemas.order import OrderResponse
     from app.schemas.user import GDPRExport
+
+# The pages the frontend must serve: the links in the verification and
+# reset emails open them, and each reads the token from its query string
+# and sends it in the JSON body of POST /users/verify-email and
+# POST /users/password/reset/{token}. The API has no GET for a token.
+VERIFY_EMAIL_PAGE_PATH = "/verify-email"
+RESET_PASSWORD_PAGE_PATH = "/reset-password"
+
+
+def _frontend_link(page_path: str, token: str) -> str:
+    # The token goes in the query string because that is how the OWASP
+    # Forgot Password Cheat Sheet has the link carry it ("attach it in the
+    # URL query string"). A fragment would keep it out of server logs and
+    # Referer, but the cheat sheet does not describe it; the leak it
+    # names is closed by the page sending Referrer-Policy: no-referrer,
+    # and by tokens being single use and short lived. quote() with no safe
+    # characters encodes everything that could end the value early. The
+    # base is FRONTEND_URL, validated without a trailing slash, never the
+    # request's Host header.
+    return f"{settings.FRONTEND_URL}{page_path}?token={quote(token, safe='')}"
 
 
 def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool:
@@ -165,8 +186,7 @@ def send_low_stock_alert_email(to_email: str, products: list[Product]) -> bool:
     )
 
 def send_welcome_email(to_email: str, full_name: str, verification_token: str) -> bool:
-    base_url = settings.PUBLIC_BASE_URL
-    verification_link = f"{base_url}{settings.API_V1_STR}/users/verify-email/{verification_token}"
+    verification_link = _frontend_link(VERIFY_EMAIL_PAGE_PATH, verification_token)
     # full_name is attacker-controlled (the caller-supplied name at
     # registration, app/api/v1/users.py) and was previously interpolated
     # into this HTML email unescaped - a name like
@@ -241,8 +261,7 @@ def send_account_exists_email(to_email: str) -> bool:
     )
 
 def send_email_verification(to_email: str, verification_token: str) -> bool:
-    base_url = settings.PUBLIC_BASE_URL
-    verification_link = f"{base_url}{settings.API_V1_STR}/users/verify-email/{verification_token}"
+    verification_link = _frontend_link(VERIFY_EMAIL_PAGE_PATH, verification_token)
 
     html_content = f"""
     <html>
@@ -268,8 +287,7 @@ def send_email_verification(to_email: str, verification_token: str) -> bool:
     )
 
 def send_password_reset_email(to_email: str, reset_token: str) -> bool:
-    base_url = settings.PUBLIC_BASE_URL
-    reset_link = f"{base_url}{settings.API_V1_STR}/users/password/reset/{reset_token}"
+    reset_link = _frontend_link(RESET_PASSWORD_PAGE_PATH, reset_token)
 
     html_content = f"""
     <html>

@@ -32,7 +32,6 @@ _PRODUCTION_ENV = {
     # conftest lowers the cost to 4; a deployment must run at 12 or more.
     "BCRYPT_ROUNDS": "12",
     "FRONTEND_URL": "https://shop.example",
-    "PUBLIC_BASE_URL": "https://api.shop.example",
     "STRIPE_SECRET_KEY": "stripe-secret-key-for-tests-not-a-real-key",
 }
 
