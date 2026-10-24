@@ -22,6 +22,18 @@ dependencies = [
     "psycopg[binary]",
 ]
 
+[project.optional-dependencies]
+telemetry = [
+    "opentelemetry-api==1.45.1",
+    "opentelemetry-exporter-otlp-proto-http==1.45.1",
+    "opentelemetry-instrumentation-celery==0.66b1",
+    "opentelemetry-instrumentation-fastapi==0.66b1",
+    "opentelemetry-instrumentation-redis==0.66b1",
+    "opentelemetry-instrumentation-requests==0.66b1",
+    "opentelemetry-instrumentation-sqlalchemy==0.66b1",
+    "opentelemetry-sdk==1.45.1",
+]
+
 [dependency-groups]
 dev = [
     "pytest",
@@ -34,6 +46,14 @@ dev = [
     "lupa",
     "httpx2>=2.13.1",
     "pytest-xdist==3.8.0",
+    "opentelemetry-api==1.45.1",
+    "opentelemetry-sdk==1.45.1",
+    "opentelemetry-exporter-otlp-proto-http==1.45.1",
+    "opentelemetry-instrumentation-fastapi==0.66b1",
+    "opentelemetry-instrumentation-sqlalchemy==0.66b1",
+    "opentelemetry-instrumentation-redis==0.66b1",
+    "opentelemetry-instrumentation-celery==0.66b1",
+    "opentelemetry-instrumentation-requests==0.66b1",
 ]
 
 [tool.pytest]
