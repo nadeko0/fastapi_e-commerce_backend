@@ -38,7 +38,7 @@ def _register_and_login(client, payload):
         f"{USERS_PREFIX}/login",
         data={"username": payload["email"], "password": payload["password"]},
     )
-    return login_response.json()["data"]["access_token"]
+    return login_response.json()["access_token"]
 
 
 def _auth_headers(token):
@@ -90,7 +90,7 @@ def test_get_cart_starts_empty(client, valid_registration_payload):
     response = client.get(CART_PREFIX, headers=_auth_headers(token))
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["items"] == []
     assert body["items_count"] == 0
 
@@ -107,7 +107,7 @@ def test_add_item_to_cart(client, db_session):
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["items_count"] == 1
     assert body["items"][0]["quantity"] == 2
 
@@ -155,7 +155,7 @@ def test_update_cart_item_quantity(client, db_session):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"][0]["quantity"] == 5
+    assert response.json()["items"][0]["quantity"] == 5
 
 
 def test_update_cart_item_rejects_quantity_over_stock(client, db_session):
@@ -206,7 +206,7 @@ def test_remove_item_from_cart(client, db_session):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"] == []
+    assert response.json()["items"] == []
 
 
 def test_remove_item_not_in_cart_returns_404(client, db_session):
@@ -230,7 +230,7 @@ def test_clear_cart(client, db_session):
     response = client.delete(CART_PREFIX, headers=_auth_headers(token))
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"] == []
+    assert response.json()["items"] == []
 
 
 def test_validate_cart_reports_no_issues_when_stock_sufficient(client, db_session):
@@ -246,7 +246,7 @@ def test_validate_cart_reports_no_issues_when_stock_sufficient(client, db_sessio
     response = client.post(f"{CART_PREFIX}/validate", headers=_auth_headers(token))
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"valid": True, "issues": [], "price_changes": []}
+    assert response.json() == {"valid": True, "issues": [], "price_changes": []}
 
 
 def test_validate_cart_reports_issue_when_stock_reduced_after_adding(client, db_session):
@@ -268,7 +268,7 @@ def test_validate_cart_reports_issue_when_stock_reduced_after_adding(client, db_
     response = client.post(f"{CART_PREFIX}/validate", headers=_auth_headers(token))
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["valid"] is False
     assert body["issues"][0]["product_id"] == product.id
 
@@ -281,7 +281,7 @@ def test_cart_without_authorization_is_an_empty_guest_cart(client, fake_redis):
     response = client.get(CART_PREFIX)
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"] == []
+    assert response.json()["items"] == []
     assert "set-cookie" not in response.headers
     assert list(fake_redis.scan_iter("*cart:*")) == []
 
@@ -347,7 +347,7 @@ def test_clearing_an_account_cart_that_does_not_exist_stores_nothing(client, fak
     response = client.delete(CART_PREFIX, headers=_auth_headers(token))
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"] == []
+    assert response.json()["items"] == []
     assert list(fake_redis.scan_iter(f"{CART_KEY_PREFIX}*")) == []
 
 
@@ -377,7 +377,7 @@ def test_sequential_add_to_cart_accumulates_quantity(client, db_session):
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["items_count"] == 1
     assert body["items"][0]["quantity"] == 5
 
@@ -408,7 +408,7 @@ def test_concurrent_add_to_cart_can_lose_updates(client, db_session):
 
     assert all(code == 200 for code in results)
 
-    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()
     final_quantity = final["items"][0]["quantity"] if final["items"] else 0
 
     # Desired behavior: all 10 concurrent +1 additions accumulate to 10.
@@ -446,7 +446,7 @@ def test_high_concurrency_add_to_cart_sums_exactly(client, db_session):
 
     assert all(code == 200 for code in results)
 
-    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()
     final_quantity = final["items"][0]["quantity"] if final["items"] else 0
     assert final_quantity == n
 
@@ -485,7 +485,7 @@ def test_concurrent_add_different_products_no_cross_clobbering(client, db_sessio
 
     assert all(code == 200 for code in results)
 
-    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()
     quantities = {item["product_id"]: item["quantity"] for item in final["items"]}
     assert quantities == {product_a.id: n, product_b.id: n}
 
@@ -540,7 +540,7 @@ def test_concurrent_add_and_remove_same_item_is_consistent(client, db_session):
     # first) or 404s (the item was already gone) - never anything else.
     assert all(code in (200, 404) for code in results)
 
-    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()
     if final["items"]:
         assert len(final["items"]) == 1
         assert final["items"][0]["product_id"] == product.id
@@ -592,7 +592,7 @@ def test_concurrent_add_and_quantity_update_same_item(client, db_session):
 
     assert all(code == 200 for code in results)
 
-    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()
     final_quantity = final["items"][0]["quantity"]
     # update-wins-last -> 10; add-wins-last (applied on top of the update's
     # 10) -> 13. Either is a valid serialization; 5 (update lost) or 8
@@ -633,7 +633,7 @@ def test_stock_limit_enforced_under_concurrent_adds(client, db_session):
     succeeded = sum(1 for code in results if code == 200)
     assert succeeded == 10
 
-    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    final = client.get(CART_PREFIX, headers=_auth_headers(token)).json()
     final_quantity = final["items"][0]["quantity"] if final["items"] else 0
     assert final_quantity == 10
 
@@ -690,7 +690,7 @@ def test_add_variant_to_cart_prices_and_stocks_against_variant(client, db_sessio
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["items_count"] == 1
     item = body["items"][0]
     assert item["product_id"] == product.id
@@ -715,7 +715,7 @@ def test_add_variant_without_price_override_uses_product_price(client, db_sessio
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"][0]["unit_price"] == "9.99"
+    assert response.json()["items"][0]["unit_price"] == "9.99"
 
 
 def test_add_variant_rejects_quantity_over_variant_stock(client, db_session):
@@ -806,7 +806,7 @@ def test_different_variants_of_same_product_are_distinct_cart_lines(client, db_s
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["items_count"] == 3
     variant_ids = {item["variant_id"] for item in body["items"]}
     assert variant_ids == {variant_red.id, variant_blue.id, None}
@@ -830,7 +830,7 @@ def test_same_variant_added_twice_merges_quantity(client, db_session):
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["items_count"] == 1
     assert body["items"][0]["quantity"] == 5
 
@@ -859,7 +859,7 @@ def test_remove_variant_line_leaves_plain_product_line_untouched(client, db_sess
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["items_count"] == 1
     assert body["items"][0]["variant_id"] is None
 
@@ -877,7 +877,7 @@ def _add(client, token, product_id, quantity, variant_id=None):
 
 
 def _cart(client, token):
-    return client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    return client.get(CART_PREFIX, headers=_auth_headers(token)).json()
 
 
 # --- A: non-positive quantity -----------------------------------------------
@@ -1004,7 +1004,7 @@ def test_get_cart_does_not_persist_an_empty_cart(client, fake_redis):
     response = client.get(CART_PREFIX, headers=_auth_headers(token))
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"] == []
+    assert response.json()["items"] == []
     assert list(fake_redis.scan_iter(f"{CART_KEY_PREFIX}*")) == []
 
 
@@ -1057,7 +1057,7 @@ def test_get_cart_does_not_overwrite_an_unreadable_stored_cart(client, db_sessio
     response = client.get(CART_PREFIX, headers=_auth_headers(token))
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"] == []
+    assert response.json()["items"] == []
     assert fake_redis.get(cart_key) == "not-json-at-all{{{"
 
 
@@ -1116,7 +1116,7 @@ def test_validate_cart_reports_product_deactivated_after_adding(client, db_sessi
     _add(client, token, product.id, 1)
     _deactivate(db_session, Product, product.id)
 
-    body = client.post(f"{CART_PREFIX}/validate", headers=_auth_headers(token)).json()["data"]
+    body = client.post(f"{CART_PREFIX}/validate", headers=_auth_headers(token)).json()
 
     assert body["valid"] is False
     assert body["issues"] == [{
@@ -1137,7 +1137,7 @@ def test_validate_cart_reports_variant_deactivated_after_adding(client, db_sessi
     _add(client, token, product.id, 1, variant_id=variant.id)
     _deactivate(db_session, ProductVariant, variant.id)
 
-    body = client.post(f"{CART_PREFIX}/validate", headers=_auth_headers(token)).json()["data"]
+    body = client.post(f"{CART_PREFIX}/validate", headers=_auth_headers(token)).json()
 
     assert body["valid"] is False
     assert body["issues"] == [{
@@ -1225,7 +1225,7 @@ def _set_price(db_session, product_id, price):
 def _validate(client, token):
     response = client.post(f"{CART_PREFIX}/validate", headers=_auth_headers(token))
     assert response.status_code == 200
-    return response.json()["data"]
+    return response.json()
 
 
 def test_validate_cart_reports_price_changed_since_adding(client, db_session):
@@ -1364,7 +1364,7 @@ def test_cart_total_follows_a_product_price_change(client, db_session):
     token = _register_and_login(client, _valid_registration_payload())
     category = _make_category(db_session)
     product = _make_product(db_session, category.id, price="9.99")
-    added = _add(client, token, product.id, 2).json()["data"]
+    added = _add(client, token, product.id, 2).json()
     assert added["total_amount"] == "19.98"
 
     _set_price(db_session, product.id, "12.50")
@@ -1441,16 +1441,16 @@ def test_mutation_responses_are_priced_live_too(client, db_session):
 
     updated = client.put(
         f"{CART_PREFIX}/items/{other.id}", json={"quantity": 3}, headers=_auth_headers(token)
-    ).json()["data"]
+    ).json()
     assert updated["total_amount"] == "23.00"
     assert _line(updated, product.id)["price_changed"] is True
 
     removed = client.delete(
         f"{CART_PREFIX}/items/{other.id}", headers=_auth_headers(token)
-    ).json()["data"]
+    ).json()
     assert removed["total_amount"] == "20.00"
 
-    cleared = client.delete(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    cleared = client.delete(CART_PREFIX, headers=_auth_headers(token)).json()
     assert cleared["items"] == []
     assert cleared["total_amount"] == "0.00"
 
@@ -1483,10 +1483,10 @@ def test_adding_more_of_a_line_re_records_the_price_seen(client, db_session):
 
     after_update = client.put(
         f"{CART_PREFIX}/items/{product.id}", json={"quantity": 2}, headers=_auth_headers(token)
-    ).json()["data"]["items"][0]
+    ).json()["items"][0]
     assert (after_update["price_when_added"], after_update["price_changed"]) == ("9.99", True)
 
-    after_add = _add(client, token, product.id, 1).json()["data"]["items"][0]
+    after_add = _add(client, token, product.id, 1).json()["items"][0]
     assert after_add["quantity"] == 3
     assert (after_add["price_when_added"], after_add["price_changed"]) == ("12.50", False)
 
@@ -1577,7 +1577,7 @@ def test_unavailable_line_can_still_be_removed(client, db_session):
     response = client.delete(f"{CART_PREFIX}/items/{product.id}", headers=_auth_headers(token))
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"] == []
+    assert response.json()["items"] == []
 
 
 # --- Decimal money -----------------------------------------------------------
@@ -1636,7 +1636,7 @@ def test_stored_line_stays_readable_by_the_previous_cart_format(client, db_sessi
     assert isinstance(line["name_snapshot"], str)
     assert line["image_snapshot"] == ""
     # The response says "no image" as null, whatever is stored.
-    assert response.json()["data"]["items"][0]["image"] is None
+    assert response.json()["items"][0]["image"] is None
 
 
 # --- Carts written before this change ----------------------------------------
@@ -1696,7 +1696,7 @@ def test_old_format_cart_loads_and_is_priced_live(client, db_session, fake_redis
     assert same["price_changed"] is False
 
     # And it is still a cart that can be changed and validated.
-    assert _add(client, token, product.id, 1).json()["data"]["total_amount"] == "52.00"
+    assert _add(client, token, product.id, 1).json()["total_amount"] == "52.00"
     assert _validate(client, token)["valid"] is True
 
 

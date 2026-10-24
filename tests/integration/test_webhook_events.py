@@ -73,7 +73,7 @@ def test_an_event_whose_processing_failed_is_applied_when_the_worker_retries_it(
 
     # Stripe is told it was received; the worker could not apply it yet.
     assert first.status_code == 200
-    assert first.json()["data"] == {"status": "retrying"}
+    assert first.json() == {"status": "retrying"}
     assert order_state(shop, order["id"]) == ("new", "pending")
     assert event_id in shop.webhook_event_ids()
     assert _status_of(shop, event_id) == "retrying"
@@ -89,7 +89,7 @@ def test_an_event_whose_processing_failed_is_applied_when_the_worker_retries_it(
 
     # Stripe delivering it again changes nothing.
     third = shop.intent_event("payment_intent.succeeded", payment, event_id=event_id)
-    assert third.json()["data"] == {"status": "already_processed"}
+    assert third.json() == {"status": "already_processed"}
 
 
 def _status_of(shop, event_id):
@@ -155,7 +155,7 @@ def test_an_unhandled_event_for_a_known_attempt_is_recorded_not_reported_applied
     response = shop.intent_event(event_type, payment, event_id=f"evt_{event_type}")
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"status": "processed", "applied": False}
+    assert response.json() == {"status": "processed", "applied": False}
     assert f"evt_{event_type}" in shop.webhook_event_ids()
     assert order_state(shop, order["id"]) == ("new", "pending")
     assert payment_rows(shop, order["id"]) == [("requires_action", 1999, 0, "USD", False)]

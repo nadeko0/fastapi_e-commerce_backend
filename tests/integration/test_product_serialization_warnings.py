@@ -42,9 +42,9 @@ def test_catalog_endpoints_return_images_without_warnings(client, db_session):
 
     for response in (detail, listing, search):
         assert response.status_code == 200
-    assert detail.json()["data"]["images"] == [URL]
-    assert listing.json()["data"]["items"][0]["images"] == [URL]
-    assert search.json()["data"]["items"][0]["images"] == [URL]
+    assert detail.json()["images"] == [URL]
+    assert listing.json()["items"][0]["images"] == [URL]
+    assert search.json()["items"][0]["images"] == [URL]
 
 
 def test_admin_create_and_update_return_images_without_warnings(client, db_session):
@@ -56,8 +56,8 @@ def test_admin_create_and_update_return_images_without_warnings(client, db_sessi
         f"{ADMIN_PREFIX}/products", json=_valid_product_payload(category.id), headers=headers
     )
     assert created.status_code in (200, 201)
-    product_id = created.json()["data"]["id"]
-    assert created.json()["data"]["images"] == [URL]
+    product_id = created.json()["id"]
+    assert created.json()["images"] == [URL]
 
     updated = client.put(
         f"{ADMIN_PREFIX}/products/{product_id}",
@@ -65,4 +65,4 @@ def test_admin_create_and_update_return_images_without_warnings(client, db_sessi
         headers=headers,
     )
     assert updated.status_code == 200
-    assert updated.json()["data"]["images"] == ["https://example.com/b.png"]
+    assert updated.json()["images"] == ["https://example.com/b.png"]

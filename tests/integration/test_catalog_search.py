@@ -38,13 +38,13 @@ def catalog(db_session):
 def _search(client, query):
     response = client.get(f"{API}/products/search", params={"query": query})
     assert response.status_code == 200, response.text
-    return sorted(item["name"] for item in response.json()["data"]["items"])
+    return sorted(item["name"] for item in response.json()["items"])
 
 
 def _listing(client, query):
     response = client.get(f"{API}/products", params={"search_query": query})
     assert response.status_code == 200, response.text
-    return sorted(item["name"] for item in response.json()["data"]["items"])
+    return sorted(item["name"] for item in response.json()["items"])
 
 
 @pytest.mark.parametrize("find", [_search, _listing], ids=["search", "listing"])

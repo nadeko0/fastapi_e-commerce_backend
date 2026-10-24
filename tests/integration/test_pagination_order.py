@@ -105,14 +105,13 @@ def orders(db_session, buyer, addresses):
 
 # -- Helpers -------------------------------------------------------------------------
 
-def _paged_ids(client, url, headers=None, params=None, key="items"):
+def _paged_ids(client, url, headers=None, params=None):
     """The ids of every row, read one row per page."""
     seen = []
     for page in range(1, 30):
         response = client.get(url, params={**(params or {}), "page": page, "size": 1}, headers=headers)
         assert response.status_code == 200, response.text
-        data = response.json()["data"]
-        rows = data[key] if isinstance(data, dict) else data
+        rows = response.json()["items"]
         if not rows:
             return seen
         seen.extend(row["id"] for row in rows)

@@ -153,7 +153,7 @@ def _create_verified_buyer_with_order(client, db_session, email="buyer@example.c
         f"{USERS_PREFIX}/login",
         data={"username": email, "password": payload["password"]},
     )
-    access_token = login.json()["data"]["access_token"]
+    access_token = login.json()["access_token"]
     headers = {"Authorization": f"Bearer {access_token}"}
 
     user = db_session.query(User).filter(User.email == email).first()
@@ -200,7 +200,7 @@ def _create_verified_buyer_with_order(client, db_session, email="buyer@example.c
         headers=_with_idempotency_key(headers),
     )
     assert order_resp.status_code == 200, order_resp.text
-    order = order_resp.json()["data"]
+    order = order_resp.json()
 
     return {"user": user, "headers": headers, "order": order, "product": product}
 
@@ -300,7 +300,7 @@ def test_successful_payment_confirms_intent_and_advances_order(client, db_sessio
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["status"] == "paid"
     assert body["transaction_id"].startswith("pi_")
     assert body["requires_action"] is False
@@ -374,7 +374,7 @@ def test_pay_without_a_currency_charges_the_orders_currency(client, db_session):
     )
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["currency"] == "USD"
+    assert response.json()["currency"] == "USD"
     payments = _get_payments(db_session, order["id"])
     assert [p.currency for p in payments] == ["USD"]
 
@@ -388,7 +388,7 @@ def _pay_requiring_action(client, setup):
         headers=_with_idempotency_key(setup["headers"]),
     )
     assert response.status_code == 200, response.text
-    return response.json()["data"]["transaction_id"]
+    return response.json()["transaction_id"]
 
 
 @pytest.mark.parametrize(
@@ -417,8 +417,8 @@ def test_webhook_success_that_does_not_match_the_order_is_flagged_not_applied(
     response = _post_webhook(client, body, _sign(body))
 
     assert response.status_code == 200
-    assert response.json()["data"]["applied"] is False
-    assert response.json()["data"]["requires_manual_review"] is True
+    assert response.json()["applied"] is False
+    assert response.json()["requires_manual_review"] is True
     db_order = _get_order(db_session, order["id"])
     assert db_order.payment_status == "pending"
     assert db_order.status == "new"
@@ -439,7 +439,7 @@ def test_webhook_success_reported_in_upper_case_currency_is_applied(client, db_s
     )
     response = _post_webhook(client, body, _sign(body))
 
-    assert response.json()["data"]["applied"] is True
+    assert response.json()["applied"] is True
     assert _get_order(db_session, order["id"]).payment_status == "paid"
 
 
@@ -530,7 +530,7 @@ def test_retry_after_timeout_with_the_same_key_succeeds(client, db_session, monk
         headers={**setup["headers"], "Idempotency-Key": "attempt-1"},
     )
     assert retry_response.status_code == 200
-    assert retry_response.json()["data"]["status"] == "paid"
+    assert retry_response.json()["status"] == "paid"
 
     db_order = _get_order(db_session, order["id"])
     assert db_order.payment_status == "paid"
@@ -557,7 +557,7 @@ def test_retry_after_decline_succeeds_without_side_effects_from_failed_attempt(
         headers={**setup["headers"], "Idempotency-Key": "attempt-2"},
     )
     assert retried.status_code == 200
-    assert retried.json()["data"]["status"] == "paid"
+    assert retried.json()["status"] == "paid"
 
     db_order = _get_order(db_session, order["id"])
     assert db_order.payment_status == "paid"
@@ -592,8 +592,8 @@ def test_duplicate_payment_request_same_idempotency_key_returns_same_intent(
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json()["data"]["transaction_id"] == second.json()["data"]["transaction_id"]
-    assert first.json()["data"]["id"] == second.json()["data"]["id"]
+    assert first.json()["transaction_id"] == second.json()["transaction_id"]
+    assert first.json()["id"] == second.json()["id"]
 
     payments = _get_payments(db_session, order["id"])
     assert len(payments) == 1
@@ -677,7 +677,7 @@ def test_the_same_key_on_two_orders_is_two_payments(client, db_session):
 
     assert a.status_code == 200, a.text
     assert b.status_code == 200, b.text
-    assert a.json()["data"]["transaction_id"] != b.json()["data"]["transaction_id"]
+    assert a.json()["transaction_id"] != b.json()["transaction_id"]
     assert len(StripePaymentProvider._intents_by_id) == 2
     assert _get_order(db_session, second["order"]["id"]).payment_status == "paid"
 
@@ -692,7 +692,7 @@ def test_the_same_key_on_two_orders_is_two_checkout_sessions(client, db_session)
 
     assert a.status_code == 200, a.text
     assert b.status_code == 200, b.text
-    assert a.json()["data"]["checkout_session_id"] != b.json()["data"]["checkout_session_id"]
+    assert a.json()["checkout_session_id"] != b.json()["checkout_session_id"]
 
 
 def test_the_same_refund_key_on_two_orders_is_two_refunds(client, db_session):
@@ -712,7 +712,7 @@ def test_the_same_refund_key_on_two_orders_is_two_refunds(client, db_session):
     ]
 
     assert [r.status_code for r in refunds] == [200, 200], refunds[1].text
-    assert refunds[0].json()["data"]["id"] != refunds[1].json()["data"]["id"]
+    assert refunds[0].json()["id"] != refunds[1].json()["id"]
     assert _get_order(db_session, second["order"]["id"]).payment_status == "refunded"
 
 
@@ -733,7 +733,7 @@ def test_requires_action_is_a_distinct_non_terminal_state(client, db_session):
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["status"] == "requires_action"
     assert body["requires_action"] is True
     assert body["client_secret"]
@@ -814,7 +814,7 @@ def test_webhook_success_finalizes_a_requires_action_payment(client, db_session)
         json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
         headers=_with_idempotency_key(setup["headers"]),
     )
-    intent_id = pay_response.json()["data"]["transaction_id"]
+    intent_id = pay_response.json()["transaction_id"]
 
     body = _webhook_body(
         "payment_intent.succeeded", intent_id,
@@ -848,7 +848,7 @@ def test_duplicate_webhook_delivery_does_not_double_apply(client, db_session, mo
         json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
         headers=_with_idempotency_key(setup["headers"]),
     )
-    intent_id = pay_response.json()["data"]["transaction_id"]
+    intent_id = pay_response.json()["transaction_id"]
 
     event_id = f"evt_{uuid.uuid4().hex[:24]}"
     body = _webhook_body(
@@ -862,7 +862,7 @@ def test_duplicate_webhook_delivery_does_not_double_apply(client, db_session, mo
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert second.json()["data"]["status"] == "already_processed"
+    assert second.json()["status"] == "already_processed"
 
     db_order = _get_order(db_session, order["id"])
     assert db_order.payment_status == "paid"
@@ -887,7 +887,7 @@ def test_webhook_success_for_cancelled_order_is_flagged_not_applied(client, db_s
         json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
         headers=_with_idempotency_key(setup["headers"]),
     )
-    intent_id = pay_response.json()["data"]["transaction_id"]
+    intent_id = pay_response.json()["transaction_id"]
 
     cancel_response = client.put(
         f"{ORDERS_PREFIX}/{order['id']}/status",
@@ -903,8 +903,8 @@ def test_webhook_success_for_cancelled_order_is_flagged_not_applied(client, db_s
     response = _post_webhook(client, body, _sign(body))
 
     assert response.status_code == 200
-    assert response.json()["data"]["requires_manual_review"] is True
-    assert response.json()["data"]["applied"] is False
+    assert response.json()["requires_manual_review"] is True
+    assert response.json()["applied"] is False
 
     db_order = _get_order(db_session, order["id"])
     assert db_order.status == "cancelled"
@@ -1031,7 +1031,7 @@ def test_partial_refund_keeps_order_paid(client, db_session):
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["amount"] in ("5.00", 5.00)
     assert body["payment_status"] == "paid"
 
@@ -1060,7 +1060,7 @@ def test_full_refund_marks_order_refunded(client, db_session):
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["payment_status"] == "refunded"
 
     db_order = _get_order(db_session, order["id"])
@@ -1082,7 +1082,7 @@ def test_a_fully_refunded_order_cannot_be_paid_again(client, db_session, flow):
         f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
     refund = client.post(f"{ORDERS_PREFIX}/{order['id']}/refund", json={}, headers=_with_idempotency_key(admin["headers"]))
-    assert refund.json()["data"]["payment_status"] == "refunded"
+    assert refund.json()["payment_status"] == "refunded"
 
     if flow == "pay":
         response = client.post(
@@ -1132,7 +1132,7 @@ def test_refund_with_idempotency_key_is_not_double_applied(client, db_session):
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json()["data"]["id"] == second.json()["data"]["id"]
+    assert first.json()["id"] == second.json()["id"]
 
     payments = _get_payments(db_session, order["id"])
     # Only one $5.00 refund actually applied, not two.
@@ -1598,7 +1598,7 @@ def test_concurrent_identical_webhook_deliveries_do_not_double_apply(client, db_
         json=_payment_payload(order, token=TOKEN_REQUIRES_ACTION),
         headers=_with_idempotency_key(setup["headers"]),
     )
-    intent_id = pay_response.json()["data"]["transaction_id"]
+    intent_id = pay_response.json()["transaction_id"]
 
     event_id = f"evt_{uuid.uuid4().hex[:24]}"
     body = _webhook_body(
@@ -1623,7 +1623,7 @@ def test_concurrent_identical_webhook_deliveries_do_not_double_apply(client, db_
         t.join()
 
     assert [r.status_code for r in results] == [200, 200]
-    outcomes = sorted(r.json()["data"]["status"] for r in results)
+    outcomes = sorted(r.json()["status"] for r in results)
     assert outcomes == ["already_processed", "processed"]
 
     db_order = _get_order(db_session, order["id"])
@@ -1702,7 +1702,7 @@ def test_provider_failure_between_create_and_confirm_leaves_well_defined_state(
         headers={**setup["headers"], "Idempotency-Key": "confirm-drop"},
     )
     assert retry.status_code == 200
-    assert retry.json()["data"]["status"] == "paid"
+    assert retry.json()["status"] == "paid"
 
 
 def test_webhook_for_unknown_payment_intent_is_acknowledged_but_not_applied(client, db_session):
@@ -1715,7 +1715,7 @@ def test_webhook_for_unknown_payment_intent_is_acknowledged_but_not_applied(clie
     response = _post_webhook(client, body, _sign(body))
 
     assert response.status_code == 200
-    body_data = response.json()["data"]
+    body_data = response.json()
     assert body_data["status"] == "processed"
     assert body_data["applied"] is False
 

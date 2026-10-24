@@ -61,7 +61,7 @@ def _login(client, email, password=PASSWORD):
     response = client.post(
         f"{USERS_PREFIX}/login", data={"username": email, "password": password}
     )
-    return response.json()["data"]["access_token"]
+    return response.json()["access_token"]
 
 
 def _register_and_login(client, email="auth.user@example.com"):
@@ -104,7 +104,7 @@ def test_valid_token_authenticates(client):
     response = client.get(f"{USERS_PREFIX}/me", headers=_auth_headers(token))
 
     assert response.status_code == 200
-    assert response.json()["data"]["email"] == "auth.user@example.com"
+    assert response.json()["email"] == "auth.user@example.com"
 
 
 def test_token_blacklisted_by_the_helper_is_rejected(client):
@@ -408,7 +408,7 @@ def test_a_request_without_authorization_authenticates_nobody(client, monkeypatc
         event.remove(async_engine, "before_cursor_execute", _record)
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"] == []
+    assert response.json()["items"] == []
     assert async_statements == []
 
 
@@ -563,7 +563,7 @@ def _checkout_ready_buyer(client, db_session, email):
         },
         headers=_auth_headers(token),
     )
-    return token, address.json()["data"]["id"]
+    return token, address.json()["id"]
 
 
 def _product_in_cart(client, db_session, token):
@@ -606,7 +606,7 @@ def test_create_order_finds_the_users_own_shipping_address(client, db_session):
     response = _place_order(client, token, address_id)
 
     assert response.status_code == 200
-    assert response.json()["data"]["shipping_address"]["id"] == address_id
+    assert response.json()["shipping_address"]["id"] == address_id
 
 
 def test_create_order_rejects_another_users_shipping_address(client, db_session):

@@ -126,7 +126,7 @@ def test_order_key_reused_with_the_same_address_replays(shop):
     first = shop.place_order(buyer, key=key)
     second = shop.place_order(buyer, key=key)
     assert second.status_code == 200
-    assert second.json()["data"]["id"] == first.json()["data"]["id"]
+    assert second.json()["id"] == first.json()["id"]
     assert shop.db.query(Order).one().idempotency_fingerprint is not None
 
 
@@ -145,7 +145,7 @@ def test_order_stored_without_a_fingerprint_replays_for_any_address(shop):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["id"] == first.json()["data"]["id"]
+    assert response.json()["id"] == first.json()["id"]
 
 
 @_needs_no_row_locks
@@ -207,7 +207,7 @@ def test_pay_key_reused_with_the_same_body_replays(shop, monkeypatch):
     # 39.980 is the same amount as 39.98 once validated.
     second = shop.pay(buyer, order["id"], amount="39.980", key=key)
     assert second.status_code == 200
-    assert second.json()["data"]["id"] == first.json()["data"]["id"]
+    assert second.json()["id"] == first.json()["id"]
     assert len(created) == 1
     assert shop.payments(order["id"])[0].idempotency_fingerprint is not None
 
@@ -223,7 +223,7 @@ def test_pay_attempt_stored_without_a_fingerprint_replays_for_any_body(shop):
     second = shop.pay(buyer, order["id"], token=PAY_3DS, amount="1.00", key=key)
 
     assert second.status_code == 200
-    assert second.json()["data"]["id"] == first.json()["data"]["id"]
+    assert second.json()["id"] == first.json()["id"]
 
 
 @_needs_no_row_locks
@@ -280,8 +280,8 @@ def test_checkout_key_reused_with_the_same_body_replays(shop):
     second = shop.checkout_session(buyer, order["id"], key=key, payload={})
     assert second.status_code == 200
     assert (
-        second.json()["data"]["checkout_session_id"]
-        == first.json()["data"]["checkout_session_id"]
+        second.json()["checkout_session_id"]
+        == first.json()["checkout_session_id"]
     )
 
 
@@ -296,7 +296,7 @@ def test_checkout_attempt_stored_without_a_fingerprint_replays_for_any_body(shop
     second = shop.checkout_session(buyer, order["id"], key=key, payload={"currency": "USD"})
 
     assert second.status_code == 200
-    assert second.json()["data"]["payment_id"] == first.json()["data"]["payment_id"]
+    assert second.json()["payment_id"] == first.json()["payment_id"]
 
 
 def test_the_key_of_a_pay_attempt_on_checkout_session_keeps_its_409(shop):

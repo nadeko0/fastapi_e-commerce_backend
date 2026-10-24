@@ -22,7 +22,7 @@ def setup(client, db_session):
     category = _make_category(db_session)
     product = client.post(
         f"{ADMIN_PREFIX}/products", json=_valid_product_payload(category.id), headers=headers
-    ).json()["data"]
+    ).json()
     return headers, product
 
 
@@ -80,7 +80,7 @@ def test_put_with_stale_if_match_is_412(client, setup):
     assert response.status_code == 412
     assert "detail" in response.json()
     assert "etag" in response.headers
-    current = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()["data"]
+    current = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()
     assert current["stock_quantity"] == product["stock_quantity"]
 
 
@@ -89,7 +89,7 @@ def test_put_with_matching_if_match_succeeds(client, setup):
     etag = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").headers["etag"]
     response = _put(client, headers, product, {"If-Match": etag}, stock_quantity=7)
     assert response.status_code == 200
-    assert response.json()["data"]["stock_quantity"] == 7
+    assert response.json()["stock_quantity"] == 7
     assert response.headers["etag"] != etag
     # the old tag is now stale
     assert _put(client, headers, product, {"If-Match": etag}, stock_quantity=8).status_code == 412
@@ -117,7 +117,7 @@ def test_variant_put_if_match(client, setup):
     headers, product = setup
     base = f"{ADMIN_PREFIX}/products/{product['id']}/variants"
     created = client.post(base, json={"sku": "ETAG-1", "stock_quantity": 2}, headers=headers)
-    variant = created.json()["data"]
+    variant = created.json()
     url = f"{base}/{variant['id']}"
 
     stale = client.put(url, json={"stock_quantity": 9}, headers={**headers, "If-Match": '"stale"'})
@@ -147,7 +147,7 @@ def test_header_list_parsing():
 
 def _variant(client, headers, product, sku="GET-1"):
     base = f"{ADMIN_PREFIX}/products/{product['id']}/variants"
-    return base, client.post(base, json={"sku": sku, "stock_quantity": 2}, headers=headers).json()["data"]
+    return base, client.post(base, json={"sku": sku, "stock_quantity": 2}, headers=headers).json()
 
 
 def test_variant_get_returns_variant_and_etag(client, setup):
@@ -155,8 +155,8 @@ def test_variant_get_returns_variant_and_etag(client, setup):
     base, variant = _variant(client, headers, product)
     response = client.get(f"{base}/{variant['id']}", headers=headers)
     assert response.status_code == 200
-    assert response.json()["data"] == variant
-    assert response.json()["data"]["currency"]
+    assert response.json() == variant
+    assert response.json()["currency"]
     etag = response.headers["etag"]
     assert etag.startswith('"') and not etag.startswith("W/")
     assert client.get(f"{base}/{variant['id']}", headers=headers).headers["etag"] == etag
@@ -209,7 +209,7 @@ def test_variant_get_404_cases(client, setup):
         f"{ADMIN_PREFIX}/products",
         json={**_valid_product_payload(product["category_id"]), "name": "Other product"},
         headers=headers,
-    ).json()["data"]
+    ).json()
     assert client.get(f"{base}/999999", headers=headers).status_code == 404
     missing_product = f"{ADMIN_PREFIX}/products/999999/variants/{variant['id']}"
     assert client.get(missing_product, headers=headers).status_code == 404
@@ -236,4 +236,4 @@ def test_variant_list_route_unchanged(client, setup):
     listing = client.get(base, headers=headers)
     assert listing.status_code == 200
     assert "etag" not in listing.headers
-    assert listing.json()["data"]["items"] == [variant]
+    assert listing.json()["items"] == [variant]

@@ -135,7 +135,7 @@ def test_the_route_stores_the_event_and_answers_before_applying_it(shop, outbox)
                                 event_id=event_id)
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"status": "received"}
+    assert response.json() == {"status": "received"}
     # Stored, with what the worker needs, and handed to the broker...
     row = _event_row(shop, event_id)
     assert (row.status, row.attempts, row.last_error, row.processed_at) == (
@@ -175,16 +175,16 @@ def test_a_duplicate_delivery_is_answered_and_changes_nothing(shop, outbox):
     first = shop.webhook_raw("payment_intent.succeeded", obj, event_id=event_id)
     second = shop.webhook_raw("payment_intent.succeeded", obj, event_id=event_id)
 
-    assert first.json()["data"] == {"status": "received"}
+    assert first.json() == {"status": "received"}
     assert second.status_code == 200
-    assert second.json()["data"] == {"status": "already_processed"}
+    assert second.json() == {"status": "already_processed"}
     assert shop.db.query(WebhookEvent).filter(WebhookEvent.event_id == event_id).count() == 1
     assert published_ids().count(event_id) == 1
 
     run_event(event_id)
     third = shop.webhook_raw("payment_intent.succeeded", obj, event_id=event_id)
 
-    assert third.json()["data"] == {"status": "already_processed"}
+    assert third.json() == {"status": "already_processed"}
     assert published_ids().count(event_id) == 1
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert [(e[0], e[4]) for e in outbox.take()] == [("status_update", "paid")]
@@ -254,7 +254,7 @@ def test_a_broker_that_is_down_still_gets_a_200_and_the_event_is_kept(
                                     event_id=event_id)
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"status": "received"}
+    assert response.json() == {"status": "received"}
     assert _event_row(shop, event_id).status == "received"
     assert event_id not in published_ids()
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]

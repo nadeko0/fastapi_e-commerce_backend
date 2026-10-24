@@ -36,7 +36,7 @@ def _stored(db_session, email="new.person@example.com"):
 
 def _login(client, email="new.person@example.com"):
     response = client.post(f"{USERS}/login", data={"username": email, "password": PASSWORD})
-    return {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 # --- registration ---------------------------------------------------------
@@ -202,8 +202,8 @@ def test_verification_is_idempotent_and_the_body_is_validated(client):
     first = client.post(f"{USERS}/verify-email", json={"token": token})
     again = client.post(f"{USERS}/verify-email", json={"token": token})
 
-    assert first.json()["data"]["message"] == "Email verified successfully"
-    assert again.json()["data"]["message"] == "Email already verified"
+    assert first.json()["message"] == "Email verified successfully"
+    assert again.json()["message"] == "Email already verified"
     assert client.post(f"{USERS}/verify-email", json={"token": "garbage"}).status_code == 400
     assert client.post(f"{USERS}/verify-email", json={}).status_code == 422
     assert client.post(f"{USERS}/verify-email", json={"token": ""}).status_code == 422

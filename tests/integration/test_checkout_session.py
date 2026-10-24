@@ -210,7 +210,7 @@ class TestCreateCheckoutSessionEndpoint:
         response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"]))
 
         assert response.status_code == 200, response.text
-        body = response.json()["data"]
+        body = response.json()
         assert body["order_id"] == order["id"]
         assert body["checkout_session_id"].startswith("cs_test_")
         assert body["url"]
@@ -234,7 +234,7 @@ class TestCreateCheckoutSessionEndpoint:
             json=_payment_payload(order, token=TOKEN_SUCCESS_DEFAULT),
             headers=_with_idempotency_key(setup["headers"]),
         )
-        assert pay_response.json()["data"]["status"] == "paid"
+        assert pay_response.json()["status"] == "paid"
 
         response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"]))
         assert response.status_code == 400
@@ -263,7 +263,7 @@ class TestCreateCheckoutSessionEndpoint:
         response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"]))
 
         assert response.status_code == 200, response.text
-        assert response.json()["data"]["currency"] == "USD"
+        assert response.json()["currency"] == "USD"
         assert [p.currency for p in _get_payments(db_session, order["id"])] == ["USD"]
 
     def test_rejects_a_currency_other_than_the_orders(self, client, db_session):
@@ -299,8 +299,8 @@ class TestCreateCheckoutSessionEndpoint:
         assert first.status_code == 200
         assert second.status_code == 200
         assert (
-            first.json()["data"]["checkout_session_id"]
-            == second.json()["data"]["checkout_session_id"]
+            first.json()["checkout_session_id"]
+            == second.json()["checkout_session_id"]
         )
 
         payments = _get_payments(db_session, order["id"])
@@ -414,7 +414,7 @@ class TestCheckoutSessionWebhook:
     def _create_session(self, client, headers, order):
         response = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(headers))
         assert response.status_code == 200, response.text
-        return response.json()["data"]
+        return response.json()
 
     def test_completed_event_marks_order_paid(self, client, db_session):
         setup = _create_verified_buyer_with_order(client, db_session)
@@ -428,7 +428,7 @@ class TestCheckoutSessionWebhook:
         response = _post_webhook(client, body, _sign(body))
 
         assert response.status_code == 200
-        assert response.json()["data"]["applied"] is True
+        assert response.json()["applied"] is True
 
         db_order = _get_order(db_session, order["id"])
         assert db_order.payment_status == "paid"
@@ -457,7 +457,7 @@ class TestCheckoutSessionWebhook:
         response = _post_webhook(client, body, _sign(body))
 
         assert response.status_code == 200
-        assert response.json()["data"]["applied"] is False
+        assert response.json()["applied"] is False
 
         db_order = _get_order(db_session, order["id"])
         assert db_order.payment_status == "pending"
@@ -476,7 +476,7 @@ class TestCheckoutSessionWebhook:
         response = _post_webhook(client, body, _sign(body))
 
         assert response.status_code == 200
-        assert response.json()["data"]["applied"] is True
+        assert response.json()["applied"] is True
         db_order = _get_order(db_session, order["id"])
         assert db_order.payment_status == "paid"
 
@@ -498,9 +498,9 @@ class TestCheckoutSessionWebhook:
         second = _post_webhook(client, body, signature)
 
         assert first.status_code == 200
-        assert first.json()["data"]["applied"] is True
+        assert first.json()["applied"] is True
         assert second.status_code == 200
-        assert second.json()["data"]["status"] == "already_processed"
+        assert second.json()["status"] == "already_processed"
 
     def test_expired_event_marks_payment_failed(self, client, db_session):
         setup = _create_verified_buyer_with_order(client, db_session)
@@ -513,7 +513,7 @@ class TestCheckoutSessionWebhook:
         response = _post_webhook(client, body, _sign(body))
 
         assert response.status_code == 200
-        assert response.json()["data"]["applied"] is True
+        assert response.json()["applied"] is True
 
         db_order = _get_order(db_session, order["id"])
         assert db_order.payment_status == "failed"
@@ -596,8 +596,8 @@ class TestCheckoutSessionWebhook:
         response = _post_webhook(client, body, _sign(body))
 
         assert response.status_code == 200
-        assert response.json()["data"]["applied"] is False
-        assert response.json()["data"]["requires_manual_review"] is True
+        assert response.json()["applied"] is False
+        assert response.json()["requires_manual_review"] is True
 
         db_order = _get_order(db_session, order["id"])
         assert db_order.status == "cancelled"
@@ -634,8 +634,8 @@ class TestCheckoutSessionWebhook:
         response = _post_webhook(client, body, _sign(body))
 
         assert response.status_code == 200
-        assert response.json()["data"]["applied"] is False
-        assert response.json()["data"]["requires_manual_review"] is True
+        assert response.json()["applied"] is False
+        assert response.json()["requires_manual_review"] is True
         assert _get_order(db_session, order["id"]).payment_status == "pending"
         payments = _get_payments(db_session, order["id"])
         assert payments[0].status == "succeeded"
@@ -647,4 +647,4 @@ class TestCheckoutSessionWebhook:
         )
         response = _post_webhook(client, body, _sign(body))
         assert response.status_code == 200
-        assert response.json()["data"]["applied"] is False
+        assert response.json()["applied"] is False

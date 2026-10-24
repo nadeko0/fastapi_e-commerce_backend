@@ -57,7 +57,7 @@ def test_an_access_token_issued_by_python_jose_still_authenticates(
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["id"] == 42
+    assert response.json()["id"] == 42
 
 
 def test_a_reset_token_issued_by_python_jose_still_decodes_but_is_no_longer_honoured(

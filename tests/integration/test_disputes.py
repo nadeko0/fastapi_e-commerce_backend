@@ -75,7 +75,7 @@ def test_a_dispute_puts_the_order_on_hold_without_changing_it(shop, paid, outbox
     response = shop.webhook("charge.dispute.created", _dispute(paid["payment"], "needs_response"))
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"] == {
+    assert response.json() == {
         "status": "processed", "applied": True, "requires_manual_review": True}
     assert order_state(shop, order_id) == ("confirmed", "paid")
     assert _disputes(shop) == [("du_test_1", "needs_response", False)]
@@ -101,7 +101,7 @@ def test_a_dispute_closed_in_our_favour_lifts_the_hold(shop, paid, outcome):
     response = shop.webhook("charge.dispute.closed", _dispute(paid["payment"], outcome))
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"status": "processed", "applied": True}
+    assert response.json() == {"status": "processed", "applied": True}
     assert order_state(shop, order_id) == ("confirmed", "paid")
     assert _disputes(shop) == [("du_test_1", outcome, True)]
     assert shop.set_status(paid["admin"], order_id, "processing").status_code == 200
@@ -137,7 +137,7 @@ def test_a_closed_dispute_is_not_reopened_by_a_late_event(shop, paid):
                                ("charge.dispute.funds_withdrawn", "needs_response")):
         response = shop.webhook(event_type, _dispute(paid["payment"], status))
         assert response.status_code == 200
-        assert response.json()["data"] == {"status": "processed", "applied": False}
+        assert response.json() == {"status": "processed", "applied": False}
 
     assert _disputes(shop) == [("du_test_1", "won", True)]
     assert order_state(shop, order_id) == ("confirmed", "paid")
@@ -185,7 +185,7 @@ def test_a_dispute_of_a_charge_this_app_did_not_make_is_acknowledged(shop, paid,
     response = shop.webhook("charge.dispute.created", obj)
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"status": "processed", "applied": False}
+    assert response.json() == {"status": "processed", "applied": False}
     assert _disputes(shop) == []
 
 
@@ -194,6 +194,6 @@ def test_a_dispute_event_without_an_id_or_status_changes_nothing(shop, paid):
 
     response = shop.webhook("charge.dispute.created", obj)
 
-    assert response.json()["data"] == {"status": "processed", "applied": False}
+    assert response.json() == {"status": "processed", "applied": False}
     assert _disputes(shop) == []
     assert shop.refund(paid["admin"], paid["order"]["id"], amount="1.00").status_code == 200

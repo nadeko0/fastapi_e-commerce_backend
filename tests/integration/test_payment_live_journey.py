@@ -143,7 +143,7 @@ def test_cart_to_partial_and_remaining_refund(shop, outbox, stripe_sdk):
     paid = shop.pay(buyer, order["id"], token="pm_card_visa")
 
     assert paid.status_code == 200, paid.text
-    assert paid.json()["data"]["status"] == "paid"
+    assert paid.json()["status"] == "paid"
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     attempt = shop.payments(order["id"])[0]
     intent = stripe_sdk.PaymentIntent.retrieve(attempt.payment_intent_id, api_key=_SECRET_KEY)
@@ -153,11 +153,11 @@ def test_cart_to_partial_and_remaining_refund(shop, outbox, stripe_sdk):
 
     partial = shop.refund(admin, order["id"], amount="10.00")
     assert partial.status_code == 200, partial.text
-    assert (partial.json()["data"]["status"], partial.json()["data"]["payment_status"]) == (
+    assert (partial.json()["status"], partial.json()["payment_status"]) == (
         "succeeded", "paid")
     rest = shop.refund(admin, order["id"])
     assert rest.status_code == 200, rest.text
-    assert (rest.json()["data"]["amount"], rest.json()["data"]["payment_status"]) == (
+    assert (rest.json()["amount"], rest.json()["payment_status"]) == (
         "15.00", "refunded")
 
     assert payment_rows(shop, order["id"]) == [("succeeded", 2500, 2500, "USD", False)]
@@ -175,7 +175,7 @@ def test_a_succeeding_payment_method_pays_the_order(shop, stripe_sdk, payment_me
     response = shop.pay(buyer, order["id"], token=payment_method)
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["status"] == "paid"
+    assert response.json()["status"] == "paid"
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert payment_rows(shop, order["id"]) == [("succeeded", 2500, 0, "USD", False)]
     intent = stripe_sdk.PaymentIntent.retrieve(
@@ -208,7 +208,7 @@ def test_a_3ds_payment_method_waits_for_authentication(shop, payment_method):
     response = shop.pay(buyer, order["id"], token=payment_method)
 
     assert response.status_code == 200, response.text
-    body = response.json()["data"]
+    body = response.json()
     assert (body["status"], body["requires_action"]) == ("requires_action", True)
     assert body["client_secret"] and body["next_action"]["type"] == "redirect_to_url"
     assert order_state(shop, order["id"]) == ("new", "pending")
@@ -222,7 +222,7 @@ def test_an_optional_3ds_payment_method_is_paid_or_waits(shop):
     response = shop.pay(buyer, order["id"], token="pm_card_threeDSecureOptional")
 
     assert response.status_code == 200, response.text
-    status = response.json()["data"]["status"]
+    status = response.json()["status"]
     expected = {"paid": (("confirmed", "paid"), "succeeded"),
                 "requires_action": (("new", "pending"), "requires_action")}[status]
     assert order_state(shop, order["id"]) == expected[0]
@@ -257,7 +257,7 @@ def test_a_pending_refund_is_completed_when_stripe_says_so(shop, stripe_sdk):
     response = shop.refund(admin, order["id"])
 
     assert response.status_code == 200, response.text
-    body = response.json()["data"]
+    body = response.json()
     assert (body["status"], body["payment_status"]) == ("pending", "paid")
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     _final_status_or_skip()
@@ -277,15 +277,15 @@ def test_a_refund_that_fails_later_is_undone_and_flagged(shop, stripe_sdk):
 
     assert response.status_code == 200, response.text
     # Stripe reports this refund succeeded at first, and the app counts it.
-    assert response.json()["data"]["status"] == "succeeded"
+    assert response.json()["status"] == "succeeded"
     assert order_state(shop, order["id"]) == ("confirmed", "refunded")
     _final_status_or_skip()
-    refund = _wait_for_refund(stripe_sdk, response.json()["data"]["id"], {"failed"}, timeout=_SLOW_TIMEOUT)
+    refund = _wait_for_refund(stripe_sdk, response.json()["id"], {"failed"}, timeout=_SLOW_TIMEOUT)
     assert refund.status == "failed"
     delivered = _deliver(shop, "refund.failed", refund.to_dict())
-    assert delivered.json()["data"]["requires_manual_review"] is True
+    assert delivered.json()["requires_manual_review"] is True
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert payment_rows(shop, order["id"]) == [("succeeded", 2500, 0, "USD", False)]
     view = shop.client.get(f"/api/v1/orders/{order['id']}/payments", headers=admin)
-    [flagged] = view.json()["data"][0]["refunds"]
+    [flagged] = view.json()[0]["refunds"]
     assert (flagged["status"], flagged["requires_manual_review"]) == ("failed", True)

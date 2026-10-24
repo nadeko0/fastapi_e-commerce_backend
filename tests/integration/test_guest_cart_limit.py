@@ -104,7 +104,7 @@ def test_account_carts_are_not_counted(client, limits, product, valid_registrati
     token = client.post(
         f"{settings.API_V1_STR}/users/login",
         data={"username": valid_registration_payload["email"], "password": valid_registration_payload["password"]},
-    ).json()["data"]["access_token"]
+    ).json()["access_token"]
     for _ in range(3):
         assert _add(_visitor(), product.id, headers={"Authorization": f"Bearer {token}"}).status_code == 200
 

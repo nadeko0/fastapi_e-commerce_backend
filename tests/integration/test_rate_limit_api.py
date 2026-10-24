@@ -66,7 +66,7 @@ def _reset_token_for(email):
 
 def auth_header(client, payload, email=None):
     payload = register(client, payload, email)
-    token = login(client, payload["email"], payload["password"]).json()["data"]["access_token"]
+    token = login(client, payload["email"], payload["password"]).json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
 

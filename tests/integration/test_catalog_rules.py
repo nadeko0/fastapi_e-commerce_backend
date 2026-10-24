@@ -47,7 +47,7 @@ def _product(db, category, name, price="9.99", stock=10, active=True, descriptio
 def _listing(client, **params):
     response = client.get(f"{API}/products", params=params)
     assert response.status_code == 200, response.text
-    return response.json()["data"]
+    return response.json()
 
 
 def _names(page):
@@ -195,7 +195,7 @@ def test_search_matches_name_or_description_ignoring_case(client, db_session):
 
     response = client.get(f"{API}/products/search", params={"query": "blue"})
 
-    assert sorted(item["name"] for item in response.json()["data"]["items"]) == ["Blue Lamp", "Chair"]
+    assert sorted(item["name"] for item in response.json()["items"]) == ["Blue Lamp", "Chair"]
 
 
 def test_search_can_be_scoped_to_a_category_and_paged(client, db_session):
@@ -207,10 +207,10 @@ def test_search_can_be_scoped_to_a_category_and_paged(client, db_session):
 
     first = client.get(
         f"{API}/products/search", params={"query": "lamp", "category_id": lamps.id, "size": 2}
-    ).json()["data"]
+    ).json()
     second = client.get(
         f"{API}/products/search", params={"query": "lamp", "category_id": lamps.id, "size": 2, "page": 2}
-    ).json()["data"]
+    ).json()
 
     assert (first["total"], first["has_more"], len(first["items"])) == (3, True, 2)
     assert (second["has_more"], len(second["items"])) == (False, 1)
@@ -233,7 +233,7 @@ def test_a_product_withdrawn_from_sale_is_nowhere_to_be_seen(client, db_session)
     assert _names(_listing(client)) == ["Visible gadget"]
     assert _listing(client)["total"] == 1
     assert _names(_listing(client, search_query="gadget")) == ["Visible gadget"]
-    search = client.get(f"{API}/products/search", params={"query": "gadget"}).json()["data"]
+    search = client.get(f"{API}/products/search", params={"query": "gadget"}).json()
     assert [item["name"] for item in search["items"]] == ["Visible gadget"]
     assert client.get(f"{API}/products/{hidden.id}").status_code == 404
 
@@ -254,11 +254,11 @@ def test_categories_can_be_listed_by_parent_and_paged(client, db_session):
     children = [_category(db_session, f"Child {index}", parent=root) for index in range(3)]
     _category(db_session, "Other root")
 
-    first = client.get(f"{API}/categories", params={"parent_id": root.id, "size": 2}).json()["data"]
+    first = client.get(f"{API}/categories", params={"parent_id": root.id, "size": 2}).json()
     second = client.get(
         f"{API}/categories", params={"parent_id": root.id, "size": 2, "page": 2}
-    ).json()["data"]
-    everything = client.get(f"{API}/categories").json()["data"]
+    ).json()
+    everything = client.get(f"{API}/categories").json()
 
     assert (first["total"], first["has_more"]) == (3, True)
     assert {c["id"] for c in first["items"] + second["items"]} == {c.id for c in children}
@@ -267,7 +267,7 @@ def test_categories_can_be_listed_by_parent_and_paged(client, db_session):
 
 
 def test_an_empty_category_tree(client):
-    assert client.get(f"{API}/categories/tree").json()["data"] == {
+    assert client.get(f"{API}/categories/tree").json() == {
         "tree": [], "total_categories": 0, "max_depth": 0,
     }
 
@@ -278,7 +278,7 @@ def test_the_tree_holds_every_root_and_reports_its_depth(client, db_session):
     child = _category(db_session, "Child", parent=first)
     _category(db_session, "Grandchild", parent=child)
 
-    body = client.get(f"{API}/categories/tree").json()["data"]
+    body = client.get(f"{API}/categories/tree").json()
 
     assert sorted(node["name"] for node in body["tree"]) == ["First", "Second"]
     assert (body["total_categories"], body["max_depth"]) == (4, 2)
@@ -290,9 +290,9 @@ def test_the_tree_holds_every_root_and_reports_its_depth(client, db_session):
 
 def test_the_tree_is_served_from_the_cache_once_built(client, db_session):
     _category(db_session, "Root")
-    first = client.get(f"{API}/categories/tree").json()["data"]
+    first = client.get(f"{API}/categories/tree").json()
 
     _category(db_session, "Added after the tree was cached")
-    second = client.get(f"{API}/categories/tree").json()["data"]
+    second = client.get(f"{API}/categories/tree").json()
 
     assert second == first

@@ -163,7 +163,7 @@ def test_order_total_is_the_exact_decimal_sum_of_its_lines(client, db_session, l
     response = _checkout(client, headers, address_id)
 
     assert response.status_code == 200, response.text
-    body = response.json()["data"]
+    body = response.json()
     assert Decimal(body["total_amount"]) == expected_total
     db_session.expire_all()
     order = db_session.get(Order, body["id"])
@@ -246,7 +246,7 @@ def test_stock_equals_start_minus_live_orders_whatever_happens(
             # 400: empty cart, or not enough stock left for the cart.
             assert response.status_code in (200, 400), response.text
             if response.status_code == 200:
-                placed.append((response.json()["data"]["id"], op[1]))
+                placed.append((response.json()["id"], op[1]))
         if placed and kind in ("pay", "cancel_by_customer", "cancel_by_admin"):
             order_id, owner = placed[op[1] % len(placed)]
             headers, _ = buyers[owner]

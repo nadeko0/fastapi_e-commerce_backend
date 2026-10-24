@@ -85,8 +85,8 @@ def test_partial_refunds_add_up_to_a_full_refund(client, db_session, paid):
     first = _refund(client, order_id, paid["admin"], amount="5.00")
     second = _refund(client, order_id, paid["admin"], amount="14.99")
 
-    assert first.json()["data"]["payment_status"] == "paid"
-    assert second.json()["data"]["payment_status"] == "refunded"
+    assert first.json()["payment_status"] == "paid"
+    assert second.json()["payment_status"] == "refunded"
     payment = _get_payments(db_session, order_id)[0]
     assert payment.amount_refunded == payment.amount == ORDER_AMOUNT_CENTS
 
@@ -109,8 +109,8 @@ def test_full_refund_after_a_partial_one_returns_the_rest(client, db_session, pa
     response = _refund(client, order_id, paid["admin"])
 
     assert response.status_code == 200
-    assert response.json()["data"]["amount"] == "15.00"
-    assert response.json()["data"]["payment_status"] == "refunded"
+    assert response.json()["amount"] == "15.00"
+    assert response.json()["payment_status"] == "refunded"
 
 
 def test_a_refunded_order_cannot_be_refunded_again(client, db_session, paid):
@@ -145,7 +145,7 @@ def test_refund_does_not_touch_stock_even_after_an_admin_cancelled_the_paid_orde
 
     refund = _refund(client, order_id, paid["admin"])
 
-    assert refund.json()["data"]["payment_status"] == "refunded"
+    assert refund.json()["payment_status"] == "refunded"
     db_session.expire_all()
     assert db_session.get(Product, product_id).stock_quantity == 10
 
@@ -171,8 +171,8 @@ def test_replaying_a_successful_pay_returns_the_same_attempt_and_charges_once(
     replay = _pay(client, setup, key="same-key")
 
     assert first.status_code == replay.status_code == 200
-    assert replay.json()["data"]["id"] == first.json()["data"]["id"]
-    assert replay.json()["data"]["transaction_id"] == first.json()["data"]["transaction_id"]
+    assert replay.json()["id"] == first.json()["id"]
+    assert replay.json()["transaction_id"] == first.json()["transaction_id"]
     assert len(_get_payments(db_session, setup["order"]["id"])) == 1
     assert len(StripePaymentProvider._intents_by_id) == 1
 
@@ -232,7 +232,7 @@ def test_a_second_attempt_while_one_is_in_flight_is_refused(
     replay = _post_attempt(client, setup, first_flow, "attempt-1")
     attempt_id = "id" if first_flow == "pay" else "payment_id"
     assert replay.status_code == 200
-    assert replay.json()["data"][attempt_id] == first.json()["data"][attempt_id]
+    assert replay.json()[attempt_id] == first.json()[attempt_id]
 
 
 def test_an_attempt_left_in_flight_too_long_no_longer_blocks(client, db_session):
@@ -279,7 +279,7 @@ def test_replaying_a_checkout_session_after_the_order_was_paid_returns_it(client
     fresh = client.post(url, headers={**setup["headers"], "Idempotency-Key": "another-key"})
 
     assert replay.status_code == 200
-    assert replay.json()["data"]["checkout_session_id"] == first.json()["data"]["checkout_session_id"]
+    assert replay.json()["checkout_session_id"] == first.json()["checkout_session_id"]
     assert fresh.status_code == 400
 
 
@@ -321,7 +321,7 @@ def test_a_processed_event_resent_with_a_fresh_signature_is_not_applied_again(
     event_id = f"evt_{uuid.uuid4().hex[:24]}"
     body = _webhook_body("payment_intent.succeeded", intent_id, event_id=event_id,
                          amount=ORDER_AMOUNT_CENTS, currency=ORDER_CURRENCY_REPORTED)
-    assert _post_webhook(client, body, _sign(body)).json()["data"]["applied"] is True
+    assert _post_webhook(client, body, _sign(body)).json()["applied"] is True
     # The order moves on (refunded by support); replaying the old success
     # must not touch it.
     order = _get_order(db_session, setup["order"]["id"])
@@ -330,7 +330,7 @@ def test_a_processed_event_resent_with_a_fresh_signature_is_not_applied_again(
 
     replay = _post_webhook(client, body, _sign(body, timestamp=int(time.time()) + 1))
 
-    assert replay.json()["data"]["status"] == "already_processed"
+    assert replay.json()["status"] == "already_processed"
     assert _get_order(db_session, setup["order"]["id"]).payment_status == "refunded"
 
 

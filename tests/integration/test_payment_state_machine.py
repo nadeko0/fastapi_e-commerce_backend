@@ -124,7 +124,7 @@ class PaymentChain(RuleBasedStateMachine):
         self._ok(self.shop.add_to_cart(self.buyer, self.product, quantity), 200, 400)
         response = self._ok(self.shop.place_order(self.buyer), 200, 400)
         if response.status_code == 200:
-            self.orders.append(response.json()["data"]["id"])
+            self.orders.append(response.json()["id"])
         self.shop.client.delete("/api/v1/cart", headers=self.buyer.headers)
 
     @precondition(lambda self: self.orders)

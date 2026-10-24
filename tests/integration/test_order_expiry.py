@@ -74,7 +74,7 @@ def _place(client, db_session, email="buyer@example.com", quantity=3, variant_qu
         headers=_with_idempotency_key(_auth_headers(token)),
     )
     assert response.status_code == 200, response.text
-    return token, response.json()["data"], product, variant
+    return token, response.json(), product, variant
 
 
 def _stock(db_session, product, variant=None):
@@ -118,7 +118,7 @@ def test_customer_cancels_own_unpaid_order_and_stock_comes_back(client, db_sessi
     response = _cancel(client, token, order["id"])
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["status"] == "cancelled"
+    assert response.json()["status"] == "cancelled"
     assert _stock(db_session, product, variant) == (10, 5)
 
 

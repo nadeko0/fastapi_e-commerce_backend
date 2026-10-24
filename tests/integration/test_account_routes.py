@@ -55,7 +55,7 @@ def _register(client, email="owner@example.com"):
 def _tokens(client, email="owner@example.com"):
     _register(client, email)
     response = client.post(f"{USERS}/login", data={"username": email, "password": PASSWORD})
-    return response.json()["data"]
+    return response.json()
 
 
 def _auth(client, email="owner@example.com"):
@@ -117,12 +117,12 @@ def test_an_admin_uses_the_account_routes_as_a_user_too(client, db_session):
     ))
     db_session.commit()
     response = client.post(f"{USERS}/login", data={"username": "admin@example.com", "password": PASSWORD})
-    headers = {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
+    headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
 
     me = client.get(f"{USERS}/me", headers=headers)
 
     assert me.status_code == 200
-    assert me.json()["data"]["role"] == "admin"
+    assert me.json()["role"] == "admin"
 
 
 def test_a_client_cannot_reach_the_admin_router(client):
@@ -142,11 +142,11 @@ def _address(**overrides):
 def _create(client, headers, **overrides):
     response = client.post(f"{USERS}/addresses", json=_address(**overrides), headers=headers)
     assert response.status_code == 200, response.text
-    return response.json()["data"]
+    return response.json()
 
 
 def _defaults(client, headers):
-    items = client.get(f"{USERS}/addresses", headers=headers).json()["data"]["items"]
+    items = client.get(f"{USERS}/addresses", headers=headers).json()["items"]
     return [item["id"] for item in items if item["is_default"]]
 
 
@@ -225,7 +225,7 @@ def test_the_address_list_is_paginated(client):
 
     page = client.get(f"{USERS}/addresses", params={"page": 2, "size": 2}, headers=headers)
 
-    data = page.json()["data"]
+    data = page.json()
     assert (data["total"], len(data["items"]), data["has_more"]) == (3, 1, False)
 
 
@@ -262,14 +262,16 @@ def test_the_order_list_shows_only_ones_own_orders_newest_first(client, db_sessi
     response = client.get(f"{USERS}/orders", headers=headers)
 
     assert response.status_code == 200
-    assert [order["id"] for order in response.json()["data"]] == [newer, older]
+    body = response.json()
+    assert [order["id"] for order in body["items"]] == [newer, older]
+    assert body["total"] == 2
 
 
-def test_an_empty_order_list_is_an_empty_list(client):
+def test_an_empty_order_list_is_an_empty_page(client):
     response = client.get(f"{USERS}/orders", headers=_auth(client))
 
     assert response.status_code == 200
-    assert response.json()["data"] == []
+    assert response.json() == {"items": [], "total": 0, "page": 1, "size": 20, "has_more": False}
 
 
 def test_another_address_still_reaches_the_protected_routes():

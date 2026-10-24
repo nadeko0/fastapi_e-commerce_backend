@@ -29,7 +29,7 @@ def test_an_admin_sees_every_attempt_with_its_refunds_and_disputes(shop):
     assert shop.pay(buyer, order["id"], token=PAY_DECLINED).status_code == 402
     assert shop.pay(buyer, order["id"]).status_code == 200
     paying = shop.payments(order["id"])[1]
-    refund_id = shop.refund(admin, order["id"], amount="5.00").json()["data"]["id"]
+    refund_id = shop.refund(admin, order["id"], amount="5.00").json()["id"]
     shop.webhook("refund.failed", {"id": refund_id, "object": "refund", "amount": 500,
                                    "currency": "usd", "payment_intent": paying.payment_intent_id,
                                    "status": "failed", "failure_reason": "lost_or_stolen_card"})
@@ -41,7 +41,7 @@ def test_an_admin_sees_every_attempt_with_its_refunds_and_disputes(shop):
     response = shop.client.get(f"/api/v1/orders/{order['id']}/payments", headers=admin)
 
     assert response.status_code == 200, response.text
-    declined, paid = response.json()["data"]
+    declined, paid = response.json()["items"]
     assert (declined["status"], declined["amount"], declined["refunds"], declined["disputes"]) == (
         "failed", "19.99", [], [])
     assert (paid["status"], paid["amount"], paid["amount_refunded"], paid["currency"]) == (

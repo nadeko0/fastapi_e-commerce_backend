@@ -40,7 +40,7 @@ def test_database_error_in_a_legal_route_answers_like_any_other_async_route(clie
     token = client.post(
         f"{USERS_PREFIX}/login",
         data={"username": payload["email"], "password": payload["password"]},
-    ).json()["data"]["access_token"]
+    ).json()["access_token"]
 
     async def failing_load_user(*_args, **_kwargs):
         _db_error()

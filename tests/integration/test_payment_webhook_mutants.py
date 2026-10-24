@@ -97,49 +97,49 @@ def test_a_refund_completing_is_answered_processed_and_not_flagged(shop, paid, m
         return refund
 
     monkeypatch.setattr(StripePaymentProvider, "create_refund", pending_refund)
-    refund_id = shop.refund(paid["admin"], paid["order"]["id"], amount="5.00").json()["data"]["id"]
+    refund_id = shop.refund(paid["admin"], paid["order"]["id"], amount="5.00").json()["id"]
 
     response = shop.webhook(
         "refund.updated", _refund_object(paid["payment"], refund_id, 500, "succeeded"))
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"] == PROCESSED
+    assert response.json() == PROCESSED
 
 
 def test_a_refund_failing_after_it_was_recorded_is_answered_flagged(shop, paid):
-    refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["data"]["id"]
+    refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["id"]
 
     response = shop.webhook("refund.failed", _refund_object(
         paid["payment"], refund_id, 1999, "failed", failure_reason="expired_or_canceled_card"))
 
-    assert response.json()["data"] == PROCESSED_FLAGGED
+    assert response.json() == PROCESSED_FLAGGED
 
 
 def test_a_failed_refund_is_final_and_a_later_event_for_it_is_not_flagged(shop, paid):
-    refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["data"]["id"]
+    refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["id"]
     shop.webhook("refund.failed", _refund_object(paid["payment"], refund_id, 1999, "failed"))
 
     response = shop.webhook(
         "refund.updated", _refund_object(paid["payment"], refund_id, 1999, "succeeded"))
 
-    assert response.json()["data"] == PROCESSED
+    assert response.json() == PROCESSED
     assert _ledger(shop, paid["payment"]) == [("re_", 1999, "failed", "admin", True)]
 
 
 def test_a_refund_event_without_a_status_is_not_flagged(shop, paid):
-    refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["data"]["id"]
+    refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["id"]
 
     response = shop.webhook(
         "refund.updated", _refund_object(paid["payment"], refund_id, 1999, None))
 
-    assert response.json()["data"] == PROCESSED
+    assert response.json() == PROCESSED
 
 
 def test_a_refund_made_outside_the_app_is_recorded_even_for_one_cent(shop, paid):
     response = shop.webhook(
         "refund.created", _refund_object(paid["payment"], "re_dashboard_1", 1, "succeeded"))
 
-    assert response.json()["data"] == PROCESSED
+    assert response.json() == PROCESSED
     assert _ledger(shop, paid["payment"]) == [("re_", 1, "succeeded", "provider", False)]
     assert payment_rows(shop, paid["order"]["id"]) == [("succeeded", 1999, 1, "USD", False)]
 
@@ -148,12 +148,12 @@ def test_a_refund_of_nothing_made_outside_the_app_is_not_recorded(shop, paid):
     for amount in (0, True, "5", None):
         response = shop.webhook(
             "refund.created", _refund_object(paid["payment"], "re_dashboard_2", amount, "succeeded"))
-        assert response.json()["data"] == PROCESSED
+        assert response.json() == PROCESSED
     assert _ledger(shop, paid["payment"]) == []
 
 
 def test_a_failure_reason_that_is_not_text_is_not_stored(shop, paid):
-    refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["data"]["id"]
+    refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["id"]
 
     shop.webhook("refund.failed", _refund_object(
         paid["payment"], refund_id, 1999, "failed", failure_reason=123))
@@ -169,7 +169,7 @@ def test_a_charge_refunded_event_applies_the_refunds_it_lists(shop, paid):
 
     response = shop.webhook("charge.refunded", charge)
 
-    assert response.json()["data"] == PROCESSED
+    assert response.json() == PROCESSED
     assert _ledger(shop, paid["payment"]) == [("re_", 700, "succeeded", "provider", False)]
 
 
@@ -182,12 +182,12 @@ def test_a_charge_refunded_event_listing_no_refund_applies_nothing(shop, paid, r
 
     response = shop.webhook("charge.refunded", charge)
 
-    assert response.json()["data"] == {"status": "processed", "applied": False}
+    assert response.json() == {"status": "processed", "applied": False}
     assert _ledger(shop, paid["payment"]) == []
 
 
 def test_a_refund_event_log_line_names_the_refund_the_payment_and_the_order(shop, paid, caplog):
-    refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["data"]["id"]
+    refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["id"]
 
     with caplog.at_level(logging.WARNING, logger=ORDERS_LOGGER):
         shop.webhook("refund.failed", _refund_object(

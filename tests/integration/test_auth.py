@@ -39,7 +39,7 @@ def _register_and_login(client, payload):
         f"{API_PREFIX}/login",
         data={"username": payload["email"], "password": payload["password"]},
     )
-    return login_response.json()["data"]["access_token"]
+    return login_response.json()["access_token"]
 
 
 
@@ -98,7 +98,7 @@ def test_registering_an_existing_email_answers_exactly_like_a_new_one(
     )
 
     assert new.status_code == again.status_code == 200
-    assert new.json()["data"] == again.json()["data"]
+    assert new.json() == again.json()
     assert email not in new.text
     assert sent == {"welcome": [email], "exists": [email]}
     # The existing account is untouched: its password is still the first one.
@@ -125,7 +125,7 @@ def test_login_returns_tokens_for_valid_credentials(client, valid_registration_p
     )
 
     assert response.status_code == 200
-    tokens = response.json()["data"]
+    tokens = response.json()
     assert tokens["access_token"]
     assert tokens["refresh_token"]
     assert tokens["token_type"] == "bearer"
@@ -160,7 +160,7 @@ def test_me_returns_current_user_with_valid_token(client, valid_registration_pay
             "password": valid_registration_payload["password"],
         },
     )
-    access_token = login_response.json()["data"]["access_token"]
+    access_token = login_response.json()["access_token"]
 
     response = client.get(
         f"{API_PREFIX}/me",
@@ -168,7 +168,7 @@ def test_me_returns_current_user_with_valid_token(client, valid_registration_pay
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["email"] == valid_registration_payload["email"]
+    assert response.json()["email"] == valid_registration_payload["email"]
 
 
 def test_login_rejects_nonexistent_email_with_same_wording_as_wrong_password(
@@ -270,7 +270,7 @@ def test_me_rejects_expired_access_token(client, valid_registration_payload):
                 "password": valid_registration_payload["password"],
             },
         )
-        access_token = login_response.json()["data"]["access_token"]
+        access_token = login_response.json()["access_token"]
 
     past_expiry = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES + 1)
     with freeze_time("2026-01-01 12:00:00") as frozen:
@@ -317,7 +317,7 @@ def test_me_rejects_refresh_token_used_as_access_token(client, valid_registratio
             "password": valid_registration_payload["password"],
         },
     )
-    refresh_token = login_response.json()["data"]["refresh_token"]
+    refresh_token = login_response.json()["refresh_token"]
 
     response = client.get(
         f"{API_PREFIX}/me",
@@ -348,7 +348,7 @@ def test_verify_email_activates_account(client, valid_registration_payload):
     response = client.post(f"{API_PREFIX}/verify-email", json={"token": token})
 
     assert response.status_code == 200
-    assert response.json()["data"]["message"] == "Email verified successfully"
+    assert response.json()["message"] == "Email verified successfully"
 
 
 def test_verify_email_rejects_invalid_token(client):
@@ -365,7 +365,7 @@ def test_verify_email_twice_reports_already_verified(client, valid_registration_
     response = client.post(f"{API_PREFIX}/verify-email", json={"token": token})
 
     assert response.status_code == 200
-    assert response.json()["data"]["message"] == "Email already verified"
+    assert response.json()["message"] == "Email already verified"
 
 
 def test_password_reset_needs_only_new_password(client, valid_registration_payload):
@@ -503,7 +503,7 @@ def test_checking_a_reset_token_does_not_reveal_whose_it_is(
     response = client.post(f"{API_PREFIX}/password/reset-token/validate", json={"token": token})
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"message": "Token is valid"}
+    assert response.json() == {"message": "Token is valid"}
     assert email not in response.text
 
 
@@ -643,8 +643,8 @@ def test_access_token_is_replayable_until_blacklisted_or_expired(
     assert first_use.status_code == 200
     assert second_use.status_code == 200
     assert (
-        first_use.json()["data"]["email"]
-        == second_use.json()["data"]["email"]
+        first_use.json()["email"]
+        == second_use.json()["email"]
         == valid_registration_payload["email"]
     )
 
@@ -666,7 +666,7 @@ def test_reset_password_invalidates_previously_issued_access_token(
                 "password": valid_registration_payload["password"],
             },
         )
-        old_access_token = login_response.json()["data"]["access_token"]
+        old_access_token = login_response.json()["access_token"]
 
         pre_reset = client.get(
             f"{API_PREFIX}/me",
@@ -701,7 +701,7 @@ def test_reset_password_invalidates_previously_issued_access_token(
                 "password": "NewStr0ngPass",
             },
         )
-        new_access_token = new_login.json()["data"]["access_token"]
+        new_access_token = new_login.json()["access_token"]
 
         # A token issued *after* the reset must still work normally.
         fresh_check = client.get(
@@ -718,7 +718,7 @@ def _login_tokens(client, payload):
         f"{API_PREFIX}/login",
         data={"username": payload["email"], "password": payload["password"]},
     )
-    return login_response.json()["data"]
+    return login_response.json()
 
 
 def test_refresh_returns_new_access_and_refresh_tokens_and_rotates_old_one(
@@ -732,7 +732,7 @@ def test_refresh_returns_new_access_and_refresh_tokens_and_rotates_old_one(
     )
 
     assert response.status_code == 200
-    new_tokens = response.json()["data"]
+    new_tokens = response.json()
     assert new_tokens["access_token"]
     assert new_tokens["refresh_token"]
     assert new_tokens["refresh_token"] != old_refresh_token
@@ -776,7 +776,7 @@ def test_refresh_does_not_require_a_valid_access_token(client, valid_registratio
         )
 
     assert response.status_code == 200
-    assert response.json()["data"]["access_token"]
+    assert response.json()["access_token"]
 
 
 def test_refresh_rejects_malformed_token(client):
@@ -850,7 +850,7 @@ def test_refresh_rejects_reused_token_and_revokes_the_rest_of_its_family(
         f"{API_PREFIX}/refresh", json={"refresh_token": original_refresh_token}
     )
     assert first_use.status_code == 200
-    rotated_refresh_token = first_use.json()["data"]["refresh_token"]
+    rotated_refresh_token = first_use.json()["refresh_token"]
 
     # Replaying the already-rotated token is a stolen-token signal.
     replay = client.post(
@@ -887,7 +887,7 @@ def _login_again(client, payload):
         f"{API_PREFIX}/login",
         data={"username": payload["email"], "password": payload["password"]},
     )
-    return response.json()["data"]
+    return response.json()
 
 
 def _refresh(client, refresh_token):
@@ -903,7 +903,7 @@ def test_logout_without_a_refresh_token_signs_out_everywhere(
     # which session is meant, so it ends all of them.
     phone = _login_tokens(client, valid_registration_payload)
     laptop = _login_again(client, valid_registration_payload)
-    rotated = _refresh(client, laptop["refresh_token"]).json()["data"]["refresh_token"]
+    rotated = _refresh(client, laptop["refresh_token"]).json()["refresh_token"]
 
     response = client.post(
         f"{API_PREFIX}/logout", headers={"Authorization": f"Bearer {phone['access_token']}"}
@@ -1088,7 +1088,7 @@ def test_logout_revokes_an_access_token_without_jti_in_every_spelling(
     access_token = _register_and_login(client, valid_registration_payload)
     user_id = client.get(
         f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {access_token}"}
-    ).json()["data"]["id"]
+    ).json()["id"]
     now = int(time.time())
     legacy = jwt.encode(
         {

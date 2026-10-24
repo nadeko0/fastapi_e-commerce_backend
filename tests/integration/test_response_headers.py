@@ -40,7 +40,7 @@ def _registered_login(client, email="headers@example.com"):
 
 
 def _bearer(response):
-    return {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 def _admin_headers(client, db_session):
@@ -66,7 +66,7 @@ def test_login_and_refresh_responses_are_no_store(client):
     login = _registered_login(client)
     refresh = client.post(
         f"{USERS}/refresh",
-        json={"refresh_token": login.json()["data"]["refresh_token"]},
+        json={"refresh_token": login.json()["refresh_token"]},
     )
 
     assert refresh.status_code == 200
@@ -159,8 +159,8 @@ def test_token_presented_and_rejected_names_invalid_token(client):
     from app.core.security import create_access_token
 
     login = _registered_login(client)
-    good = login.json()["data"]["access_token"]
-    refresh = login.json()["data"]["refresh_token"]
+    good = login.json()["access_token"]
+    refresh = login.json()["refresh_token"]
     garbage = {"Authorization": "Bearer not-a-jwt"}
     wrong_type = {"Authorization": f"Bearer {refresh}"}
     tampered = {"Authorization": f"Bearer {good[:-3]}abc"}

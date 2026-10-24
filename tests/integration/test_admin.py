@@ -42,7 +42,7 @@ def _register_and_login(client, payload):
         f"{USERS_PREFIX}/login",
         data={"username": payload["email"], "password": payload["password"]},
     )
-    return login_response.json()["data"]["access_token"]
+    return login_response.json()["access_token"]
 
 
 def _make_admin(db_session, email="admin@example.com"):
@@ -69,7 +69,7 @@ def _login_as(client, email, password):
         f"{USERS_PREFIX}/login",
         data={"username": email, "password": password},
     )
-    return login_response.json()["data"]["access_token"]
+    return login_response.json()["access_token"]
 
 
 def _auth_headers(token):
@@ -212,8 +212,8 @@ def test_admin_creates_category(client, db_session):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["name"] == "New Category"
-    assert response.json()["data"]["level"] == 0
+    assert response.json()["name"] == "New Category"
+    assert response.json()["level"] == 0
 
 
 def test_admin_creates_subcategory_with_correct_level_and_path(client, db_session):
@@ -228,7 +228,7 @@ def test_admin_creates_subcategory_with_correct_level_and_path(client, db_sessio
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["level"] == 1
     assert body["path"] == [parent.id]
 
@@ -247,7 +247,7 @@ def test_admin_creates_grandchild_category_with_correct_level_and_path(client, d
         headers=_auth_headers(admin_token),
     )
     assert child_response.status_code == 200
-    child = child_response.json()["data"]
+    child = child_response.json()
     assert child["level"] == 1
     assert child["path"] == [root.id]
 
@@ -257,7 +257,7 @@ def test_admin_creates_grandchild_category_with_correct_level_and_path(client, d
         headers=_auth_headers(admin_token),
     )
     assert grandchild_response.status_code == 200
-    grandchild = grandchild_response.json()["data"]
+    grandchild = grandchild_response.json()
     assert grandchild["level"] == 2
     assert grandchild["path"] == [root.id, child["id"]]
 
@@ -290,7 +290,7 @@ def test_admin_creates_product(client, db_session):
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["name"] == "Test Widget"
     assert body["category_name"] == category.name
 
@@ -316,7 +316,7 @@ def test_admin_updates_product(client, db_session):
         f"{ADMIN_PREFIX}/products",
         json=_valid_product_payload(category.id),
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
 
     response = client.put(
         f"{ADMIN_PREFIX}/products/{created['id']}",
@@ -325,7 +325,7 @@ def test_admin_updates_product(client, db_session):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["stock_quantity"] == 42
+    assert response.json()["stock_quantity"] == 42
 
 
 # Every ProductUpdate field maps to a NOT NULL column. An explicit JSON null
@@ -374,7 +374,7 @@ def test_admin_deletes_product_with_no_orders(client, db_session):
         f"{ADMIN_PREFIX}/products",
         json=_valid_product_payload(category.id),
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
 
     response = client.delete(
         f"{ADMIN_PREFIX}/products/{created['id']}",
@@ -418,7 +418,7 @@ def test_admin_lists_orders_returns_empty_when_none_exist(client, db_session):
     # pagination metadata at all (total/page/size/has_more were computed
     # and then silently discarded) - now wraps in OrderListResponse like
     # every other list endpoint in this API.
-    data = response.json()["data"]
+    data = response.json()
     assert data["items"] == []
     assert data["total"] == 0
     assert data["has_more"] is False
@@ -507,7 +507,7 @@ def test_admin_stats_returns_zeroed_stats_when_no_orders(client, db_session):
     response = client.get(f"{ADMIN_PREFIX}/stats", headers=_auth_headers(admin_token))
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["order_count"] == 0
     assert body["total_revenue"] == 0
 
@@ -523,7 +523,7 @@ def _create_product(client, admin_token, category_id):
         f"{ADMIN_PREFIX}/products",
         json=_valid_product_payload(category_id),
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
 
 
 def test_admin_creates_product_variant(client, db_session):
@@ -543,7 +543,7 @@ def test_admin_creates_product_variant(client, db_session):
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["sku"] == "WIDGET-RED-M"
     assert body["attributes"] == {"size": "M", "color": "red"}
     assert body["stock_quantity"] == 5
@@ -653,7 +653,7 @@ def test_admin_lists_product_variants(client, db_session):
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["total"] == 2
     assert {v["sku"] for v in body["items"]} == {"VARIANT-A", "VARIANT-B"}
 
@@ -667,7 +667,7 @@ def test_admin_updates_product_variant(client, db_session):
         f"{ADMIN_PREFIX}/products/{product['id']}/variants",
         json={"sku": "VARIANT-C", "stock_quantity": 1},
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
 
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
@@ -676,7 +676,7 @@ def test_admin_updates_product_variant(client, db_session):
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["stock_quantity"] == 20
     assert body["price_override"] == "15.50"
 
@@ -695,7 +695,7 @@ def test_admin_update_variant_rejects_explicit_null(client, db_session, field):
         f"{ADMIN_PREFIX}/products/{product['id']}/variants",
         json={"sku": "VARIANT-N", "attributes": {"size": "M"}},
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
 
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
@@ -717,7 +717,7 @@ def test_admin_update_variant_null_price_override_clears_it(client, db_session):
         f"{ADMIN_PREFIX}/products/{product['id']}/variants",
         json={"sku": "VARIANT-P", "price_override": "15.50"},
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
 
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
@@ -726,7 +726,7 @@ def test_admin_update_variant_null_price_override_clears_it(client, db_session):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["price_override"] is None
+    assert response.json()["price_override"] is None
 
 
 def _add_variant_constraint(db_session, event):
@@ -780,7 +780,7 @@ def test_admin_update_variant_other_integrity_error_is_not_reported_as_sku_confl
         f"{ADMIN_PREFIX}/products/{product['id']}/variants",
         json={"sku": "VARIANT-X", "stock_quantity": 1},
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
     _add_variant_constraint(db_session, "UPDATE")
 
     response = client.put(
@@ -810,7 +810,7 @@ def test_admin_update_variant_with_a_free_sku_and_another_integrity_error_is_not
         f"{ADMIN_PREFIX}/products/{product['id']}/variants",
         json={"sku": "VARIANT-Y"},
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
     _add_variant_constraint(db_session, "UPDATE")
 
     response = client.put(
@@ -939,8 +939,8 @@ def test_admin_moves_product_to_another_category(client, db_session):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["category_id"] == new.id
-    assert response.json()["data"]["category_name"] == "New Shelf"
+    assert response.json()["category_id"] == new.id
+    assert response.json()["category_name"] == "New Shelf"
 
 
 # --- Catalog business rules -------------------------------------------------
@@ -991,7 +991,7 @@ def test_admin_delete_product_with_orders_deactivates_instead_of_deleting(
     assert db_session.query(OrderItem).filter(OrderItem.order_id == order.id).count() == 1
     # Gone from the storefront all the same.
     assert client.get(f"{CATALOG_PREFIX}/products/{product['id']}").status_code == 404
-    listing = client.get(f"{CATALOG_PREFIX}/products").json()["data"]
+    listing = client.get(f"{CATALOG_PREFIX}/products").json()
     assert product["id"] not in [p["id"] for p in listing["items"]]
 
 
@@ -1013,7 +1013,7 @@ def test_admin_update_product_is_visible_through_the_cache(client, db_session):
     admin_token = _login_as(client, admin.email, "AdminPass1")
     category = _make_category(db_session)
     product = _create_product(client, admin_token, category.id)
-    before = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()["data"]
+    before = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()
     assert before["price"] == "19.99"
 
     client.put(
@@ -1022,7 +1022,7 @@ def test_admin_update_product_is_visible_through_the_cache(client, db_session):
         headers=_auth_headers(admin_token),
     )
 
-    after = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()["data"]
+    after = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()
     assert (after["price"], after["stock_quantity"]) == ("25.00", 0)
 
 
@@ -1030,14 +1030,14 @@ def test_admin_create_category_shows_up_in_the_cached_tree(client, db_session):
     admin = _make_admin(db_session)
     admin_token = _login_as(client, admin.email, "AdminPass1")
     _make_category(db_session, name="Existing")
-    first = client.get(f"{CATALOG_PREFIX}/categories/tree").json()["data"]
+    first = client.get(f"{CATALOG_PREFIX}/categories/tree").json()
 
     client.post(
         f"{ADMIN_PREFIX}/categories", json={"name": "Brand New"},
         headers=_auth_headers(admin_token),
     )
 
-    second = client.get(f"{CATALOG_PREFIX}/categories/tree").json()["data"]
+    second = client.get(f"{CATALOG_PREFIX}/categories/tree").json()
     assert "Brand New" not in str(first)
     assert "Brand New" in str(second)
 
@@ -1107,7 +1107,7 @@ def test_admin_product_price_and_stock_round_trip_exactly(client, db_session, pr
 
     created = client.post(
         f"{ADMIN_PREFIX}/products", json=payload, headers=_auth_headers(admin_token)
-    ).json()["data"]
+    ).json()
 
     assert Decimal(created["price"]) == price
     assert created["stock_quantity"] == stock
@@ -1208,7 +1208,7 @@ def test_admin_update_variant_resending_its_own_sku_is_not_a_conflict(client, db
         f"{ADMIN_PREFIX}/products/{product['id']}/variants",
         json={"sku": "SAME-SKU"},
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
 
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
@@ -1217,7 +1217,7 @@ def test_admin_update_variant_resending_its_own_sku_is_not_a_conflict(client, db
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["is_active"] is False
+    assert response.json()["is_active"] is False
 
 
 def test_admin_variant_of_another_product_is_not_found_through_this_one(client, db_session):
@@ -1230,7 +1230,7 @@ def test_admin_variant_of_another_product_is_not_found_through_this_one(client, 
         f"{ADMIN_PREFIX}/products/{owner['id']}/variants",
         json={"sku": "OWNED-SKU", "stock_quantity": 2},
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
 
     response = client.put(
         f"{ADMIN_PREFIX}/products/{other['id']}/variants/{variant['id']}",
@@ -1258,7 +1258,7 @@ def test_admin_variant_listing_shows_inactive_variants_in_creation_order(client,
     body = client.get(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants",
         headers=_auth_headers(admin_token),
-    ).json()["data"]
+    ).json()
 
     assert [(v["sku"], v["is_active"]) for v in body["items"]] == [
         ("V-1", True), ("V-2", False), ("V-3", True),

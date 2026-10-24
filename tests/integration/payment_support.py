@@ -176,7 +176,7 @@ class Shop:
         assert added.status_code == 200, added.text
         response = self.place_order(buyer)
         assert response.status_code == 200, response.text
-        return response.json()["data"]
+        return response.json()
 
     def pay(self, buyer: Buyer, order_id, token=PAY_OK, amount=None, currency=None, key=None):
         if amount is None:

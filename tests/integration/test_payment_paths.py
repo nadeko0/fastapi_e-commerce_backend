@@ -154,13 +154,13 @@ def test_order_racing_a_twin_with_the_same_key_returns_the_twins_order(
     response = shop.place_order(buyer, key=key)
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["id"] == twin["id"]
+    assert response.json()["id"] == twin["id"]
     assert [o.id for o in shop.db.query(Order).all()] == [twin["id"]]
     # The loser took no stock (the twin row was inserted directly, so it
     # took none either) and its cart lines were not removed.
     assert shop.stock(product) == 5
     cart = shop.client.get(CART, headers=buyer.headers)
-    assert [i["quantity"] for i in cart.json()["data"]["items"]] == [2]
+    assert [i["quantity"] for i in cart.json()["items"]] == [2]
     # Only the request that placed the order confirms it.
     assert outbox.take() == []
 
@@ -211,7 +211,7 @@ def test_pay_racing_a_twin_with_the_same_key_returns_the_twins_attempt(
     response = shop.pay(buyer, order["id"], key=key)
 
     assert response.status_code == 200, response.text
-    body = response.json()["data"]
+    body = response.json()
     assert body["id"] == twin["id"]
     assert body["status"] == "pending"
     assert body["transaction_id"] == "pi_twin_attempt"
@@ -268,7 +268,7 @@ def test_pay_whose_intent_is_still_processing_is_not_marked_paid(shop, outbox, m
     response = shop.pay(buyer, order["id"])
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["status"] == "pending"
+    assert response.json()["status"] == "pending"
     assert order_state(shop, order["id"]) == ("new", "pending")
     assert payment_rows(shop, order["id"]) == [("processing", 1999, 0, "USD", False)]
     assert outbox.take() == []
@@ -329,7 +329,7 @@ def test_checkout_session_racing_a_twin_with_the_same_key_returns_the_twins_sess
     response = shop.checkout_session(buyer, order["id"], key=key)
 
     assert response.status_code == 200, response.text
-    body = response.json()["data"]
+    body = response.json()
     assert (body["payment_id"], body["checkout_session_id"], body["url"]) == (
         twin["id"], "cs_test_twin", "https://pay.test/twin")
     assert created == []
@@ -396,7 +396,7 @@ def test_checkout_session_retried_with_its_key_after_a_lost_response_reaches_the
     response = shop.checkout_session(buyer, order["id"], key=key)
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["checkout_session_id"] == lost_session.id
+    assert response.json()["checkout_session_id"] == lost_session.id
     assert len(created) == 1
     assert created[0]["idempotency_key"] == f"checkout-order-{order['id']}:{key}"
     assert len(StripePaymentProvider._sessions_by_key) == 1
@@ -690,7 +690,7 @@ def test_refund_still_recorded_when_redis_cannot_guard_the_bookkeeping(
     response = shop.refund(admin, order["id"], amount="4.99")
 
     assert response.status_code == 200, response.text
-    body = response.json()["data"]
+    body = response.json()
     assert (Decimal(body["amount"]), body["payment_status"]) == (Decimal("4.99"), "paid")
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 499, "USD", False)]
 
@@ -718,7 +718,7 @@ def test_a_refund_replayed_while_redis_is_down_is_counted_once(shop, fake_redis,
 
     assert first.status_code == 200, first.text
     assert replay.status_code == 200, replay.text
-    assert replay.json()["data"]["id"] == first.json()["data"]["id"]
+    assert replay.json()["id"] == first.json()["id"]
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 1000, "USD", False)]
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
 
@@ -736,7 +736,7 @@ def test_success_reported_again_by_webhook_after_pay_changes_nothing(shop, outbo
     response = shop.intent_event("payment_intent.succeeded", payment)
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"status": "processed", "applied": True}
+    assert response.json() == {"status": "processed", "applied": True}
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
     assert outbox.take() == []
@@ -788,7 +788,7 @@ def test_checkout_completed_with_an_expanded_payment_intent_backfills_its_id(sho
                                   payment_intent={"id": "pi_expanded_object", "object": "payment_intent"})
 
     assert response.status_code == 200
-    assert response.json()["data"]["applied"] is True
+    assert response.json()["applied"] is True
     assert shop.payments(order["id"])[0].payment_intent_id == "pi_expanded_object"
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
 
@@ -799,15 +799,15 @@ def test_3ds_attempt_success_reported_twice_with_different_event_ids_applies_onc
     product = shop.product(price="19.99")
     buyer = shop.buyer()
     order = shop.order_of(buyer, product)
-    assert shop.pay(buyer, order["id"], token=PAY_3DS).json()["data"]["requires_action"]
+    assert shop.pay(buyer, order["id"], token=PAY_3DS).json()["requires_action"]
     outbox.take()
     payment = shop.payments(order["id"])[0]
 
     first = shop.intent_event("payment_intent.succeeded", payment)
     second = shop.intent_event("payment_intent.succeeded", payment)
 
-    assert first.json()["data"]["applied"] is True
-    assert second.json()["data"]["applied"] is True
+    assert first.json()["applied"] is True
+    assert second.json()["applied"] is True
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 0, "USD", False)]
     assert [(e[0], e[4]) for e in outbox.take()] == [("status_update", "paid")]
@@ -848,8 +848,8 @@ def test_pay_retried_with_its_key_after_a_lost_confirm_response_reaches_the_same
     response = shop.pay(buyer, order["id"], key=key)
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["status"] == "paid"
-    assert response.json()["data"]["transaction_id"] == first_intent_id
+    assert response.json()["status"] == "paid"
+    assert response.json()["transaction_id"] == first_intent_id
     assert len(created) == 1 and len(confirmed) == 1
     assert created[0]["idempotency_key"].endswith(key)
     assert confirmed[0]["idempotency_key"] == created[0]["idempotency_key"] + ":confirm"

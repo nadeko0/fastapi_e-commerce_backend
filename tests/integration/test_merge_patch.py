@@ -28,7 +28,7 @@ def _address(client, token, **extra):
         f"{API_PREFIX}/addresses",
         json={**_valid_address(), **extra},
         headers=_auth_headers(token),
-    ).json()["data"]
+    ).json()
 
 
 def _admin(client, db_session):
@@ -48,7 +48,7 @@ def _variant(client, headers, product_id, **extra):
         f"{ADMIN_PREFIX}/products/{product_id}/variants",
         json={"sku": "PATCH-V1", **extra},
         headers=headers,
-    ).json()["data"]
+    ).json()
 
 
 # --- OpenAPI ---------------------------------------------------------------
@@ -86,7 +86,7 @@ def test_patch_me_changes_only_the_given_member(client, valid_registration_paylo
         headers={**_auth_headers(token), **MERGE_PATCH},
     )
 
-    data = response.json()["data"]
+    data = response.json()
     assert response.status_code == 200
     assert data["phone"] == "+123456789"
     assert data["full_name"] == valid_registration_payload["full_name"]
@@ -100,7 +100,7 @@ def test_patch_me_null_clears_a_nullable_field(client, valid_registration_payloa
     response = client.patch(f"{API_PREFIX}/me", json={"phone": None}, headers=headers)
 
     assert response.status_code == 200
-    assert response.json()["data"]["phone"] is None
+    assert response.json()["phone"] is None
 
 
 def test_patch_me_null_on_a_non_nullable_field_is_422(client, valid_registration_payload):
@@ -123,7 +123,7 @@ def test_patch_me_ignores_unknown_members(client, valid_registration_payload):
         headers=_auth_headers(token),
     )
 
-    data = response.json()["data"]
+    data = response.json()
     assert response.status_code == 200
     assert data["full_name"] == "Patched Name"
     assert data["role"] != "admin"
@@ -154,7 +154,7 @@ def test_patch_address_changes_only_the_given_member(client, valid_registration_
         headers={**_auth_headers(token), **MERGE_PATCH},
     )
 
-    data = response.json()["data"]
+    data = response.json()
     assert response.status_code == 200
     assert data["city"] == "Gotham"
     assert data["street"] == created["street"]
@@ -174,7 +174,7 @@ def test_patch_address_null_clears_a_nullable_field(client, valid_registration_p
     )
 
     assert response.status_code == 200
-    assert response.json()["data"][field] is None
+    assert response.json()[field] is None
 
 
 @pytest.mark.parametrize("field", ["street", "city", "country", "is_default"])
@@ -205,12 +205,12 @@ def test_patch_address_ignores_unknown_members(client, valid_registration_payloa
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["city"] == "Gotham"
+    assert response.json()["city"] == "Gotham"
 
 
 def _first_city(client, token):
     listing = client.get(f"{API_PREFIX}/addresses", headers=_auth_headers(token))
-    return listing.json()["data"]["items"][0]["city"]
+    return listing.json()["items"][0]["city"]
 
 
 def test_patch_address_of_another_user_is_404(client, valid_registration_payload):
@@ -242,7 +242,7 @@ def test_patch_address_default_unsets_the_old_default(client, valid_registration
     )
 
     listing = client.get(f"{API_PREFIX}/addresses", headers=_auth_headers(token))
-    defaults = {a["id"] for a in listing.json()["data"]["items"] if a["is_default"]}
+    defaults = {a["id"] for a in listing.json()["items"] if a["is_default"]}
     assert defaults == {second["id"]}
 
 
@@ -262,7 +262,7 @@ def test_patch_product_changes_only_the_given_member(client, db_session):
         headers={**headers, **MERGE_PATCH},
     )
 
-    data = response.json()["data"]
+    data = response.json()
     assert response.status_code == 200
     assert data["stock_quantity"] == 7
     assert data["name"] == product["name"]
@@ -295,19 +295,19 @@ def test_patch_product_ignores_unknown_members(client, db_session):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["stock_quantity"] == 3
+    assert response.json()["stock_quantity"] == 3
 
 
 def test_patch_product_invalidates_the_cache(client, db_session):
     headers, product = _product(client, db_session)
-    before = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()["data"]
+    before = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()
     assert before["price"] == "19.99"
 
     client.patch(
         f"{ADMIN_PREFIX}/products/{product['id']}", json={"price": "25.00"}, headers=headers
     )
 
-    after = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()["data"]
+    after = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()
     assert after["price"] == "25.00"
 
 
@@ -357,7 +357,7 @@ def test_patch_variant_changes_only_the_given_member(client, db_session):
         headers={**headers, **MERGE_PATCH},
     )
 
-    data = response.json()["data"]
+    data = response.json()
     assert response.status_code == 200
     assert data["price_override"] == "15.50"
     assert data["sku"] == "PATCH-V1"
@@ -375,7 +375,7 @@ def test_patch_variant_null_clears_price_override(client, db_session):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["price_override"] is None
+    assert response.json()["price_override"] is None
 
 
 @pytest.mark.parametrize("field", ["sku", "attributes", "stock_quantity", "is_active"])
@@ -406,7 +406,7 @@ def test_patch_variant_ignores_unknown_members_and_keeps_its_own_sku(client, db_
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["stock_quantity"] == 9
+    assert response.json()["stock_quantity"] == 9
 
 
 def test_patch_variant_unknown_variant_is_404_and_needs_an_admin(

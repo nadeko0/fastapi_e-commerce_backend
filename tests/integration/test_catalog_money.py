@@ -93,7 +93,7 @@ def test_a_price_the_column_holds_is_stored_as_sent(shop, write, field, sent, st
     response = write(shop, sent)
 
     assert response.status_code in (200, 201), response.text
-    assert response.json()["data"][field] == stored
+    assert response.json()[field] == stored
 
 
 @pytest.mark.parametrize("param", ["min_price", "max_price"])

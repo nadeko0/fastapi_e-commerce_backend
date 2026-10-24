@@ -38,8 +38,7 @@ def _clean_provider():
 def _ids(client, url, headers=None, **params):
     response = client.get(url, params=params, headers=headers)
     assert response.status_code == 200, response.text
-    data = response.json()["data"]
-    return [row["id"] for row in (data["items"] if isinstance(data, dict) else data)]
+    return [row["id"] for row in response.json()["items"]]
 
 
 def _expected(rows, descending):

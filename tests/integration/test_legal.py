@@ -23,21 +23,20 @@ def _register_and_login(client, payload):
         f"{USERS_PREFIX}/login",
         data={"username": payload["email"], "password": payload["password"]},
     )
-    return login_response.json()["data"]["access_token"]
+    return login_response.json()["access_token"]
 
 
 def _auth_headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _assert_envelope(body):
-    """Every router in this API wraps responses in the APIResponse envelope
-    (success/data/error/timestamp/request_id) - see app/schemas/common.py.
-    legal.py used to return raw dicts/models instead; these assertions guard
-    against that regressing."""
-    assert set(body.keys()) >= {"success", "data", "error", "timestamp", "request_id"}
-    assert body["success"] is True
-    assert body["error"] is None
+def _assert_resource(response):
+    """The body of a successful legal response is the resource itself, with no
+    success/data/error wrapper (timestamp and request_id are fields of some
+    resources here, so they are not checked); the request id of the call is
+    the X-Request-ID header. Guards against the envelope coming back."""
+    assert not {"success", "data", "error"} & response.json().keys()
+    assert response.headers["X-Request-ID"]
 
 
 def test_privacy_policy_is_public(client):
@@ -45,8 +44,8 @@ def test_privacy_policy_is_public(client):
 
     assert response.status_code == 200
     body = response.json()
-    _assert_envelope(body)
-    assert "Privacy Policy" in body["data"]["content"]
+    _assert_resource(response)
+    assert "Privacy Policy" in body["content"]
 
 
 def test_terms_of_service_is_public(client):
@@ -54,8 +53,8 @@ def test_terms_of_service_is_public(client):
 
     assert response.status_code == 200
     body = response.json()
-    _assert_envelope(body)
-    assert "Terms of Service" in body["data"]["content"]
+    _assert_resource(response)
+    assert "Terms of Service" in body["content"]
 
 
 def test_cookie_policy_is_public(client):
@@ -63,8 +62,8 @@ def test_cookie_policy_is_public(client):
 
     assert response.status_code == 200
     body = response.json()
-    _assert_envelope(body)
-    assert "Cookie Policy" in body["data"]["content"]
+    _assert_resource(response)
+    assert "Cookie Policy" in body["content"]
 
 
 def test_update_consent_requires_authentication(client):
@@ -87,9 +86,9 @@ def test_update_consent_updates_marketing_preference(client):
 
     assert response.status_code == 200
     body = response.json()
-    _assert_envelope(body)
-    assert body["data"]["status"] == "success"
-    assert body["data"]["updated_consents"]["marketing"] is True
+    _assert_resource(response)
+    assert body["status"] == "success"
+    assert body["updated_consents"]["marketing"] is True
 
 
 def test_update_consent_succeeds_when_request_has_no_client(client, monkeypatch):
@@ -114,8 +113,8 @@ def test_update_consent_succeeds_when_request_has_no_client(client, monkeypatch)
 
     assert response.status_code == 200
     body = response.json()
-    _assert_envelope(body)
-    assert body["data"]["updated_consents"]["marketing"] is True
+    _assert_resource(response)
+    assert body["updated_consents"]["marketing"] is True
 
 
 def test_data_request_export_returns_processing_status(client, monkeypatch):
@@ -133,9 +132,9 @@ def test_data_request_export_returns_processing_status(client, monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    _assert_envelope(body)
-    assert body["data"]["status"] == "processing"
-    assert body["data"]["request_id"].startswith("export_")
+    _assert_resource(response)
+    assert body["status"] == "processing"
+    assert body["request_id"].startswith("export_")
 
 
 def test_data_request_deletion_returns_processing_status(client, monkeypatch):
@@ -155,8 +154,8 @@ def test_data_request_deletion_returns_processing_status(client, monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    _assert_envelope(body)
-    assert body["data"]["request_id"].startswith("deletion_")
+    _assert_resource(response)
+    assert body["request_id"].startswith("deletion_")
 
 
 def _quiet_gdpr_mail(monkeypatch):
@@ -241,9 +240,9 @@ def test_consent_status_returns_current_state(client):
 
     assert response.status_code == 200
     body = response.json()
-    _assert_envelope(body)
-    assert body["data"]["marketing_consent"] is False
-    assert body["data"]["privacy_policy_accepted"] is True
+    _assert_resource(response)
+    assert body["marketing_consent"] is False
+    assert body["privacy_policy_accepted"] is True
 
 
 def test_data_retention_reports_within_period_for_new_account(client):
@@ -253,8 +252,8 @@ def test_data_retention_reports_within_period_for_new_account(client):
 
     assert response.status_code == 200
     body = response.json()
-    _assert_envelope(body)
-    assert body["data"]["within_retention_period"] is True
+    _assert_resource(response)
+    assert body["within_retention_period"] is True
 
 
 def test_consent_status_rejects_blacklisted_token(client):
@@ -325,8 +324,8 @@ def _stored_user(db_session, email="legal.user@example.com"):
 def test_update_consent_is_persisted_and_visible_on_later_requests(client, db_session):
     token = _register_and_login(client, _valid_registration_payload())
     before = client.get(f"{LEGAL_PREFIX}/consent-status", headers=_auth_headers(token))
-    assert before.json()["data"]["marketing_consent"] is False
-    history_before = len(before.json()["data"]["consent_history"])
+    assert before.json()["marketing_consent"] is False
+    history_before = len(before.json()["consent_history"])
 
     response = client.post(
         f"{LEGAL_PREFIX}/consent",
@@ -338,7 +337,7 @@ def test_update_consent_is_persisted_and_visible_on_later_requests(client, db_se
     # A later request, with its own sessions, sees the new state.
     after = client.get(f"{LEGAL_PREFIX}/consent-status", headers=_auth_headers(token))
     assert after.status_code == 200
-    data = after.json()["data"]
+    data = after.json()
     assert data["marketing_consent"] is True
     assert data["marketing_consent_date"] is not None
     assert len(data["consent_history"]) == history_before + 1
@@ -363,10 +362,10 @@ def test_withdrawing_consent_is_persisted_too(client, db_session):
         headers=_auth_headers(token),
     )
     assert response.status_code == 200
-    assert response.json()["data"]["updated_consents"]["marketing"] is False
+    assert response.json()["updated_consents"]["marketing"] is False
 
     after = client.get(f"{LEGAL_PREFIX}/consent-status", headers=_auth_headers(token))
-    assert after.json()["data"]["marketing_consent"] is False
+    assert after.json()["marketing_consent"] is False
     assert _stored_user(db_session).marketing_consent is False
 
 
@@ -426,7 +425,7 @@ def test_data_request_export_leaves_the_account_untouched(client, db_session, mo
 
     assert response.status_code == 200
     stored = _stored_user(db_session)
-    assert response.json()["data"]["request_id"].startswith(f"export_{stored.id}_")
+    assert response.json()["request_id"].startswith(f"export_{stored.id}_")
     assert stored.is_active is True
     assert stored.data_deletion_requested is False
 
@@ -460,7 +459,7 @@ def test_data_retention_reports_the_users_own_retention_period(client, db_sessio
     response = client.get(f"{LEGAL_PREFIX}/data-retention", headers=_auth_headers(token))
 
     assert response.status_code == 200
-    assert response.json()["data"]["retention_days"] == _stored_user(db_session).data_retention_period
+    assert response.json()["retention_days"] == _stored_user(db_session).data_retention_period
 
 
 # --- More of the legal surface ----------------------------------------------
@@ -469,9 +468,9 @@ def test_data_retention_reports_the_users_own_retention_period(client, db_sessio
 def test_the_policies_name_the_controller_and_how_to_reach_the_dpo(client):
     from app.core.config import settings
 
-    privacy = client.get(f"{LEGAL_PREFIX}/privacy-policy").json()["data"]["content"]
-    terms = client.get(f"{LEGAL_PREFIX}/terms-of-service").json()["data"]["content"]
-    cookies = client.get(f"{LEGAL_PREFIX}/cookie-policy").json()["data"]["content"]
+    privacy = client.get(f"{LEGAL_PREFIX}/privacy-policy").json()["content"]
+    terms = client.get(f"{LEGAL_PREFIX}/terms-of-service").json()["content"]
+    cookies = client.get(f"{LEGAL_PREFIX}/cookie-policy").json()["content"]
 
     assert settings.DPO_EMAIL in privacy and settings.COMPANY_ADDRESS in privacy
     assert str(settings.USER_DATA_RETENTION_DAYS) in privacy

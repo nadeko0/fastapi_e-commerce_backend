@@ -72,7 +72,7 @@ def test_the_list_is_newest_first_and_carries_no_payload(shop, admin):
     response = _get(shop, admin)
 
     assert response.status_code == 200
-    data = response.json()["data"]
+    data = response.json()
     assert [item["event_id"] for item in data["items"]] == [newest, failed, oldest]
     assert (data["total"], data["page"], data["size"], data["has_more"]) == (3, 1, 20, False)
     item = data["items"][1]
@@ -92,7 +92,7 @@ def test_the_list_filters_by_status(shop, admin):
 
     response = _get(shop, admin, status="failed")
 
-    data = response.json()["data"]
+    data = response.json()
     assert [item["event_id"] for item in data["items"]] == [failed_b, failed_a]
     assert data["total"] == 2
 
@@ -101,8 +101,8 @@ def test_the_list_is_paginated(shop, admin):
     ids = [_store(shop, "failed", minutes_ago=m) for m in (50, 40, 30, 20, 10)]
     newest_first = list(reversed(ids))
 
-    first = _get(shop, admin, size=2, page=1).json()["data"]
-    last = _get(shop, admin, size=2, page=3).json()["data"]
+    first = _get(shop, admin, size=2, page=1).json()
+    last = _get(shop, admin, size=2, page=3).json()
 
     assert [i["event_id"] for i in first["items"]] == newest_first[:2]
     assert (first["total"], first["has_more"]) == (5, True)
@@ -143,7 +143,7 @@ def test_replay_resets_a_failed_event_and_hands_it_to_the_worker(shop, admin):
     response = shop.client.post(f"{ADMIN_EVENTS}/{event_id}/replay", headers=admin)
 
     assert response.status_code == 200
-    data = response.json()["data"]
+    data = response.json()
     assert (data["event_id"], data["status"], data["attempts"]) == (event_id, "received", 0)
     shop.db.expire_all()
     row = shop.db.query(WebhookEvent).filter_by(event_id=event_id).one()
@@ -167,7 +167,7 @@ def test_replay_with_the_broker_down_keeps_the_event_for_the_sweeper(
         response = shop.client.post(f"{ADMIN_EVENTS}/{event_id}/replay", headers=admin)
 
     assert response.status_code == 200
-    assert response.json()["data"]["status"] == "received"
+    assert response.json()["status"] == "received"
     assert event_id not in published_ids()
     assert any(event_id in r.getMessage() for r in caplog.records)
 
@@ -202,7 +202,7 @@ def test_a_failed_event_is_listed_replayed_and_applied(shop, admin, monkeypatch)
         assert attempts < 50
     assert order_state(shop, order["id"]) == ("new", "pending")
 
-    listed = _get(shop, admin, status="failed").json()["data"]["items"]
+    listed = _get(shop, admin, status="failed").json()["items"]
     assert [i["event_id"] for i in listed] == [event_id]
     assert "the database is on fire" in listed[0]["last_error"]
 
@@ -211,8 +211,8 @@ def test_a_failed_event_is_listed_replayed_and_applied(shop, admin, monkeypatch)
     assert run_event(event_id) == {"status": "processed", "applied": True}
 
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
-    assert _get(shop, admin, status="failed").json()["data"]["items"] == []
-    done = _get(shop, admin, status="processed").json()["data"]["items"]
+    assert _get(shop, admin, status="failed").json()["items"] == []
+    done = _get(shop, admin, status="processed").json()["items"]
     assert [i["event_id"] for i in done] == [event_id]
     assert done[0]["processed_at"] is not None
     assert [(e[0], e[4]) for e in outbox.take()] == [("status_update", "paid")]

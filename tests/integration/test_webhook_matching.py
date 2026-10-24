@@ -68,7 +68,7 @@ def test_an_event_for_an_object_this_app_did_not_create_is_acknowledged_and_reco
     response = shop.webhook("payment_intent.succeeded", obj, event_id=event_id)
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"status": "processed", "applied": False}
+    assert response.json() == {"status": "processed", "applied": False}
     assert event_id in shop.webhook_event_ids()
     assert order_state(shop, order["id"]) == ("new", "pending")
     assert shop.payments(order["id"]) == []
@@ -89,7 +89,7 @@ def test_an_event_naming_an_order_with_no_attempt_waiting_for_its_id_is_acknowle
     response = shop.webhook("payment_intent.succeeded", obj, event_id=event_id)
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"status": "processed", "applied": False}
+    assert response.json() == {"status": "processed", "applied": False}
     assert event_id in shop.webhook_event_ids()
     assert order_state(shop, order["id"]) == ("new", "pending")
 
@@ -123,7 +123,7 @@ def test_an_event_that_overtakes_its_pay_request_is_retried_not_lost(
     # Stripe got its 200; the event is stored, and the worker could not
     # apply it yet.
     assert early["response"].status_code == 200, early["response"].text
-    assert early["response"].json()["data"] == {"status": "retrying"}
+    assert early["response"].json() == {"status": "retrying"}
     obj, event_id = early["event"]
     # /pay itself completed the payment meanwhile; the worker's retry then
     # finds the attempt and applies the event (a no-op on an applied success).
@@ -163,7 +163,7 @@ def test_a_checkout_event_that_overtakes_its_session_request_is_retried(
     assert shop.checkout_session(buyer, order["id"]).status_code == 200
 
     assert early["response"].status_code == 200
-    assert early["response"].json()["data"] == {"status": "retrying"}
+    assert early["response"].json() == {"status": "retrying"}
     assert order_state(shop, order["id"]) == ("new", "pending")
     obj, event_id = early["event"]
     assert _event_state(shop, event_id) == ("retrying", 1)
@@ -183,5 +183,5 @@ def test_unusable_order_metadata_is_treated_as_not_ours(shop, metadata):
     response = shop.webhook("payment_intent.succeeded", obj)
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"] == {"status": "processed", "applied": False}
+    assert response.json() == {"status": "processed", "applied": False}
 

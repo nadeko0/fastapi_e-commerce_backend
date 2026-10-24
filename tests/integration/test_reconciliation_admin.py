@@ -64,7 +64,7 @@ def test_no_discrepancies_is_an_empty_page(shop, client):
     response = client.get(f"{BASE}/discrepancies", headers=shop.admin())
 
     assert response.status_code == 200
-    assert response.json()["data"] == {
+    assert response.json() == {
         "items": [], "total": 0, "page": 1, "size": 20, "has_more": False}
 
 
@@ -76,7 +76,7 @@ def test_open_discrepancies_are_listed_oldest_first_with_their_order(shop, clien
 
     response = client.get(f"{BASE}/discrepancies", headers=shop.admin())
 
-    data = response.json()["data"]
+    data = response.json()
     assert [item["id"] for item in data["items"]] == [old.id, new.id]
     assert data["total"] == 2
     first = data["items"][0]
@@ -96,7 +96,7 @@ def test_the_list_is_paginated(shop, client):
     admin_headers = shop.admin()
 
     pages = [client.get(f"{BASE}/discrepancies", params={"page": p, "size": 2},
-                        headers=admin_headers).json()["data"] for p in (1, 2, 3)]
+                        headers=admin_headers).json() for p in (1, 2, 3)]
 
     assert [[i["id"] for i in page["items"]] for page in pages] == [ids[:2], ids[2:4], ids[4:]]
     assert [page["has_more"] for page in pages] == [True, True, False]
@@ -119,7 +119,7 @@ def test_the_list_can_be_limited_to_one_order(shop, client):
     response = client.get(f"{BASE}/discrepancies", params={"order_id": order["id"]},
                           headers=shop.admin())
 
-    assert [i["id"] for i in response.json()["data"]["items"]] == [mine.id]
+    assert [i["id"] for i in response.json()["items"]] == [mine.id]
 
 
 # -- a run on demand --------------------------------------------------------------------
@@ -133,21 +133,21 @@ def test_a_run_for_one_order_happens_now_and_reports_what_it_found(shop, client)
     response = client.post(f"{BASE}/run", params={"order_id": order["id"]}, headers=headers)
 
     assert response.status_code == 200
-    data = response.json()["data"]
+    data = response.json()
     assert (data["checked"], data["opened"], data["errors"]) == (1, 1, 0)
-    listed = client.get(f"{BASE}/discrepancies", headers=headers).json()["data"]
+    listed = client.get(f"{BASE}/discrepancies", headers=headers).json()
     assert [(i["kind"], i["ours"], i["theirs"]) for i in listed["items"]] == [
         ("amount", "2600", "2500")]
 
     # Again: nothing new; and once the data is right it is resolved.
     again = client.post(f"{BASE}/run", params={"order_id": order["id"]}, headers=headers)
-    assert again.json()["data"]["opened"] == 0
+    assert again.json()["opened"] == 0
     shop.db.expire_all()
     payment.amount = 2500
     shop.db.commit()
     fixed = client.post(f"{BASE}/run", params={"order_id": order["id"]}, headers=headers)
-    assert fixed.json()["data"]["resolved"] == 1
-    assert client.get(f"{BASE}/discrepancies", headers=headers).json()["data"]["total"] == 0
+    assert fixed.json()["resolved"] == 1
+    assert client.get(f"{BASE}/discrepancies", headers=headers).json()["total"] == 0
 
 
 def test_a_run_for_an_unknown_order_is_404(shop, client):
@@ -164,7 +164,7 @@ def test_a_full_run_is_queued_for_the_worker(shop, client, monkeypatch):
     response = client.post(f"{BASE}/run", headers=shop.admin())
 
     assert response.status_code == 202
-    assert response.json()["data"] == {"queued": True}
+    assert response.json() == {"queued": True}
     # retry=False: an unreachable broker must fail at once, not sit in kombu's retries.
     assert queued == [((), {"retry": False})]
 

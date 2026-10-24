@@ -72,7 +72,7 @@ def test_inside_the_ttl_nothing_is_cleared_and_keys_still_replay(shop):
     assert tasks.cleanup_expired_idempotency_keys() == 0
 
     again = shop.pay(buyer, order["id"], key=key)
-    assert again.json()["data"]["id"] == first.json()["data"]["id"]
+    assert again.json()["id"] == first.json()["id"]
     other = shop.pay(buyer, order["id"], token=PAY_3DS, key=key)
     assert other.status_code == 422
     assert other.json() == {"detail": REUSED_KEY_DETAIL}
@@ -83,7 +83,7 @@ def test_an_expired_order_key_creates_a_new_order(shop):
     buyer = shop.buyer()
     assert shop.add_to_cart(buyer, product, 1).status_code == 200
     key = new_key()
-    first = shop.place_order(buyer, key=key).json()["data"]["id"]
+    first = shop.place_order(buyer, key=key).json()["id"]
     old = shop.db.get(Order, first)
     _age(shop, old, by=TTL + timedelta(minutes=1))
     updated = old.updated_at
@@ -96,7 +96,7 @@ def test_an_expired_order_key_creates_a_new_order(shop):
     assert shop.add_to_cart(buyer, product, 1).status_code == 200
     second = shop.place_order(buyer, key=key)
     assert second.status_code == 200
-    assert second.json()["data"]["id"] != first
+    assert second.json()["id"] != first
     assert shop.db.query(Order).count() == 2
 
 
@@ -136,7 +136,7 @@ def test_a_reused_pay_key_after_the_sweep_replays_never_500(shop):
 
     again = shop.pay(buyer, order["id"], key=key)
     assert again.status_code == 200, again.text
-    assert again.json()["data"]["id"] == first.json()["data"]["id"]
+    assert again.json()["id"] == first.json()["id"]
     other = shop.pay(buyer, order["id"], token=PAY_3DS, key=key)
     assert other.status_code == 422
     assert shop.db.query(Payment).count() == 1
@@ -156,7 +156,7 @@ def test_a_reused_failed_pay_key_after_the_sweep_answers_as_before(shop):
 
     again = shop.pay(buyer, order["id"], token=PAY_DECLINED, key=key)
     assert again.status_code == before.status_code != 500, again.text
-    assert again.json()["data"]["id"] == before.json()["data"]["id"]
+    assert again.json()["id"] == before.json()["id"]
     assert shop.db.query(Payment).count() == 1
 
 
@@ -175,7 +175,7 @@ def test_a_reused_checkout_key_after_the_sweep_replays_never_500(shop):
     again = shop.checkout_session(buyer, order["id"], key=key)
     assert again.status_code == 200, again.text
     for field in ("payment_id", "checkout_session_id", "url"):
-        assert again.json()["data"][field] == first.json()["data"][field]
+        assert again.json()[field] == first.json()[field]
     assert shop.db.query(Payment).count() == 1
 
 
@@ -185,7 +185,7 @@ def test_the_task_is_idempotent_and_batched(shop, caplog):
     orders = []
     for _ in range(5):
         assert shop.add_to_cart(buyer, product, 1).status_code == 200
-        orders.append(shop.db.get(Order, shop.place_order(buyer).json()["data"]["id"]))
+        orders.append(shop.db.get(Order, shop.place_order(buyer).json()["id"]))
     _age(shop, *orders, by=TTL + timedelta(hours=2))
 
     with caplog.at_level(logging.INFO, logger="app.tasks"):

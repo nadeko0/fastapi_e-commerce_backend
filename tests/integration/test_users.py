@@ -9,7 +9,7 @@ def _register_and_login(client, payload):
         f"{API_PREFIX}/login",
         data={"username": payload["email"], "password": payload["password"]},
     )
-    return login_response.json()["data"]["access_token"]
+    return login_response.json()["access_token"]
 
 
 def _auth_headers(token):
@@ -76,7 +76,7 @@ def test_update_profile_changes_full_name(client, valid_registration_payload):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["full_name"] == "Jane Updated"
+    assert response.json()["full_name"] == "Jane Updated"
 
 
 def test_update_profile_returns_404_when_user_deleted_after_token_issued(
@@ -192,7 +192,7 @@ def test_update_profile_null_clears_nullable_field(client, valid_registration_pa
     )
 
     assert response.status_code == 200
-    assert response.json()["data"][field] is None
+    assert response.json()[field] is None
 
 
 # --- Address CRUD ------------------------------------------------------------
@@ -208,7 +208,7 @@ def test_create_address_becomes_default_when_first(client, valid_registration_pa
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["is_default"] is True
+    assert response.json()["is_default"] is True
 
 
 def test_list_addresses_returns_created_address(client, valid_registration_payload):
@@ -220,7 +220,7 @@ def test_list_addresses_returns_created_address(client, valid_registration_paylo
     response = client.get(f"{API_PREFIX}/addresses", headers=_auth_headers(access_token))
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["total"] == 1
     assert len(body["items"]) == 1
 
@@ -230,7 +230,7 @@ def test_update_address_changes_city(client, valid_registration_payload):
     create_response = client.post(
         f"{API_PREFIX}/addresses", json=_valid_address(), headers=_auth_headers(access_token)
     )
-    address_id = create_response.json()["data"]["id"]
+    address_id = create_response.json()["id"]
 
     response = client.put(
         f"{API_PREFIX}/addresses/{address_id}",
@@ -239,7 +239,7 @@ def test_update_address_changes_city(client, valid_registration_payload):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["city"] == "New City"
+    assert response.json()["city"] == "New City"
 
 
 # These address columns are NOT NULL; null used to end as a 500 from the
@@ -252,7 +252,7 @@ def test_update_address_rejects_explicit_null(client, valid_registration_payload
     access_token = _register_and_login(client, valid_registration_payload)
     created = client.post(
         f"{API_PREFIX}/addresses", json=_valid_address(), headers=_auth_headers(access_token)
-    ).json()["data"]
+    ).json()
 
     response = client.put(
         f"{API_PREFIX}/addresses/{created['id']}",
@@ -262,7 +262,7 @@ def test_update_address_rejects_explicit_null(client, valid_registration_payload
 
     assert response.status_code == 422
     listing = client.get(f"{API_PREFIX}/addresses", headers=_auth_headers(access_token))
-    assert listing.json()["data"]["items"][0][field] == created[field]
+    assert listing.json()["items"][0][field] == created[field]
 
 
 @pytest.mark.parametrize("field", ["delivery_instructions", "delivery_phone"])
@@ -275,7 +275,7 @@ def test_update_address_null_clears_nullable_field(client, valid_registration_pa
     }
     created = client.post(
         f"{API_PREFIX}/addresses", json=address, headers=_auth_headers(access_token)
-    ).json()["data"]
+    ).json()
 
     response = client.put(
         f"{API_PREFIX}/addresses/{created['id']}",
@@ -284,7 +284,7 @@ def test_update_address_null_clears_nullable_field(client, valid_registration_pa
     )
 
     assert response.status_code == 200
-    assert response.json()["data"][field] is None
+    assert response.json()[field] is None
 
 
 def test_update_nonexistent_address_returns_404(client, valid_registration_payload):
@@ -303,12 +303,12 @@ def test_set_default_address(client, valid_registration_payload):
     access_token = _register_and_login(client, valid_registration_payload)
     first = client.post(
         f"{API_PREFIX}/addresses", json=_valid_address(), headers=_auth_headers(access_token)
-    ).json()["data"]
+    ).json()
     second_payload = _valid_address()
     second_payload["street"] = "456 Other Street"
     second = client.post(
         f"{API_PREFIX}/addresses", json=second_payload, headers=_auth_headers(access_token)
-    ).json()["data"]
+    ).json()
     assert first["is_default"] is True
     assert second["is_default"] is False
 
@@ -321,7 +321,7 @@ def test_set_default_address(client, valid_registration_payload):
     assert response.status_code == 200
 
     listing = client.get(f"{API_PREFIX}/addresses", headers=_auth_headers(access_token))
-    items = {item["id"]: item["is_default"] for item in listing.json()["data"]["items"]}
+    items = {item["id"]: item["is_default"] for item in listing.json()["items"]}
     assert items[second["id"]] is True
     assert items[first["id"]] is False
 
@@ -330,12 +330,12 @@ def test_delete_address_promotes_another_to_default(client, valid_registration_p
     access_token = _register_and_login(client, valid_registration_payload)
     first = client.post(
         f"{API_PREFIX}/addresses", json=_valid_address(), headers=_auth_headers(access_token)
-    ).json()["data"]
+    ).json()
     second_payload = _valid_address()
     second_payload["street"] = "456 Other Street"
     second = client.post(
         f"{API_PREFIX}/addresses", json=second_payload, headers=_auth_headers(access_token)
-    ).json()["data"]
+    ).json()
 
     response = client.delete(
         f"{API_PREFIX}/addresses/{first['id']}", headers=_auth_headers(access_token)
@@ -344,9 +344,9 @@ def test_delete_address_promotes_another_to_default(client, valid_registration_p
     assert response.status_code == 200
 
     listing = client.get(f"{API_PREFIX}/addresses", headers=_auth_headers(access_token))
-    remaining_ids = {item["id"] for item in listing.json()["data"]["items"]}
+    remaining_ids = {item["id"] for item in listing.json()["items"]}
     assert first["id"] not in remaining_ids
-    assert listing.json()["data"]["total"] == 1
+    assert listing.json()["total"] == 1
     assert second["id"] in remaining_ids
 
 
@@ -380,7 +380,7 @@ def test_user_cannot_read_another_users_address_by_guessing_id(
     owner_token = _register_and_login(client, valid_registration_payload)
     owned_address = client.post(
         f"{API_PREFIX}/addresses", json=_valid_address(), headers=_auth_headers(owner_token)
-    ).json()["data"]
+    ).json()
 
     attacker_token = _register_and_login(client, _second_user_payload())
 
@@ -401,7 +401,7 @@ def test_user_cannot_delete_another_users_address_by_guessing_id(
     owner_token = _register_and_login(client, valid_registration_payload)
     owned_address = client.post(
         f"{API_PREFIX}/addresses", json=_valid_address(), headers=_auth_headers(owner_token)
-    ).json()["data"]
+    ).json()
 
     attacker_token = _register_and_login(client, _second_user_payload())
 
@@ -414,4 +414,4 @@ def test_user_cannot_delete_another_users_address_by_guessing_id(
 
     # Confirm it wasn't actually deleted for the real owner.
     listing = client.get(f"{API_PREFIX}/addresses", headers=_auth_headers(owner_token))
-    assert listing.json()["data"]["total"] == 1
+    assert listing.json()["total"] == 1

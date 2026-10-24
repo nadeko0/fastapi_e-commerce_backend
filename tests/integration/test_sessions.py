@@ -44,7 +44,7 @@ def _login(client, email=EMAIL, password=PASSWORD):
 
 def _tokens(client, email=EMAIL):
     _register(client, email)
-    return _login(client, email).json()["data"]
+    return _login(client, email).json()
 
 
 def _bearer(token):
@@ -149,7 +149,7 @@ def test_two_access_tokens_for_one_user_are_two_tokens():
 def test_a_rotated_refresh_token_stays_in_its_family_and_works_once(client):
     tokens = _tokens(client)
     first = client.post(f"{USERS}/refresh", json={"refresh_token": tokens["refresh_token"]})
-    rotated = first.json()["data"]["refresh_token"]
+    rotated = first.json()["refresh_token"]
 
     claims = [
         jwt.decode(token, options={"verify_signature": False})
@@ -159,7 +159,7 @@ def test_a_rotated_refresh_token_stays_in_its_family_and_works_once(client):
     assert claims[0]["jti"] != claims[1]["jti"]
     second = client.post(f"{USERS}/refresh", json={"refresh_token": rotated})
     assert second.status_code == 200
-    assert client.get(f"{USERS}/me", headers=_bearer(second.json()["data"]["access_token"])).status_code == 200
+    assert client.get(f"{USERS}/me", headers=_bearer(second.json()["access_token"])).status_code == 200
 
 
 def test_a_refresh_token_issued_before_a_password_reset_is_refused(client, db_session):
@@ -335,5 +335,5 @@ def test_a_reset_request_for_an_unknown_email_looks_like_any_other(client, monke
     unknown = client.post(f"{USERS}/password/reset", json={"email": "nobody@example.com"})
 
     assert known.status_code == unknown.status_code == 200
-    assert known.json()["data"] == unknown.json()["data"]
+    assert known.json() == unknown.json()
     assert len(sent) == 1

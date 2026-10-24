@@ -97,8 +97,8 @@ def _customer_sees(shop, buyer, order_id):
     which must agree."""
     one = shop.get_order(buyer, order_id)
     assert one.status_code == 200, one.text
-    data = one.json()["data"]
-    listed = [o for o in shop.list_orders(buyer).json()["data"] if o["id"] == order_id]
+    data = one.json()
+    listed = [o for o in shop.list_orders(buyer).json()["items"] if o["id"] == order_id]
     assert len(listed) == 1
     for field in ("status", "payment_status", "total_amount", "currency"):
         assert listed[0][field] == data[field]
@@ -132,7 +132,7 @@ def _ready_buyer(shop, catalog):
     assert shop.add_to_cart(buyer, shirt, 1, variant=shirt_xl).status_code == 200
     response = shop.place_order(buyer)
     assert response.status_code == 200, response.text
-    return buyer, response.json()["data"]
+    return buyer, response.json()
 
 
 # -- The main journey ------------------------------------------------------------
@@ -149,7 +149,7 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     add = visitor.post(f"{CART}/items", json={"product_id": shirt.id, "quantity": 1,
                                                  "variant_id": shirt_xl.id})
     assert add.status_code == 200
-    cart = add.json()["data"]
+    cart = add.json()
     assert (Decimal(cart["total_amount"]), cart["items_count"]) == (Decimal("32.25"), 2)
     # Cart validation: no more than the stock, nothing that is not for sale.
     too_many = visitor.post(f"{CART}/items", json={"product_id": widget.id, "quantity": 9})
@@ -168,15 +168,15 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     assert registered.status_code == 200, registered.text
     login = visitor.post(f"{USERS}/login", data={"username": email, "password": "Str0ngPass1"})
     assert login.status_code == 200
-    headers = {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
-    merged = visitor.get(CART, headers=headers).json()["data"]
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    merged = visitor.get(CART, headers=headers).json()
     assert sorted((i["product_id"], i["variant_id"], i["quantity"]) for i in merged["items"]) == [
         (widget.id, None, 2), (shirt.id, shirt_xl.id, 1)]
     address = visitor.post(f"{USERS}/addresses", headers=headers, json={
         "street": "1 Journey Street", "city": "Metropolis", "state": "NY",
         "postal_code": "10001", "country": "US"})
     assert address.status_code == 200, address.text
-    buyer = Buyer(headers, 0, email, address.json()["data"]["id"])
+    buyer = Buyer(headers, 0, email, address.json()["id"])
     # Not yet: an order needs a verified address and a complete profile.
     assert guest.place_order(buyer).status_code == 403
     assert visitor.post(f"{USERS}/verify-email", json={"token": tokens[0]}).status_code == 200
@@ -187,16 +187,16 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     key = new_key()
     placed = guest.place_order(buyer, key=key)
     assert placed.status_code == 200, placed.text
-    order = placed.json()["data"]
+    order = placed.json()
     order_id = order["id"]
-    assert guest.place_order(buyer, key=key).json()["data"]["id"] == order_id
+    assert guest.place_order(buyer, key=key).json()["id"] == order_id
     total = Decimal("32.25")
     assert _customer_sees(guest, buyer, order_id) == {
         "status": "new", "payment_status": "pending", "total": total, "currency": currency,
         "lines": sorted([(widget.id, None, 2, Decimal("12.50")),
                          (shirt.id, shirt_xl.id, 1, Decimal("7.25"))])}
     assert (shop.stock(widget), shop.stock(shirt), shop.stock(shirt_xl)) == (8, 8, 4)
-    assert visitor.get(CART, headers=headers).json()["data"]["items"] == []
+    assert visitor.get(CART, headers=headers).json()["items"] == []
     assert _emails(outbox) == [("confirmation", "new", "pending")]
 
     # 4. Pays: the wrong currency is refused, a card declined, then paid.
@@ -209,8 +209,8 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     assert order_state(shop, order_id) == ("new", "failed")
     paid = guest.pay(buyer, order_id, currency=currency)
     assert paid.status_code == 200, paid.text
-    assert (paid.json()["data"]["status"], Decimal(paid.json()["data"]["amount"]),
-            paid.json()["data"]["currency"]) == ("paid", total, currency)
+    assert (paid.json()["status"], Decimal(paid.json()["amount"]),
+            paid.json()["currency"]) == ("paid", total, currency)
     assert payment_rows(shop, order_id) == [
         ("failed", 3225, 0, currency, False), ("succeeded", 3225, 0, currency, False)]
     assert [c for c in provider_calls if c[0] == "create_payment_intent"] == [
@@ -231,22 +231,22 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     refund_key = new_key()
     partial = shop.refund(admin, order_id, amount="10.00", key=refund_key)
     assert partial.status_code == 200, partial.text
-    assert (partial.json()["data"]["amount"], partial.json()["data"]["currency"],
-            partial.json()["data"]["status"], partial.json()["data"]["payment_status"]) == (
+    assert (partial.json()["amount"], partial.json()["currency"],
+            partial.json()["status"], partial.json()["payment_status"]) == (
         "10.00", currency, "succeeded", "paid")
     replay = shop.refund(admin, order_id, amount="10.00", key=refund_key)
-    assert replay.json()["data"]["id"] == partial.json()["data"]["id"]
+    assert replay.json()["id"] == partial.json()["id"]
     assert shop.refund(admin, order_id, amount="30.00").status_code == 400
     assert payment_rows(shop, order_id)[1] == ("succeeded", 3225, 1000, currency, False)
     # Stripe reports the refund too; it is the same one.
     paying = shop.payments(order_id)[1]
-    shop.webhook("refund.created", {"id": partial.json()["data"]["id"], "object": "refund",
+    shop.webhook("refund.created", {"id": partial.json()["id"], "object": "refund",
                                     "amount": 1000, "currency": currency.lower(),
                                     "payment_intent": paying.payment_intent_id,
                                     "status": "succeeded"})
     rest = shop.refund(admin, order_id)
     assert rest.status_code == 200
-    assert (rest.json()["data"]["amount"], rest.json()["data"]["payment_status"]) == (
+    assert (rest.json()["amount"], rest.json()["payment_status"]) == (
         "22.25", "refunded")
     assert payment_rows(shop, order_id) == [
         ("failed", 3225, 0, currency, False), ("succeeded", 3225, 3225, currency, False)]
@@ -271,7 +271,7 @@ def test_3ds_payment_completed_by_webhook(shop, outbox, provider_calls, currency
 
     pending = shop.pay(buyer, order["id"], token=PAY_3DS)
 
-    body = pending.json()["data"]
+    body = pending.json()
     assert (pending.status_code, body["status"], body["requires_action"]) == (
         200, "requires_action", True)
     # With a return_url (which /pay always sends), Stripe answers a
@@ -285,7 +285,7 @@ def test_3ds_payment_completed_by_webhook(shop, outbox, provider_calls, currency
 
     done = shop.intent_event("payment_intent.succeeded", shop.payments(order["id"])[0])
 
-    assert done.json()["data"] == {"status": "processed", "applied": True}
+    assert done.json() == {"status": "processed", "applied": True}
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert payment_rows(shop, order["id"]) == [("succeeded", 3225, 0, currency, False)]
     assert _emails(outbox) == [("status_update", "confirmed", "paid")]
@@ -321,7 +321,7 @@ def test_checkout_session_completed(shop, outbox, provider_calls, currency):
     session = shop.checkout_session(buyer, order["id"])
 
     assert session.status_code == 200, session.text
-    data = session.json()["data"]
+    data = session.json()
     assert (data["status"], Decimal(data["amount"]), data["currency"]) == (
         "pending", Decimal("32.25"), currency)
     assert data["url"].startswith("https://checkout.stripe.com/")
@@ -330,7 +330,7 @@ def test_checkout_session_completed(shop, outbox, provider_calls, currency):
 
     done = shop.session_event("checkout.session.completed", attempt, payment_intent="pi_cs_1")
 
-    assert done.json()["data"]["applied"] is True
+    assert done.json()["applied"] is True
     assert order_state(shop, order["id"]) == ("confirmed", "paid")
     assert payment_rows(shop, order["id"]) == [("succeeded", 3225, 0, currency, False)]
     assert shop.payments(order["id"])[0].payment_intent_id == "pi_cs_1"
@@ -368,7 +368,7 @@ def test_checkout_session_paid_by_a_delayed_method(shop, outbox, currency, outco
     # Completed, but the bank debit has not cleared: nothing is applied.
     completed = shop.session_event("checkout.session.completed", attempt,
                                    payment_status="unpaid", payment_intent="pi_async")
-    assert completed.json()["data"] == {"status": "processed", "applied": False}
+    assert completed.json() == {"status": "processed", "applied": False}
     assert order_state(shop, order["id"]) == ("new", "pending")
 
     shop.session_event(outcome, attempt)
@@ -417,7 +417,7 @@ def test_admin_cancels_a_paid_order_then_refunds_it(shop, outbox, currency):
     assert (shop.stock(widget), shop.stock(shirt_xl)) == (10, 5)
     assert _emails(outbox) == [("status_update", "cancelled", "paid")]
     refund = shop.refund(admin, order["id"])
-    assert refund.json()["data"]["payment_status"] == "refunded"
+    assert refund.json()["payment_status"] == "refunded"
     assert order_state(shop, order["id"]) == ("cancelled", "refunded")
     assert payment_rows(shop, order["id"]) == [("succeeded", 3225, 3225, currency, False)]
     assert (shop.stock(widget), shop.stock(shirt_xl)) == (10, 5)  # not returned twice
@@ -438,7 +438,7 @@ def test_expired_unpaid_order_and_a_late_payment(shop, outbox, tasks_db, currenc
 
     late = shop.intent_event("payment_intent.succeeded", shop.payments(order["id"])[0])
 
-    assert late.json()["data"]["requires_manual_review"] is True
+    assert late.json()["requires_manual_review"] is True
     assert order_state(shop, order["id"]) == ("cancelled", "pending")
     assert payment_rows(shop, order["id"]) == [("succeeded", 3225, 0, currency, True)]
     assert (shop.stock(widget), shop.stock(shirt_xl)) == (10, 5)
@@ -510,7 +510,7 @@ def test_a_full_refund_in_one_go_at_each_status(shop, path, allowed):
 
     if allowed:
         assert response.status_code == 200, response.text
-        assert (response.json()["data"]["amount"], response.json()["data"]["payment_status"]) == (
+        assert (response.json()["amount"], response.json()["payment_status"]) == (
             "32.25", "refunded")
         assert order_state(shop, order["id"]) == (status_before, "refunded")
         assert payment_rows(shop, order["id"])[-1][:3] == ("succeeded", 3225, 3225)

@@ -167,7 +167,7 @@ def test_old_query_parameters_next_to_a_body_are_ignored(client, db_session):
     )
 
     assert response.status_code == 200
-    line = response.json()["data"]["items"][0]
+    line = response.json()["items"][0]
     assert (line["product_id"], line["quantity"]) == (product.id, 2)
 
 

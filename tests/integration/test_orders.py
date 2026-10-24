@@ -105,7 +105,7 @@ def _login(client, email, password):
         f"{USERS_PREFIX}/login",
         data={"username": email, "password": password},
     )
-    return login_response.json()["data"]["access_token"]
+    return login_response.json()["access_token"]
 
 
 def _checkout_ready_buyer(client, db_session, email="buyer@example.com"):
@@ -136,7 +136,7 @@ def _checkout_ready_buyer(client, db_session, email="buyer@example.com"):
         },
         headers=_auth_headers(token),
     )
-    address_id = address_response.json()["data"]["id"]
+    address_id = address_response.json()["id"]
 
     return token, address_id
 
@@ -185,7 +185,7 @@ def test_full_checkout_flow_decrements_stock_and_resolves_address(client, db_ses
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["shipping_address"]["id"] == address_id
     assert float(body["total_amount"]) == 59.97
     assert len(body["items"]) == 1
@@ -196,7 +196,7 @@ def test_full_checkout_flow_decrements_stock_and_resolves_address(client, db_ses
 
     # Cart was cleared after checkout.
     cart_response = client.get(CART_PREFIX, headers=_auth_headers(token))
-    assert cart_response.json()["data"]["items"] == []
+    assert cart_response.json()["items"] == []
 
 
 def test_create_order_rejects_unknown_shipping_address(client, db_session):
@@ -264,7 +264,7 @@ def test_create_order_is_idempotent_with_same_key(client, db_session):
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=headers
     )
     assert first.status_code == 200
-    first_order_id = first.json()["data"]["id"]
+    first_order_id = first.json()["id"]
 
     # Re-add an item so the cart isn't empty for the retried request too.
     client.post(
@@ -277,7 +277,7 @@ def test_create_order_is_idempotent_with_same_key(client, db_session):
     )
 
     assert second.status_code == 200
-    assert second.json()["data"]["id"] == first_order_id
+    assert second.json()["id"] == first_order_id
 
     db_session.refresh(product)
     # Only the first request's 2 units were ever decremented - the retry
@@ -313,7 +313,7 @@ def test_create_order_requires_an_idempotency_key(client, db_session, bad_header
     assert db_session.query(Order).count() == 0
     db_session.refresh(product)
     assert product.stock_quantity == 10
-    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()
     assert [item["quantity"] for item in cart["items"]] == [2]
 
 
@@ -335,7 +335,7 @@ def test_two_checkouts_with_different_keys_are_two_orders(client, db_session):
             headers=_with_idempotency_key(_auth_headers(token)),
         )
         assert response.status_code == 200
-        order_ids.append(response.json()["data"]["id"])
+        order_ids.append(response.json()["id"])
 
     assert order_ids[0] != order_ids[1]
     db_session.refresh(product)
@@ -353,7 +353,7 @@ def test_get_order_returns_404_for_other_users_order(client, db_session):
     )
     order = client.post(
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
-    ).json()["data"]
+    ).json()
 
     other_token, _ = _checkout_ready_buyer(client, db_session, email="buyer2@example.com")
 
@@ -375,12 +375,12 @@ def test_get_order_returns_own_order(client, db_session):
     )
     order = client.post(
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
-    ).json()["data"]
+    ).json()
 
     response = client.get(f"{ORDERS_PREFIX}/{order['id']}", headers=_auth_headers(token))
 
     assert response.status_code == 200
-    assert response.json()["data"]["id"] == order["id"]
+    assert response.json()["id"] == order["id"]
 
 
 def _create_order(client, db_session, email="buyer@example.com"):
@@ -394,7 +394,7 @@ def _create_order(client, db_session, email="buyer@example.com"):
     )
     order = client.post(
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
-    ).json()["data"]
+    ).json()
     return token, order
 
 
@@ -422,7 +422,7 @@ def test_admin_updates_order_status_with_valid_transition(client, db_session):
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["status"] == "confirmed"
+    assert response.json()["status"] == "confirmed"
 
 
 def test_admin_rejects_invalid_status_transition(client, db_session):
@@ -587,7 +587,7 @@ def test_cancel_from_new_succeeds_and_restores_stock(client, db_session):
     )
     order = client.post(
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
-    ).json()["data"]
+    ).json()
 
     db_session.refresh(product)
     assert product.stock_quantity == 7
@@ -597,7 +597,7 @@ def test_cancel_from_new_succeeds_and_restores_stock(client, db_session):
     response = _transition(client, admin_token, order["id"], "cancelled")
 
     assert response.status_code == 200
-    assert response.json()["data"]["status"] == "cancelled"
+    assert response.json()["status"] == "cancelled"
 
     db_session.refresh(product)
     assert product.stock_quantity == 10
@@ -614,7 +614,7 @@ def test_cancel_from_confirmed_succeeds_and_restores_stock(client, db_session):
     )
     order = client.post(
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
-    ).json()["data"]
+    ).json()
 
     admin = _make_admin(db_session, email="admin-confirmed@example.com")
     admin_token = _login(client, admin.email, "AdminPass1")
@@ -637,7 +637,7 @@ def test_cancel_from_processing_succeeds_and_restores_stock(client, db_session):
     )
     order = client.post(
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
-    ).json()["data"]
+    ).json()
 
     admin = _make_admin(db_session, email="admin-processing@example.com")
     admin_token = _login(client, admin.email, "AdminPass1")
@@ -661,7 +661,7 @@ def test_cancel_from_sent_succeeds_and_restores_stock(client, db_session):
     )
     order = client.post(
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
-    ).json()["data"]
+    ).json()
 
     admin = _make_admin(db_session, email="admin-sent@example.com")
     admin_token = _login(client, admin.email, "AdminPass1")
@@ -688,7 +688,7 @@ def test_cancel_from_delivered_is_rejected(client, db_session):
     )
     order = client.post(
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
-    ).json()["data"]
+    ).json()
 
     admin = _make_admin(db_session, email="admin-delivered@example.com")
     admin_token = _login(client, admin.email, "AdminPass1")
@@ -716,7 +716,7 @@ def test_cancel_from_already_cancelled_is_rejected(client, db_session):
     )
     order = client.post(
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
-    ).json()["data"]
+    ).json()
 
     admin = _make_admin(db_session, email="admin-recancel@example.com")
     admin_token = _login(client, admin.email, "AdminPass1")
@@ -755,7 +755,7 @@ def test_order_total_uses_exact_decimal_arithmetic_for_uneven_prices(client, db_
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["total_amount"] == "29.97"
 
     order = db_session.query(Order).filter(Order.id == body["id"]).first()
@@ -784,7 +784,7 @@ def test_order_total_sums_multiple_odd_priced_items_without_drift(client, db_ses
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     # 10.10 * 3 + 0.03 * 7 = 30.30 + 0.21 = 30.51
     assert body["total_amount"] == "30.51"
 
@@ -813,7 +813,7 @@ def test_checkout_with_variant_decrements_only_variant_stock(client, db_session)
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert len(body["items"]) == 1
     assert body["items"][0]["variant_id"] == variant.id
     assert float(body["total_amount"]) == 29.00  # 14.50 * 2, the variant's price
@@ -876,7 +876,7 @@ def test_checkout_with_plain_and_variant_line_decrements_each_correctly(client, 
     )
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert len(body["items"]) == 2
     # 5.00 * 2 + 9.99 * 3 = 10.00 + 29.97 = 39.97
     assert float(body["total_amount"]) == 39.97
@@ -902,7 +902,7 @@ def test_cancel_order_with_variant_line_restocks_variant_not_product(client, db_
     )
     order = client.post(
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
-    ).json()["data"]
+    ).json()
 
     db_session.refresh(variant)
     assert variant.stock_quantity == 3
@@ -1007,7 +1007,7 @@ def test_create_order_rejects_product_deactivated_after_adding(client, db_sessio
     db_session.refresh(withdrawn)
     assert still_sold.stock_quantity == 10
     assert withdrawn.stock_quantity == 10
-    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()
     assert cart["items_count"] == 2
 
 
@@ -1056,10 +1056,10 @@ def test_create_order_keeps_items_added_to_the_cart_during_checkout(client, db_s
     monkeypatch.setattr(AsyncRedisService, "get_cart", real_get_cart)
 
     assert response.status_code == 200
-    order_items = response.json()["data"]["items"]
+    order_items = response.json()["items"]
     assert [(item["product_id"], item["quantity"]) for item in order_items] == [(ordered.id, 2)]
 
-    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()
     assert [(item["product_id"], item["quantity"]) for item in cart["items"]] == [(added_late.id, 3)]
 
 
@@ -1111,11 +1111,11 @@ def test_order_charges_the_total_the_cart_showed_just_before(client, db_session)
     )
     db_session.commit()
 
-    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()["data"]
+    cart = client.get(CART_PREFIX, headers=_auth_headers(token)).json()
     response = _place_order(client, token, address_id)
 
     assert response.status_code == 200
-    order = response.json()["data"]
+    order = response.json()
     # 12.49 * 3 + 7.77 * 2 + 21.10 * 1; at the prices recorded on adding it
     # would have been 9.99 * 3 + 14.50 * 2 + 20.00 = 78.97.
     assert cart["total_amount"] == "74.11"

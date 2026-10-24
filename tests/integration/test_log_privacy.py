@@ -38,7 +38,7 @@ def _assert_no_personal_data(caplog):
 
 def _login(client):
     response = client.post(f"{USERS}/login", data={"username": EMAIL, "password": PASSWORD})
-    return {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 def test_the_account_lifecycle_logs_no_personal_data(client, every_log_line, monkeypatch):
@@ -61,7 +61,7 @@ def test_the_account_lifecycle_logs_no_personal_data(client, every_log_line, mon
     address = client.post(f"{USERS}/addresses", headers=headers, json={
         "street": "1 Main Street", "city": "Springfield", "state": "Illinois",
         "postal_code": "62701", "country": "US",
-    }).json()["data"]
+    }).json()
     client.put(f"{USERS}/addresses/{address['id']}", json={"city": "Shelbyville"}, headers=headers)
     client.post(f"{USERS}/addresses/default", json={"address_id": address["id"]}, headers=headers)
     client.delete(f"{USERS}/addresses/{address['id']}", headers=headers)

@@ -231,8 +231,8 @@ def test_webhook_success_for_an_order_another_attempt_paid_is_flagged(
     response = _post_webhook(client, body, _sign(body))
 
     assert response.status_code == 200
-    assert response.json()["data"]["applied"] is False
-    assert response.json()["data"]["requires_manual_review"] is True
+    assert response.json()["applied"] is False
+    assert response.json()["requires_manual_review"] is True
     assert _get_order(db_session, order["id"]).payment_status == "paid"
     first = next(p for p in _get_payments(db_session, order["id"])
                  if p.payment_intent_id == first_intent_id)
@@ -246,7 +246,7 @@ def test_checkout_session_completed_after_pay_is_flagged(client, db_session, sta
     # is completed after /pay already took the money.
     setup = _create_verified_buyer_with_order(client, db_session)
     order = setup["order"]
-    session = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"])).json()["data"]
+    session = client.post(CHECKOUT_SESSION_URL(order["id"]), headers=_with_idempotency_key(setup["headers"])).json()
     _age_attempts(db_session, order["id"])  # long enough not to block /pay
     paid = client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
@@ -259,7 +259,7 @@ def test_checkout_session_completed_after_pay_is_flagged(client, db_session, sta
     )
     response = _post_webhook(client, body, _sign(body))
 
-    assert response.json()["data"]["requires_manual_review"] is True
+    assert response.json()["requires_manual_review"] is True
     assert _get_order(db_session, order["id"]).payment_status == "paid"
     assert status_emails == ["paid"]
 
@@ -287,7 +287,7 @@ def test_pay_whose_order_is_paid_while_the_provider_call_is_in_flight_is_flagged
     )
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["status"] == "paid"
+    assert response.json()["status"] == "paid"
     payments = _get_payments(db_session, order["id"])
     assert [(p.status, p.requires_manual_review) for p in payments] == [("succeeded", True)]
     assert status_emails == []

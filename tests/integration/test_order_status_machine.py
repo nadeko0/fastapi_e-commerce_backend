@@ -98,7 +98,7 @@ def test_admin_status_change_for_every_pair(client, db_session, old, new):
     stock = db_session.get(Product, product_id).stock_quantity
     if (old, new) in ALLOWED:
         assert response.status_code == 200, response.text
-        assert response.json()["data"]["status"] == new
+        assert response.json()["status"] == new
         assert order.status == new
         # Into cancelled returns the order's 3 units; nothing else touches stock.
         assert stock == (10 if new == "cancelled" else 7)

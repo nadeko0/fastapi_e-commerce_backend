@@ -756,4 +756,4 @@ def test_make_user_headers_logs_a_user_in(client, db_session):
     response = client.get("/api/v1/users/me", headers=headers)
 
     assert response.status_code == 200
-    assert response.json()["data"]["id"] == user.id
+    assert response.json()["id"] == user.id

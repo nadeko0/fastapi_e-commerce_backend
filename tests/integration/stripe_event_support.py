@@ -71,7 +71,7 @@ class Delivered:
         return getattr(self.route_response, name)
 
     def json(self):
-        return {**self.route_response.json(), "data": self.result}
+        return self.result
 
     @property
     def text(self):
@@ -82,7 +82,7 @@ def deliver(response, content):
     """The route's `response` to the delivery of `content`, followed by the
     worker getting to the event it stored. A delivery the route did not
     store (refused, a duplicate) is returned as it is."""
-    if response.status_code != 200 or response.json()["data"]["status"] != "received":
+    if response.status_code != 200 or response.json()["status"] != "received":
         return response
     return Delivered(response, run_event(json.loads(content)["id"]))
 

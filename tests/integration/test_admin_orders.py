@@ -40,7 +40,7 @@ def _make_user(db_session, email, role=UserRole.CLIENT):
 
 def _headers(client, email):
     login = client.post("/api/v1/users/login", data={"username": email, "password": "Str0ngPass1"})
-    return {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
 def _admin_headers(client, db_session):
@@ -98,7 +98,7 @@ def _order(
 
 def _ids(response):
     assert response.status_code == 200, response.text
-    return [o["id"] for o in response.json()["data"]["items"]]
+    return [o["id"] for o in response.json()["items"]]
 
 
 # --- Listing: filters --------------------------------------------------------
@@ -281,7 +281,7 @@ def test_admin_order_list_pages_partition_the_newest_first_list(client, db_sessi
         headers=_admin_headers(client, db_session),
     )
 
-    data = response.json()["data"]
+    data = response.json()
     assert _ids(response) == newest_first[(page - 1) * size: page * size]
     assert data["total"] == ORDER_COUNT
     assert (data["page"], data["size"]) == (page, size)
@@ -303,7 +303,7 @@ def test_admin_order_list_rejects_out_of_range_pagination(client, db_session, pa
 def _stats(client, headers, period):
     response = client.get(f"{ADMIN}/stats", params={"period": period}, headers=headers)
     assert response.status_code == 200, response.text
-    return response.json()["data"]
+    return response.json()
 
 
 def test_admin_stats_count_only_paid_live_orders_inside_each_window(client, db_session):
@@ -415,7 +415,7 @@ def test_admin_status_change_follows_the_order_lifecycle(client, db_session, old
     stored = db_session.get(Order, order.id).status
     if new in ALLOWED[old]:
         assert response.status_code == 200, response.text
-        assert response.json()["data"]["status"] == new
+        assert response.json()["status"] == new
         assert stored == new
     else:
         assert response.status_code == 400

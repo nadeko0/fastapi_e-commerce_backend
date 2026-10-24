@@ -218,7 +218,7 @@ def test_a_cancellation_and_an_order_with_the_same_products_in_opposite_order_do
     first, second = shop.product(stock=5, name="A"), shop.product(stock=5, name="B")
     seller, buyer = shop.buyer(), shop.buyer()
     _cart_with(shop, seller, (first, second))
-    order_id = shop.place_order(seller).json()["data"]["id"]
+    order_id = shop.place_order(seller).json()["id"]
     _cart_with(shop, buyer, (first, second) if checkout_first_then_second else (second, first))
 
     results = _run_holding_after_first_stock_update([

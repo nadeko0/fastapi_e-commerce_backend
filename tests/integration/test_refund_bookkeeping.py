@@ -131,7 +131,7 @@ def test_concurrent_refunds_adding_up_to_the_charge_mark_the_order_refunded(shop
     response = shop.refund(admin, order["id"], amount="9.99")
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["payment_status"] == "refunded"
+    assert response.json()["payment_status"] == "refunded"
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 1999, "USD", False)]
     assert order_state(shop, order["id"]) == ("confirmed", "refunded")
 
@@ -157,5 +157,5 @@ def test_refund_is_reported_in_the_orders_currency_code(shop, monkeypatch):
     response = shop.refund(admin, order["id"], amount="1.00")
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["currency"] == "USD"
+    assert response.json()["currency"] == "USD"
     assert payment_rows(shop, order["id"]) == [("succeeded", 1999, 100, "USD", False)]

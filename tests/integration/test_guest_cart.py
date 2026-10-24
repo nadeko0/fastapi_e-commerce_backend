@@ -130,7 +130,7 @@ def _add(visitor, product_id, quantity=1, variant_id=None, headers=None):
 def _cart(visitor, headers=None):
     response = visitor.get(CART_PREFIX, headers=headers)
     assert response.status_code == 200
-    return response.json()["data"]
+    return response.json()
 
 
 def _quantities(cart):
@@ -166,26 +166,26 @@ def test_guest_can_add_view_update_remove_clear_and_validate(browser, db_session
 
     added = _add(guest, first.id, 2)
     assert added.status_code == 200
-    assert _quantities(added.json()["data"]) == {(first.id, None): 2}
+    assert _quantities(added.json()) == {(first.id, None): 2}
     assert _add(guest, second.id, 1).status_code == 200
 
     assert _quantities(_cart(guest)) == {(first.id, None): 2, (second.id, None): 1}
 
     updated = guest.put(f"{CART_PREFIX}/items/{first.id}", json={"quantity": 5})
     assert updated.status_code == 200
-    assert _quantities(updated.json()["data"]) == {(first.id, None): 5, (second.id, None): 1}
+    assert _quantities(updated.json()) == {(first.id, None): 5, (second.id, None): 1}
 
     validated = guest.post(f"{CART_PREFIX}/validate")
     assert validated.status_code == 200
-    assert validated.json()["data"] == {"valid": True, "issues": [], "price_changes": []}
+    assert validated.json() == {"valid": True, "issues": [], "price_changes": []}
 
     removed = guest.delete(f"{CART_PREFIX}/items/{second.id}")
     assert removed.status_code == 200
-    assert _quantities(removed.json()["data"]) == {(first.id, None): 5}
+    assert _quantities(removed.json()) == {(first.id, None): 5}
 
     cleared = guest.delete(CART_PREFIX)
     assert cleared.status_code == 200
-    assert cleared.json()["data"]["items"] == []
+    assert cleared.json()["items"] == []
     assert _cart(guest)["items"] == []
 
 
@@ -195,7 +195,7 @@ def test_guest_cart_is_priced_live_like_an_account_cart(browser, db_session):
     variant_product = _make_product(db_session, category.id, price="5.00")
     variant = _make_variant(db_session, variant_product.id, price_override="14.50")
     guest = browser()
-    assert _add(guest, product.id, 2).json()["data"]["total_amount"] == "19.98"
+    assert _add(guest, product.id, 2).json()["total_amount"] == "19.98"
     _add(guest, variant_product.id, 1, variant_id=variant.id)
 
     db_session.query(Product).filter(Product.id == product.id).update({"price": "12.50"})
@@ -209,7 +209,7 @@ def test_guest_cart_is_priced_live_like_an_account_cart(browser, db_session):
     assert line["price_changed"] is True
     assert cart["total_amount"] == "39.50"
 
-    validated = guest.post(f"{CART_PREFIX}/validate").json()["data"]
+    validated = guest.post(f"{CART_PREFIX}/validate").json()
     assert validated["valid"] is True
     assert validated["price_changes"] == [{
         "product_id": product.id,
@@ -233,7 +233,7 @@ def test_guest_gets_the_same_rejections_as_an_account(browser, db_session):
 
     db_session.query(Product).filter(Product.id == product.id).update({"stock_quantity": 0})
     db_session.commit()
-    validated = guest.post(f"{CART_PREFIX}/validate").json()["data"]
+    validated = guest.post(f"{CART_PREFIX}/validate").json()
     assert validated["valid"] is False
     assert [issue["code"] for issue in validated["issues"]] == ["insufficient_stock"]
 
@@ -274,9 +274,9 @@ def test_looking_at_an_empty_cart_as_a_guest_stores_nothing_and_issues_no_identi
     ]
 
     assert [response.status_code for response in responses] == [200, 200, 200, 404, 404, 404, 400]
-    assert responses[0].json()["data"]["items"] == []
-    assert responses[0].json()["data"]["total_amount"] == "0.00"
-    assert responses[2].json()["data"]["items"] == []
+    assert responses[0].json()["items"] == []
+    assert responses[0].json()["total_amount"] == "0.00"
+    assert responses[2].json()["items"] == []
     assert all(_set_cookie(response) is None for response in responses)
     assert len(guest.cookies) == 0
     assert list(fake_redis.scan_iter("*")) == []
@@ -341,7 +341,7 @@ def test_an_emptied_guest_cart_is_not_kept_and_its_identifier_is_retired(browser
     _add(by_remove, first.id, 1)
     removed = by_remove.delete(f"{CART_PREFIX}/items/{first.id}")
     assert removed.status_code == 200
-    assert removed.json()["data"]["items"] == []
+    assert removed.json()["items"] == []
     _assert_cookie_cleared(removed)
     assert by_remove.cookies.get(COOKIE) is None
 
@@ -379,7 +379,7 @@ def test_two_guests_never_see_each_others_carts(browser, db_session, fake_redis)
 def _account_with_a_cart(browser, db_session, product_id, email="owner@example.com"):
     owner = browser()
     _register(owner, email)
-    token = _login(owner, email).json()["data"]["access_token"]
+    token = _login(owner, email).json()["access_token"]
     assert _add(owner, product_id, 4, headers=_auth_headers(token)).status_code == 200
     user_id = db_session.query(User).filter(User.email == email).one().id
     return token, user_id
@@ -409,16 +409,16 @@ def test_an_identifier_of_the_wrong_format_reads_and_creates_nothing(
     intruder.cookies.set(COOKIE, forged, domain="testserver.local")
 
     assert _cart(intruder)["items"] == []
-    assert intruder.post(f"{CART_PREFIX}/validate").json()["data"]["valid"] is True
+    assert intruder.post(f"{CART_PREFIX}/validate").json()["valid"] is True
     assert intruder.put(f"{CART_PREFIX}/items/{product.id}", json={"quantity": 1}).status_code == 404
     assert intruder.delete(f"{CART_PREFIX}/items/{product.id}").status_code == 404
-    assert intruder.delete(CART_PREFIX).json()["data"]["items"] == []
+    assert intruder.delete(CART_PREFIX).json()["items"] == []
     assert {key: fake_redis.get(key) for key in fake_redis.scan_iter("*cart:*")} == before
 
     added = _add(intruder, other.id, 1)
 
     assert added.status_code == 200
-    assert _quantities(added.json()["data"]) == {(other.id, None): 1}
+    assert _quantities(added.json()) == {(other.id, None): 1}
     issued = _set_cookie(added).split(";")[0].split("=", 1)[1]
     assert issued != forged
     assert re.fullmatch(r"[A-Za-z0-9_-]{43}", issued)
@@ -564,7 +564,7 @@ def test_an_inactive_account_is_rejected_on_cart_routes_as_before(browser, db_se
     (product,) = _products(db_session, 1)
     visitor = browser()
     _register(visitor)
-    token = _login(visitor).json()["data"]["access_token"]
+    token = _login(visitor).json()["access_token"]
     db_session.query(User).update({User.is_active: False})
     db_session.commit()
 
@@ -588,7 +588,7 @@ def test_an_account_request_uses_the_account_cart_and_leaves_a_guest_cookie_alon
         return False
 
     monkeypatch.setattr(AsyncRedisService, "merge_guest_cart", _not_merged)
-    token = _login(visitor).json()["data"]["access_token"]
+    token = _login(visitor).json()["access_token"]
     headers = _auth_headers(token)
 
     added = _add(visitor, account_product.id, 1, headers=headers)
@@ -686,7 +686,7 @@ def test_login_merges_the_guest_cart_into_the_account_cart(browser, db_session, 
     response = _login(visitor, "owner@example.com")
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["token_type"] == "bearer"
     # A line present in both carts: the quantities are added up.
     merged = _cart(visitor, headers=_auth_headers(body["access_token"]))
@@ -716,7 +716,7 @@ def test_login_merges_into_an_account_that_had_no_cart(browser, db_session, fake
     _add(visitor, product.id, 2)
     _add(visitor, product.id, 1, variant_id=variant.id)
 
-    token = _login(visitor).json()["data"]["access_token"]
+    token = _login(visitor).json()["access_token"]
 
     cart = _cart(visitor, headers=_auth_headers(token))
     assert _quantities(cart) == {(product.id, None): 2, (product.id, variant.id): 1}
@@ -735,7 +735,7 @@ def test_login_without_a_guest_cart_behaves_as_before(browser, db_session, fake_
     response = _login(visitor, "owner@example.com")
 
     assert response.status_code == 200
-    assert set(response.json()["data"]) == {"access_token", "refresh_token", "token_type"}
+    assert set(response.json()) == {"access_token", "refresh_token", "token_type"}
     assert _set_cookie(response) is None
     assert len(visitor.cookies) == 0
     # The account cart was not rewritten, nor its lifetime renewed.
@@ -825,9 +825,9 @@ def test_merge_does_not_fail_a_login_over_stock(browser, db_session):
     response = _login(visitor, "owner@example.com")
 
     assert response.status_code == 200
-    headers = _auth_headers(response.json()["data"]["access_token"])
+    headers = _auth_headers(response.json()["access_token"])
     assert _quantities(_cart(visitor, headers=headers)) == {(product.id, None): 7}
-    validated = visitor.post(f"{CART_PREFIX}/validate", headers=headers).json()["data"]
+    validated = visitor.post(f"{CART_PREFIX}/validate", headers=headers).json()
     assert validated["valid"] is False
     assert validated["issues"] == [{
         "product_id": product.id,
@@ -851,7 +851,7 @@ def test_merged_line_records_the_price_last_seen_as_a_guest(browser, db_session)
     db_session.commit()
     _add(visitor, product.id, 1)  # seen at 12.50, a moment before logging in
 
-    token = _login(visitor, "owner@example.com").json()["data"]["access_token"]
+    token = _login(visitor, "owner@example.com").json()["access_token"]
 
     line = _cart(visitor, headers=_auth_headers(token))["items"][0]
     assert (line["quantity"], line["price_when_added"], line["price_changed"]) == (5, "12.50", False)
@@ -949,7 +949,7 @@ def test_two_logins_carrying_the_same_guest_cart_merge_it_once(browser, db_sessi
     second = _login(replay)
 
     assert (first.status_code, second.status_code) == (200, 200)
-    token = second.json()["data"]["access_token"]
+    token = second.json()["access_token"]
     assert _quantities(_cart(replay, headers=_auth_headers(token))) == {(product.id, None): 2}
 
 
@@ -976,7 +976,7 @@ def test_redis_failing_during_the_merge_does_not_fail_the_login(
 
     # Logged in, with working tokens.
     assert response.status_code == 200
-    new_token = response.json()["data"]["access_token"]
+    new_token = response.json()["access_token"]
     assert visitor.get(f"{USERS_PREFIX}/me", headers=_auth_headers(new_token)).status_code == 200
     # Both carts exactly where they were, and the identifier kept.
     assert fake_redis.get(guest_key) == stored_guest
@@ -1054,7 +1054,7 @@ def test_account_cart_refuses_a_line_beyond_the_cap(browser, db_session, monkeyp
     first, second, third = _products(db_session, 3)
     visitor = browser()
     _register(visitor)
-    headers = _auth_headers(_login(visitor).json()["data"]["access_token"])
+    headers = _auth_headers(_login(visitor).json()["access_token"])
     _add(visitor, first.id, 1, headers=headers)
     _add(visitor, second.id, 1, headers=headers)
 
@@ -1113,7 +1113,7 @@ def _make_checkout_ready(visitor, db_session, token):
         },
         headers=_auth_headers(token),
     )
-    return address.json()["data"]["id"]
+    return address.json()["id"]
 
 
 def test_a_guest_cannot_place_an_order(browser, db_session, fake_redis):
@@ -1141,14 +1141,14 @@ def test_after_login_the_order_contains_the_merged_cart(browser, db_session, fak
     guest_only = _make_product(db_session, category.id, stock=10, price="2.50")
     visitor = browser()
     _register(visitor)
-    first_token = _login(visitor).json()["data"]["access_token"]
+    first_token = _login(visitor).json()["access_token"]
     address_id = _make_checkout_ready(visitor, db_session, first_token)
     _add(visitor, in_both.id, 1, headers=_auth_headers(first_token))
     # Back as a guest (the token is simply not sent), the visitor shops on.
     _add(visitor, in_both.id, 2)
     _add(visitor, guest_only.id, 4)
 
-    token = _login(visitor).json()["data"]["access_token"]
+    token = _login(visitor).json()["access_token"]
     response = visitor.post(
         ORDERS_PREFIX,
         json={"shipping_address_id": address_id},
@@ -1156,7 +1156,7 @@ def test_after_login_the_order_contains_the_merged_cart(browser, db_session, fak
     )
 
     assert response.status_code == 200
-    order = response.json()["data"]
+    order = response.json()
     assert {item["product_id"]: item["quantity"] for item in order["items"]} == {
         in_both.id: 3,
         guest_only.id: 4,
@@ -1194,7 +1194,7 @@ def test_an_account_cart_stored_in_the_current_format_still_loads(browser, db_se
     other = _make_product(db_session, category.id, price="1.00")
     visitor = browser()
     _register(visitor)
-    token = _login(visitor).json()["data"]["access_token"]
+    token = _login(visitor).json()["access_token"]
     user_id = db_session.query(User).one().id
     _store_cart_as_written_today(fake_redis, user_id, product.id, 2, "9.99")
     headers = _auth_headers(token)
@@ -1206,10 +1206,10 @@ def test_an_account_cart_stored_in_the_current_format_still_loads(browser, db_se
     assert cart["items"][0]["added_at"].startswith("2026-10-09T08:15:30")
     assert cart["items"][0]["price_changed"] is False
     # Still a cart that can be changed, validated - and merged into.
-    assert _add(visitor, other.id, 1, headers=headers).json()["data"]["total_amount"] == "20.98"
-    assert visitor.post(f"{CART_PREFIX}/validate", headers=headers).json()["data"]["valid"] is True
+    assert _add(visitor, other.id, 1, headers=headers).json()["total_amount"] == "20.98"
+    assert visitor.post(f"{CART_PREFIX}/validate", headers=headers).json()["valid"] is True
     _add(visitor, product.id, 1)
-    again = _login(visitor).json()["data"]["access_token"]
+    again = _login(visitor).json()["access_token"]
     assert _quantities(_cart(visitor, headers=_auth_headers(again))) == {
         (product.id, None): 3,
         (other.id, None): 1,

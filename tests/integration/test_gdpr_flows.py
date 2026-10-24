@@ -19,7 +19,7 @@ def headers(client, monkeypatch):
         "gdpr_consent": True, "privacy_policy_accepted": True,
     })
     response = client.post(f"{USERS}/login", data={"username": EMAIL, "password": PASSWORD})
-    return {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 def _stored(db_session):

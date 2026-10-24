@@ -34,7 +34,7 @@ def test_list_categories_returns_created_category(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/categories")
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["name"] == "Electronics"
 
@@ -51,7 +51,7 @@ def test_get_category_returns_existing_category(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/categories/{category.id}")
 
     assert response.status_code == 200
-    assert response.json()["data"]["id"] == category.id
+    assert response.json()["id"] == category.id
 
 
 def test_category_tree_reflects_parent_child_relationship(client, db_session):
@@ -61,7 +61,7 @@ def test_category_tree_reflects_parent_child_relationship(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/categories/tree")
 
     assert response.status_code == 200
-    tree = response.json()["data"]["tree"]
+    tree = response.json()["tree"]
     assert len(tree) == 1
     assert tree[0]["name"] == "Root"
     assert len(tree[0]["children"]) == 1
@@ -82,7 +82,7 @@ def test_category_tree_nests_correctly_at_three_levels(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/categories/tree")
 
     assert response.status_code == 200
-    data = response.json()["data"]
+    data = response.json()
     assert data["total_categories"] == 3
     assert data["max_depth"] == 2
 
@@ -108,7 +108,7 @@ def test_list_products_returns_created_product(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/products")
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["name"] == "Widget"
 
@@ -121,7 +121,7 @@ def test_list_products_paginates(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/products", params={"page": 1, "size": 2})
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["total"] == 3
     assert len(body["items"]) == 2
     assert body["has_more"] is True
@@ -135,7 +135,7 @@ def test_list_products_sorts_by_price(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/products", params={"sort_by": "price_asc"})
 
     assert response.status_code == 200
-    names = [item["name"] for item in response.json()["data"]["items"]]
+    names = [item["name"] for item in response.json()["items"]]
     assert names == ["Cheap", "Pricey"]
 
 
@@ -155,7 +155,7 @@ def test_list_products_sorts_by_created_at_does_not_500(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/products", params={"sort_by": "created_at_desc"})
 
     assert response.status_code == 200
-    names = [item["name"] for item in response.json()["data"]["items"]]
+    names = [item["name"] for item in response.json()["items"]]
     assert names == ["Second", "First"]
 
 
@@ -167,7 +167,7 @@ def test_list_products_filters_by_min_price(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/products", params={"min_price": "50.00"})
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["name"] == "Pricey"
 
@@ -180,7 +180,7 @@ def test_list_products_filters_in_stock_only(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/products", params={"in_stock": True})
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["name"] == "InStock"
 
@@ -198,8 +198,8 @@ def test_get_product_returns_existing_product(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/products/{product.id}")
 
     assert response.status_code == 200
-    assert response.json()["data"]["id"] == product.id
-    assert response.json()["data"]["category_name"] == category.name
+    assert response.json()["id"] == product.id
+    assert response.json()["category_name"] == category.name
 
 
 def test_get_product_is_served_from_cache_on_second_call(client, db_session):
@@ -216,7 +216,7 @@ def test_get_product_is_served_from_cache_on_second_call(client, db_session):
 
     second = client.get(f"{CATALOG_PREFIX}/products/{product.id}")
     assert second.status_code == 200
-    assert second.json()["data"]["name"] == "Widget"
+    assert second.json()["name"] == "Widget"
 
 
 def test_search_products_matches_name(client, db_session):
@@ -227,7 +227,7 @@ def test_search_products_matches_name(client, db_session):
     response = client.get(f"{CATALOG_PREFIX}/products/search", params={"query": "Gadget"})
 
     assert response.status_code == 200
-    body = response.json()["data"]
+    body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["name"] == "Special Gadget"
 

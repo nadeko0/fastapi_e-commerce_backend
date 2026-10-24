@@ -73,7 +73,7 @@ def test_head_gets_the_same_304_as_get(client, db_session):
     category = _make_category(db_session)
     product = client.post(
         f"{ADMIN_PREFIX}/products", json=_valid_product_payload(category.id), headers=headers
-    ).json()["data"]
+    ).json()
     url = f"{CATALOG_PREFIX}/products/{product['id']}"
     etag = client.get(url).headers["etag"]
     assert client.head(url).headers["etag"] == etag

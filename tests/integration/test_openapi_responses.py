@@ -178,12 +178,12 @@ def test_products_filter_by_characteristics_query(client, db_session):
     _product(db_session, "Red", {"color": {"name": "Color", "value": "red"}})
     _product(db_session, "Blue", {"color": {"name": "Color", "value": "blue"}})
 
-    everything = client.get(f"{API}/products").json()["data"]
+    everything = client.get(f"{API}/products").json()
     red = client.get(f"{API}/products", params={"characteristics": '{"color": "red"}'})
 
     assert everything["total"] == 2
     assert red.status_code == 200
-    assert [item["name"] for item in red.json()["data"]["items"]] == ["Red"]
+    assert [item["name"] for item in red.json()["items"]] == ["Red"]
 
 
 def test_a_body_on_get_products_is_not_a_filter(client, db_session):
@@ -193,7 +193,7 @@ def test_a_body_on_get_products_is_not_a_filter(client, db_session):
     response = client.request("GET", f"{API}/products", json={"color": "red"})
 
     assert response.status_code == 200
-    assert response.json()["data"]["total"] == 2
+    assert response.json()["total"] == 2
 
 
 @pytest.mark.parametrize("value", ["not json", "[1, 2]", '"red"', "7", "x" * 1001])

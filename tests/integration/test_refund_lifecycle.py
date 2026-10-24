@@ -99,7 +99,7 @@ def test_a_pending_refund_is_not_reported_as_completed(shop, paid, monkeypatch):
     response = shop.refund(paid["admin"], order_id)
 
     assert response.status_code == 200, response.text
-    body = response.json()["data"]
+    body = response.json()
     assert (body["status"], body["payment_status"], body["amount"]) == ("pending", "paid", "19.99")
     assert order_state(shop, order_id) == ("confirmed", "paid")
     # Reserved: Stripe will not refund the same money twice, nor will we.
@@ -119,7 +119,7 @@ def test_a_pending_refund_is_not_reported_as_completed(shop, paid, monkeypatch):
 def test_a_partial_refund_completing_does_not_refund_the_order(shop, paid, monkeypatch):
     _refunds_start(monkeypatch, RefundStatus.PENDING)
     order_id = paid["order"]["id"]
-    refund_id = shop.refund(paid["admin"], order_id, amount="5.00").json()["data"]["id"]
+    refund_id = shop.refund(paid["admin"], order_id, amount="5.00").json()["id"]
 
     shop.webhook("refund.updated", _refund_object(paid["payment"], refund_id, 500, "succeeded"))
 
@@ -133,7 +133,7 @@ def test_a_refund_event_missing_its_id_or_status_changes_nothing(shop, paid, mon
     # Refund.status is nullable in Stripe's API reference.
     _refunds_start(monkeypatch, RefundStatus.PENDING)
     order_id = paid["order"]["id"]
-    recorded = shop.refund(paid["admin"], order_id).json()["data"]["id"]
+    recorded = shop.refund(paid["admin"], order_id).json()["id"]
     obj = _refund_object(paid["payment"], refund_id and recorded, 1999, status)
 
     response = shop.webhook("refund.updated", obj)
@@ -156,7 +156,7 @@ def test_a_refund_that_fails_after_it_was_recorded_is_undone_and_flagged(
     # pm_card_refundFail: the refund is created succeeded and fails later.
     # The order stayed "refunded" while the customer got nothing back.
     order_id = paid["order"]["id"]
-    refund = shop.refund(paid["admin"], order_id).json()["data"]
+    refund = shop.refund(paid["admin"], order_id).json()
     assert order_state(shop, order_id) == ("confirmed", "refunded")
     outbox.take()
 
@@ -164,7 +164,7 @@ def test_a_refund_that_fails_after_it_was_recorded_is_undone_and_flagged(
         paid["payment"], refund["id"], 1999, status, failure_reason="expired_or_canceled_card"))
 
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["requires_manual_review"] is True
+    assert response.json()["requires_manual_review"] is True
     assert order_state(shop, order_id) == ("confirmed", "paid")
     assert payment_rows(shop, order_id) == [("succeeded", 1999, 0, "USD", False)]
     assert _ledger(shop, order_id) == [("re_", 1999, status, "admin", True)]
@@ -178,7 +178,7 @@ def test_a_refund_that_fails_after_it_was_recorded_is_undone_and_flagged(
 
 def test_a_failed_refund_stays_failed_whatever_arrives_after_it(shop, paid):
     order_id = paid["order"]["id"]
-    refund = shop.refund(paid["admin"], order_id, amount="5.00").json()["data"]
+    refund = shop.refund(paid["admin"], order_id, amount="5.00").json()
     failed = _refund_object(paid["payment"], refund["id"], 500, "failed")
     assert shop.webhook("refund.failed", failed).status_code == 200
 
@@ -219,7 +219,7 @@ def test_a_refund_made_in_the_dashboard_is_recorded(shop, paid):
 
 def test_our_own_refund_reported_by_its_webhook_is_counted_once(shop, paid):
     order_id = paid["order"]["id"]
-    refund = shop.refund(paid["admin"], order_id, amount="5.00").json()["data"]
+    refund = shop.refund(paid["admin"], order_id, amount="5.00").json()
 
     for event_type in ("refund.created", "refund.updated", "charge.refunded"):
         obj = _refund_object(paid["payment"], refund["id"], 500, "succeeded")
@@ -255,7 +255,7 @@ def test_a_refund_webhook_that_overtakes_the_refund_request_is_counted_once(
 
     assert early[0].status_code == 200, early[0].text
     assert response.status_code == 200, response.text
-    assert response.json()["data"]["payment_status"] == "refunded"
+    assert response.json()["payment_status"] == "refunded"
     assert payment_rows(shop, order_id) == [("succeeded", 1999, 1999, "USD", False)]
     assert _ledger(shop, order_id) == [("re_", 1999, "succeeded", "provider", False)]
     assert order_state(shop, order_id) == ("confirmed", "refunded")
@@ -283,7 +283,7 @@ def test_refund_events_for_a_charge_this_app_did_not_make_are_acknowledged(shop,
     response = shop.webhook("refund.created", obj)
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"status": "processed", "applied": False}
+    assert response.json() == {"status": "processed", "applied": False}
     assert payment_rows(shop, paid["order"]["id"]) == [("succeeded", 1999, 0, "USD", False)]
 
 
