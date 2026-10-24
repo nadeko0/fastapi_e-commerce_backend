@@ -47,7 +47,9 @@ def _status_codes(env_overrides):
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
-    return dict(line.split() for line in result.stdout.splitlines())
+    # The app now logs its JSON event stream to stdout too (Twelve-Factor):
+    # keep only the "<path> <status>" lines the probe prints.
+    return dict(line.split() for line in result.stdout.splitlines() if line.startswith("/"))
 
 
 def test_production_serves_no_docs_and_no_schema():
