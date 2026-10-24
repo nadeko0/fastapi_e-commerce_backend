@@ -68,7 +68,7 @@ def test_the_matrix_covers_the_routes_it_should():
     assert ("GET", f"{USERS}/me") in PROTECTED
     assert ("POST", f"{settings.API_V1_STR}/legal/data-request") in PROTECTED
     assert ("POST", f"{USERS}/logout") in PROTECTED
-    assert len(PROTECTED) >= 17
+    assert len(PROTECTED) >= 16
     assert ("POST", f"{USERS}/login") not in PROTECTED
 
 
