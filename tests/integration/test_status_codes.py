@@ -133,20 +133,32 @@ def test_creating_a_variant_is_201_with_its_location(shop):
     assert shop.client.get(location, headers=admin).status_code == 200
 
 
-def test_posts_without_a_url_of_their_own_for_what_they_make_stay_200(shop):
-    # No GET names an address, a payment attempt, a checkout session or a
-    # cart line: a 201 without a Location would identify the target URI
-    # (RFC 9110 15.3.2), which is the collection or the action, not the thing.
+def test_creating_an_address_is_201_with_the_location_of_the_address(shop):
     buyer = shop.buyer()
-    product = shop.product()
-    address = shop.client.post(
+
+    response = shop.client.post(
         f"{API}/users/addresses",
         json={"street": "9 Elm Street", "city": "Gotham", "state": "NY",
               "postal_code": "10002", "country": "US"},
         headers=buyer.headers,
     )
-    assert address.status_code == 200 and "Location" not in address.headers
-    assert shop.add_to_cart(buyer, product).status_code == 200
+
+    assert response.status_code == 201, response.text
+    location = response.headers["Location"]
+    assert location == f"{API}/users/addresses/{response.json()['id']}"
+    followed = shop.client.get(location, headers=buyer.headers)
+    assert followed.status_code == 200
+    assert followed.json() == response.json()
+
+
+def test_posts_without_a_url_of_their_own_for_what_they_make_stay_200(shop):
+    # No GET names a payment attempt, a checkout session or a cart line: a 201
+    # without a Location would identify the target URI (RFC 9110 15.3.2),
+    # which is the collection or the action, not the thing.
+    buyer = shop.buyer()
+    product = shop.product()
+    added = shop.add_to_cart(buyer, product)
+    assert added.status_code == 200 and "Location" not in added.headers
     order = shop.place_order(buyer).json()
     pay = shop.pay(buyer, order["id"])
     assert pay.status_code == 200 and "Location" not in pay.headers
@@ -567,6 +579,7 @@ def _operation(client, method, path):
     ("post", "/cart/items", {"409"}, set()),
     ("put", "/cart/items/{product_id}", {"409"}, set()),
     ("post", "/users/addresses/default", {"409"}, set()),
+    ("post", "/users/addresses", {"201"}, {"200"}),
     ("get", "/users/addresses/{address_id}", {"200", "404"}, set()),
 ])
 def test_the_openapi_operation_lists_the_new_statuses(client, method, path, documented, gone):

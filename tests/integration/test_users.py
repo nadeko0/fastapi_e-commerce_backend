@@ -207,7 +207,7 @@ def test_create_address_becomes_default_when_first(client, valid_registration_pa
         headers=_auth_headers(access_token),
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json()["is_default"] is True
 
 
@@ -384,8 +384,8 @@ def test_user_cannot_read_another_users_address_by_guessing_id(
 
     attacker_token = _register_and_login(client, _second_user_payload())
 
-    # There is no GET /addresses/{id}; the update/delete routes are where
-    # cross-user access must be blocked instead of leaking existence.
+    # The update route is checked here; GET is in test_status_codes.py. Either
+    # must answer 404, not 403, so the id does not leak who owns an address.
     response = client.put(
         f"{API_PREFIX}/addresses/{owned_address['id']}",
         json={"city": "Hijacked City"},

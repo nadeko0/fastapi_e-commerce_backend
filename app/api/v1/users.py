@@ -23,7 +23,8 @@ from app.api.v1.cart import merge_guest_cart_on_login_async
 from app.core.clock import utc_now
 from app.core.dependencies import BearerToken, Cache, CurrentUser, DbSession
 from app.core.errors import Problem, ProblemType, sanitized_errors
-from app.core.openapi import DocumentedRoute
+from app.core.location import set_location
+from app.core.openapi import LOCATION_HEADER, DocumentedRoute
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password
 from app.core.rate_limit import check_login_attempt, clear_login_failures
 from app.core.security import (
@@ -604,12 +605,16 @@ async def get_address(
 @router.post(
     "/addresses",
     response_model=AddressResponse,
+    status_code=status.HTTP_201_CREATED,
     responses={
+        201: {"description": "Address created; Location is its URL", "headers": LOCATION_HEADER},
         409: {"description": "This address already exists for the current user"},
         422: {"description": "Invalid address data"},
     },
 )
 async def create_address(
+    request: Request,
+    response: Response,
     address_in: AddressCreate,
     current_user: CurrentUser,
     db: DbSession,
@@ -657,6 +662,7 @@ async def create_address(
         created = await db.get(Address, address.id)
         logger.info(f"Verified address exists: {created and created.id} for user {current_user.id}")
 
+        set_location(request, response, "get_address", address_id=address.id)
         return AddressResponse.model_validate(address)
     except ValidationError as e:
         raise Problem(

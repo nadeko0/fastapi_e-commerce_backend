@@ -143,7 +143,7 @@ def _address(**overrides):
 
 def _create(client, headers, **overrides):
     response = client.post(f"{USERS}/addresses", json=_address(**overrides), headers=headers)
-    assert response.status_code == 200, response.text
+    assert response.status_code == 201, response.text
     return response.json()
 
 
@@ -175,7 +175,7 @@ def test_making_an_address_default_by_update_unsets_the_old_default(client):
 def test_the_same_address_twice_is_409(client):
     headers = _auth(client)
     fields = _address()
-    assert client.post(f"{USERS}/addresses", json=fields, headers=headers).status_code == 200
+    assert client.post(f"{USERS}/addresses", json=fields, headers=headers).status_code == 201
 
     again = client.post(f"{USERS}/addresses", json=fields, headers=headers)
 
