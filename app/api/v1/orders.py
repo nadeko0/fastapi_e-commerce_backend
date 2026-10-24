@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import timedelta
 from decimal import Decimal
-from typing import Annotated, List  # noqa: UP035 - see the UP006 noqa on response_model
+from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Body, Header, HTTPException, Request, status
 from fastapi import status as http_status
@@ -30,11 +30,15 @@ from app.models.order_items import OrderItem
 from app.models.payment import Payment
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, PaymentRefund
 from app.models.product import Product, ProductVariant
-from app.schemas.common import APIResponse, Int32
+from app.schemas.common import Int32
 from app.schemas.order import (
     CheckoutSessionCreate,
     CheckoutSessionResponse,
     OrderCreate,
+    OrderPayment,
+    OrderPaymentDispute,
+    OrderPaymentList,
+    OrderPaymentRefund,
     OrderResponse,
     OrderStatus,
     OrderStatusUpdate,
@@ -43,6 +47,7 @@ from app.schemas.order import (
     PaymentStatus,
     RefundCreate,
     RefundResponse,
+    StripeWebhookAck,
 )
 from app.services.email import (
     send_order_cancellation_email,
@@ -102,7 +107,7 @@ async def _order_by_idempotency_key(
 
 @router.post(
     "",
-    response_model=APIResponse[OrderResponse],
+    response_model=OrderResponse,
     responses={
         400: {"description": "Cart is empty, profile incomplete, or a cart item is out of stock"},
         403: {"description": "Email verification required before placing orders"},
@@ -161,7 +166,7 @@ async def create_order(
     existing = await _order_by_idempotency_key(db, current_user.id, idempotency_key)
     if existing:
         ensure_same_request(existing.idempotency_fingerprint, fingerprint)
-        return APIResponse.success_response(OrderResponse.model_validate(existing))
+        return OrderResponse.model_validate(existing)
 
     cart = await redis.get_cart(current_user.id)
     if not cart or not cart.items:
@@ -225,7 +230,7 @@ async def create_order(
         existing = await _order_by_idempotency_key(db, current_user.id, idempotency_key)
         if existing:
             ensure_same_request(existing.idempotency_fingerprint, fingerprint)
-            return APIResponse.success_response(OrderResponse.model_validate(existing))
+            return OrderResponse.model_validate(existing)
         # Only the key's unique index can fail a bare order INSERT (its
         # foreign keys were just read and nothing deletes orders' users or
         # addresses mid-request); re-raised rather than mistaken for a
@@ -350,11 +355,11 @@ async def create_order(
         OrderResponse.model_validate(order)
     )
 
-    return APIResponse.success_response(OrderResponse.model_validate(order))
+    return OrderResponse.model_validate(order)
 
 @router.get(
     "/{order_id}",
-    response_model=APIResponse[OrderResponse],
+    response_model=OrderResponse,
     responses={404: {"description": "Order not found"}},
 )
 async def get_order(
@@ -378,11 +383,11 @@ async def get_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
-    return APIResponse.success_response(OrderResponse.model_validate(order))
+    return OrderResponse.model_validate(order)
 
 @router.put(
     "/{order_id}/status",
-    response_model=APIResponse[OrderResponse],
+    response_model=OrderResponse,
     responses={
         400: {"description": "Invalid status transition"},
         403: {"description": "Admin privileges required"},
@@ -452,12 +457,12 @@ async def update_order_status(
         OrderResponse.model_validate(order)
     )
 
-    return APIResponse.success_response(OrderResponse.model_validate(order))
+    return OrderResponse.model_validate(order)
 
 
 @router.post(
     "/{order_id}/cancel",
-    response_model=APIResponse[OrderResponse],
+    response_model=OrderResponse,
     responses={
         400: {"description": "Order is paid, or no longer new"},
         404: {"description": "Order not found"},
@@ -505,7 +510,7 @@ async def cancel_own_order(
         send_order_cancellation_email, current_user.email, OrderResponse.model_validate(order)
     )
 
-    return APIResponse.success_response(OrderResponse.model_validate(order))
+    return OrderResponse.model_validate(order)
 
 
 async def _payment_by_key(
@@ -621,9 +626,7 @@ def _replay_checkout_session(payment_row: Payment, order: Order):
     409 telling the client to start a new attempt with a new key.
     """
     if payment_row.checkout_session_id:
-        return APIResponse.success_response(
-            _checkout_session_row_to_response(payment_row, order)
-        )
+        return _checkout_session_row_to_response(payment_row, order)
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=(
@@ -896,7 +899,7 @@ _MANUAL_REVIEW_RESPONSE = {"status": "processed", "applied": False, "requires_ma
 
 @router.post(
     "/{order_id}/pay",
-    response_model=APIResponse[PaymentResponse],
+    response_model=PaymentResponse,
     responses={
         400: {"description": "Order already paid, cancelled, or amount mismatch"},
         402: {"description": "Card declined by the payment provider"},
@@ -980,9 +983,7 @@ async def process_payment(
     retried_attempt = None
     if existing_payment:
         if existing_payment.status != "unknown":
-            return APIResponse.success_response(
-                _payment_row_to_response(existing_payment, order)
-            )
+            return _payment_row_to_response(existing_payment, order)
         if _is_checkout_attempt(existing_payment):
             # Sending it as a PaymentIntent would be a second way to
             # charge the order; only /checkout-session settles it.
@@ -1044,9 +1045,7 @@ async def process_payment(
             existing_payment = await _payment_by_key(db, order.id, idempotency_key)
             if existing_payment:
                 _ensure_same_request_in_flow(existing_payment, fingerprint, checkout=False)
-                return APIResponse.success_response(
-                    _payment_row_to_response(existing_payment, order)
-                )
+                return _payment_row_to_response(existing_payment, order)
             raise
 
     # Every provider call in this module goes through run_in_threadpool.
@@ -1153,7 +1152,7 @@ async def process_payment(
         # finalizes it.
         payment_row.status = "requires_action"
         await db.commit()
-        return APIResponse.success_response(PaymentResponse(
+        return PaymentResponse(
             order_id=order.id,
             payment_method=payment.payment_method,
             amount=payment.amount,
@@ -1166,7 +1165,7 @@ async def process_payment(
             client_secret=intent.client_secret,
             requires_action=True,
             next_action=intent.next_action,
-        ))
+        )
 
     if intent.status == PaymentIntentStatus.PROCESSING:
         # Accepted but not settled yet (Stripe's "processing", and any
@@ -1176,7 +1175,7 @@ async def process_payment(
         # webhook, as for 3D Secure above. This branch and the one below
         # used to be missing - everything other than requires_action was
         # applied as a success, and the order marked paid and confirmed.
-        return APIResponse.success_response(_payment_row_to_response(payment_row, order))
+        return _payment_row_to_response(payment_row, order)
 
     if intent.status != PaymentIntentStatus.SUCCEEDED:
         # Confirmed without an error and still unpaid (requires_payment_method,
@@ -1191,7 +1190,7 @@ async def process_payment(
         _apply_payment_success, order, payment_row, background_tasks, current_user.email
     )
 
-    return APIResponse.success_response(PaymentResponse(
+    return PaymentResponse(
         order_id=order.id,
         payment_method=payment.payment_method,
         amount=payment.amount,
@@ -1202,12 +1201,12 @@ async def process_payment(
         created_at=payment_row.created_at,
         transaction_id=intent.id,
         client_secret=intent.client_secret,
-    ))
+    )
 
 
 @router.post(
     "/{order_id}/checkout-session",
-    response_model=APIResponse[CheckoutSessionResponse],
+    response_model=CheckoutSessionResponse,
     responses={
         400: {"description": "Order already paid or cancelled"},
         404: {"description": "Order not found"},
@@ -1382,12 +1381,12 @@ async def create_checkout_session(
     payment_row.checkout_session_url = session.url
     await db.commit()
 
-    return APIResponse.success_response(_checkout_session_row_to_response(payment_row, order))
+    return _checkout_session_row_to_response(payment_row, order)
 
 
 @router.post(
     "/{order_id}/refund",
-    response_model=APIResponse[RefundResponse],
+    response_model=RefundResponse,
     responses={
         400: {"description": "Order not paid, or no successful payment found"},
         403: {"description": "Admin privileges required"},
@@ -1527,7 +1526,7 @@ async def refund_payment(
     order.updated_at = utc_now()
     await db.commit()
 
-    return APIResponse.success_response(RefundResponse(
+    return RefundResponse(
         id=refund.id,
         order_id=order.id,
         amount=_cents_to_decimal(refund_row.amount),
@@ -1540,12 +1539,12 @@ async def refund_payment(
         # already reported, says where the refund is now.
         status=refund_row.status,
         payment_status=order.payment_status,
-    ))
+    )
 
 
 @router.get(
     "/{order_id}/payments",
-    response_model=APIResponse[List[dict]],  # noqa: UP006 - List, not list: the repr names the OpenAPI schema (contract)
+    response_model=OrderPaymentList,
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
@@ -1584,43 +1583,43 @@ async def list_order_payments(
             PaymentDispute.payment_id.in_(payment_ids)
         ).order_by(PaymentDispute.id)
     )).scalars().all()
-    return APIResponse.success_response([
-        {
-            "id": p.id,
-            "status": p.status,
-            "amount": _cents_to_decimal(p.amount),
-            "amount_refunded": _cents_to_decimal(p.amount_refunded),
-            "currency": p.currency,
-            "transaction_id": p.payment_intent_id,
-            "checkout_session_id": p.checkout_session_id,
-            "requires_manual_review": p.requires_manual_review,
-            "created_at": p.created_at,
-            "refunds": [
-                {
-                    "id": r.refund_id,
-                    "amount": _cents_to_decimal(r.amount),
-                    "currency": r.currency,
-                    "status": r.status,
-                    "source": r.source,
-                    "failure_reason": r.failure_reason,
-                    "requires_manual_review": r.requires_manual_review,
-                    "created_at": r.created_at,
-                }
+    return OrderPaymentList(items=[
+        OrderPayment(
+            id=p.id,
+            status=p.status,
+            amount=_cents_to_decimal(p.amount),
+            amount_refunded=_cents_to_decimal(p.amount_refunded),
+            currency=p.currency,
+            transaction_id=p.payment_intent_id,
+            checkout_session_id=p.checkout_session_id,
+            requires_manual_review=p.requires_manual_review,
+            created_at=p.created_at,
+            refunds=[
+                OrderPaymentRefund(
+                    id=r.refund_id,
+                    amount=_cents_to_decimal(r.amount),
+                    currency=r.currency,
+                    status=r.status,
+                    source=r.source,
+                    failure_reason=r.failure_reason,
+                    requires_manual_review=r.requires_manual_review,
+                    created_at=r.created_at,
+                )
                 for r in refunds if r.payment_id == p.id
             ],
-            "disputes": [
-                {
-                    "id": d.dispute_id,
-                    "amount": _cents_to_decimal(d.amount),
-                    "currency": d.currency,
-                    "status": d.status,
-                    "reason": d.reason,
-                    "closed_at": d.closed_at,
-                    "created_at": d.created_at,
-                }
+            disputes=[
+                OrderPaymentDispute(
+                    id=d.dispute_id,
+                    amount=_cents_to_decimal(d.amount),
+                    currency=d.currency,
+                    status=d.status,
+                    reason=d.reason,
+                    closed_at=d.closed_at,
+                    created_at=d.created_at,
+                )
                 for d in disputes if d.payment_id == p.id
             ],
-        }
+        )
         for p in payments
     ])
 
@@ -1718,7 +1717,7 @@ def _has_open_dispute(db: Session, order_id: int, payment_id: int | None = None)
 # with its own 422; the refusal stays the 400 below, like a bad signature.
 @router.post(
     "/webhooks/stripe",
-    response_model=APIResponse[dict],
+    response_model=StripeWebhookAck,
     responses={400: {"description": "Missing or invalid webhook signature"}},
     openapi_extra={
         "parameters": [{
@@ -1801,10 +1800,10 @@ async def stripe_webhook(
         ),
     )
     if not stored:
-        return APIResponse.success_response({"status": "already_processed"})
+        return StripeWebhookAck(status="already_processed")
     # Publishing to the broker is blocking network IO (apply_async).
     await run_in_threadpool(stripe_events.enqueue_event, event.id)
-    return APIResponse.success_response({"status": "received"})
+    return StripeWebhookAck(status="received")
 
 
 # The transition table lives in app/services/orders.py, shared with the
