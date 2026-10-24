@@ -259,8 +259,15 @@ class PaymentChain(RuleBasedStateMachine):
     @rule(index=st.integers(0, 10), amount=st.one_of(st.none(), st.integers(1, 3000)))
     def admin_refunds(self, index, amount):
         value = None if amount is None else Decimal(amount) / 100
-        self._ok(self.shop.refund(self.admin, self._order_id(index), amount=value),
-                 200, 409)
+        response = self._ok(
+            self.shop.refund(self.admin, self._order_id(index), amount=value), 200, 400, 409)
+        if response.status_code == 400:
+            # The provider refusing more than is left on the charge. The
+            # route does not check the remainder itself: a replay of a
+            # refund that took everything that was left (same
+            # Idempotency-Key) must answer the first refund, and only the
+            # provider knows the key. Any other 400 would be a bug.
+            assert "exceeds the refundable amount" in response.json()["detail"]
 
     @precondition(lambda self: self.orders)
     @rule(index=st.integers(0, 10),

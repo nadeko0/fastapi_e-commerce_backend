@@ -344,3 +344,34 @@ def test_an_unknown_refund_without_a_usable_amount_is_not_recorded(shop, paid, a
     assert response.status_code == 200
     assert payment_rows(shop, paid["order"]["id"]) == [("succeeded", 1999, 0, "USD", False)]
     assert _ledger(shop, paid["order"]["id"]) == []
+
+
+# -- More than is left to refund -------------------------------------------------
+
+def test_a_refund_of_more_than_is_left_is_the_providers_400(shop, paid):
+    # The route does not compare the amount with what is left: a replay of
+    # the refund that took the rest (same Idempotency-Key) must answer that
+    # refund, and only the provider knows the key. The provider refuses an
+    # amount over what is left as invalid, a 400, and nothing is recorded.
+    order_id = paid["order"]["id"]
+    assert shop.refund(paid["admin"], order_id, amount="12.64").status_code == 200
+
+    response = shop.refund(paid["admin"], order_id, amount="7.36")
+
+    assert response.status_code == 400, response.text
+    assert "exceeds the refundable amount" in response.json()["detail"]
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 1264, "USD", False)]
+
+
+def test_a_replay_of_the_refund_that_took_the_rest_answers_that_refund(shop, paid, monkeypatch):
+    # Pending, so the order stays paid and the replay reaches the refund.
+    _refunds_start(monkeypatch, RefundStatus.PENDING)
+    order_id = paid["order"]["id"]
+    key = uuid.uuid4().hex
+    first = shop.refund(paid["admin"], order_id, key=key)
+
+    replay = shop.refund(paid["admin"], order_id, key=key)
+
+    assert (first.status_code, replay.status_code) == (200, 200), replay.text
+    assert replay.json()["id"] == first.json()["id"]
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 1999, "USD", False)]
