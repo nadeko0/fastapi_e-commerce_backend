@@ -65,9 +65,8 @@ def setup_logging(config=settings):
     stream_handler.setFormatter(formatter)
 
     handlers: list[logging.Handler] = [stream_handler]
-    log_file = config.LOG_FILE.strip()
+    log_file = (config.LOG_FILE or "").strip()
     if log_file:
-        # Kept for 3.x compatibility; an empty LOG_FILE leaves stdout alone.
         path = Path(log_file)
         path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = RotatingFileHandler(
@@ -103,4 +102,4 @@ def setup_logging(config=settings):
     if log_file:
         startup_logger.info(f"Log file: {Path(log_file).absolute()} (rotation: 100MB max, 5 backups)")
     else:
-        startup_logger.info("Log file disabled (LOG_FILE is empty); logging to stdout only")
+        startup_logger.info("Log file disabled (LOG_FILE is not set); logging to stdout only")

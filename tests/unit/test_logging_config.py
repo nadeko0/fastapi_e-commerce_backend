@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+from logging.handlers import RotatingFileHandler
 
 import pytest
 
@@ -158,5 +159,24 @@ def test_log_file_creates_missing_directories(configure, tmp_path):
     assert "in a new directory" in path.read_text(encoding="utf-8")
 
 
-def test_log_file_defaults_to_the_3x_location():
-    assert Settings(_env_file=None, LOG_FILE=Settings.model_fields["LOG_FILE"].default).LOG_FILE == "logs/app.log"
+def test_log_file_is_unset_by_default(monkeypatch):
+    monkeypatch.delenv("LOG_FILE")
+    assert Settings(_env_file=None).LOG_FILE is None
+
+
+def test_unset_log_file_adds_no_file_handler_and_creates_no_directory(configure, tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    configure(ENVIRONMENT="production", LOG_FILE=None)
+    capsys.readouterr()
+    logging.getLogger("app.x").info("stdout only")
+    assert [type(h) for h in logging.getLogger().handlers] == [logging.StreamHandler]
+    assert [r["message"] for r in _stdout_records(capsys)] == ["stdout only"]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_set_log_file_adds_a_rotating_file_handler(configure):
+    path = configure(ENVIRONMENT="production")
+    assert any(
+        isinstance(h, RotatingFileHandler) and h.baseFilename == str(path)
+        for h in logging.getLogger().handlers
+    )
