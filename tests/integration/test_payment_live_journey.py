@@ -163,7 +163,7 @@ def test_cart_to_partial_and_remaining_refund(shop, outbox, stripe_sdk):
     assert payment_rows(shop, order["id"]) == [("succeeded", 2500, 2500, "USD", False)]
     assert _stripe_refunded(stripe_sdk, attempt.payment_intent_id) == [
         (1000, "succeeded"), (1500, "succeeded")]
-    assert shop.refund(admin, order["id"], amount="0.01").status_code == 400
+    assert shop.refund(admin, order["id"], amount="0.01").status_code == 409
 
 
 # -- Stripe's test PaymentMethods ------------------------------------------------------
@@ -189,7 +189,8 @@ def test_a_declined_payment_method_fails_the_attempt_with_a_message(shop, paymen
 
     response = shop.pay(buyer, order["id"], token=payment_method)
 
-    assert response.status_code == 402, response.text
+    assert response.status_code == 422, response.text
+    assert response.json()["type"].endswith("/problems/payment-declined")
     message = response.json()["detail"]
     assert isinstance(message, str) and 10 < len(message) < 300
     assert "Traceback" not in message and "sk_" not in message

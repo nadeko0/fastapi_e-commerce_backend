@@ -133,8 +133,8 @@ def test_two_concurrent_payments_for_one_order_charge_it_once(client, db_session
     assert not any(thread.is_alive() for thread in threads)
 
     codes = sorted(response.status_code for response in results.values())
-    # One wins; the other is told the order is paid or a payment is in flight.
-    assert codes[0] == 200 and codes[1] in (400, 409), [r.text for r in results.values()]
+    # One wins; the other is a 409: the order is paid, or a payment is in flight.
+    assert codes == [200, 409], [r.text for r in results.values()]
 
     db_session.expire_all()
     order = _get_order(db_session, order_id)
@@ -203,7 +203,7 @@ def test_orders_with_the_same_products_in_opposite_order_do_not_deadlock(client,
         lambda c: Shop(c, db_session).place_order(buyers[1]),
     ])
 
-    assert [results[i].status_code for i in range(2)] == [200, 200], [r.text for r in results.values()]
+    assert [results[i].status_code for i in range(2)] == [201, 201], [r.text for r in results.values()]
     assert shop.stock(first) == 3 and shop.stock(second) == 3
 
 
@@ -226,7 +226,7 @@ def test_a_cancellation_and_an_order_with_the_same_products_in_opposite_order_do
         lambda c: Shop(c, db_session).place_order(buyer),
     ])
 
-    assert [results[i].status_code for i in range(2)] == [200, 200], [r.text for r in results.values()]
+    assert [results[i].status_code for i in range(2)] == [200, 201], [r.text for r in results.values()]
     # 5 - 1 (first order) + 1 (cancelled) - 1 (second order)
     assert shop.stock(first) == 4 and shop.stock(second) == 4
 
