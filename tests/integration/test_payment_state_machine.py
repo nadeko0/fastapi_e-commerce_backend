@@ -87,6 +87,12 @@ PRICE = "7.35"
 MAX_ORDERS = 3
 
 
+# No teardown(): Hypothesis calls it at the end of every example, and the
+# state an example leaves behind is already cleared where the next one starts.
+# setup() resets the in-process provider and makes its own product, buyer and
+# admin, so examples share the database and fake Redis (function fixtures)
+# but never an entity; the last example's provider state is dropped by the
+# _quiet fixture below. A teardown that deleted rows would only cost time.
 class PaymentChain(RuleBasedStateMachine):
     shop: Shop = None  # set by the test function
 
