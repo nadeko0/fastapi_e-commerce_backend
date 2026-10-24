@@ -114,7 +114,7 @@ def test_order_key_reused_with_another_address_answers_422(shop):
     )
 
     assert response.status_code == 422
-    assert response.json() == {"detail": REUSED_KEY_DETAIL}
+    assert response.json()["detail"] == REUSED_KEY_DETAIL
     assert shop.db.query(Order).count() == 1
 
 
@@ -172,7 +172,7 @@ def test_order_racing_a_twin_with_another_address_answers_422(shop, monkeypatch)
     response = shop.place_order(buyer, key=key)
 
     assert response.status_code == 422
-    assert response.json() == {"detail": REUSED_KEY_DETAIL}
+    assert response.json()["detail"] == REUSED_KEY_DETAIL
     assert shop.db.query(Order).count() == 1
 
 
@@ -192,7 +192,7 @@ def test_pay_key_reused_with_another_body_answers_422_and_charges_once(shop, mon
 
     for response in (other_token, other_amount, other_currency):
         assert response.status_code == 422, response.text
-        assert response.json() == {"detail": REUSED_KEY_DETAIL}
+        assert response.json()["detail"] == REUSED_KEY_DETAIL
     assert len(created) == 1
     assert len(shop.payments(order["id"])) == 1
 
@@ -265,7 +265,7 @@ def test_checkout_key_reused_with_another_body_answers_422(shop, monkeypatch):
     response = shop.checkout_session(buyer, order["id"], key=key, payload={"currency": "USD"})
 
     assert response.status_code == 422, response.text
-    assert response.json() == {"detail": REUSED_KEY_DETAIL}
+    assert response.json()["detail"] == REUSED_KEY_DETAIL
     assert len(created) == 1
     assert len(shop.payments(order["id"])) == 1
 

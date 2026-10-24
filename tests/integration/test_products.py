@@ -274,6 +274,6 @@ def test_list_products_with_min_price_above_max_price_is_a_422_not_a_500(client)
     )
 
     assert response.status_code == 422
-    (error,) = response.json()["detail"]
+    (error,) = response.json()["errors"]
     assert error["loc"] == ["query", "max_price"]
     assert "max_price must be greater than min_price" in error["msg"]

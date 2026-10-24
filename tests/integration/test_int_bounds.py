@@ -74,7 +74,7 @@ def _url(path, params, overrides):
 def _out_of_range_errors(response, where, name, rule):
     assert response.status_code == 422, response.text
     return [
-        error for error in response.json()["detail"]
+        error for error in response.json()["errors"]
         if error["loc"][:2] == [where, name] and error["type"] == rule
     ]
 

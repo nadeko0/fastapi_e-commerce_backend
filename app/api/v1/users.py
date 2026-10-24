@@ -22,7 +22,7 @@ from app.api.merge_patch import PATCH_DESCRIPTION, merge_patch_body
 from app.api.v1.cart import merge_guest_cart_on_login_async
 from app.core.clock import utc_now
 from app.core.dependencies import BearerToken, Cache, CurrentUser, DbSession
-from app.core.errors import sanitized_errors
+from app.core.errors import Problem, ProblemType, sanitized_errors
 from app.core.openapi import DocumentedRoute
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password
 from app.core.rate_limit import check_login_attempt, clear_login_failures
@@ -625,12 +625,11 @@ async def create_address(
 
         return AddressResponse.model_validate(address)
     except ValidationError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "message": "Invalid address data",
-                "errors": sanitized_errors(e.errors())
-            }
+        raise Problem(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            type=ProblemType.VALIDATION_ERROR,
+            detail="Invalid address data",
+            errors=sanitized_errors(e.errors()),
         ) from None
     except IntegrityError as e:
         await db.rollback()

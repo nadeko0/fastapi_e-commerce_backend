@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, CurrentUser, DbSession, Provider
+from app.core.errors import Problem, ProblemType
 from app.core.idempotency import (
     PAYMENT_KEY_HEADER_DESCRIPTION,
     REFUND_KEY_HEADER_DESCRIPTION,
@@ -627,8 +628,9 @@ def _replay_checkout_session(payment_row: Payment, order: Order):
     """
     if payment_row.checkout_session_id:
         return _checkout_session_row_to_response(payment_row, order)
-    raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
+    raise Problem(
+        status.HTTP_409_CONFLICT,
+        type=ProblemType.IDEMPOTENCY_KEY_IN_USE,
         detail=(
             "This Idempotency-Key belongs to a payment attempt without a checkout "
             "session (still in progress, or failed); retry later, or start a new "
@@ -987,8 +989,9 @@ async def process_payment(
         if _is_checkout_attempt(existing_payment):
             # Sending it as a PaymentIntent would be a second way to
             # charge the order; only /checkout-session settles it.
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
+            raise Problem(
+                status.HTTP_409_CONFLICT,
+                type=ProblemType.IDEMPOTENCY_KEY_IN_USE,
                 detail=(
                     "This Idempotency-Key belongs to a checkout session attempt "
                     "whose outcome is not known yet; retry it on "
@@ -1114,8 +1117,9 @@ async def process_payment(
             await db.refresh(payment_row)
             payment_row.status = "unknown"
             await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+        raise Problem(
+            status.HTTP_409_CONFLICT,
+            type=ProblemType.IDEMPOTENCY_KEY_IN_USE,
             detail="Idempotency key already used with different payment parameters",
         ) from None
     except InvalidRequestError as e:
@@ -1138,8 +1142,9 @@ async def process_payment(
         # the order may have been paid by another attempt (a Checkout
         # Session completing) since the guard above read it.
         await db.run_sync(_apply_payment_failure, order, payment_row)
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        raise Problem(
+            status.HTTP_402_PAYMENT_REQUIRED,
+            type=ProblemType.PAYMENT_DECLINED,
             detail=e.message,
         ) from e
 
@@ -1181,8 +1186,9 @@ async def process_payment(
         # Confirmed without an error and still unpaid (requires_payment_method,
         # canceled, ...): a failed attempt, like a decline.
         await db.run_sync(_apply_payment_failure, order, payment_row)
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        raise Problem(
+            status.HTTP_402_PAYMENT_REQUIRED,
+            type=ProblemType.PAYMENT_DECLINED,
             detail="The payment was not completed; please try again or use another payment method",
         )
 
@@ -1364,8 +1370,9 @@ async def create_checkout_session(
             await db.refresh(payment_row)
             payment_row.status = "unknown"
             await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+        raise Problem(
+            status.HTTP_409_CONFLICT,
+            type=ProblemType.IDEMPOTENCY_KEY_IN_USE,
             detail="Idempotency key already used with different checkout session parameters",
         ) from None
     except InvalidRequestError as e:
@@ -1493,8 +1500,9 @@ async def refund_payment(
             headers={"Retry-After": "5"},
         ) from e
     except IdempotencyError:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
+        raise Problem(
+            http_status.HTTP_409_CONFLICT,
+            type=ProblemType.IDEMPOTENCY_KEY_IN_USE,
             detail="Idempotency key already used with different refund parameters",
         ) from None
     except (CardError, InvalidRequestError) as e:

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.core.body_limit import BodySizeLimitMiddleware
 
 LIMIT = 100
-TOO_LARGE = {"detail": "Request body is too large"}
+TOO_LARGE = "Request body is too large"
 
 
 def _build():
@@ -37,7 +37,7 @@ def test_content_length_over_the_limit_is_413_and_the_app_is_not_called():
     response = client.post("/echo", content=b"x" * (LIMIT + 1))
 
     assert response.status_code == 413
-    assert response.json() == TOO_LARGE
+    assert response.json()["detail"] == TOO_LARGE
     assert calls == []
 
 
@@ -58,7 +58,7 @@ def test_chunked_body_over_the_limit_is_413_and_the_app_never_sees_a_partial_bod
     response = client.post("/echo", content=chunks())
 
     assert response.status_code == 413
-    assert response.json() == TOO_LARGE
+    assert response.json()["detail"] == TOO_LARGE
     assert calls == []
 
 
@@ -133,7 +133,7 @@ def test_app_keeps_getting_disconnect_after_rejection_and_client_disconnect_pass
     async def send(message):
         sent.append(message)
 
-    scope = {"type": "http", "headers": []}
+    scope = {"type": "http", "path": "/", "headers": []}
     asyncio.run(BodySizeLimitMiddleware(app, limit=LIMIT)(scope, receive, send))
 
     assert seen == ["http.disconnect"] * 4

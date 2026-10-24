@@ -47,7 +47,7 @@ def test_request_over_the_limit_gets_503_with_retry_after():
 
     assert response.status_code == 503
     assert response.headers["Retry-After"] == "1"
-    assert response.json() == {"detail": "Server is at capacity, please retry shortly"}
+    assert response.json()["detail"] == "Server is at capacity, please retry shortly"
     # A rejected request never took a slot, so it must not give one back.
     assert middleware.in_flight == 2
 

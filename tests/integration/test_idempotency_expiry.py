@@ -75,7 +75,7 @@ def test_inside_the_ttl_nothing_is_cleared_and_keys_still_replay(shop):
     assert again.json()["id"] == first.json()["id"]
     other = shop.pay(buyer, order["id"], token=PAY_3DS, key=key)
     assert other.status_code == 422
-    assert other.json() == {"detail": REUSED_KEY_DETAIL}
+    assert other.json()["detail"] == REUSED_KEY_DETAIL
 
 
 def test_an_expired_order_key_creates_a_new_order(shop):

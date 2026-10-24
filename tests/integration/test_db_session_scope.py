@@ -77,7 +77,7 @@ def test_failing_final_commit_answers_500_not_200(monkeypatch):
                     raise_server_exceptions=False) as c:
         response = c.get("/write")
     assert response.status_code == 500
-    assert response.json() == {"detail": "A database error occurred"}
+    assert response.json()["detail"] == "A database error occurred"
     assert events == ["commit", "rollback", "close"]
 
 

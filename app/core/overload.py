@@ -1,6 +1,6 @@
-from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.core.errors import Problem, ProblemType, problem_response
 from app.core.probes import PROBE_PATHS
 
 
@@ -46,11 +46,12 @@ class InFlightLimitMiddleware:
             return
 
         if self.in_flight >= self.limit:
-            response = JSONResponse(
-                {"detail": "Server is at capacity, please retry shortly"},
-                status_code=503,
-                headers={"Retry-After": "1"},
-            )
+            response = problem_response(scope, Problem(
+                503,
+                type=ProblemType.SERVICE_OVERLOADED,
+                detail="Server is at capacity, please retry shortly",
+                retry_after=1,
+            ))
             await response(scope, receive, send)
             return
 

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.dependencies import Cache, DbSession
+from app.core.errors import Problem, ProblemType
 from app.core.openapi import DocumentedRoute
 from app.core.rate_limit import (
     client_address,
@@ -497,9 +498,10 @@ async def add_to_cart(
                 owner = CartOwner.guest(new_guest_cart_id())
             cart = await redis.add_to_cart_atomic(owner, **line)
     except InsufficientStockError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Not enough stock available"
+        raise Problem(
+            status.HTTP_400_BAD_REQUEST,
+            type=ProblemType.INSUFFICIENT_STOCK,
+            detail="Not enough stock available",
         ) from None
     except CartFullError as error:
         raise _cart_full(error) from None
@@ -553,9 +555,10 @@ async def update_cart_item(
             detail="Item not in cart"
         ) from None
     except InsufficientStockError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Not enough stock available"
+        raise Problem(
+            status.HTTP_400_BAD_REQUEST,
+            type=ProblemType.INSUFFICIENT_STOCK,
+            detail="Not enough stock available",
         ) from None
 
     cart = _cart_or_503(cart)

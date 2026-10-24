@@ -8,8 +8,8 @@ handler, so auth, validation, side effects and responses are identical.
 
 Request media types: FastAPI parses any ``application/json`` or
 ``application/*+json`` body, which includes ``application/merge-patch+json``
-(RFC 7396 section 5). Other media types are not rejected with 415, as for
-every other route of this API; the OpenAPI document lists both JSON types.
+(RFC 7396 section 5). Any other media type is a 415 with an Accept header
+naming both (app/core/errors.py); the OpenAPI document lists both JSON types.
 """
 
 MERGE_PATCH_MEDIA_TYPE = "application/merge-patch+json"

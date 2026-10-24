@@ -84,7 +84,7 @@ def test_a_price_the_column_cannot_hold_is_422(shop, write, field, price):
     response = write(shop, price)
 
     assert response.status_code == 422, response.text
-    assert any(error["loc"][-1] == field for error in response.json()["detail"])
+    assert any(error["loc"][-1] == field for error in response.json()["errors"])
 
 
 @pytest.mark.parametrize("write, field", WRITES)

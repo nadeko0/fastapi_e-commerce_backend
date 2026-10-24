@@ -1,10 +1,11 @@
 from starlette.datastructures import MutableHeaders
 from starlette.requests import HTTPConnection, Request
-from starlette.responses import PlainTextResponse, Response
+from starlette.responses import Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.v1.cart import guest_cart_cookie_name
 from app.core.config import settings
+from app.core.errors import Problem, problem_response
 
 # Responses of these prefixes carry tokens, personal data or a payment
 # client_secret: no cache may keep them (RFC 9111 section 5.2.2.5). So does
@@ -98,13 +99,14 @@ class SecurityHeadersMiddleware:
 
 
 async def server_error_handler(request: Request, exc: Exception) -> Response:
-    """The 500 for an unhandled exception: Starlette's own default response
-    (plain text, "Internal Server Error"), with the security headers.
+    """The 500 for an unhandled exception: a problem details object with no
+    detail (the exception's text can carry implementation details, RFC 9457
+    section 5), with the security headers.
 
     Registered for Exception, which Starlette hands to ServerErrorMiddleware
     as its handler. The exception is still re-raised after this response is
     sent, so server logs and the test client see it as before."""
-    response = PlainTextResponse("Internal Server Error", status_code=500)
+    response = problem_response(request.scope, Problem(500))
     apply_security_headers(response.headers, request.scope)
     # ServerErrorMiddleware is outside RequestContextMiddleware, which has
     # already left; its id is on the scope.

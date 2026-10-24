@@ -5,7 +5,7 @@ from app.core.config import settings
 
 API = settings.API_V1_STR
 OVER = settings.MAX_REQUEST_BODY_BYTES + 1
-TOO_LARGE = {"detail": "Request body is too large"}
+TOO_LARGE = "Request body is too large"
 
 
 def _big_json(size):
@@ -22,7 +22,7 @@ def test_register_with_an_oversized_body_is_413_with_security_headers(client):
                            headers={"Content-Type": "application/json"})
 
     assert response.status_code == 413
-    assert response.json() == TOO_LARGE
+    assert response.json()["detail"] == TOO_LARGE
     assert response.headers["X-Content-Type-Options"] == "nosniff"
 
 
@@ -31,7 +31,7 @@ def test_webhook_with_an_oversized_body_is_413_before_the_signature_check(client
     response = client.post(f"{API}/orders/webhooks/stripe", content=_big_json(OVER))
 
     assert response.status_code == 413
-    assert response.json() == TOO_LARGE
+    assert response.json()["detail"] == TOO_LARGE
 
 
 def test_authenticated_endpoint_with_an_oversized_body_is_413(client):
@@ -51,7 +51,7 @@ def test_chunked_oversized_body_is_413(client):
                            headers={"Content-Type": "application/json"})
 
     assert response.status_code == 413
-    assert response.json() == TOO_LARGE
+    assert response.json()["detail"] == TOO_LARGE
 
 
 def test_body_at_the_limit_and_under_it_reach_the_app(client):

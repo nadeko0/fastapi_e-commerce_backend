@@ -25,9 +25,10 @@ import hashlib
 import json
 from typing import Any
 
-from fastapi import HTTPException, status
+from fastapi import status
 
 from app.core.config import settings
+from app.core.errors import Problem, ProblemType
 
 REUSED_KEY_DETAIL = "Idempotency-Key was already used with a different request payload"
 
@@ -50,8 +51,9 @@ def ensure_same_request(stored: str | None, fingerprint: str) -> None:
     """422 when the key was first used by a different request; no-op for a
     row stored without a fingerprint."""
     if stored is not None and stored != fingerprint:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        raise Problem(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            type=ProblemType.IDEMPOTENCY_KEY_REUSED,
             detail=REUSED_KEY_DETAIL,
         )
 

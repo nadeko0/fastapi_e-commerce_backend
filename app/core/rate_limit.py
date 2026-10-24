@@ -53,11 +53,12 @@ from functools import lru_cache
 from typing import NamedTuple
 
 import jwt
-from fastapi import HTTPException, Request, Response
+from fastapi import Request, Response
 from redis.exceptions import RedisError
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS, HTTP_503_SERVICE_UNAVAILABLE
 
 from app.core.config import RATE_LIMIT_PATTERN, settings
+from app.core.errors import Problem, ProblemType
 from app.core.probes import PROBE_PATHS
 from app.core.security import ACCESS_TOKEN_REQUIRED_CLAIMS, user_id_from_subject
 from app.services.redis_async import get_async_redis
@@ -288,11 +289,12 @@ async def seconds_until_allowed(key: str, rate: Rate) -> int:
         return 0
 
 
-def too_many_requests(message: str, retry_after: int) -> HTTPException:
-    return HTTPException(
-        status_code=HTTP_429_TOO_MANY_REQUESTS,
-        detail={"error": message, "retry_after": retry_after},
-        headers={"Retry-After": str(retry_after)},
+def too_many_requests(message: str, retry_after: int) -> Problem:
+    return Problem(
+        HTTP_429_TOO_MANY_REQUESTS,
+        type=ProblemType.RATE_LIMITED,
+        detail=message,
+        retry_after=retry_after,
     )
 
 
@@ -420,13 +422,10 @@ async def check_login_attempt(email: str, request: Request) -> None:
             )
     except RedisError as e:
         logger.error(f"Rate limiting error, login refused: {e}")
-        raise HTTPException(
-            status_code=HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": "Login is temporarily unavailable",
-                "retry_after": LOGIN_UNAVAILABLE_RETRY_AFTER,
-            },
-            headers={"Retry-After": str(LOGIN_UNAVAILABLE_RETRY_AFTER)},
+        raise Problem(
+            HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Login is temporarily unavailable",
+            retry_after=LOGIN_UNAVAILABLE_RETRY_AFTER,
         ) from e
     if retry_after:
         raise too_many_requests("Too many failed login attempts", retry_after)

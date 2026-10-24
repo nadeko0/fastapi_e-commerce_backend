@@ -83,7 +83,9 @@ def test_every_kind_of_refusal_looks_the_same_and_costs_one_bcrypt(
     ]
 
     assert {response.status_code for response in answers} == {401}
-    assert len({response.text for response in answers}) == 1
+    # The request id is the one member that differs between requests.
+    assert len({response.json()["detail"] for response in answers}) == 1
+    assert len({response.json()["title"] for response in answers}) == 1
     assert len(calls) == 3
 
 

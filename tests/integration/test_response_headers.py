@@ -251,8 +251,8 @@ def test_unhandled_exception_500_carries_the_security_headers(client, exploding_
         normal = lenient.get("/health")
 
     assert response.status_code == 500
-    assert response.text == "Internal Server Error"
-    assert response.headers["content-type"].startswith("text/plain")
+    assert response.json()["title"] == "Internal Server Error"
+    assert response.headers["content-type"] == "application/problem+json"
     for name in SECURITY_HEADERS:
         assert response.headers[name] == normal.headers[name]
 

@@ -293,9 +293,9 @@ def test_a_country_that_outgrows_the_limit_when_title_cased_is_422_without_echoi
 
     assert response.status_code == 422
     assert country not in response.text
-    detail = response.json()["detail"]
-    assert detail["message"] == "Invalid address data"
-    assert detail["errors"]
-    for error in detail["errors"]:
+    problem = response.json()
+    assert problem["detail"] == "Invalid address data"
+    assert problem["errors"]
+    for error in problem["errors"]:
         assert "input" not in error
         assert set(error) <= {"type", "loc", "msg", "ctx", "url"}

@@ -65,7 +65,7 @@ def test_database_error_in_a_legal_route_answers_like_any_other_async_route(clie
         reference_response = lenient.get("/reference")
 
     assert reference_response.status_code == 500
-    assert reference_response.json() == {"detail": "A database error occurred"}
+    assert reference_response.json()["detail"] == "A database error occurred"
     assert legal.status_code == reference_response.status_code
-    assert legal.json() == reference_response.json()
+    assert legal.json()["detail"] == reference_response.json()["detail"]
     assert "SELECT" not in legal.text and "leak@example.com" not in legal.text

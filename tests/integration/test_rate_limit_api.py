@@ -99,7 +99,8 @@ def test_limit_answers_429_with_retry_after_and_recovers(client, limits):
         blocked = client.get(f"{API}/categories")
         assert blocked.status_code == 429
         assert blocked.headers["Retry-After"] == "50"
-        assert blocked.json() == {"detail": {"error": "Rate limit exceeded", "retry_after": 50}}
+        assert blocked.json()["detail"] == "Rate limit exceeded"
+        assert blocked.json()["retry_after"] == 50
 
         clock.tick(51)
         assert client.get(f"{API}/categories").status_code == 200
@@ -161,7 +162,7 @@ def test_auth_routes_are_limited_per_address_whoever_is_named(client, limits):
     assert login(client, "b@example.com", "wrong-password").status_code == 401
     blocked = login(client, "c@example.com", "wrong-password")
     assert blocked.status_code == 429
-    assert blocked.json()["detail"]["error"] == "Rate limit exceeded"
+    assert blocked.json()["detail"] == "Rate limit exceeded"
     # Another address is not affected.
     elsewhere = TestClient(app, client=("198.51.100.9", 50000))
     assert login(elsewhere, "c@example.com", "wrong-password").status_code == 401
@@ -286,9 +287,8 @@ def test_login_is_refused_while_its_failure_count_cannot_be_kept(
         refused = login(client, payload["email"], password)
         assert refused.status_code == 503
         assert refused.headers["Retry-After"] == "30"
-        assert refused.json() == {
-            "detail": {"error": "Login is temporarily unavailable", "retry_after": 30}
-        }
+        assert refused.json()["detail"] == "Login is temporarily unavailable"
+        assert refused.json()["retry_after"] == 30
 
 
 # --- failed logins, per account ----------------------------------------------------
@@ -336,9 +336,8 @@ def test_the_backstop_counts_failures_per_email_across_addresses(
             blocked = login(caller, payload["email"], "wrong-4")
             assert blocked.status_code == 429
             assert blocked.headers["Retry-After"] == "840"
-            assert blocked.json() == {
-                "detail": {"error": "Too many failed login attempts", "retry_after": 840}
-            }
+            assert blocked.json()["detail"] == "Too many failed login attempts"
+            assert blocked.json()["retry_after"] == 840
         # The right password is refused as well until the window is over...
         assert login(client, payload["email"], payload["password"]).status_code == 429
         # ...and another account is not affected, from the same address.
@@ -377,9 +376,9 @@ def test_refusal_looks_the_same_for_an_email_without_an_account(
         answers = []
         for _ in range(5):
             response = login(client, email, "wrong-password")
-            answers.append(
-                (response.status_code, response.json(), response.headers.get("Retry-After"))
-            )
+            # request_id is per request; everything else must match.
+            body = {k: v for k, v in response.json().items() if k != "request_id"}
+            answers.append((response.status_code, body, response.headers.get("Retry-After")))
         return answers
 
     with freeze_time("2026-01-01 00:00:00"):

@@ -55,7 +55,7 @@ def test_reset_confirm_takes_the_token_from_the_body_only(client):
     # A missing token is a validation error, not an invalid-token 400.
     missing = client.post(f"{USERS}/password/reset/confirm", json={"new_password": "NewStr0ngPass"})
     assert missing.status_code == 422
-    assert missing.json()["detail"][0]["loc"] == ["body", "token"]
+    assert missing.json()["errors"][0]["loc"] == ["body", "token"]
 
     empty = client.post(
         f"{USERS}/password/reset/confirm", json={"token": "", "new_password": "NewStr0ngPass"}
@@ -112,7 +112,7 @@ def test_no_deprecation_headers_are_exposed_to_browsers(client):
 
 def _is_missing_body(response):
     assert response.status_code == 422
-    detail = response.json()["detail"][0]
+    detail = response.json()["errors"][0]
     assert (detail["type"], detail["loc"]) == ("missing", ["body"])
 
 

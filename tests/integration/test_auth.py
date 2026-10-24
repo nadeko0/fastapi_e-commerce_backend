@@ -252,9 +252,11 @@ def test_login_refuses_a_deactivated_account_like_a_wrong_password(
     )
 
     assert right_password.status_code == 401
-    assert right_password.json() == wrong_password.json() == {
-        "detail": "Incorrect email or password"
-    }
+    # Same body, same request_id apart: nothing tells the two refusals apart.
+    right_body, wrong_body = right_password.json(), wrong_password.json()
+    right_body.pop("request_id"), wrong_body.pop("request_id")
+    assert right_body == wrong_body
+    assert right_body["detail"] == "Incorrect email or password"
     # bcrypt ran both times: the answer takes as long as any other refusal.
     assert len(calls) == 2
 
@@ -417,7 +419,7 @@ def test_password_reset_weak_new_password_is_422_with_or_without_current_passwor
     ):
         response = client.post(url, json={"token": reset_token, **body})
         assert response.status_code == 422, body
-        assert response.json()["detail"][0]["loc"][:2] == ["body", "new_password"]
+        assert response.json()["errors"][0]["loc"][:2] == ["body", "new_password"]
 
     assert client.post(url, json={"token": reset_token}).status_code == 422
 
@@ -610,9 +612,9 @@ def test_login_brute_force_is_blocked_after_rate_limit_exceeded(
 
         blocked_response = attempt()
         assert blocked_response.status_code == 429
-        detail = blocked_response.json()["detail"]
-        assert detail["error"] == "Too many failed login attempts"
-        assert detail["retry_after"] == 15 * 60
+        problem = blocked_response.json()
+        assert problem["detail"] == "Too many failed login attempts"
+        assert problem["retry_after"] == 15 * 60
         assert blocked_response.headers["Retry-After"] == "900"
 
         # The right password does not get through during the block either.

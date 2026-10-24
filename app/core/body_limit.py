@@ -1,5 +1,6 @@
-from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from app.core.errors import Problem, ProblemType, problem_response
 
 
 class BodySizeLimitMiddleware:
@@ -34,14 +35,15 @@ class BodySizeLimitMiddleware:
         self.limit = limit
 
     @staticmethod
-    def _too_large() -> JSONResponse:
-        return JSONResponse(
-            {"detail": "Request body is too large"},
-            status_code=413,
+    def _too_large(scope: Scope):
+        return problem_response(scope, Problem(
+            413,
+            type=ProblemType.BODY_TOO_LARGE,
+            detail="Request body is too large",
             # The rest of an oversized body may still be on the wire; do not
             # try to read it on a reused connection.
             headers={"Connection": "close"},
-        )
+        ))
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -50,7 +52,7 @@ class BodySizeLimitMiddleware:
 
         declared = dict(scope["headers"]).get(b"content-length")
         if declared is not None and declared.isdigit() and int(declared) > self.limit:
-            await self._too_large()(scope, receive, send)
+            await self._too_large(scope)(scope, receive, send)
             return
 
         received = 0
@@ -67,7 +69,7 @@ class BodySizeLimitMiddleware:
                 if received > self.limit:
                     rejected = True
                     if not response_started:
-                        await self._too_large()(scope, receive, send)
+                        await self._too_large(scope)(scope, receive, send)
                     return {"type": "http.disconnect"}
             return message
 

@@ -59,7 +59,7 @@ def _assert_same_but_input(client, method, url, secret=None, **kwargs):
     if secret:
         assert secret not in ours.text
         assert secret in theirs.text  # the default really does echo it
-    mine, default = ours.json()["detail"], theirs.json()["detail"]
+    mine, default = ours.json()["errors"], theirs.json()["detail"]
     assert len(mine) == len(default) > 0
     for got, want in zip(mine, default, strict=True):
         for key in ("type", "loc", "msg"):
@@ -82,7 +82,7 @@ def test_short_password_422_keeps_constraint_context(client):
         client, "POST", f"{USERS}/password/reset/confirm",
         secret="sh0rt", json={"token": "sometoken", "current_password": "x", "new_password": "sh0rt"},
     )
-    ctxs = [e["ctx"] for e in response.json()["detail"] if "ctx" in e]
+    ctxs = [e["ctx"] for e in response.json()["errors"] if "ctx" in e]
     assert {"min_length": 8} in ctxs
 
 
@@ -92,7 +92,7 @@ def test_missing_field_422_does_not_echo_the_body(client):
     response = _assert_same_but_input(
         client, "POST", f"{USERS}/register", secret=SECRET, json=payload,
     )
-    assert response.json()["detail"][0]["type"] == "missing"
+    assert response.json()["errors"][0]["type"] == "missing"
 
 
 def test_password_reset_422_does_not_echo_new_password(client):
@@ -112,20 +112,20 @@ def test_big_invalid_body_422_is_not_echoed_back(client):
     assert len(response.content) < 5_000
 
 
-def test_malformed_json_422_does_not_echo_it(client):
+def test_malformed_json_400_does_not_echo_it(client):
     body = '{"password": "' + SECRET + '", '
     response = client.post(
         f"{USERS}/register", content=body, headers={"Content-Type": "application/json"},
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
     assert SECRET not in response.text
     assert not _has_key(response.json(), "input")
-    assert response.json()["detail"][0]["type"] == "json_invalid"
+    assert response.json()["type"].endswith("/malformed-request")
 
 
 def test_ctx_never_carries_a_submitted_value(client):
     # a value_error's ctx holds the exception object; its text is in `msg`
     response = client.post(f"{USERS}/register", json=_register_payload(password="qwertyuiop"))
-    for error in response.json()["detail"]:
+    for error in response.json()["errors"]:
         assert "qwertyuiop" not in json.dumps(error)
         assert "error" not in error.get("ctx", {})
