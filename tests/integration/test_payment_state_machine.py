@@ -365,3 +365,42 @@ def test_the_payment_chain_keeps_its_invariants(client, db_session, tasks_db, mo
     # outcomes vary from run to run and are not required.
     for outcome in ("orders 201", "pay 200", "stripe 200"):
         assert SEEN[outcome] > 0, (outcome, SEEN)
+
+
+def test_an_over_refund_of_a_paid_order_is_the_providers_400(client, db_session, tasks_db):
+    """The sequence Hypothesis shrank the run to in 4.0.0, replayed by hand.
+
+    @example does not apply to a RuleBasedStateMachine; Hypothesis prints a
+    failing run as plain calls on the machine ("you should just be able to
+    copy and paste the code into a test"), so this is that printout: three
+    orders, one paid, the others cancelled again and again (409 from the
+    second time on), then a refund of 14.82 on the paid 7.35 order. The
+    provider refuses it as too large, the route answers 400, and the machine
+    used to allow only 200 and 409, which failed the run on the commit
+    before cfb85dc. Pinned here so that the sequence is tried on every run,
+    not only when the generator happens to draw it.
+    """
+    PaymentChain.shop = Shop(client, db_session)
+    SEEN.clear()
+    try:
+        state = PaymentChain()
+        state.setup()
+        state.money_and_stock_agree()
+        for _ in range(3):
+            state.create_order(quantity=1)
+            state.money_and_stock_agree()
+        state.customer_cancels(index=0)
+        state.money_and_stock_agree()
+        state.pay_with_a_good_card(index=1)
+        state.money_and_stock_agree()
+        for _ in range(8):
+            state.customer_cancels(index=0)
+            state.money_and_stock_agree()
+        state.admin_refunds(amount=1482, index=10)
+        state.money_and_stock_agree()
+        state.teardown()
+    finally:
+        PaymentChain.shop = None
+    # The step really reached the over-refund answer, and nothing was refunded.
+    assert SEEN["refund 400"] == 1, SEEN
+    assert db_session.query(PaymentRefund).count() == 0
