@@ -570,6 +570,37 @@ async def list_addresses(
         has_more=total > (pagination.page * pagination.size)
     )
 
+@router.get(
+    "/addresses/{address_id}",
+    response_model=AddressResponse,
+    responses={404: {"description": "Address not found, deleted, or not the current user's"}},
+)
+async def get_address(
+    address_id: Int32,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    """One of the current user's active addresses.
+
+    The address of another user, a deleted one and a missing one are the
+    same 404, so the id says nothing about who owns it."""
+
+    address = (await db.execute(
+        select(Address).where(
+            Address.id == address_id,
+            Address.user_id == current_user.id,
+            Address.is_active
+        ).limit(1)
+    )).scalars().first()
+
+    if not address:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Address {address_id} not found"
+        )
+
+    return AddressResponse.model_validate(address)
+
 @router.post(
     "/addresses",
     response_model=AddressResponse,

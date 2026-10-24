@@ -152,6 +152,57 @@ def test_posts_without_a_url_of_their_own_for_what_they_make_stay_200(shop):
     assert pay.status_code == 200 and "Location" not in pay.headers
 
 
+# -- GET /users/addresses/{id} --------------------------------------------------
+
+
+def test_getting_an_own_address_is_200_with_the_body_of_the_list_item(shop):
+    buyer = shop.buyer()
+
+    response = shop.client.get(f"{API}/users/addresses/{buyer.address_id}", headers=buyer.headers)
+
+    assert response.status_code == 200, response.text
+    items = shop.client.get(f"{API}/users/addresses", headers=buyer.headers).json()["items"]
+    assert response.json() == items[0]
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "ETag" not in response.headers
+
+
+def test_getting_the_address_of_another_user_is_404(shop):
+    owner = shop.buyer()
+    other = shop.buyer()
+
+    response = shop.client.get(f"{API}/users/addresses/{owner.address_id}", headers=other.headers)
+
+    assert_problem(response, 404)
+
+
+def test_getting_a_deleted_address_is_404(shop):
+    buyer = shop.buyer()
+    shop.client.delete(f"{API}/users/addresses/{buyer.address_id}", headers=buyer.headers)
+
+    response = shop.client.get(f"{API}/users/addresses/{buyer.address_id}", headers=buyer.headers)
+
+    assert_problem(response, 404)
+
+
+def test_getting_a_missing_address_is_404(shop):
+    buyer = shop.buyer()
+
+    assert_problem(shop.client.get(f"{API}/users/addresses/2147483647", headers=buyer.headers), 404)
+
+
+def test_head_of_an_own_address_is_200_without_a_body(shop):
+    buyer = shop.buyer()
+    url = f"{API}/users/addresses/{buyer.address_id}"
+
+    got = shop.client.get(url, headers=buyer.headers)
+    head = shop.client.head(url, headers=buyer.headers)
+
+    assert head.status_code == 200
+    assert head.content == b""
+    assert head.headers["content-length"] == got.headers["content-length"]
+
+
 # -- 202 Accepted ---------------------------------------------------------------
 
 
@@ -516,6 +567,7 @@ def _operation(client, method, path):
     ("post", "/cart/items", {"409"}, set()),
     ("put", "/cart/items/{product_id}", {"409"}, set()),
     ("post", "/users/addresses/default", {"409"}, set()),
+    ("get", "/users/addresses/{address_id}", {"200", "404"}, set()),
 ])
 def test_the_openapi_operation_lists_the_new_statuses(client, method, path, documented, gone):
     codes = set(_operation(client, method, path)["responses"])
