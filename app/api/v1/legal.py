@@ -9,12 +9,12 @@ from app.core.dependencies import CurrentUser, DbSession
 from app.core.openapi import DocumentedRoute
 from app.core.security import verify_password_async
 from app.models.user import User
-from app.schemas.common import APIResponse
 from app.schemas.legal import (
     ConsentUpdate,
     ConsentUpdateResponse,
     DataRequest,
     DataRequestResponse,
+    DataRetentionStatus,
     LegalDocument,
     UserConsent,
 )
@@ -185,13 +185,13 @@ Privacy/DPO: {dpo_email}
 Address: {company_address}
 """
 
-@router.get("/privacy-policy", response_model=APIResponse[LegalDocument])
+@router.get("/privacy-policy", response_model=LegalDocument)
 def get_privacy_policy():
     """
     Retrieve the current privacy policy.
     """
     current_time = utc_now()
-    return APIResponse.success_response(LegalDocument(
+    return LegalDocument(
         content=PRIVACY_POLICY.format(
             company_name=settings.PROJECT_NAME,
             company_address=settings.COMPANY_ADDRESS,
@@ -205,15 +205,15 @@ def get_privacy_policy():
         ),
         version="1.0",
         last_updated=current_time
-    ))
+    )
 
-@router.get("/terms-of-service", response_model=APIResponse[LegalDocument])
+@router.get("/terms-of-service", response_model=LegalDocument)
 def get_terms_of_service():
     """
     Retrieve the current terms of service.
     """
     current_time = utc_now()
-    return APIResponse.success_response(LegalDocument(
+    return LegalDocument(
         content=TERMS_OF_SERVICE.format(
             company_name=settings.PROJECT_NAME,
             company_address=settings.COMPANY_ADDRESS,
@@ -225,15 +225,15 @@ def get_terms_of_service():
         ),
         version="1.0",
         last_updated=current_time
-    ))
+    )
 
-@router.get("/cookie-policy", response_model=APIResponse[LegalDocument])
+@router.get("/cookie-policy", response_model=LegalDocument)
 def get_cookie_policy():
     """
     Retrieve the current cookie policy.
     """
     current_time = utc_now()
-    return APIResponse.success_response(LegalDocument(
+    return LegalDocument(
         content=COOKIE_POLICY.format(
             company_name=settings.PROJECT_NAME,
             company_address=settings.COMPANY_ADDRESS,
@@ -245,7 +245,7 @@ def get_cookie_policy():
         ),
         version="1.0",
         last_updated=current_time
-    ))
+    )
 
 async def _load_user(db: AsyncSession, user_id: int) -> User:
     """Load the authenticated user in this route's session.
@@ -265,7 +265,7 @@ async def _load_user(db: AsyncSession, user_id: int) -> User:
     return user
 
 
-@router.post("/consent", response_model=APIResponse[ConsentUpdateResponse])
+@router.post("/consent", response_model=ConsentUpdateResponse)
 async def update_user_consent(
     consent_update: ConsentUpdate,
     request: Request,
@@ -298,15 +298,15 @@ async def update_user_consent(
         user_agent=request.headers.get("user-agent")
     )
 
-    return APIResponse.success_response(ConsentUpdateResponse(
+    return ConsentUpdateResponse(
         status="success",
         updated_consents=updated_consents,
         timestamp=utc_now()
-    ))
+    )
 
 @router.post(
     "/data-request",
-    response_model=APIResponse[DataRequestResponse],
+    response_model=DataRequestResponse,
     responses={
         401: {"description": "Incorrect password (deletion)"},
         422: {"description": "Password missing for a deletion request"},
@@ -352,13 +352,13 @@ async def request_personal_data(
             detail="Invalid request type. Must be either 'export' or 'deletion'"
         )
 
-    return APIResponse.success_response(DataRequestResponse(
+    return DataRequestResponse(
         request_id=request_id,
         status="processing",
         estimated_completion_time=utc_now() + timedelta(hours=24)
-    ))
+    )
 
-@router.get("/consent-status", response_model=APIResponse[UserConsent])
+@router.get("/consent-status", response_model=UserConsent)
 async def get_consent_status(
     current_user: CurrentUser
 ):
@@ -371,9 +371,9 @@ async def get_consent_status(
     * Complete consent history
     """
     gdpr_service = GDPRService()
-    return APIResponse.success_response(UserConsent(**gdpr_service.get_consent_status(current_user)))
+    return UserConsent(**gdpr_service.get_consent_status(current_user))
 
-@router.get("/data-retention", response_model=APIResponse[dict])
+@router.get("/data-retention", response_model=DataRetentionStatus)
 async def check_data_retention(
     current_user: CurrentUser
 ):
@@ -382,7 +382,7 @@ async def check_data_retention(
     """
     gdpr_service = GDPRService()
     is_valid = gdpr_service.validate_retention_period(current_user)
-    return APIResponse.success_response({
-        "within_retention_period": is_valid,
-        "retention_days": current_user.data_retention_period or settings.USER_DATA_RETENTION_DAYS
-    })
+    return DataRetentionStatus(
+        within_retention_period=is_valid,
+        retention_days=current_user.data_retention_period or settings.USER_DATA_RETENTION_DAYS,
+    )
