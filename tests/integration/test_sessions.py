@@ -171,7 +171,7 @@ def test_a_refresh_token_issued_before_a_password_reset_is_refused(client, db_se
         user = _user(db_session)
         reset = client.post(
             f"{USERS}/password/reset/confirm",
-            json={"token": generate_password_reset_token(user.email, user.hashed_password), "current_password": "unused", "new_password": "NewStr0ngPass"},
+            json={"token": generate_password_reset_token(user.email, user.hashed_password), "new_password": "NewStr0ngPass"},
         )
         assert reset.status_code == 200
 
@@ -285,7 +285,7 @@ def test_an_expired_reset_link_is_refused(client, db_session):
         check = client.post(f"{USERS}/password/reset-token/validate", json={"token": token})
         reset = client.post(
             f"{USERS}/password/reset/confirm",
-            json={"token": token, "current_password": "unused", "new_password": "NewStr0ngPass"},
+            json={"token": token, "new_password": "NewStr0ngPass"},
         )
 
     assert (check.status_code, reset.status_code) == (400, 400)
@@ -298,7 +298,7 @@ def test_a_verification_token_is_not_a_reset_token(client):
     assert client.post(f"{USERS}/password/reset-token/validate", json={"token": token}).status_code == 400
     assert client.post(
         f"{USERS}/password/reset/confirm",
-        json={"token": token, "current_password": "unused", "new_password": "NewStr0ngPass"},
+        json={"token": token, "new_password": "NewStr0ngPass"},
     ).status_code == 400
 
 
@@ -308,7 +308,7 @@ def test_a_reset_link_for_an_account_that_is_gone_is_404(client):
     assert client.post(f"{USERS}/password/reset-token/validate", json={"token": token}).status_code == 404
     assert client.post(
         f"{USERS}/password/reset/confirm",
-        json={"token": token, "current_password": "unused", "new_password": "NewStr0ngPass"},
+        json={"token": token, "new_password": "NewStr0ngPass"},
     ).status_code == 404
 
 
@@ -319,7 +319,7 @@ def test_a_reset_with_a_weak_new_password_is_422_and_spends_nothing(client, db_s
 
     weak = client.post(
         f"{USERS}/password/reset/confirm",
-        json={"token": token, "current_password": "unused", "new_password": "weak"},
+        json={"token": token, "new_password": "weak"},
     )
 
     assert weak.status_code == 422

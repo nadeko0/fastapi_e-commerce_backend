@@ -175,7 +175,7 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     address = visitor.post(f"{USERS}/addresses", headers=headers, json={
         "street": "1 Journey Street", "city": "Metropolis", "state": "NY",
         "postal_code": "10001", "country": "US"})
-    assert address.status_code == 200, address.text
+    assert address.status_code == 201, address.text
     buyer = Buyer(headers, 0, email, address.json()["id"])
     # Not yet: an order needs a verified address and a complete profile.
     assert guest.place_order(buyer).status_code == 403

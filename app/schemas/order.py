@@ -15,7 +15,7 @@ from pydantic import (
 
 from app.core.config import settings
 from app.models.enums import OrderStatus
-from app.schemas.common import Int32
+from app.schemas.common import Int32, RequestBody
 
 # Order.total_amount is Numeric(10, 2), so no amount paid or refunded for an
 # order has more digits than that. Checked by the amount fields themselves,
@@ -162,8 +162,10 @@ class OrderListResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class PaymentCreate(BaseModel):
-    """Schema for payment processing"""
+class PaymentBase(BaseModel):
+    """The fields a payment request and the payment it produces have in
+    common. The request side (PaymentCreate) refuses unknown members; the
+    response (PaymentResponse) does not."""
     order_id: Int32
     payment_method: str = Field(..., pattern="^(stripe|paypal)$")
     amount: Money
@@ -180,7 +182,10 @@ class PaymentCreate(BaseModel):
     # the existing request shape backward compatible.
     payment_method_token: str | None = None
 
-class PaymentResponse(PaymentCreate):
+class PaymentCreate(RequestBody, PaymentBase):
+    """Schema for payment processing"""
+
+class PaymentResponse(PaymentBase):
     id: int
     status: PaymentStatus
     created_at: datetime
@@ -209,17 +214,17 @@ def _url_origin(url: str) -> tuple | None:
     return scheme, parts.hostname.lower(), port or (443 if scheme == 'https' else 80)
 
 
-class OrderCreate(BaseModel):
+class OrderCreate(RequestBody):
     """Body of POST /orders."""
     shipping_address_id: Int32
 
 
-class OrderStatusUpdate(BaseModel):
+class OrderStatusUpdate(RequestBody):
     """Body of PUT /orders/{id}/status."""
     status: OrderStatus
 
 
-class CheckoutSessionCreate(BaseModel):
+class CheckoutSessionCreate(RequestBody):
     """
     Optional overrides for creating a Stripe Checkout Session for an order
     (the hosted-redirect payment flow - see /orders/{id}/checkout-session).
@@ -271,7 +276,7 @@ class CheckoutSessionResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class RefundCreate(BaseModel):
+class RefundCreate(RequestBody):
     """Schema for issuing a refund on a paid order."""
     amount: PositiveMoney | None = Field(
         None, description="Amount to refund; omit for a full refund"

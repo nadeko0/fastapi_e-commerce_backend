@@ -13,22 +13,22 @@ import secrets
 from dataclasses import dataclass
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
-from app.schemas.common import INT32_MAX, Int32
+from app.schemas.common import INT32_MAX, Int32, RequestBody
 
 # Bodies of the cart item routes. ge=1 because 0 or a negative quantity once
 # made the stored cart unreadable.
 CartQuantity = Annotated[int, Field(ge=1, le=INT32_MAX)]
 
 
-class CartItemAdd(BaseModel):
+class CartItemAdd(RequestBody):
     product_id: Int32
     quantity: CartQuantity = 1
     variant_id: Int32 | None = None
 
 
-class CartItemUpdate(BaseModel):
+class CartItemUpdate(RequestBody):
     quantity: CartQuantity
     variant_id: Int32 | None = None
 

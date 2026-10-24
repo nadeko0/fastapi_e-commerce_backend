@@ -80,7 +80,7 @@ def test_short_password_422_keeps_constraint_context(client):
     # PasswordUpdate.new_password has min_length=8; ctx carries the 8, not the input.
     response = _assert_same_but_input(
         client, "POST", f"{USERS}/password/reset/confirm",
-        secret="sh0rt", json={"token": "sometoken", "current_password": "x", "new_password": "sh0rt"},
+        secret="sh0rt", json={"token": "sometoken", "new_password": "sh0rt"},
     )
     ctxs = [e["ctx"] for e in response.json()["errors"] if "ctx" in e]
     assert {"min_length": 8} in ctxs

@@ -50,6 +50,23 @@ StoreCurrency = Annotated[
 _CENT = Decimal("0.01")
 
 
+class RequestBody(BaseModel):
+    """Base of every model a client sends as a JSON request body, nested
+    models included: a member the model does not declare is refused (a 422
+    of type extra_forbidden naming the member) instead of silently dropped.
+    A misspelled optional field (`phone_numer`) would otherwise be accepted
+    and ignored, and the client would believe it had been applied (Pydantic
+    ConfigDict `extra`, inherited by subclasses).
+
+    Not for a model that is also read back as a response: a response model
+    must keep reading rows and cache entries written under older shapes, so
+    a model shared by input and output has its input side split off.
+    Query parameter models stay on BaseModel: an unknown query parameter is
+    ignored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class TokenPayload(BaseModel):
     """Schema for JWT token payload"""
     sub: int | str  # Subject (user ID)

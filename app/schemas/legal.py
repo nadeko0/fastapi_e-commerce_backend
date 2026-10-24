@@ -9,10 +9,11 @@ from pydantic import BaseModel, ConfigDict, model_validator
 # different modules also collided in the generated OpenAPI schema
 # (FastAPI disambiguates same-named schemas with an ugly
 # module-qualified name), which this avoids.
+from app.schemas.common import RequestBody
 from app.schemas.user import ConsentHistory
 
 
-class ConsentUpdate(BaseModel):
+class ConsentUpdate(RequestBody):
     marketing_consent: bool
     privacy_policy_accepted: bool
 
@@ -34,7 +35,7 @@ class UserConsent(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class DataRequest(BaseModel):
+class DataRequest(RequestBody):
     request_type: str  # "export" or "deletion"
     reason: str | None = None
     # The account's current password. Required for "deletion": erasure

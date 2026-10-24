@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import AddressType
-from app.schemas.common import E164_PHONE_PATTERN, Int32
+from app.schemas.common import E164_PHONE_PATTERN, Int32, RequestBody
 
 
 # Mirrors app.schemas.user.UserBase's phone validation exactly - both
@@ -61,13 +61,13 @@ class AddressBase(BaseModel):
     def validate_delivery_phone(cls, v):
         return _validate_phone(v)
 
-class AddressCreate(AddressBase):
+class AddressCreate(RequestBody, AddressBase):
     @field_validator('delivery_phone')
     @classmethod
     def validate_delivery_phone(cls, v):
         return _validate_input_phone(v)
 
-class AddressUpdate(BaseModel):
+class AddressUpdate(RequestBody):
     street: str | None = Field(None, min_length=5, max_length=255)
     city: str | None = Field(None, min_length=2, max_length=100)
     state: str | None = Field(None, min_length=2, max_length=100)
@@ -129,6 +129,6 @@ class AddressListResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class SetDefaultAddress(BaseModel):
+class SetDefaultAddress(RequestBody):
     """Schema for setting an address as default"""
     address_id: Int32 = Field(..., description="ID of the address to set as default")

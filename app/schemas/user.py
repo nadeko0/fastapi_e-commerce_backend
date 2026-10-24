@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password, normalize_password
 from app.models.enums import UserRole
-from app.schemas.common import E164_PHONE_PATTERN
+from app.schemas.common import E164_PHONE_PATTERN, RequestBody
 
 
 class ConsentType(str, Enum):
@@ -78,7 +78,7 @@ class UserBase(BaseModel):
             raise ValueError('Invalid phone number length')
         return f"+{phone}"
 
-class UserCreate(UserBase):
+class UserCreate(RequestBody, UserBase):
     # Strict on input only: UserBase (shared with the responses) keeps the old
     # pattern so a number stored before the E.164 rule still reads.
     phone: str | None = Field(None, pattern=E164_PHONE_PATTERN, description="International phone number (5-15 digits)")
@@ -121,7 +121,7 @@ class UserCreate(UserBase):
             raise ValueError('Privacy policy must be accepted')
         return v
 
-class UserUpdate(BaseModel):
+class UserUpdate(RequestBody):
     full_name: str | None = Field(None, min_length=2, max_length=100)
     phone: str | None = Field(None, pattern=E164_PHONE_PATTERN, description="International phone number (5-15 digits)")
 
@@ -160,10 +160,10 @@ class Token(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
 
-class RefreshTokenRequest(BaseModel):
+class RefreshTokenRequest(RequestBody):
     refresh_token: str
 
-class LogoutRequest(BaseModel):
+class LogoutRequest(RequestBody):
     refresh_token: str | None = None
 
 class TokenPayload(BaseModel):
@@ -171,7 +171,7 @@ class TokenPayload(BaseModel):
     exp: datetime
     role: UserRole
 
-class PasswordReset(BaseModel):
+class PasswordReset(RequestBody):
     email: EmailStr
 
     @field_validator('email', mode="before")
@@ -179,14 +179,14 @@ class PasswordReset(BaseModel):
     def normalise_email(cls, v):
         return normalize_email(v) if isinstance(v, str) else v
 
-class TokenBody(BaseModel):
+class TokenBody(RequestBody):
     """Body of the routes that take an emailed token (email verification,
     reset-token check): in the body rather than the URL, where it would end
     up in access logs, browser history and Referer."""
     token: str = Field(..., min_length=1)
 
 
-class NewPassword(BaseModel):
+class NewPassword(RequestBody):
     new_password: str = Field(..., min_length=8)
 
     @field_validator('new_password')
@@ -198,9 +198,9 @@ class NewPassword(BaseModel):
 class PasswordResetConfirm(TokenBody, NewPassword):
     """Body of the reset-by-token route: the token proves the right to set
     a password, so the current one is not sent. Both travel in the body:
-    a token in the path would end up in access logs. Extra fields (an old
-    client still sending current_password) are ignored, the Pydantic
-    default."""
+    a token in the path would end up in access logs. A current_password
+    (what clients sent before 4.0.0, when it was ignored) is refused like
+    any other unknown member."""
 
 
 class PasswordUpdate(NewPassword):

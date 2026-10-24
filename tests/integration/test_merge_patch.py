@@ -114,7 +114,7 @@ def test_patch_me_null_on_a_non_nullable_field_is_422(client, valid_registration
     assert "may be omitted but cannot be null" in response.text
 
 
-def test_patch_me_ignores_unknown_members(client, valid_registration_payload):
+def test_patch_me_refuses_unknown_members(client, valid_registration_payload):
     token = _register_and_login(client, valid_registration_payload)
 
     response = client.patch(
@@ -123,10 +123,12 @@ def test_patch_me_ignores_unknown_members(client, valid_registration_payload):
         headers=_auth_headers(token),
     )
 
-    data = response.json()
-    assert response.status_code == 200
-    assert data["full_name"] == "Patched Name"
-    assert data["role"] != "admin"
+    assert response.status_code == 422
+    assert [(e["type"], e["loc"]) for e in response.json()["errors"]] == [
+        ("extra_forbidden", ["body", "role"])]
+    me = client.get(f"{API_PREFIX}/me", headers=_auth_headers(token)).json()
+    assert me["full_name"] != "Patched Name"
+    assert me["role"] != "admin"
 
 
 def test_patch_me_requires_authentication(client):
@@ -194,7 +196,7 @@ def test_patch_address_null_on_a_non_nullable_field_is_422(
     assert "may be omitted but cannot be null" in response.text
 
 
-def test_patch_address_ignores_unknown_members(client, valid_registration_payload):
+def test_patch_address_refuses_unknown_members(client, valid_registration_payload):
     token = _register_and_login(client, valid_registration_payload)
     created = _address(client, token)
 
@@ -204,8 +206,10 @@ def test_patch_address_ignores_unknown_members(client, valid_registration_payloa
         headers=_auth_headers(token),
     )
 
-    assert response.status_code == 200
-    assert response.json()["city"] == "Gotham"
+    assert response.status_code == 422
+    assert [(e["type"], e["loc"]) for e in response.json()["errors"]] == [
+        ("extra_forbidden", ["body", "user_id"])]
+    assert _first_city(client, token) == created["city"]
 
 
 def _first_city(client, token):
@@ -285,7 +289,7 @@ def test_patch_product_null_on_a_non_nullable_field_is_422(client, db_session, f
     assert getattr(db_session.get(Product, product["id"]), field) is not None
 
 
-def test_patch_product_ignores_unknown_members(client, db_session):
+def test_patch_product_refuses_unknown_members(client, db_session):
     headers, product = _product(client, db_session)
 
     response = client.patch(
@@ -294,8 +298,11 @@ def test_patch_product_ignores_unknown_members(client, db_session):
         headers=headers,
     )
 
-    assert response.status_code == 200
-    assert response.json()["stock_quantity"] == 3
+    assert response.status_code == 422
+    assert [(e["type"], e["loc"]) for e in response.json()["errors"]] == [
+        ("extra_forbidden", ["body", "bogus"])]
+    stored = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()
+    assert stored["stock_quantity"] == product["stock_quantity"]
 
 
 def test_patch_product_invalidates_the_cache(client, db_session):
@@ -395,7 +402,7 @@ def test_patch_variant_null_on_a_non_nullable_field_is_422(client, db_session, f
     assert getattr(db_session.get(ProductVariant, variant["id"]), field) is not None
 
 
-def test_patch_variant_ignores_unknown_members_and_keeps_its_own_sku(client, db_session):
+def test_patch_variant_refuses_unknown_members(client, db_session):
     headers, product = _product(client, db_session)
     variant = _variant(client, headers, product["id"])
 
@@ -405,8 +412,13 @@ def test_patch_variant_ignores_unknown_members_and_keeps_its_own_sku(client, db_
         headers=headers,
     )
 
-    assert response.status_code == 200
-    assert response.json()["stock_quantity"] == 9
+    assert response.status_code == 422
+    assert [(e["type"], e["loc"]) for e in response.json()["errors"]] == [
+        ("extra_forbidden", ["body", "bogus"])]
+    stored = client.get(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}", headers=headers
+    ).json()
+    assert stored["stock_quantity"] == variant["stock_quantity"]
 
 
 def test_patch_variant_unknown_variant_is_404_and_needs_an_admin(

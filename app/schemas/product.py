@@ -13,7 +13,7 @@ from pydantic import (
     field_validator,
 )
 
-from app.schemas.common import Int32, Int32Max, StoreCurrency
+from app.schemas.common import Int32, Int32Max, RequestBody, StoreCurrency
 from app.schemas.order import NonNegativeMoney
 
 # An image URL is validated as an HttpUrl but kept as the plain string: it
@@ -36,6 +36,10 @@ class ProductCharacteristic(BaseModel):
     unit: str | None = None
     filterable: bool = True
 
+class ProductCharacteristicInput(RequestBody, ProductCharacteristic):
+    """ProductCharacteristic as a client sends it: no unknown members."""
+
+
 class ProductBase(BaseModel):
     name: str = Field(..., min_length=3, max_length=200)
     description: str = Field(..., min_length=10)
@@ -54,17 +58,17 @@ class ProductBase(BaseModel):
         # Convert HttpUrl objects to strings and remove duplicates
         return list(dict.fromkeys(str(url) for url in v))
 
-class ProductCreate(ProductBase):
-    pass
+class ProductCreate(RequestBody, ProductBase):
+    characteristics: dict[str, ProductCharacteristicInput] = Field(default_factory=dict)
 
-class ProductUpdate(BaseModel):
+class ProductUpdate(RequestBody):
     name: str | None = Field(None, min_length=3, max_length=200)
     description: str | None = Field(None, min_length=10)
     price: NonNegativeMoney | None = None
     stock_quantity: Int32Max | None = Field(None, ge=0)
     category_id: Int32 | None = None
     images: list[ImageUrl] | None = None
-    characteristics: dict[str, ProductCharacteristic] | None = None
+    characteristics: dict[str, ProductCharacteristicInput] | None = None
 
     @field_validator('name', 'description', 'price', 'stock_quantity', 'category_id', 'images', 'characteristics')
     @classmethod
@@ -154,10 +158,10 @@ class ProductVariantBase(BaseModel):
     stock_quantity: Int32Max = Field(0, ge=0)
     is_active: bool = True
 
-class ProductVariantCreate(ProductVariantBase):
+class ProductVariantCreate(RequestBody, ProductVariantBase):
     pass
 
-class ProductVariantUpdate(BaseModel):
+class ProductVariantUpdate(RequestBody):
     """Schema for updating an existing product variant. All fields optional."""
     sku: str | None = Field(None, min_length=1, max_length=100)
     attributes: dict[str, Any] | None = None

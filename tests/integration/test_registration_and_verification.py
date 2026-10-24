@@ -78,12 +78,14 @@ def test_no_marketing_consent_means_no_marketing_consent_date(client, db_session
 
 
 def test_a_client_cannot_register_itself_as_an_admin(client, db_session):
-    # Extra fields are ignored, not obeyed.
-    client.post(f"{USERS}/register", json=_registration(role="admin", is_email_verified=True))
+    # Extra fields are refused, not obeyed: nothing is created.
+    response = client.post(
+        f"{USERS}/register", json=_registration(role="admin", is_email_verified=True))
 
-    user = _stored(db_session)
-    assert user.role == "client"
-    assert user.is_email_verified is False
+    assert response.status_code == 422
+    assert {tuple(e["loc"]) for e in response.json()["errors"]} == {
+        ("body", "role"), ("body", "is_email_verified")}
+    assert db_session.query(User).count() == 0
 
 
 @pytest.mark.parametrize(

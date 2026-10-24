@@ -159,7 +159,7 @@ def test_password_reset_holds_no_connection_while_the_new_password_is_hashed(
 
     response = client.post(
         "/api/v1/users/password/reset/confirm",
-        json={"token": token, "current_password": "Str0ngPass", "new_password": "NewStr0ngPass1"},
+        json={"token": token, "new_password": "NewStr0ngPass1"},
     )
 
     assert response.status_code == 200
@@ -269,7 +269,7 @@ def test_concurrent_password_resets_do_not_exhaust_or_leak_the_connection_pool(
     def do_reset():
         return client.post(
             "/api/v1/users/password/reset/confirm",
-            json={"token": token, "current_password": "Str0ngPass", "new_password": "NewStr0ngPass1"},
+            json={"token": token, "new_password": "NewStr0ngPass1"},
         )
 
     started = time.monotonic()

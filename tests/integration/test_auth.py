@@ -388,23 +388,31 @@ def test_password_reset_needs_only_new_password(client, valid_registration_paylo
     assert login.status_code == 200
 
 
-def test_password_reset_still_accepts_and_ignores_current_password(
-    client, valid_registration_payload
-):
-    # Clients written against the old contract keep working: the extra
-    # field is ignored, whatever its value.
+def test_password_reset_refuses_a_current_password(client, valid_registration_payload):
+    # 4.0.0: a body names only the fields the API knows. Clients written
+    # against the old contract, which sent current_password and had it
+    # ignored, get a 422 naming the field, and the password stays as it was.
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
     reset_token = _reset_token_for(valid_registration_payload["email"])
 
     response = client.post(
         f"{API_PREFIX}/password/reset/confirm",
-        json={"token": reset_token, "current_password": "wrong-on-purpose", "new_password": "NewStr0ngPass"},
+        json={"token": reset_token, "current_password": "wrong-on-purpose",
+              "new_password": "NewStr0ngPass"},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 422
+    error = response.json()["errors"][0]
+    assert (error["type"], error["loc"]) == ("extra_forbidden", ["body", "current_password"])
+    login = client.post(
+        f"{API_PREFIX}/login",
+        data={"username": valid_registration_payload["email"],
+              "password": valid_registration_payload["password"]},
+    )
+    assert login.status_code == 200
 
 
-def test_password_reset_weak_new_password_is_422_with_or_without_current_password(
+def test_password_reset_weak_new_password_is_422(
     client, valid_registration_payload
 ):
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
@@ -415,7 +423,6 @@ def test_password_reset_weak_new_password_is_422_with_or_without_current_passwor
         {"new_password": "short1"},
         {"new_password": "qwertyuiop"},
         {"new_password": "12345678"},
-        {"current_password": "x", "new_password": "qwertyuiop"},
     ):
         response = client.post(url, json={"token": reset_token, **body})
         assert response.status_code == 422, body
@@ -433,7 +440,7 @@ def test_password_reset_flow_allows_login_with_new_password(client, valid_regist
 
     reset_response = client.post(
         f"{API_PREFIX}/password/reset/confirm",
-        json={"token": reset_token, "current_password": "unused", "new_password": "NewStr0ngPass"},
+        json={"token": reset_token, "new_password": "NewStr0ngPass"},
     )
     assert reset_response.status_code == 200
 
@@ -459,7 +466,7 @@ def test_password_reset_flow_allows_login_with_new_password(client, valid_regist
 def test_password_reset_rejects_invalid_token(client):
     response = client.post(
         f"{API_PREFIX}/password/reset/confirm",
-        json={"token": "not-a-real-token", "current_password": "unused", "new_password": "NewStr0ngPass"},
+        json={"token": "not-a-real-token", "new_password": "NewStr0ngPass"},
     )
 
     assert response.status_code == 400
@@ -482,7 +489,7 @@ def _emailed_reset_token(client, monkeypatch, email):
 def _reset(client, token, new_password):
     return client.post(
         f"{API_PREFIX}/password/reset/confirm",
-        json={"token": token, "current_password": "unused", "new_password": new_password},
+        json={"token": token, "new_password": new_password},
     )
 
 
@@ -684,7 +691,7 @@ def test_reset_password_invalidates_previously_issued_access_token(
         reset_token = _reset_token_for(valid_registration_payload["email"])
         reset_response = client.post(
             f"{API_PREFIX}/password/reset/confirm",
-            json={"token": reset_token, "current_password": "unused", "new_password": "NewStr0ngPass"},
+            json={"token": reset_token, "new_password": "NewStr0ngPass"},
         )
         assert reset_response.status_code == 200
 

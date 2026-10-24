@@ -133,9 +133,9 @@ def test_reset_applies_the_policy_and_accepts_passphrases(client):
     url = f"{USERS}/password/reset/confirm"
 
     for bad in ("password", "policy.user-2024"):
-        refused = client.post(url, json={"token": token, "current_password": "x", "new_password": bad})
+        refused = client.post(url, json={"token": token, "new_password": bad})
         assert refused.status_code == 422, bad
 
-    ok = client.post(url, json={"token": token, "current_password": "x", "new_password": "correct horse battery staple"})
+    ok = client.post(url, json={"token": token, "new_password": "correct horse battery staple"})
     assert ok.status_code == 200
     assert _login(client, "correct horse battery staple").status_code == 200

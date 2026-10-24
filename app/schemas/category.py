@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.common import Int32
+from app.schemas.common import Int32, RequestBody
 
 
 class CategoryBase(BaseModel):
@@ -10,7 +10,7 @@ class CategoryBase(BaseModel):
     description: str | None = None
     parent_id: Int32 | None = None
 
-class CategoryCreate(CategoryBase):
+class CategoryCreate(RequestBody, CategoryBase):
     """Schema for creating a new category"""
     metadata: dict | None = Field(default_factory=dict)
 
@@ -22,7 +22,7 @@ class CategoryCreate(CategoryBase):
             raise ValueError('parent_id must be a positive integer')
         return v
 
-class CategoryUpdate(BaseModel):
+class CategoryUpdate(RequestBody):
     """Schema for updating an existing category"""
     name: str | None = Field(None, min_length=2, max_length=100)
     description: str | None = None

@@ -409,7 +409,7 @@ def test_a_completed_password_reset_clears_the_count(client, limits, valid_regis
 
     reset = client.post(
         f"{API}/users/password/reset/confirm",
-        json={"token": _reset_token_for(payload['email']), "current_password": "unused", "new_password": "An0therStrongPass"},
+        json={"token": _reset_token_for(payload['email']), "new_password": "An0therStrongPass"},
     )
     assert reset.status_code == 200
     assert login(client, payload["email"], "An0therStrongPass").status_code == 200
@@ -469,7 +469,7 @@ def test_a_completed_password_reset_clears_the_backstop_but_not_other_addresses(
 
     reset = client.post(
         f"{API}/users/password/reset/confirm",
-        json={"token": _reset_token_for(payload['email']), "current_password": "unused", "new_password": "An0therStrongPass"},
+        json={"token": _reset_token_for(payload['email']), "new_password": "An0therStrongPass"},
     )
     assert reset.status_code == 200
 
