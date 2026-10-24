@@ -184,9 +184,8 @@ def test_admin_order_list_date_range_is_inclusive_on_both_ends(client, db_sessio
     response = client.get(
         f"{ADMIN}/orders",
         params={
-            # No offset: taken as UTC, as clients always sent it.
-            "start_date": (NOW - timedelta(days=2)).replace(tzinfo=None).isoformat(),
-            "end_date": NOW.replace(tzinfo=None).isoformat(),
+            "start_date": (NOW - timedelta(days=2)).isoformat(),
+            "end_date": NOW.isoformat(),
         },
         headers=_admin_headers(client, db_session),
     )

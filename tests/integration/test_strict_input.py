@@ -9,15 +9,21 @@ money arrives as a decimal string, and a datetime carries its time zone.
 - GET /admin/stats writes its amounts like every other money output.
 - A datetime on input without an offset is a 422.
 """
+import re
 from dataclasses import dataclass
+from datetime import timedelta
 
 import pytest
 from payment_support import PAY_OK, Shop, new_key, reset_provider
-from test_admin_orders import _admin_headers, _customer, _order, _product
+from test_admin_orders import NOW, _admin_headers, _customer, _order, _product
+
+from app.core.clock import utc_now
+from app.models.payment_discrepancy import PaymentDiscrepancy
 
 API = "/api/v1"
 MERGE_PATCH = {"Content-Type": "application/merge-patch+json"}
 BOGUS = {"bogus": "value-that-must-not-be-echoed"}
+UTC_STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
 
 
 @pytest.fixture(autouse=True)
@@ -328,3 +334,81 @@ def test_admin_stats_without_orders_are_zero_strings(client, db_session):
     assert (stats["total_revenue"], stats["average_order_value"]) == ("0.00", "0.00")
 
 
+# --- datetimes on input carry a time zone ------------------------------------------------
+
+@pytest.mark.parametrize("name", ["start_date", "end_date"])
+def test_a_naive_datetime_filter_is_a_422(client, db_session, name):
+    response = client.get(f"{API}/admin/orders", params={name: "2026-01-01T00:00:00"},
+                          headers=_admin_headers(client, db_session))
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["errors"][0]["loc"] == ["query", name]
+    assert body["errors"][0]["type"] == "timezone_aware"
+
+
+@pytest.mark.parametrize("stamp", ["2026-01-01T00:00:00Z", "2026-01-01T02:00:00+02:00"])
+def test_an_aware_datetime_filter_is_accepted(client, db_session, stamp):
+    headers = _admin_headers(client, db_session)
+
+    for name in ("start_date", "end_date"):
+        assert client.get(f"{API}/admin/orders", params={name: stamp},
+                          headers=headers).status_code == 200
+
+
+def test_an_offset_filter_compares_instants(client, db_session):
+    customer = _customer(db_session)
+    _order(db_session, customer, created_at=NOW)
+    headers = _admin_headers(client, db_session)
+    after = (NOW + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    same_instant = (NOW + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S") + "+02:00"
+
+    assert client.get(f"{API}/admin/orders", params={"start_date": after},
+                      headers=headers).json()["total"] == 0
+    assert client.get(f"{API}/admin/orders", params={"start_date": same_instant},
+                      headers=headers).json()["total"] == 1
+
+
+# --- datetimes on output: UTC with "Z", like OrderResponse ---------------------------------
+
+def _stamps(value):
+    """Every string in a JSON value that looks like a timestamp."""
+    if isinstance(value, dict):
+        for v in value.values():
+            yield from _stamps(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _stamps(v)
+    elif isinstance(value, str) and re.match(r"^\d{4}-\d{2}-\d{2}T", value):
+        yield value
+
+
+def test_the_response_models_added_in_4_write_datetimes_as_utc_with_z(world, db_session):
+    world.shop.pay(world.buyer, world.order["id"])
+    (payment,) = world.shop.payments(world.order["id"])
+    db_session.add(PaymentDiscrepancy(
+        payment_id=payment.id, kind="amount", subject="", ours="1", theirs="2",
+        detected_at=utc_now(), last_seen_at=utc_now()))
+    db_session.commit()
+    world.shop.webhook_raw("payment_intent.succeeded", {
+        "id": payment.payment_intent_id, "object": "payment_intent",
+        "amount": payment.amount, "currency": "usd",
+        "metadata": {"order_id": str(payment.order_id)}})
+    seen = {
+        "order": world.client.get(f"{API}/orders/{world.order['id']}",
+                                  headers=world.buyer.headers).json(),
+        "discrepancies": world.client.get(
+            f"{API}/admin/reconciliation/discrepancies", headers=world.admin).json(),
+        "webhook-events": world.client.get(
+            f"{API}/admin/webhook-events", headers=world.admin).json(),
+        "order-payments": world.client.get(
+            f"{API}/orders/{world.order['id']}/payments", headers=world.admin).json(),
+        "consent-status": world.client.get(
+            f"{API}/legal/consent-status", headers=world.buyer.headers).json(),
+    }
+
+    for name, body in seen.items():
+        stamps = list(_stamps(body))
+        assert stamps or name == "consent-status", name
+        for stamp in stamps:
+            assert UTC_STAMP.match(stamp), (name, stamp)

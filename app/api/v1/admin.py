@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated
 
@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,12 +67,6 @@ from app.services.stripe_events import enqueue_event
 from app.tasks import check_payment_reconciliation
 
 logger = logging.getLogger(__name__)
-
-
-def _request_datetime(value: datetime, name: str) -> datetime:
-    if value.tzinfo is None:
-        logger.debug("%s has no UTC offset, taking it as UTC", name)
-    return as_utc(value)
 
 
 def _cents(value) -> Decimal:
@@ -398,8 +392,8 @@ async def list_orders(
     # the http_status alias instead.
     status: OrderStatusFilter = None,
     payment_status: PaymentStatusFilter = None,
-    start_date: datetime | None = None,
-    end_date: datetime | None = None,
+    start_date: AwareDatetime | None = None,
+    end_date: AwareDatetime | None = None,
 ):
     """List orders across all users, with filtering, sorting, and pagination."""
 
@@ -440,13 +434,12 @@ async def list_orders(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Invalid payment status. Valid values are: {', '.join([s.value for s in PaymentStatus])}"
             ) from None
-    # A date without an offset is taken to be UTC (as clients always sent
-    # them); one with an offset is converted. Either way the comparison is
-    # between instants.
+    # A date must carry its offset (a naive one is a 422): the comparison is
+    # between instants, in UTC like every stored timestamp.
     if start_date:
-        filters.append(Order.created_at >= _request_datetime(start_date, "start_date"))
+        filters.append(Order.created_at >= as_utc(start_date))
     if end_date:
-        filters.append(Order.created_at <= _request_datetime(end_date, "end_date"))
+        filters.append(Order.created_at <= as_utc(end_date))
 
     # Apply sorting. AdminOrderListParams' pattern has already answered 422
     # for anything but a whitelisted field_asc/field_desc, so both lookups
