@@ -16,6 +16,12 @@ holds addresses that differ only in case, the index cannot be created, and
 this migration stops with a message instead of picking one of the accounts
 to keep. Which one is the real one is a decision for a person: merge or
 rename them, then run the migration again.
+
+In offline mode (`alembic upgrade head --sql`) nothing can be queried, so the
+same check is written into the script as a DO block that raises when it runs
+(https://alembic.sqlalchemy.org/en/latest/offline.html,
+MigrationContext.as_sql, the same flag as EnvironmentContext.is_offline_mode): whoever applies the script by hand gets
+the same refusal, with the same message, before the index is created.
 """
 from typing import Sequence, Union
 
@@ -31,20 +37,38 @@ depends_on: Union[str, Sequence[str], None] = None
 INDEX_NAME = 'uq_users_email_lower'
 
 
+def _refusal(count: str) -> str:
+    # `count` is a Python number or a PL/pgSQL expression, spliced into the text.
+    return (
+        f"Cannot create {INDEX_NAME}: {count} email address(es) belong to "
+        "more than one account when compared without regard to case. Merge or rename "
+        "those accounts, then run the migration again. To list them: "
+        "SELECT lower(email), count(*), min(id), max(id) FROM users "
+        "GROUP BY lower(email) HAVING count(*) > 1;"
+    )
+
+
 def upgrade() -> None:
-    duplicates = op.get_bind().execute(sa.text(
-        "SELECT lower(email) FROM users GROUP BY lower(email) HAVING count(*) > 1"
-    )).fetchall()
-    if duplicates:
-        # The addresses themselves are not printed: they are personal data,
-        # and this message ends up in deploy logs.
-        raise RuntimeError(
-            f"Cannot create {INDEX_NAME}: {len(duplicates)} email address(es) belong to "
-            "more than one account when compared without regard to case. Merge or rename "
-            "those accounts, then run the migration again. To list them: "
-            "SELECT lower(email), count(*), min(id), max(id) FROM users "
-            "GROUP BY lower(email) HAVING count(*) > 1;"
-        )
+    if op.get_context().as_sql:
+        # No connection to ask: the script asks when it runs. PostgreSQL only
+        # (the dialect the script is for); % is RAISE's placeholder.
+        if op.get_context().dialect.name == 'postgresql':
+            op.execute(
+                "DO $$ DECLARE duplicates integer; BEGIN "
+                "SELECT count(*) INTO duplicates FROM ("
+                "SELECT 1 FROM users GROUP BY lower(email) HAVING count(*) > 1) AS d; "
+                "IF duplicates > 0 THEN RAISE EXCEPTION '"
+                + _refusal("%").replace("'", "''")
+                + "', duplicates; END IF; END $$"
+            )
+    else:
+        duplicates = op.get_bind().execute(sa.text(
+            "SELECT lower(email) FROM users GROUP BY lower(email) HAVING count(*) > 1"
+        )).fetchall()
+        if duplicates:
+            # The addresses themselves are not printed: they are personal data,
+            # and this message ends up in deploy logs.
+            raise RuntimeError(_refusal(str(len(duplicates))))
     op.create_index(INDEX_NAME, 'users', [sa.text('lower(email)')], unique=True)
 
 

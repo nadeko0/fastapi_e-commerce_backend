@@ -91,6 +91,13 @@ def _current_names(inspector: sa.Inspector, table: str) -> dict:
 def _rename_all(old_fk, new_fk, old_uq, new_uq) -> None:
     """Rename each object from the name the catalog reports; the name it is
     expected to have now (old_*) is checked, so a drifted database fails."""
+    if op.get_context().as_sql:
+        if op.get_context().dialect.name == 'postgresql':
+            for table, column, referred in FOREIGN_KEYS:
+                _rename(table, old_fk(table, column, referred), new_fk(table, column, referred))
+            for table, column in UNIQUE_CONSTRAINTS:
+                _rename(table, old_uq(table, column), new_uq(table, column))
+        return
     bind = op.get_bind()
     if bind.dialect.name != 'postgresql':
         return
