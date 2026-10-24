@@ -19,8 +19,9 @@ receive the context through message headers (app/core/celery_context.py).
 
 import re
 import uuid
+from collections.abc import Callable
 from contextvars import ContextVar, Token
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -51,8 +52,26 @@ class RequestContext:
 _context: ContextVar[RequestContext | None] = ContextVar("request_context", default=None)
 
 
+# Set by app/core/telemetry.py when OpenTelemetry tracing is on: returns
+# (trace_id, span_id) of the current span, or None when there is no valid one.
+_trace_source: Callable[[], tuple[str, str] | None] | None = None
+
+
+def set_trace_source(source: Callable[[], tuple[str, str] | None] | None) -> None:
+    global _trace_source
+    _trace_source = source
+
+
 def get_request_context() -> RequestContext | None:
-    return _context.get()
+    context = _context.get()
+    if context is None or _trace_source is None:
+        return context
+    # Tracing on: the current span is the truth, so log trace_id equals the
+    # span's trace id (a continued traceparent has the same trace id anyway).
+    ids = _trace_source()
+    if ids is None:
+        return context
+    return replace(context, trace_id=ids[0], parent_span_id=ids[1])
 
 
 def bind_request_context(context: RequestContext) -> Token:

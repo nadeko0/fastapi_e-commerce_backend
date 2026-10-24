@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import admin, cart, legal, orders, products, users
-from app.core import probes
+from app.core import probes, telemetry
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.database import async_engine, engine
@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
     # "shutdown" handler; same work, same order).
     yield
     logger.info("FastAPI shutdown event triggered")
+    telemetry.shutdown()  # flushes pending spans; a no-op when tracing is off
     cleanup()
     # Not in cleanup(): disposing the async engine has to be awaited.
     await async_engine.dispose()
@@ -125,6 +126,10 @@ app.add_middleware(RequestContextMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_exception_handler(Exception, server_error_handler)
+
+# OpenTelemetry tracing: off unless OTEL_* variables turn it on
+# (app/core/telemetry.py). Last, so its middleware is the outermost one.
+telemetry.setup(app, engines=[engine, async_engine.sync_engine])
 
 
 logger.info("Initializing service connections")
