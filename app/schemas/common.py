@@ -1,13 +1,10 @@
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from enum import Enum
 from typing import (
     Annotated,
     Any,
-    Generic,
     Literal,
-    TypeVar,
 )
 
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
@@ -58,68 +55,10 @@ class TokenPayload(BaseModel):
     sub: int | str  # Subject (user ID)
     exp: datetime  # Expiration time
     type: str  # Token type (access, refresh, reset)
-DataT = TypeVar('DataT')
 
 class Message(BaseModel):
     """The answer of a route that only confirms what it did."""
     message: str
-
-class ErrorCode(str, Enum):
-    """Standard error codes"""
-    VALIDATION_ERROR = "VALIDATION_ERROR"
-    NOT_FOUND = "NOT_FOUND"
-    UNAUTHORIZED = "UNAUTHORIZED"
-    FORBIDDEN = "FORBIDDEN"
-    CONFLICT = "CONFLICT"
-    RATE_LIMIT = "RATE_LIMIT"
-    INTERNAL_ERROR = "INTERNAL_ERROR"
-    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
-    DATABASE_ERROR = "DATABASE_ERROR"
-    REDIS_ERROR = "REDIS_ERROR"
-
-class ErrorDetail(BaseModel):
-    """Detailed error information"""
-    code: ErrorCode
-    message: str
-    field: str | None = None
-    details: dict[str, Any] | None = None
-
-class ValidationError(BaseModel):
-    """Validation error details"""
-    field: str
-    message: str
-    code: str
-
-class ValidationErrorResponse(BaseModel):
-    """Response for validation errors"""
-    errors: list[ValidationError]
-    timestamp: datetime = Field(default_factory=utc_now)
-    request_id: str | None = None
-
-class APIResponse(BaseModel, Generic[DataT]):
-    """Generic API response wrapper"""
-    success: bool = True
-    data: DataT | None = None
-    error: ErrorDetail | None = None
-    timestamp: datetime = Field(default_factory=utc_now)
-    request_id: str | None = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-    @classmethod
-    def success_response(cls, data: DataT, request_id: str | None = None) -> 'APIResponse[DataT]':
-        return cls(success=True, data=data, request_id=request_id)
-
-    @classmethod
-    def error_response(
-        cls,
-        code: ErrorCode,
-        message: str,
-        details: dict[str, Any] | None = None,
-        request_id: str | None = None
-    ) -> 'APIResponse[DataT]':
-        error = ErrorDetail(code=code, message=message, details=details)
-        return cls(success=False, error=error, request_id=request_id)
 
 class PaginationParams(BaseModel):
     """Common pagination parameters"""
