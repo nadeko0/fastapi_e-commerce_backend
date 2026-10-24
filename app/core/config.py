@@ -97,16 +97,19 @@ class Settings(BaseSettings):
     # so a VERSION environment variable cannot override it.
     VERSION: ClassVar[str] = __version__
     API_V1_STR: str = "/api/v1"
-    ENVIRONMENT: str = "development"
+    # No default: this setting changes security behaviour (docs published,
+    # debug, plain http), so a deployment that forgets it must fail at
+    # startup instead of running as development.
+    ENVIRONMENT: Literal["development", "test", "staging", "production"]
     DEBUG: bool = False
     # Threshold of the application's own loggers ("app.*"). Third-party
     # loggers keep their own levels. DEBUG is refused outside development
     # and test: it would put request detail in logs that outlive the request.
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    # JSON lines always go to stdout (Twelve-Factor XI). This rotating file is
-    # the 3.x compatibility copy; empty disables it. Relative to the working
-    # directory. The default changes to empty in 4.0.0.
-    LOG_FILE: str = "logs/app.log"
+    # JSON lines always go to stdout (Twelve-Factor XI). Set LOG_FILE to also
+    # keep a rotating copy in that file (relative to the working directory);
+    # unset, or empty, writes no file.
+    LOG_FILE: str | None = None
 
     HOST: str = "0.0.0.0"
     PORT: int = 8000

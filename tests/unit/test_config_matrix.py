@@ -186,3 +186,38 @@ def test_version_comes_from_the_package_not_the_environment():
 
     assert _settings().VERSION == __version__
     assert "VERSION" not in Settings.model_fields
+
+
+# ENVIRONMENT changes security behaviour (docs published, debug, plain http),
+# so it has no default: a deployment that forgets it must fail at startup, not
+# run as development.
+_ENVIRONMENTS = ["development", "test", "staging", "production"]
+
+
+def test_environment_is_required(monkeypatch):
+    monkeypatch.delenv("ENVIRONMENT")
+    with pytest.raises(ValidationError) as excinfo:
+        _settings()
+    assert [(e["loc"], e["type"]) for e in excinfo.value.errors()] == [(("ENVIRONMENT",), "missing")]
+
+
+@pytest.mark.parametrize("value", ["", "prod", "Production", "dev", "local"])
+def test_environment_refuses_an_unknown_value(value):
+    with pytest.raises(ValidationError) as excinfo:
+        _settings(ENVIRONMENT=value)
+    assert excinfo.value.errors()[0]["loc"] == ("ENVIRONMENT",)
+
+
+def test_environment_accepts_exactly_the_known_values():
+    assert Settings.model_fields["ENVIRONMENT"].annotation.__args__ == tuple(_ENVIRONMENTS)
+
+
+@pytest.mark.parametrize("value", ["development", "test"])
+def test_undeployed_environments_load_with_placeholder_secrets(value):
+    assert _settings(ENVIRONMENT=value).ENVIRONMENT == value
+
+
+@pytest.mark.parametrize("value", ["staging", "production"])
+def test_deployed_environments_still_run_the_deployability_check(value):
+    with pytest.raises(ValidationError, match="is not deployable"):
+        _settings(ENVIRONMENT=value)
