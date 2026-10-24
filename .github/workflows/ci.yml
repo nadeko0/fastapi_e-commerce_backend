@@ -11,6 +11,9 @@ permissions:
 
 env:
   UV_VERSION: "0.13.5"
+  # Hypothesis settings profile registered in tests/conftest.py (more examples,
+  # random seeds, print_blob); every test job below inherits it.
+  HYPOTHESIS_PROFILE: ci
 
 jobs:
   lint:

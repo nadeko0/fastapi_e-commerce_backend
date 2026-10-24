@@ -32,7 +32,7 @@ Invariants (checked after every rule, for every order):
   and expiry of a paid order never move it);
 - an order on hold (open dispute) or cancelled is never moved on.
 
-Settings: max_examples=30 runs of up to 40 steps (stateful_step_count),
+Settings: max_examples=30 runs (60 under the ci profile) of up to 40 steps (stateful_step_count),
 at most 3 orders per run, no deadline. About 30-40 s on a laptop: each
 step is one or a few HTTP requests against SQLite; 30 x 40 steps hit
 every rule many times while keeping the suite's runtime reasonable (a
@@ -46,6 +46,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from conftest import scaled_examples
 from hypothesis import HealthCheck
 from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
@@ -352,7 +353,7 @@ def test_the_payment_chain_keeps_its_invariants(client, db_session, tasks_db, mo
     SEEN.clear()
     try:
         run_state_machine_as_test(PaymentChain, settings=hyp_settings(
-            max_examples=30,
+            max_examples=scaled_examples(30),
             stateful_step_count=40,
             deadline=None,
             suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],

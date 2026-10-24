@@ -20,6 +20,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from conftest import scaled_examples
 from hypothesis import HealthCheck, event, given
 from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
@@ -136,7 +137,7 @@ line = st.fixed_dictionaries({
 })
 
 
-@hyp_settings(max_examples=25, **_HYPOTHESIS)
+@hyp_settings(max_examples=scaled_examples(25), **_HYPOTHESIS)
 @given(lines=st.lists(line, min_size=1, max_size=4))
 def test_order_total_is_the_exact_decimal_sum_of_its_lines(client, db_session, lines):
     headers, address_id = _buyer(db_session)
@@ -211,7 +212,7 @@ operation = st.one_of(
 )
 
 
-@hyp_settings(max_examples=50, **_HYPOTHESIS)
+@hyp_settings(max_examples=scaled_examples(50), **_HYPOTHESIS)
 @given(operations=st.lists(operation, min_size=3, max_size=10))
 def test_stock_equals_start_minus_live_orders_whatever_happens(
     client, db_session, tasks_db, operations

@@ -56,6 +56,8 @@ import uuid
 import fakeredis
 import pytest
 from fastapi.testclient import TestClient
+from hypothesis import HealthCheck
+from hypothesis import settings as hypothesis_settings
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -68,6 +70,40 @@ import app.services.redis_async as redis_async_module
 from app.main import app
 from app.models.base import Base
 from app.services.redis import RedisService
+
+# Hypothesis settings profiles (settings.register_profile / load_profile),
+# chosen by HYPOTHESIS_PROFILE; CI sets "ci". Hypothesis also detects CI by
+# itself and would load its own built-in "ci" profile (derandomized); loading
+# one explicitly here keeps the choice in this file and the same on a laptop.
+#   dev: Hypothesis' own defaults (100 examples, 200 ms deadline).
+#   ci:  more examples, random seeds (derandomize=False, so every run explores
+#        new inputs; the 4.0.0 payment failure was found that way), no
+#        database (a fresh checkout has none to replay), no deadline (shared
+#        runners are slow), and print_blob=True so a red run prints the
+#        @reproduce_failure line needed to replay it.
+# Per-test settings stay only where a test has a reason of its own (a cost
+# budget for tests that make HTTP calls, or a deadline switched off).
+hypothesis_settings.register_profile("dev", max_examples=100, deadline=200, print_blob=False, derandomize=False)
+hypothesis_settings.register_profile(
+    "ci",
+    max_examples=200,
+    deadline=None,
+    print_blob=True,
+    derandomize=False,
+    database=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+hypothesis_settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
+
+
+def scaled_examples(examples: int) -> int:
+    """A per-test example budget for expensive tests, doubled under the ci profile.
+
+    A test that makes HTTP calls and writes to the database cannot take the
+    profile's 200 examples; it sets its own count, and this keeps the ci
+    profile's extra time on the tests where a failure is most valuable.
+    """
+    return examples * 2 if hypothesis_settings.get_current_profile_name() == "ci" else examples
 
 # Optional: run the suite on a real PostgreSQL server.
 #
