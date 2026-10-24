@@ -61,7 +61,7 @@ from app.schemas.common import (
     Message,
     sortable_pagination,
 )
-from app.schemas.order import OrderResponse
+from app.schemas.order import OrderListResponse, OrderResponse
 from app.schemas.user import (
     ConsentType,
     LogoutRequest,
@@ -822,13 +822,17 @@ async def set_default_address(
 
     return Message(message="Default address updated successfully")
 
-@router.get("/orders", response_model=list[OrderResponse])
+@router.get("/orders", response_model=OrderListResponse)
 async def get_user_orders(
     pagination: Annotated[UserOrderListParams, Query()],
     current_user: CurrentUser,
     db: DbSession,
 ):
     """List the current user's orders, most recent first, paginated."""
+
+    total = await db.scalar(
+        select(func.count()).select_from(Order).where(Order.user_id == current_user.id)
+    )
 
     # Eager-load shipping_address (many-to-one) and items->product/variant
     # (one-to-many): OrderResponse serializes them for every order in the
@@ -849,7 +853,13 @@ async def get_user_orders(
         .offset((pagination.page - 1) * pagination.size)
         .limit(pagination.size)
     )).scalars().all()
-    return [OrderResponse.model_validate(order) for order in orders]
+    return OrderListResponse(
+        items=[OrderResponse.model_validate(order) for order in orders],
+        total=total,
+        page=pagination.page,
+        size=pagination.size,
+        has_more=total > pagination.page * pagination.size,
+    )
 
 def _invalid_reset_token() -> HTTPException:
     return HTTPException(
