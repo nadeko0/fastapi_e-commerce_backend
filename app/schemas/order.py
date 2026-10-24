@@ -210,12 +210,12 @@ def _url_origin(url: str) -> tuple | None:
 
 
 class OrderCreate(BaseModel):
-    """Body of POST /orders; the same field was a query parameter until 3.3.0."""
+    """Body of POST /orders."""
     shipping_address_id: Int32
 
 
 class OrderStatusUpdate(BaseModel):
-    """Body of PUT /orders/{id}/status; the same field was a query parameter until 3.3.0."""
+    """Body of PUT /orders/{id}/status."""
     status: OrderStatus
 
 

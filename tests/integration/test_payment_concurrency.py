@@ -169,7 +169,7 @@ def test_cancellation_reads_the_order_only_with_a_row_lock(client, db_session, p
         response = client.post(f"{ORDERS_PREFIX}/{order['id']}/cancel", headers=headers)
     else:
         response = client.put(
-            f"{ORDERS_PREFIX}/{order['id']}/status", params={"status": "cancelled"}, headers=headers
+            f"{ORDERS_PREFIX}/{order['id']}/status", json={"status": "cancelled"}, headers=headers
         )
 
     assert response.status_code == 200, response.text

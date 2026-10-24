@@ -109,7 +109,7 @@ def test_order_key_reused_with_another_address_answers_422(shop):
     other = _second_address(shop, buyer)
 
     response = shop.client.post(
-        "/api/v1/orders", params={"shipping_address_id": other},
+        "/api/v1/orders", json={"shipping_address_id": other},
         headers={**buyer.headers, "Idempotency-Key": key},
     )
 
@@ -140,7 +140,7 @@ def test_order_stored_without_a_fingerprint_replays_for_any_address(shop):
     other = _second_address(shop, buyer)
 
     response = shop.client.post(
-        "/api/v1/orders", params={"shipping_address_id": other},
+        "/api/v1/orders", json={"shipping_address_id": other},
         headers={**buyer.headers, "Idempotency-Key": key},
     )
 

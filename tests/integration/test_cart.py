@@ -102,7 +102,7 @@ def test_add_item_to_cart(client, db_session):
 
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 2},
+        json={"product_id": product.id, "quantity": 2},
         headers=_auth_headers(token),
     )
 
@@ -117,7 +117,7 @@ def test_add_item_rejects_unknown_product(client, db_session):
 
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": 999999, "quantity": 1},
+        json={"product_id": 999999, "quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -131,7 +131,7 @@ def test_add_item_rejects_quantity_over_stock(client, db_session):
 
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 3},
+        json={"product_id": product.id, "quantity": 3},
         headers=_auth_headers(token),
     )
 
@@ -144,13 +144,13 @@ def test_update_cart_item_quantity(client, db_session):
     product = _make_product(db_session, category.id, stock=10)
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 1},
+        json={"product_id": product.id, "quantity": 1},
         headers=_auth_headers(token),
     )
 
     response = client.put(
         f"{CART_PREFIX}/items/{product.id}",
-        params={"quantity": 5},
+        json={"quantity": 5},
         headers=_auth_headers(token),
     )
 
@@ -164,13 +164,13 @@ def test_update_cart_item_rejects_quantity_over_stock(client, db_session):
     product = _make_product(db_session, category.id, stock=3)
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 1},
+        json={"product_id": product.id, "quantity": 1},
         headers=_auth_headers(token),
     )
 
     response = client.put(
         f"{CART_PREFIX}/items/{product.id}",
-        params={"quantity": 10},
+        json={"quantity": 10},
         headers=_auth_headers(token),
     )
 
@@ -184,7 +184,7 @@ def test_update_item_not_in_cart_returns_404(client, db_session):
 
     response = client.put(
         f"{CART_PREFIX}/items/{product.id}",
-        params={"quantity": 1},
+        json={"quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -197,7 +197,7 @@ def test_remove_item_from_cart(client, db_session):
     product = _make_product(db_session, category.id)
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 1},
+        json={"product_id": product.id, "quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -223,7 +223,7 @@ def test_clear_cart(client, db_session):
     product = _make_product(db_session, category.id)
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 1},
+        json={"product_id": product.id, "quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -239,7 +239,7 @@ def test_validate_cart_reports_no_issues_when_stock_sufficient(client, db_sessio
     product = _make_product(db_session, category.id, stock=10)
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 2},
+        json={"product_id": product.id, "quantity": 2},
         headers=_auth_headers(token),
     )
 
@@ -255,7 +255,7 @@ def test_validate_cart_reports_issue_when_stock_reduced_after_adding(client, db_
     product = _make_product(db_session, category.id, stock=5)
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 3},
+        json={"product_id": product.id, "quantity": 3},
         headers=_auth_headers(token),
     )
 
@@ -293,8 +293,8 @@ def test_cart_with_an_invalid_token_is_a_401_not_a_guest_cart(client):
 
     responses = [
         client.get(CART_PREFIX, headers=headers),
-        client.post(f"{CART_PREFIX}/items", params={"product_id": 1}, headers=headers),
-        client.put(f"{CART_PREFIX}/items/1", params={"quantity": 1}, headers=headers),
+        client.post(f"{CART_PREFIX}/items", json={"product_id": 1}, headers=headers),
+        client.put(f"{CART_PREFIX}/items/1", json={"quantity": 1}, headers=headers),
         client.delete(f"{CART_PREFIX}/items/1", headers=headers),
         client.delete(CART_PREFIX, headers=headers),
         client.post(f"{CART_PREFIX}/validate", headers=headers),
@@ -311,8 +311,8 @@ def test_account_cart_requests_never_set_a_cookie(client, db_session):
     headers = _auth_headers(token)
 
     responses = [
-        client.post(f"{CART_PREFIX}/items", params={"product_id": product.id}, headers=headers),
-        client.put(f"{CART_PREFIX}/items/{product.id}", params={"quantity": 2}, headers=headers),
+        client.post(f"{CART_PREFIX}/items", json={"product_id": product.id}, headers=headers),
+        client.put(f"{CART_PREFIX}/items/{product.id}", json={"quantity": 2}, headers=headers),
         client.get(CART_PREFIX, headers=headers),
         client.delete(f"{CART_PREFIX}/items/{product.id}", headers=headers),
         client.delete(CART_PREFIX, headers=headers),
@@ -329,7 +329,7 @@ def test_an_emptied_account_cart_stays_stored(client, db_session, fake_redis):
     category = _make_category(db_session)
     product = _make_product(db_session, category.id)
     headers = _auth_headers(token)
-    client.post(f"{CART_PREFIX}/items", params={"product_id": product.id}, headers=headers)
+    client.post(f"{CART_PREFIX}/items", json={"product_id": product.id}, headers=headers)
 
     client.delete(f"{CART_PREFIX}/items/{product.id}", headers=headers)
 
@@ -367,12 +367,12 @@ def test_sequential_add_to_cart_accumulates_quantity(client, db_session):
 
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 2},
+        json={"product_id": product.id, "quantity": 2},
         headers=_auth_headers(token),
     )
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 3},
+        json={"product_id": product.id, "quantity": 3},
         headers=_auth_headers(token),
     )
 
@@ -395,7 +395,7 @@ def test_concurrent_add_to_cart_can_lose_updates(client, db_session):
         barrier.wait()
         response = client.post(
             f"{CART_PREFIX}/items",
-            params={"product_id": product.id, "quantity": 1},
+            json={"product_id": product.id, "quantity": 1},
             headers=_auth_headers(token),
         )
         results[i] = response.status_code
@@ -433,7 +433,7 @@ def test_high_concurrency_add_to_cart_sums_exactly(client, db_session):
         barrier.wait()
         response = client.post(
             f"{CART_PREFIX}/items",
-            params={"product_id": product.id, "quantity": 1},
+            json={"product_id": product.id, "quantity": 1},
             headers=_auth_headers(token),
         )
         results[i] = response.status_code
@@ -468,7 +468,7 @@ def test_concurrent_add_different_products_no_cross_clobbering(client, db_sessio
         barrier.wait()
         response = client.post(
             f"{CART_PREFIX}/items",
-            params={"product_id": product_id, "quantity": 1},
+            json={"product_id": product_id, "quantity": 1},
             headers=_auth_headers(token),
         )
         results[i] = response.status_code
@@ -502,7 +502,7 @@ def test_concurrent_add_and_remove_same_item_is_consistent(client, db_session):
 
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 5},
+        json={"product_id": product.id, "quantity": 5},
         headers=_auth_headers(token),
     )
 
@@ -514,7 +514,7 @@ def test_concurrent_add_and_remove_same_item_is_consistent(client, db_session):
         barrier.wait()
         response = client.post(
             f"{CART_PREFIX}/items",
-            params={"product_id": product.id, "quantity": 1},
+            json={"product_id": product.id, "quantity": 1},
             headers=_auth_headers(token),
         )
         results[i] = response.status_code
@@ -559,7 +559,7 @@ def test_concurrent_add_and_quantity_update_same_item(client, db_session):
 
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 5},
+        json={"product_id": product.id, "quantity": 5},
         headers=_auth_headers(token),
     )
 
@@ -570,7 +570,7 @@ def test_concurrent_add_and_quantity_update_same_item(client, db_session):
         barrier.wait()
         response = client.post(
             f"{CART_PREFIX}/items",
-            params={"product_id": product.id, "quantity": 3},
+            json={"product_id": product.id, "quantity": 3},
             headers=_auth_headers(token),
         )
         results[0] = response.status_code
@@ -579,7 +579,7 @@ def test_concurrent_add_and_quantity_update_same_item(client, db_session):
         barrier.wait()
         response = client.put(
             f"{CART_PREFIX}/items/{product.id}",
-            params={"quantity": 10},
+            json={"quantity": 10},
             headers=_auth_headers(token),
         )
         results[1] = response.status_code
@@ -618,7 +618,7 @@ def test_stock_limit_enforced_under_concurrent_adds(client, db_session):
         barrier.wait()
         response = client.post(
             f"{CART_PREFIX}/items",
-            params={"product_id": product.id, "quantity": 1},
+            json={"product_id": product.id, "quantity": 1},
             headers=_auth_headers(token),
         )
         results[i] = response.status_code
@@ -653,7 +653,7 @@ def test_cart_ttl_refreshed_after_concurrent_writes(client, db_session, fake_red
         barrier.wait()
         client.post(
             f"{CART_PREFIX}/items",
-            params={"product_id": product.id, "quantity": 1},
+            json={"product_id": product.id, "quantity": 1},
             headers=_auth_headers(token),
         )
 
@@ -685,7 +685,7 @@ def test_add_variant_to_cart_prices_and_stocks_against_variant(client, db_sessio
 
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "variant_id": variant.id, "quantity": 2},
+        json={"product_id": product.id, "variant_id": variant.id, "quantity": 2},
         headers=_auth_headers(token),
     )
 
@@ -710,7 +710,7 @@ def test_add_variant_without_price_override_uses_product_price(client, db_sessio
 
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "variant_id": variant.id, "quantity": 1},
+        json={"product_id": product.id, "variant_id": variant.id, "quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -729,7 +729,7 @@ def test_add_variant_rejects_quantity_over_variant_stock(client, db_session):
 
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "variant_id": variant.id, "quantity": 4},
+        json={"product_id": product.id, "variant_id": variant.id, "quantity": 4},
         headers=_auth_headers(token),
     )
 
@@ -745,7 +745,7 @@ def test_add_variant_rejects_id_belonging_to_different_product(client, db_sessio
 
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product_a.id, "variant_id": variant_of_b.id, "quantity": 1},
+        json={"product_id": product_a.id, "variant_id": variant_of_b.id, "quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -760,7 +760,7 @@ def test_add_variant_rejects_inactive_variant(client, db_session):
 
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "variant_id": variant.id, "quantity": 1},
+        json={"product_id": product.id, "variant_id": variant.id, "quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -774,7 +774,7 @@ def test_add_variant_rejects_unknown_variant_id(client, db_session):
 
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "variant_id": 999999, "quantity": 1},
+        json={"product_id": product.id, "variant_id": 999999, "quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -790,18 +790,18 @@ def test_different_variants_of_same_product_are_distinct_cart_lines(client, db_s
 
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "variant_id": variant_red.id, "quantity": 1},
+        json={"product_id": product.id, "variant_id": variant_red.id, "quantity": 1},
         headers=_auth_headers(token),
     )
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "variant_id": variant_blue.id, "quantity": 1},
+        json={"product_id": product.id, "variant_id": variant_blue.id, "quantity": 1},
         headers=_auth_headers(token),
     )
     # And the plain product itself (no variant) is a third, separate line.
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 1},
+        json={"product_id": product.id, "quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -820,12 +820,12 @@ def test_same_variant_added_twice_merges_quantity(client, db_session):
 
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "variant_id": variant.id, "quantity": 2},
+        json={"product_id": product.id, "variant_id": variant.id, "quantity": 2},
         headers=_auth_headers(token),
     )
     response = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "variant_id": variant.id, "quantity": 3},
+        json={"product_id": product.id, "variant_id": variant.id, "quantity": 3},
         headers=_auth_headers(token),
     )
 
@@ -843,12 +843,12 @@ def test_remove_variant_line_leaves_plain_product_line_untouched(client, db_sess
 
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 1},
+        json={"product_id": product.id, "quantity": 1},
         headers=_auth_headers(token),
     )
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "variant_id": variant.id, "quantity": 1},
+        json={"product_id": product.id, "variant_id": variant.id, "quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -873,7 +873,7 @@ def _add(client, token, product_id, quantity, variant_id=None):
     params = {"product_id": product_id, "quantity": quantity}
     if variant_id is not None:
         params["variant_id"] = variant_id
-    return client.post(f"{CART_PREFIX}/items", params=params, headers=_auth_headers(token))
+    return client.post(f"{CART_PREFIX}/items", json=params, headers=_auth_headers(token))
 
 
 def _cart(client, token):
@@ -925,7 +925,7 @@ def test_update_cart_item_rejects_non_positive_quantity(client, db_session, quan
 
     response = client.put(
         f"{CART_PREFIX}/items/{product.id}",
-        params={"quantity": quantity},
+        json={"quantity": quantity},
         headers=_auth_headers(token),
     )
 
@@ -965,7 +965,7 @@ def test_update_item_returns_503_when_redis_fails(client, db_session, monkeypatc
 
     response = client.put(
         f"{CART_PREFIX}/items/{product.id}",
-        params={"quantity": 2},
+        json={"quantity": 2},
         headers=_auth_headers(token),
     )
 
@@ -1101,7 +1101,7 @@ def test_update_cart_item_rejects_product_deactivated_after_adding(client, db_se
 
     response = client.put(
         f"{CART_PREFIX}/items/{product.id}",
-        params={"quantity": 4},
+        json={"quantity": 4},
         headers=_auth_headers(token),
     )
 
@@ -1159,11 +1159,11 @@ def test_update_variant_line_rejects_variant_deactivated_after_adding(client, db
 
     params = {"quantity": 2, "variant_id": variant.id}
     still_active = client.put(
-        f"{CART_PREFIX}/items/{product.id}", params=params, headers=_auth_headers(token)
+        f"{CART_PREFIX}/items/{product.id}", json=params, headers=_auth_headers(token)
     )
     _deactivate(db_session, ProductVariant, variant.id)
     deactivated = client.put(
-        f"{CART_PREFIX}/items/{product.id}", params=params | {"quantity": 3}, headers=_auth_headers(token)
+        f"{CART_PREFIX}/items/{product.id}", json=params | {"quantity": 3}, headers=_auth_headers(token)
     )
 
     assert still_active.status_code == 200
@@ -1440,7 +1440,7 @@ def test_mutation_responses_are_priced_live_too(client, db_session):
     _set_price(db_session, product.id, "20.00")
 
     updated = client.put(
-        f"{CART_PREFIX}/items/{other.id}", params={"quantity": 3}, headers=_auth_headers(token)
+        f"{CART_PREFIX}/items/{other.id}", json={"quantity": 3}, headers=_auth_headers(token)
     ).json()["data"]
     assert updated["total_amount"] == "23.00"
     assert _line(updated, product.id)["price_changed"] is True
@@ -1482,7 +1482,7 @@ def test_adding_more_of_a_line_re_records_the_price_seen(client, db_session):
     _set_price(db_session, product.id, "12.50")
 
     after_update = client.put(
-        f"{CART_PREFIX}/items/{product.id}", params={"quantity": 2}, headers=_auth_headers(token)
+        f"{CART_PREFIX}/items/{product.id}", json={"quantity": 2}, headers=_auth_headers(token)
     ).json()["data"]["items"][0]
     assert (after_update["price_when_added"], after_update["price_changed"]) == ("9.99", True)
 
@@ -1807,7 +1807,7 @@ def test_cart_routes_read_the_catalog_through_the_async_session_only(client, db_
         _add(client, token, product_id, 1, variant_id=variant_id)
         client.put(
             f"{CART_PREFIX}/items/{product_id}",
-            params={"quantity": 2, "variant_id": variant_id},
+            json={"quantity": 2, "variant_id": variant_id},
             headers=_auth_headers(token),
         )
         client.get(CART_PREFIX, headers=_auth_headers(token))

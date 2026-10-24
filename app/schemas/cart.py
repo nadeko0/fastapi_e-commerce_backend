@@ -17,10 +17,8 @@ from pydantic import BaseModel, Field
 
 from app.schemas.common import INT32_MAX, Int32
 
-# Bodies of the cart item routes, which took the same fields as query
-# parameters until 3.3.0 (still accepted, deprecated). Same bounds as those
-# parameters: ge=1 because 0 or a negative quantity once made the stored
-# cart unreadable.
+# Bodies of the cart item routes. ge=1 because 0 or a negative quantity once
+# made the stored cart unreadable.
 CartQuantity = Annotated[int, Field(ge=1, le=INT32_MAX)]
 
 

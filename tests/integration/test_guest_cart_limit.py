@@ -55,7 +55,7 @@ def _visitor(address="203.0.113.7"):
 
 
 def _add(visitor, product_id, headers=None):
-    return visitor.post(f"{CART}/items", params={"product_id": product_id}, headers=headers)
+    return visitor.post(f"{CART}/items", json={"product_id": product_id}, headers=headers)
 
 
 def _guest_keys(fake_redis):

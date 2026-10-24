@@ -91,7 +91,7 @@ def test_admin_status_change_for_every_pair(client, db_session, old, new):
     admin = _user(db_session, "admin")
     headers = {"Authorization": f"Bearer {create_access_token(admin.id)}"}
 
-    response = client.put(f"{ORDERS}/{order_id}/status", params={"status": new}, headers=headers)
+    response = client.put(f"{ORDERS}/{order_id}/status", json={"status": new}, headers=headers)
 
     db_session.expire_all()
     order = db_session.get(Order, order_id)
@@ -114,7 +114,7 @@ def test_status_change_requires_an_admin(client, db_session):
     customer = _user(db_session, "client")
     headers = {"Authorization": f"Bearer {create_access_token(customer.id)}"}
 
-    response = client.put(f"{ORDERS}/{order_id}/status", params={"status": "cancelled"},
+    response = client.put(f"{ORDERS}/{order_id}/status", json={"status": "cancelled"},
                           headers=headers)
 
     assert response.status_code == 403
@@ -127,7 +127,7 @@ def test_unknown_status_is_a_validation_error(client, db_session):
     admin = _user(db_session, "admin")
     headers = {"Authorization": f"Bearer {create_access_token(admin.id)}"}
 
-    response = client.put(f"{ORDERS}/{order_id}/status", params={"status": "shipped"},
+    response = client.put(f"{ORDERS}/{order_id}/status", json={"status": "shipped"},
                           headers=headers)
 
     assert response.status_code == 422

@@ -247,7 +247,7 @@ class TestCreateCheckoutSessionEndpoint:
 
         cancel_response = client.put(
             f"{ORDERS_PREFIX}/{order['id']}/status",
-            params={"status": "cancelled"},
+            json={"status": "cancelled"},
             headers=admin["headers"],
         )
         assert cancel_response.status_code == 200
@@ -583,7 +583,7 @@ class TestCheckoutSessionWebhook:
 
         cancel_response = client.put(
             f"{ORDERS_PREFIX}/{order['id']}/status",
-            params={"status": "cancelled"},
+            json={"status": "cancelled"},
             headers=admin["headers"],
         )
         assert cancel_response.status_code == 200

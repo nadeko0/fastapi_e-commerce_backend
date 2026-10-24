@@ -58,19 +58,19 @@ def _place(client, db_session, email="buyer@example.com", quantity=3, variant_qu
     variant = None
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": quantity},
+        json={"product_id": product.id, "quantity": quantity},
         headers=_auth_headers(token),
     )
     if variant_quantity:
         variant = _make_variant(db_session, product.id, stock=5)
         client.post(
             f"{CART_PREFIX}/items",
-            params={"product_id": product.id, "quantity": variant_quantity, "variant_id": variant.id},
+            json={"product_id": product.id, "quantity": variant_quantity, "variant_id": variant.id},
             headers=_auth_headers(token),
         )
     response = client.post(
         ORDERS_PREFIX,
-        params={"shipping_address_id": address_id},
+        json={"shipping_address_id": address_id},
         headers=_with_idempotency_key(_auth_headers(token)),
     )
     assert response.status_code == 200, response.text
@@ -189,7 +189,7 @@ def test_admin_cancel_after_customer_cancel_does_not_restock_again(client, db_se
 
     response = client.put(
         f"{ORDERS_PREFIX}/{order['id']}/status",
-        params={"status": "cancelled"},
+        json={"status": "cancelled"},
         headers=_auth_headers(admin_token),
     )
 

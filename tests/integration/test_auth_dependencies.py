@@ -583,7 +583,7 @@ def _product_in_cart(client, db_session, token):
     db_session.commit()
     added = client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 2},
+        json={"product_id": product.id, "quantity": 2},
         headers=_auth_headers(token),
     )
     assert added.status_code == 200
@@ -592,7 +592,7 @@ def _product_in_cart(client, db_session, token):
 def _place_order(client, token, address_id):
     return client.post(
         ORDERS_PREFIX,
-        params={"shipping_address_id": address_id},
+        json={"shipping_address_id": address_id},
         headers={"Idempotency-Key": uuid.uuid4().hex, **_auth_headers(token)},
     )
 

@@ -359,8 +359,8 @@ CART_ACCOUNT = RouteGroup(
     headers=lambda db_session: make_user_headers(db_session, "cart-load@example.com")[0],
     requests=lambda ids: [
         ("GET", "/api/v1/cart"),
-        ("POST", f"/api/v1/cart/items?product_id={ids['product_id']}&quantity=1"),
-        ("PUT", f"/api/v1/cart/items/{ids['product_id']}?quantity=2"),
+        ("POST", "/api/v1/cart/items", {"json": {"product_id": ids["product_id"], "quantity": 1}}),
+        ("PUT", f"/api/v1/cart/items/{ids['product_id']}", {"json": {"quantity": 2}}),
         ("POST", "/api/v1/cart/validate"),
     ],
 )
@@ -373,7 +373,7 @@ CART_GUEST = RouteGroup(
     seed=_seed_catalog,
     requests=lambda ids: [
         ("GET", "/api/v1/cart"),
-        ("POST", f"/api/v1/cart/items?product_id={ids['product_id']}&quantity=1"),
+        ("POST", "/api/v1/cart/items", {"json": {"product_id": ids["product_id"], "quantity": 1}}),
         ("GET", "/api/v1/cart"),
         ("POST", "/api/v1/cart/validate"),
         ("DELETE", "/api/v1/cart"),
@@ -437,7 +437,7 @@ USERS = RouteGroup(
         ("GET", "/api/v1/users/me"),
         ("GET", "/api/v1/users/addresses"),
         ("GET", "/api/v1/users/orders"),
-        ("POST", "/api/v1/users/consent?consent_type=marketing&granted=true"),
+        ("POST", "/api/v1/legal/consent", {"json": {"marketing_consent": True, "privacy_policy_accepted": True}}),
         (
             "POST",
             "/api/v1/users/login",
@@ -456,7 +456,7 @@ class PassIdentity(httpx2.Auth):
     pass's own task, so a ContextVar set there stays with the pass) picks
     the next identity; it signs that request, and the later ones, as that
     user and fills in the ids the static request list cannot know:
-    ORDER_ID in the path and ADDRESS_ID in the query."""
+    ORDER_ID in the path and ADDRESS_ID in the JSON body."""
 
     def __init__(self, identities):
         self.identities = identities
@@ -475,6 +475,11 @@ class PassIdentity(httpx2.Auth):
             .replace("ORDER_ID", str(who["order_id"]))
             .replace("ADDRESS_ID", str(who["address_id"]))
         )
+        if request.content:
+            # The placeholder is a quoted JSON string; the id is a number.
+            body = request.content.replace(b'"ADDRESS_ID"', str(who["address_id"]).encode())
+            request.stream = httpx2.ByteStream(body)
+            request.headers["Content-Length"] = str(len(body))
         yield request
 
 
@@ -516,11 +521,15 @@ def _seed_orders(db_session):
 ORDERS = RouteGroup(
     seed=_seed_orders,
     requests=lambda ids: [
-        ("POST", f"/api/v1/cart/items?product_id={ids['product_id']}&quantity=1", {"auth": ids["identity"]}),
         (
             "POST",
-            "/api/v1/orders?shipping_address_id=ADDRESS_ID",
-            {"auth": ids["identity"], "headers": {"Idempotency-Key": "orders-load-create"}},
+            "/api/v1/cart/items",
+            {"auth": ids["identity"], "json": {"product_id": ids["product_id"], "quantity": 1}},
+        ),
+        (
+            "POST",
+            "/api/v1/orders",
+            {"auth": ids["identity"], "json": {"shipping_address_id": "ADDRESS_ID"}, "headers": {"Idempotency-Key": "orders-load-create"}},
         ),
         ("GET", "/api/v1/orders/ORDER_ID", {"auth": ids["identity"]}),
         ("GET", "/api/v1/orders/ORDER_ID/payments", {"auth": ids["identity"]}),

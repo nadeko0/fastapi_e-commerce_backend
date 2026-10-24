@@ -407,7 +407,7 @@ def test_admin_status_change_follows_the_order_lifecycle(client, db_session, old
     order = _order(db_session, _customer(db_session), status=old)
 
     response = client.put(
-        f"{ORDERS}/{order.id}/status", params={"status": new},
+        f"{ORDERS}/{order.id}/status", json={"status": new},
         headers=_admin_headers(client, db_session),
     )
 
@@ -428,7 +428,7 @@ def test_admin_walks_an_order_through_its_whole_lifecycle(client, db_session):
 
     for status in ("confirmed", "processing", "sent", "delivered"):
         response = client.put(
-            f"{ORDERS}/{order.id}/status", params={"status": status}, headers=headers
+            f"{ORDERS}/{order.id}/status", json={"status": status}, headers=headers
         )
         assert response.status_code == 200, (status, response.text)
 
@@ -441,7 +441,7 @@ def test_non_admin_cannot_change_an_order_status(client, db_session):
     order = _order(db_session, customer)
 
     response = client.put(
-        f"{ORDERS}/{order.id}/status", params={"status": "confirmed"},
+        f"{ORDERS}/{order.id}/status", json={"status": "confirmed"},
         headers=_headers(client, "buyer@example.com"),
     )
 

@@ -124,7 +124,7 @@ def _add(visitor, product_id, quantity=1, variant_id=None, headers=None):
     params = {"product_id": product_id, "quantity": quantity}
     if variant_id is not None:
         params["variant_id"] = variant_id
-    return visitor.post(f"{CART_PREFIX}/items", params=params, headers=headers)
+    return visitor.post(f"{CART_PREFIX}/items", json=params, headers=headers)
 
 
 def _cart(visitor, headers=None):
@@ -171,7 +171,7 @@ def test_guest_can_add_view_update_remove_clear_and_validate(browser, db_session
 
     assert _quantities(_cart(guest)) == {(first.id, None): 2, (second.id, None): 1}
 
-    updated = guest.put(f"{CART_PREFIX}/items/{first.id}", params={"quantity": 5})
+    updated = guest.put(f"{CART_PREFIX}/items/{first.id}", json={"quantity": 5})
     assert updated.status_code == 200
     assert _quantities(updated.json()["data"]) == {(first.id, None): 5, (second.id, None): 1}
 
@@ -229,7 +229,7 @@ def test_guest_gets_the_same_rejections_as_an_account(browser, db_session):
     assert _add(guest, product.id, 3).status_code == 400
     assert _add(guest, product.id, 0).status_code == 422
     assert _add(guest, product.id, 1).status_code == 200
-    assert guest.put(f"{CART_PREFIX}/items/{product.id}", params={"quantity": 9}).status_code == 400
+    assert guest.put(f"{CART_PREFIX}/items/{product.id}", json={"quantity": 9}).status_code == 400
 
     db_session.query(Product).filter(Product.id == product.id).update({"stock_quantity": 0})
     db_session.commit()
@@ -266,7 +266,7 @@ def test_looking_at_an_empty_cart_as_a_guest_stores_nothing_and_issues_no_identi
         guest.get(CART_PREFIX),
         guest.post(f"{CART_PREFIX}/validate"),
         guest.delete(CART_PREFIX),
-        guest.put(f"{CART_PREFIX}/items/{product.id}", params={"quantity": 1}),
+        guest.put(f"{CART_PREFIX}/items/{product.id}", json={"quantity": 1}),
         guest.delete(f"{CART_PREFIX}/items/{product.id}"),
         # Rejected adds do not create a cart either.
         _add(guest, 999999),
@@ -323,7 +323,7 @@ def test_every_guest_write_renews_the_cookie_together_with_the_key(browser, db_s
     guest_id = guest.cookies.get(COOKIE)
 
     again = _add(guest, second.id, 1)
-    updated = guest.put(f"{CART_PREFIX}/items/{first.id}", params={"quantity": 2})
+    updated = guest.put(f"{CART_PREFIX}/items/{first.id}", json={"quantity": 2})
     read = guest.get(CART_PREFIX)
 
     # Same identifier, lifetime started again; a read renews nothing.
@@ -410,7 +410,7 @@ def test_an_identifier_of_the_wrong_format_reads_and_creates_nothing(
 
     assert _cart(intruder)["items"] == []
     assert intruder.post(f"{CART_PREFIX}/validate").json()["data"]["valid"] is True
-    assert intruder.put(f"{CART_PREFIX}/items/{product.id}", params={"quantity": 1}).status_code == 404
+    assert intruder.put(f"{CART_PREFIX}/items/{product.id}", json={"quantity": 1}).status_code == 404
     assert intruder.delete(f"{CART_PREFIX}/items/{product.id}").status_code == 404
     assert intruder.delete(CART_PREFIX).json()["data"]["items"] == []
     assert {key: fake_redis.get(key) for key in fake_redis.scan_iter("*cart:*")} == before
@@ -439,7 +439,7 @@ def test_a_well_formed_identifier_the_server_never_issued_creates_nothing(
     guest.cookies.set(COOKIE, chosen, domain="testserver.local")
 
     assert _cart(guest)["items"] == []
-    assert guest.put(f"{CART_PREFIX}/items/{product.id}", params={"quantity": 1}).status_code == 404
+    assert guest.put(f"{CART_PREFIX}/items/{product.id}", json={"quantity": 1}).status_code == 404
     assert guest.delete(f"{CART_PREFIX}/items/{product.id}").status_code == 404
     assert guest.cookies.get(COOKIE) == chosen
     cleared = guest.delete(CART_PREFIX)
@@ -506,7 +506,7 @@ def _cart_calls(visitor, product_id, headers):
     return [
         visitor.get(CART_PREFIX, headers=headers),
         _add(visitor, product_id, 1, headers=headers),
-        visitor.put(f"{CART_PREFIX}/items/{product_id}", params={"quantity": 2}, headers=headers),
+        visitor.put(f"{CART_PREFIX}/items/{product_id}", json={"quantity": 2}, headers=headers),
         visitor.delete(f"{CART_PREFIX}/items/{product_id}", headers=headers),
         visitor.delete(CART_PREFIX, headers=headers),
         visitor.post(f"{CART_PREFIX}/validate", headers=headers),
@@ -838,7 +838,7 @@ def test_merge_does_not_fail_a_login_over_stock(browser, db_session):
         "requested": 7,
     }]
     # And the customer can bring the line back within stock.
-    fixed = visitor.put(f"{CART_PREFIX}/items/{product.id}", params={"quantity": 5}, headers=headers)
+    fixed = visitor.put(f"{CART_PREFIX}/items/{product.id}", json={"quantity": 5}, headers=headers)
     assert fixed.status_code == 200
 
 
@@ -1124,7 +1124,7 @@ def test_a_guest_cannot_place_an_order(browser, db_session, fake_redis):
 
     response = guest.post(
         ORDERS_PREFIX,
-        params={"shipping_address_id": 1},
+        json={"shipping_address_id": 1},
         headers={"Idempotency-Key": uuid.uuid4().hex},
     )
 
@@ -1151,7 +1151,7 @@ def test_after_login_the_order_contains_the_merged_cart(browser, db_session, fak
     token = _login(visitor).json()["data"]["access_token"]
     response = visitor.post(
         ORDERS_PREFIX,
-        params={"shipping_address_id": address_id},
+        json={"shipping_address_id": address_id},
         headers={"Idempotency-Key": uuid.uuid4().hex, **_auth_headers(token)},
     )
 

@@ -191,12 +191,12 @@ def _create_verified_buyer_with_order(client, db_session, email="buyer@example.c
 
     client.post(
         f"{CART_PREFIX}/items",
-        params={"product_id": product.id, "quantity": 1},
+        json={"product_id": product.id, "quantity": 1},
         headers=headers,
     )
     order_resp = client.post(
         ORDERS_PREFIX,
-        params={"shipping_address_id": address.id},
+        json={"shipping_address_id": address.id},
         headers=_with_idempotency_key(headers),
     )
     assert order_resp.status_code == 200, order_resp.text
@@ -891,7 +891,7 @@ def test_webhook_success_for_cancelled_order_is_flagged_not_applied(client, db_s
 
     cancel_response = client.put(
         f"{ORDERS_PREFIX}/{order['id']}/status",
-        params={"status": "cancelled"},
+        json={"status": "cancelled"},
         headers=admin["headers"],
     )
     assert cancel_response.status_code == 200
@@ -999,7 +999,7 @@ def test_cannot_start_a_payment_on_an_already_cancelled_order(client, db_session
 
     client.put(
         f"{ORDERS_PREFIX}/{order['id']}/status",
-        params={"status": "cancelled"},
+        json={"status": "cancelled"},
         headers=admin["headers"],
     )
 

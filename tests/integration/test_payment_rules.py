@@ -138,7 +138,7 @@ def test_refund_does_not_touch_stock_even_after_an_admin_cancelled_the_paid_orde
     order_id = paid["order"]["id"]
     product_id = paid["product"].id
     cancelled = client.put(f"{ORDERS_PREFIX}/{order_id}/status",
-                           params={"status": "cancelled"}, headers=paid["admin"])
+                           json={"status": "cancelled"}, headers=paid["admin"])
     assert cancelled.status_code == 200
     db_session.expire_all()
     assert db_session.get(Product, product_id).stock_quantity == 10

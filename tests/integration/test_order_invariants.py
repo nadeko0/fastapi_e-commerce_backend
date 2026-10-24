@@ -111,7 +111,7 @@ def _variant(db, product, price_override, stock):
 
 
 def _checkout(client, headers, address_id):
-    return client.post(ORDERS, params={"shipping_address_id": address_id},
+    return client.post(ORDERS, json={"shipping_address_id": address_id},
                        headers={**headers, "Idempotency-Key": uuid.uuid4().hex})
 
 
@@ -154,7 +154,7 @@ def test_order_total_is_the_exact_decimal_sum_of_its_lines(client, db_session, l
             params["variant_id"] = variant.id
             if override is not None:
                 unit_price = override
-        added = client.post(f"{CART}/items", params=params, headers=headers)
+        added = client.post(f"{CART}/items", json=params, headers=headers)
         assert added.status_code == 200, added.text
         expected_total += unit_price * spec["quantity"]
         expected_prices[(product.id, variant.id if variant else None)] = unit_price
@@ -237,7 +237,7 @@ def test_stock_equals_start_minus_live_orders_whatever_happens(
         if kind in ("add", "order"):
             headers, _ = buyers[op[1]]
             response = client.post(f"{CART}/items",
-                                   params={"product_id": product.id, "quantity": op[2]},
+                                   json={"product_id": product.id, "quantity": op[2]},
                                    headers=headers)
             assert response.status_code in (200, 400), response.text
         if kind in ("checkout", "order"):
@@ -262,7 +262,7 @@ def test_stock_equals_start_minus_live_orders_whatever_happens(
                 response = client.post(f"{ORDERS}/{order_id}/cancel", headers=headers)
             else:
                 response = client.put(f"{ORDERS}/{order_id}/status",
-                                      params={"status": "cancelled"}, headers=admin_headers)
+                                      json={"status": "cancelled"}, headers=admin_headers)
             assert response.status_code in (200, 400), response.text
         if kind == "expire":
             for order_id, _ in placed:

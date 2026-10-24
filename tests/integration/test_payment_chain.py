@@ -144,17 +144,17 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     # 1. A guest fills a cart (over https: the cart cookie is Secure).
     visitor = TestClient(app, base_url="https://testserver")
     guest = Shop(visitor, shop.db)
-    add = visitor.post(f"{CART}/items", params={"product_id": widget.id, "quantity": 2})
+    add = visitor.post(f"{CART}/items", json={"product_id": widget.id, "quantity": 2})
     assert add.status_code == 200, add.text
-    add = visitor.post(f"{CART}/items", params={"product_id": shirt.id, "quantity": 1,
+    add = visitor.post(f"{CART}/items", json={"product_id": shirt.id, "quantity": 1,
                                                  "variant_id": shirt_xl.id})
     assert add.status_code == 200
     cart = add.json()["data"]
     assert (Decimal(cart["total_amount"]), cart["items_count"]) == (Decimal("32.25"), 2)
     # Cart validation: no more than the stock, nothing that is not for sale.
-    too_many = visitor.post(f"{CART}/items", params={"product_id": widget.id, "quantity": 9})
+    too_many = visitor.post(f"{CART}/items", json={"product_id": widget.id, "quantity": 9})
     assert too_many.status_code == 400
-    assert visitor.post(f"{CART}/items", params={"product_id": 999999}).status_code == 404
+    assert visitor.post(f"{CART}/items", json={"product_id": 999999}).status_code == 404
     assert shop.stock(widget) == 10  # a cart reserves nothing
 
     # 2. Signs up, verifies the address, logs in: the guest cart is merged.
@@ -179,7 +179,7 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
     buyer = Buyer(headers, 0, email, address.json()["data"]["id"])
     # Not yet: an order needs a verified address and a complete profile.
     assert guest.place_order(buyer).status_code == 403
-    assert visitor.get(f"{USERS}/verify-email/{tokens[0]}").status_code == 200
+    assert visitor.post(f"{USERS}/verify-email", json={"token": tokens[0]}).status_code == 200
     assert guest.place_order(buyer).status_code == 400  # no phone yet
     assert visitor.put(f"{USERS}/me", headers=headers, json={"phone": "+48123456789"}).status_code == 200
 

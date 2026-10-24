@@ -5,7 +5,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Annotated, List  # noqa: UP035 - see the UP006 noqa on response_model
 
-from fastapi import APIRouter, BackgroundTasks, Body, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Body, Header, HTTPException, Request, status
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select, update
@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, CurrentUser, DbSession, Provider
-from app.core.deprecation import QUERY_PARAMETER_DEPRECATED, body_or_query
 from app.core.idempotency import (
     PAYMENT_KEY_HEADER_DESCRIPTION,
     REFUND_KEY_HEADER_DESCRIPTION,
@@ -128,26 +127,16 @@ async def create_order(
         alias="Idempotency-Key", min_length=8, max_length=255,
         description=order_key_header_description(),
     )],
-    # `shipping_address_id` goes in the JSON body; the query parameter is
-    # what 3.3.0 and earlier took and is deprecated (sending both is a 422).
-    body: Annotated[OrderCreate | None, Body()] = None,
-    shipping_address_id: Annotated[
-        Int32 | None, Query(deprecated=True, description=QUERY_PARAMETER_DEPRECATED)
-    ] = None,
+    body: Annotated[OrderCreate, Body()],
 ):
     """Create an order from the current user's cart, decrementing stock atomically.
 
     Requires an `Idempotency-Key` header. Repeating a request with a key
     already used by this user returns the order created the first time;
     a key already used with a different `shipping_address_id` is answered 422.
-
-    `shipping_address_id` goes in the JSON body; the query parameter of the
-    same name is deprecated.
     """
 
-    shipping_address_id = body_or_query(
-        body, ("shipping_address_id",), shipping_address_id=shipping_address_id,
-    )["shipping_address_id"]
+    shipping_address_id = body.shipping_address_id
 
     if not current_user.is_email_verified:
         raise HTTPException(
@@ -402,25 +391,14 @@ async def get_order(
 )
 async def update_order_status(
     order_id: Int32,
-    # Named "status" for the public API/query param, but that shadows the
-    # `status` module (fastapi.status) imported above within this function
-    # body - HTTPException below must use the http_status alias instead,
-    # or status.HTTP_404_NOT_FOUND resolves against this OrderStatus value
-    # and raises AttributeError instead of a proper 404/400 response.
     background_tasks: BackgroundTasks,
     current_user: AdminUser,  # Admin only
     db: DbSession,
-    body: Annotated[OrderStatusUpdate | None, Body()] = None,
-    status: Annotated[
-        OrderStatus | None, Query(deprecated=True, description=QUERY_PARAMETER_DEPRECATED)
-    ] = None,
+    body: Annotated[OrderStatusUpdate, Body()],
 ):
-    """Transition an order to a new status (admin only).
+    """Transition an order to a new status (admin only)."""
 
-    `status` goes in the JSON body; the query parameter of the same name is
-    deprecated."""
-
-    status = body_or_query(body, ("status",), status=status)["status"]
+    new_status = body.status
 
     # See get_order above: OrderResponse.model_validate(order) below serializes
     # shipping_address and items->product, so eager-load both here too.
@@ -442,25 +420,25 @@ async def update_order_status(
 
     # An order whose payment is disputed is on hold: it is not moved on
     # (fulfilled) until the dispute closes. Cancelling it stays possible.
-    if status != OrderStatus.CANCELLED and await db.run_sync(_has_open_dispute, order.id):
+    if new_status != OrderStatus.CANCELLED and await db.run_sync(_has_open_dispute, order.id):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Order is on hold: a payment for it is disputed",
         )
 
-    if not _is_valid_status_transition(order.status, status):
+    if not _is_valid_status_transition(order.status, new_status):
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Invalid status transition"
         )
 
 
-    if status == OrderStatus.CANCELLED:
+    if new_status == OrderStatus.CANCELLED:
         # Releases the stock create_order took (the one restock path, shared
         # with the customer's own cancel and the unpaid-order expiry).
         await db.run_sync(cancel_order_and_restock, order)
     else:
-        order.status = status
+        order.status = new_status
         order.updated_at = utc_now()
 
     await db.commit()

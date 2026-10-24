@@ -164,10 +164,10 @@ class Shop:
         params = {"product_id": product.id, "quantity": quantity}
         if variant is not None:
             params["variant_id"] = variant.id
-        return self.client.post(f"{CART}/items", params=params, headers=buyer.headers)
+        return self.client.post(f"{CART}/items", json=params, headers=buyer.headers)
 
     def place_order(self, buyer: Buyer, key=None):
-        return self.client.post(ORDERS, params={"shipping_address_id": buyer.address_id},
+        return self.client.post(ORDERS, json={"shipping_address_id": buyer.address_id},
                                 headers={**buyer.headers, "Idempotency-Key": key or new_key()})
 
     def order_of(self, buyer: Buyer, product, quantity=1) -> dict:
@@ -204,7 +204,7 @@ class Shop:
     # -- Admin -------------------------------------------------------------
 
     def set_status(self, admin_headers, order_id, status):
-        return self.client.put(f"{ORDERS}/{order_id}/status", params={"status": status},
+        return self.client.put(f"{ORDERS}/{order_id}/status", json={"status": status},
                                headers=admin_headers)
 
     def refund(self, admin_headers, order_id, amount=None, key=None):
