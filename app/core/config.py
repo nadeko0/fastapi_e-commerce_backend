@@ -347,6 +347,12 @@ class Settings(BaseSettings):
     # startup and was never used, which suggested otherwise. A leftover
     # line in an old .env is ignored like any unknown variable.
     GDPR_EXPORT_EXPIRY_HOURS: int = 24
+    # How long an Idempotency-Key is honoured (draft-ietf-httpapi-idempotency-
+    # key-header-08, section 2.3: define the expiry policy and publish it).
+    # 24 hours is Stripe's: it prunes its own keys once they are at least
+    # that old (https://docs.stripe.com/api/idempotent_requests). Past it the
+    # same value is a new key; see app.tasks.clear_expired_idempotency_keys.
+    IDEMPOTENCY_KEY_TTL_HOURS: int = Field(24, ge=1)
     # The most records GET /users/data/export assembles in one response:
     # addresses + orders + order items of the account. The export is built
     # in the worker's memory and sent whole; past this it is refused with a

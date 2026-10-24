@@ -17,7 +17,12 @@ from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, CurrentUser, DbSession, Provider
 from app.core.deprecation import QUERY_PARAMETER_DEPRECATED, body_or_query
-from app.core.idempotency import ensure_same_request, request_fingerprint
+from app.core.idempotency import (
+    REFUND_KEY_HEADER_DESCRIPTION,
+    ensure_same_request,
+    key_header_description,
+    request_fingerprint,
+)
 from app.core.openapi import DocumentedRoute
 from app.models.address import Address
 from app.models.order import Order
@@ -120,7 +125,7 @@ async def create_order(
     # attempt and resend the same key on every retry of that attempt.
     idempotency_key: Annotated[str, Header(
         alias="Idempotency-Key", min_length=8, max_length=255,
-        description="Unique per checkout attempt; resend the same value when retrying.",
+        description=key_header_description("Unique per checkout attempt"),
     )],
     # `shipping_address_id` goes in the JSON body; the query parameter is
     # what 3.3.0 and earlier took and is deprecated (sending both is a 422).
@@ -938,7 +943,7 @@ async def process_payment(
     # a key, the second request of one attempt is the first one's replay.
     idempotency_key: Annotated[str, Header(
         alias="Idempotency-Key", min_length=8, max_length=255,
-        description="Unique per payment attempt; resend the same value when retrying.",
+        description=key_header_description("Unique per payment attempt"),
     )],
 ):
     """Charge an order's total via the payment provider, creating a PaymentIntent.
@@ -1242,7 +1247,7 @@ async def create_checkout_session(
     # key can both be completed, and both charge the customer.
     idempotency_key: Annotated[str, Header(
         alias="Idempotency-Key", min_length=8, max_length=255,
-        description="Unique per payment attempt; resend the same value when retrying.",
+        description=key_header_description("Unique per payment attempt"),
     )],
     payload: CheckoutSessionCreate | None = None,
 ):
@@ -1423,7 +1428,7 @@ async def refund_payment(
     # partial refund was a second refund, the money returned twice.
     idempotency_key: Annotated[str, Header(
         alias="Idempotency-Key", min_length=8, max_length=255,
-        description="Unique per refund; resend the same value when retrying.",
+        description=REFUND_KEY_HEADER_DESCRIPTION,
     )],
 ):
     """Issue a full or partial refund for a paid order (admin only).
