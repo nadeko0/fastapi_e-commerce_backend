@@ -33,6 +33,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# The base image ships pip (with its own vendored copies of certifi, urllib3,
+# msgpack, ...) in the system site-packages. Nothing at run time installs
+# packages: the app runs from /app/.venv, built in the builder stage. Without
+# pip the image carries none of pip's vendored libraries, so their advisories
+# do not apply to it. python:3.13-slim installs no setuptools or wheel.
+RUN python -m pip uninstall --yes pip
+
 RUN adduser --disabled-password --gecos '' --no-create-home appuser && \
     mkdir -p /app/logs && \
     chown appuser:appuser /app/logs
