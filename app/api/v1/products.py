@@ -21,7 +21,7 @@ from app.schemas.category import (
     CategoryTreeNode,
     CategoryTreeResponse,
 )
-from app.schemas.common import APIResponse, Int32, sortable_pagination
+from app.schemas.common import Int32, sortable_pagination
 from app.schemas.product import (
     ProductFilter,
     ProductListResponse,
@@ -132,7 +132,7 @@ CATEGORY_SORT_COLUMNS = {"id": Category.id, "name": Category.name, "created_at":
 CategoryListParams = sortable_pagination("CategoryListParams", tuple(CATEGORY_SORT_COLUMNS))
 
 
-@router.get("/categories", response_model=APIResponse[CategoryListResponse])
+@router.get("/categories", response_model=CategoryListResponse)
 async def list_categories(
     pagination: Annotated[CategoryListParams, Depends()],
     db: DbSession,
@@ -157,15 +157,15 @@ async def list_categories(
         )).offset((pagination.page - 1) * pagination.size).limit(pagination.size)
     )).all()
 
-    return APIResponse.success_response(CategoryListResponse(
+    return CategoryListResponse(
         items=[CategoryResponse.model_validate(cat) for cat in categories],
         total=total,
         page=pagination.page,
         size=pagination.size,
         has_more=total > pagination.page * pagination.size
-    ))
+    )
 
-@router.get("/categories/tree", response_model=APIResponse[CategoryTreeResponse])
+@router.get("/categories/tree", response_model=CategoryTreeResponse)
 async def get_category_tree(
     db: DbSession,
     redis: Cache,
@@ -174,7 +174,7 @@ async def get_category_tree(
 
     cached_tree = await redis.get_cached_category_tree()
     if cached_tree:
-        return APIResponse.success_response(cached_tree)
+        return cached_tree
 
 
     categories = (await db.scalars(select(Category))).all()
@@ -212,11 +212,11 @@ async def get_category_tree(
 
     await redis.cache_category_tree(response)
 
-    return APIResponse.success_response(response)
+    return response
 
 @router.get(
     "/categories/{category_id}",
-    response_model=APIResponse[CategoryResponse],
+    response_model=CategoryResponse,
     responses={404: {"description": "Category not found"}},
 )
 async def get_category(
@@ -231,9 +231,9 @@ async def get_category(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Category not found"
         )
-    return APIResponse.success_response(CategoryResponse.model_validate(category))
+    return CategoryResponse.model_validate(category)
 
-@router.get("/products", response_model=APIResponse[ProductListResponse])
+@router.get("/products", response_model=ProductListResponse)
 async def list_products(
     filter_params: Annotated[ProductFilter, Depends(_product_filter)],
     db: DbSession,
@@ -299,19 +299,19 @@ async def list_products(
         stmt.offset((filter_params.page - 1) * filter_params.size).limit(filter_params.size)
     )).all()
 
-    return APIResponse.success_response(ProductListResponse(
+    return ProductListResponse(
         items=[_to_product_response(p) for p in products],
         total=total,
         page=filter_params.page,
         size=filter_params.size,
         has_more=total > filter_params.page * filter_params.size
-    ))
+    )
 
 # /products/search must be registered before /products/{product_id}:
 # Starlette matches routes in registration order, and {product_id}: int
 # would otherwise greedily match the literal path segment "search" first
 # (failing int validation -> 422), making this endpoint unreachable.
-@router.get("/products/search", response_model=APIResponse[ProductListResponse])
+@router.get("/products/search", response_model=ProductListResponse)
 async def search_products(
     search: Annotated[ProductSearch, Query()],
     db: DbSession,
@@ -331,17 +331,17 @@ async def search_products(
         stmt.order_by(Product.id).offset((search.page - 1) * search.size).limit(search.size)
     )).all()
 
-    return APIResponse.success_response(ProductListResponse(
+    return ProductListResponse(
         items=[_to_product_response(p) for p in products],
         total=total,
         page=search.page,
         size=search.size,
         has_more=total > search.page * search.size
-    ))
+    )
 
 @router.get(
     "/products/{product_id}",
-    response_model=APIResponse[ProductResponse],
+    response_model=ProductResponse,
     responses={
         304: {"description": "Not modified: If-None-Match matches the current ETag"},
         404: {"description": "Product not found"},
@@ -374,7 +374,7 @@ async def get_product(
         except ValidationError:
             cached_representation = None  # unreadable cache entry: rebuild below
         if cached_representation is not None:
-            return _conditional(cached_representation) or APIResponse.success_response(cached_product)
+            return _conditional(cached_representation) or cached_representation
 
     product = (await db.scalars(
         select(Product).options(joinedload(Product.category)).where(
@@ -392,4 +392,4 @@ async def get_product(
 
     await redis.cache_product(product_id, representation.model_dump())
 
-    return _conditional(representation) or APIResponse.success_response(representation)
+    return _conditional(representation) or representation
