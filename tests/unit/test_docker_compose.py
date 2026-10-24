@@ -167,15 +167,23 @@ def test_base_images_are_pinned_by_digest_on_their_current_majors():
 
 
 def test_ci_tests_against_the_postgres_image_production_runs():
-    # The test-postgres job's service container must be the db service's image,
-    # tag and digest: a Postgres-only behaviour is only worth testing on the
-    # server that is deployed. Bumping one without the other fails here.
+    # The test-postgres job runs once per PostgreSQL major, from a matrix. The
+    # entry for the major docker-compose.yml deploys must be the db service's
+    # image, tag and digest: a Postgres-only behaviour is only worth testing
+    # on the server that is deployed. Bumping one without the other fails
+    # here. The other majors are pinned by digest as well.
     compose_image = re.search(r"^\s*image: (postgres:\S+)", service_block("db"), re.M).group(1)
     ci = _read(".github/workflows/ci.yml")
     job = ci[ci.index("\n  test-postgres:"):]
-    job = job[: job.index("\n  docker-build:")]
-    assert re.search(rf"^\s*image: {re.escape(compose_image)}\s*$", job, re.M)
-    assert "test-postgres" in re.search(r"docker-build:.*?needs: \[([^\]]*)\]", ci, re.S).group(1)
+    job = job[: job.index("\n  audit:")]
+    assert re.search(r"^\s*image: \$\{\{ matrix\.image \}\}\s*$", job, re.M), job
+    matrix_images = re.findall(r"^\s+image: (postgres:\S+)\s*$", job, re.M)
+    assert compose_image in matrix_images
+    assert sorted(re.match(r"postgres:(\d+)", image).group(1) for image in matrix_images) == ["15", "16", "18"]
+    for image in matrix_images:
+        assert re.search(_PINNED, image), image
+    needs = re.search(r"docker-build:.*?needs: \[([^\]]*)\]", ci, re.S).group(1)
+    assert "test-postgres" in needs
 
 
 def test_celery_worker_gets_time_to_finish_its_task_on_stop():

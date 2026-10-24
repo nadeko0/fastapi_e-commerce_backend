@@ -159,15 +159,37 @@ jobs:
     # tests/conftest.py) plus the PostgreSQL-only ones, against a real server.
     # tests/conftest.py creates a throwaway database on it, builds the schema
     # with `alembic upgrade head` and drops it at the end.
+    #
+    # One run per PostgreSQL major: 15 is what docker-compose.yml deploys
+    # (SETUP.md: "15+"), 16 and 18 are the other supported majors. 15 runs the
+    # whole suite on PostgreSQL (everything that does not assert on elapsed
+    # time), 16 and 18 the database-sensitive subset: the subset is ~80% of the
+    # whole run's time (11 min of ~15 on two local workers), so the full suite
+    # on each major would triple the cost for ~20% more coverage of code that
+    # does not touch the database differently between majors. Images by tag and
+    # digest, each digest more than two weeks old when pinned; 15's is the one
+    # test_docker_compose.py keeps equal to docker-compose.yml.
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgres: "15"
+            image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
+            selection: not timing_sensitive
+          - postgres: "16"
+            image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+            selection: db_sensitive and not timing_sensitive
+          - postgres: "18"
+            image: postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+            selection: db_sensitive and not timing_sensitive
+    name: test-postgres (PostgreSQL ${{ matrix.postgres }})
     services:
       postgres:
-        # The image docker-compose.yml runs in production, tag and digest
-        # (test_docker_compose.py keeps the two in step). max_connections stays
-        # at the default 100 here: a service container cannot pass the
-        # `-c max_connections=200` that docker-compose.yml sets, and the tests
-        # open far fewer.
-        image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
+        # max_connections stays at the default 100 here: a service container
+        # cannot pass the `-c max_connections=200` that docker-compose.yml
+        # sets, and the tests open far fewer.
+        image: ${{ matrix.image }}
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
@@ -189,7 +211,7 @@ jobs:
         run: uv python install
       - name: Install dependencies
         run: uv sync --locked --group dev
-      - name: Database-sensitive tests on PostgreSQL
+      - name: Tests on PostgreSQL ${{ matrix.postgres }} (${{ matrix.selection }})
         env:
           TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/ci
           JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
@@ -203,7 +225,7 @@ jobs:
           SMTP_PASSWORD: ci
           EMAILS_FROM_EMAIL: ci@example.com
           EMAILS_FROM_NAME: CI
-        run: uv run pytest tests/ -m "db_sensitive and not timing_sensitive" -q -p no:cacheprovider -rs -n auto --dist worksteal
+        run: uv run pytest tests/ -m "${{ matrix.selection }}" -q -p no:cacheprovider -rs -n auto --dist worksteal
       - name: Timing-sensitive database tests on PostgreSQL, alone
         env:
           TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/ci
