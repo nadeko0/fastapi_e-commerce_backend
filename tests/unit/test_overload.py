@@ -5,7 +5,9 @@ import asyncio
 
 import pytest
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
+from starlette.requests import ClientDisconnect
 
 from app.core.overload import InFlightLimitMiddleware
 
@@ -128,3 +130,115 @@ def test_non_http_scopes_are_passed_straight_through(scope_type):
 
     assert seen == [scope_type]
     assert middleware.in_flight == 0
+
+
+def _streaming_app(started: asyncio.Event, proceed: asyncio.Event):
+    """An app whose response is a stream that is held open until `proceed`."""
+    app = FastAPI()
+
+    @app.get("/stream")
+    async def stream():
+        async def chunks():
+            started.set()
+            await proceed.wait()
+            yield b"late chunk"
+
+        return StreamingResponse(chunks())
+
+    return app
+
+
+def _request_scope(spec_version: str) -> dict:
+    return {
+        "type": "http", "path": "/stream", "raw_path": b"/stream", "method": "GET",
+        "headers": [], "query_string": b"", "root_path": "", "scheme": "http",
+        "server": ("test", 80), "client": ("127.0.0.1", 1234),
+        "asgi": {"version": "3.0", "spec_version": spec_version},
+    }
+
+
+def test_slot_is_released_when_the_client_disconnects_mid_response():
+    """A slot is held for as long as the ASGI call lasts, so a client that
+    goes away while its response is still being produced must give it back
+    (Starlette's docs: cleanup belongs in try/finally, which also runs on a
+    disconnect or a cancellation). Driven at ASGI level: the request is in
+    the handler's stream, the server reports http.disconnect through
+    receive(), and the counter must return to what it was. Starlette's
+    StreamingResponse listens for the disconnect on ASGI spec versions
+    below 2.4."""
+    async def scenario():
+        started, proceed = asyncio.Event(), asyncio.Event()
+        middleware = InFlightLimitMiddleware(_streaming_app(started, proceed), limit=1)
+        incoming: asyncio.Queue = asyncio.Queue()
+        incoming.put_nowait({"type": "http.request", "body": b"", "more_body": False})
+        sent = []
+
+        async def receive():
+            return await incoming.get()
+
+        async def send(message):
+            sent.append(message)
+
+        before = middleware.in_flight
+        call = asyncio.create_task(middleware(_request_scope("2.3"), receive, send))
+        await asyncio.wait_for(started.wait(), timeout=2)
+        assert middleware.in_flight == before + 1, "the request holds a slot while it streams"
+
+        incoming.put_nowait({"type": "http.disconnect"})
+        await asyncio.wait_for(call, timeout=2)
+        return before, middleware.in_flight
+
+    before, after = asyncio.run(scenario())
+    assert after == before == 0
+
+
+def test_slot_is_released_when_sending_to_a_gone_client_fails():
+    """The same release on ASGI spec 2.4 and later, where a server signals a
+    gone client by making send() raise OSError (Starlette turns that into
+    ClientDisconnect) instead of delivering http.disconnect."""
+    async def scenario():
+        started, proceed = asyncio.Event(), asyncio.Event()
+        middleware = InFlightLimitMiddleware(_streaming_app(started, proceed), limit=1)
+        gone = False
+
+        async def receive():
+            await asyncio.Event().wait()  # no message ever arrives
+
+        async def send(message):
+            if gone and message["type"] == "http.response.body":
+                raise OSError("client went away")
+
+        call = asyncio.create_task(middleware(_request_scope("2.4"), receive, send))
+        await asyncio.wait_for(started.wait(), timeout=2)
+        assert middleware.in_flight == 1
+
+        gone = True
+        proceed.set()
+        with pytest.raises(ClientDisconnect):  # for the server to ignore
+            await asyncio.wait_for(call, timeout=2)
+        return middleware.in_flight
+
+    assert asyncio.run(scenario()) == 0
+
+
+def test_slot_is_released_when_the_request_task_is_cancelled():
+    async def scenario():
+        started, proceed = asyncio.Event(), asyncio.Event()
+        middleware = InFlightLimitMiddleware(_streaming_app(started, proceed), limit=1)
+
+        async def receive():
+            await asyncio.Event().wait()
+
+        async def send(message):
+            pass
+
+        call = asyncio.create_task(middleware(_request_scope("2.3"), receive, send))
+        await asyncio.wait_for(started.wait(), timeout=2)
+        assert middleware.in_flight == 1
+
+        call.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+        return middleware.in_flight
+
+    assert asyncio.run(scenario()) == 0
