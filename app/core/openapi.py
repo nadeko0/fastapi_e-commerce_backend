@@ -239,10 +239,13 @@ def install_problem_media_type(app: FastAPI) -> None:
     response (status 400 and up): FastAPI puts a response's model under the
     route's own media type, application/json.
 
-    FastAPI rebuilds its cached document whenever the router's routes change,
-    so the conversion runs on every document handed out, not only on the
-    first build. It is idempotent: a converted response has no
-    application/json left to move."""
+    FastAPI rebuilds its cached document only when a route is ADDED (the
+    router's routes version, bumped by add_api_route, add_route,
+    include_router and the like, is compared with the one the cache was built
+    at; removing a route, or editing the `routes` list, does not change it).
+    The conversion runs on every document handed out, not only on the first
+    build, so a rebuilt document is converted too. It is idempotent: a
+    converted response has no application/json left to move."""
     build = app.openapi
 
     def openapi() -> dict[str, Any]:
