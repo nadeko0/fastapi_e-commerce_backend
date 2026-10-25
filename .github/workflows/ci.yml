@@ -356,8 +356,36 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: fastapi-ecommerce-backend:ci
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             REVISION=${{ github.sha }}
             CREATED=${{ steps.meta.outputs.created }}
+      # A scan of the image that ships, not of the lockfile alone: audit covers
+      # the Python dependencies, this covers the OS packages and every binary in
+      # the app image and in the postgres and redis images docker-compose.yml
+      # runs (read from it, so a re-pin there is scanned here). Only findings
+      # with a fix fail the job (one without cannot be acted on yet). The ignore
+      # list holds nothing but the gosu findings shown unreachable (see
+      # .trivyignore.yaml).
+      - name: Scan the app image and the compose images (Trivy)
+        env:
+          # Trivy 0.75.0 by digest, as the other tools in this workflow.
+          TRIVY: aquasec/trivy@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+        run: |
+          images="fastapi-ecommerce-backend:ci $(tr -d '\r' < docker-compose.yml | sed -n 's/^ *image: \(postgres:.*\|redis:.*\)$/\1/p')"
+          test "$(echo $images | wc -w)" = 3
+          status=0
+          for image in $images; do
+            echo "::group::trivy $image"
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$GITHUB_WORKSPACE:/repo:ro" \
+              "$TRIVY" image --skip-version-check \
+              --ignorefile /repo/.trivyignore.yaml \
+              --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
+              "$image" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
