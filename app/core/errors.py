@@ -60,6 +60,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.routing import iter_route_contexts
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
@@ -185,10 +186,35 @@ def sanitized_errors(errors: list[dict]) -> list[dict]:
     return jsonable_encoder([_without_input(e) for e in errors])
 
 
+def _supported_methods(request: Request) -> list[str]:
+    """Every method any route with the request's path has, sorted. The routes
+    are read the way FastAPI reads them to build the OpenAPI document
+    (iter_route_contexts): the router keeps an included router as one
+    unexpanded entry, so a walk of `router.routes` would find none of the
+    routes of users.py, cart.py, and the rest."""
+    path = request.scope["path"].removeprefix(request.scope.get("root_path", ""))
+    methods: set[str] = set()
+    for route in iter_route_contexts(request.app.router.routes):
+        regex = getattr(route, "path_regex", None)
+        if route.methods and regex is not None and regex.match(path):
+            methods |= route.methods
+    return sorted(methods)
+
+
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> Response:
     if exc.status_code in {204, 304}:
         # No body is allowed on these (RFC 9110 15.3.5, 15.4.5).
         return Response(status_code=exc.status_code, headers=exc.headers)
+    if exc.status_code == 405 and exc.headers and "Allow" in exc.headers:
+        # Where a path is several routes (GET, PUT and PATCH /users/me),
+        # Starlette raises this with the methods of the first route it found
+        # for the path. The Allow of a 405 must list all the resource's
+        # supported methods (RFC 9110 15.5.6). HEAD is added to it, wherever
+        # GET is, by app/core/head.py.
+        exc = StarletteHTTPException(
+            405, detail=exc.detail,
+            headers={**exc.headers, "Allow": ", ".join(_supported_methods(request))},
+        )
     if exc.status_code == 400 and exc.detail == _UNREADABLE_BODY_DETAIL:
         exc = Problem(
             400, type=ProblemType.MALFORMED_REQUEST,
