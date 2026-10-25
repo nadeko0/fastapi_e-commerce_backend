@@ -510,7 +510,7 @@ class RedisService:
             return self._redis.set(
                 key,
                 self._serialize(data),
-                ex=codec.PRODUCT_CACHE_TTL,  # 1 hour cache as per requirements
+                ex=codec.PRODUCT_CACHE_TTL,
             )
         except RedisError as e:
             self._handle_redis_error(f"cache_product: {str(e)}")

@@ -31,6 +31,17 @@ ORDER_STATUS_TRANSITIONS = {
 UNPAID_PAYMENT_STATUSES = frozenset({PaymentStatus.PENDING, PaymentStatus.FAILED})
 
 
+def products_with_cached_stock(lines) -> list[int]:
+    """
+    Ids of the products whose detail (GET /products/{id}, cached in Redis)
+    shows a stock count that a change to `lines` (pairs of product id and
+    variant id, or None) moves: the plain lines. A variant line changes the
+    variant's own stock, which the product detail does not show. Callers drop
+    these cache entries after the transaction that changed the stock commits.
+    """
+    return sorted({product_id for product_id, variant_id in lines if variant_id is None})
+
+
 def is_valid_status_transition(old_status: OrderStatus, new_status: OrderStatus) -> bool:
     return new_status in ORDER_STATUS_TRANSITIONS.get(old_status, set())
 

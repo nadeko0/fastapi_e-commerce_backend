@@ -33,7 +33,11 @@ from app.schemas.common import Cart, CartItem, cart_item_key
 logger = logging.getLogger("app.services.redis")
 
 CATEGORY_TREE_KEY = "category:tree"
-PRODUCT_CACHE_TTL = timedelta(hours=1)
+# Short because the detail carries the stock count: every committed change
+# drops the entry (order, cancellation, expiry, admin edit), and this bounds
+# the staleness when that drop is lost (Redis unreachable at that moment) or
+# a reader re-caches the old row just before the commit.
+PRODUCT_CACHE_TTL = timedelta(minutes=5)
 SESSION_TTL = timedelta(hours=24)
 
 

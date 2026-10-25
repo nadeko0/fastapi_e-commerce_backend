@@ -33,6 +33,7 @@ from app.services.orders import (
     UNPAID_PAYMENT_STATUSES,
     cancel_order_and_restock,
     is_unpaid_and_new,
+    products_with_cached_stock,
 )
 from app.services.payment import get_payment_provider
 from app.services.reconciliation import reconcile_payments
@@ -510,8 +511,17 @@ def expire_unpaid_orders(db) -> int:
             total_amount=order.total_amount,
             currency=order.currency,
         )
+        restocked = products_with_cached_stock(
+            [(item.product_id, item.variant_id) for item in order.items]
+        )
         db.commit()
         cancelled += 1
+        # After the commit (a reader in between would cache the old stock
+        # again). A failure is logged by RedisService and not raised: the
+        # entry then lives at most PRODUCT_CACHE_TTL.
+        cache = RedisService()
+        for product_id in restocked:
+            cache.invalidate_product_cache(product_id)
         send_order_cancellation_email(recipient, notice)
     return cancelled
 

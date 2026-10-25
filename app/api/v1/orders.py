@@ -70,6 +70,7 @@ from app.services.orders import (
     is_unpaid_and_new,
     is_valid_status_transition,
     lock_stock_rows,
+    products_with_cached_stock,
 )
 from app.services.payment.exceptions import (
     CardError,
@@ -102,6 +103,16 @@ async def _load_order_for_response(db: AsyncSession, order_id: int) -> Order:
         select(Order).options(*_ORDER_RESPONSE_LOADS).where(Order.id == order_id).limit(1)
         .execution_options(populate_existing=True)
     )).scalars().one()
+
+
+async def _drop_product_details(redis: Cache, product_ids: list[int]) -> None:
+    """Drop the cached product details whose stock a committed order change
+    moved (see products_with_cached_stock). After the commit, never before:
+    a reader between the two would cache the old count again. A Redis error
+    is logged by the cache service and not raised - the change is committed
+    - so a lost invalidation lasts at most PRODUCT_CACHE_TTL."""
+    for product_id in product_ids:
+        await redis.invalidate_product_cache(product_id)
 
 
 async def _order_by_idempotency_key(
@@ -355,6 +366,9 @@ async def create_order(
 
     order.total_amount = total_amount
     await db.commit()
+    await _drop_product_details(redis, products_with_cached_stock(
+        [(item.product_id, item.variant_id) for item in cart.items.values()]
+    ))
 
     # Read back with get_order's eager options: OrderResponse reads the
     # address, the lines, their products and variants (and the columns the
@@ -428,6 +442,7 @@ async def update_order_status(
     background_tasks: BackgroundTasks,
     current_user: AdminUser,  # Admin only
     db: DbSession,
+    redis: Cache,
     body: Annotated[OrderStatusUpdate, Body()],
 ):
     """Transition an order to a new status (admin only)."""
@@ -475,7 +490,11 @@ async def update_order_status(
         order.status = new_status
         order.updated_at = utc_now()
 
+    restocked = products_with_cached_stock(
+        [(item.product_id, item.variant_id) for item in order.items]
+    ) if new_status == OrderStatus.CANCELLED else []
     await db.commit()
+    await _drop_product_details(redis, restocked)
 
 
     # The transition was validated above and no status moves to itself, so
@@ -502,6 +521,7 @@ async def cancel_own_order(
     background_tasks: BackgroundTasks,
     current_user: CurrentUser,
     db: DbSession,
+    redis: Cache,
 ):
     """Cancel one of the current user's own orders that has not been paid,
     returning its items to stock.
@@ -533,7 +553,11 @@ async def cancel_own_order(
         )
 
     await db.run_sync(cancel_order_and_restock, order)
+    restocked = products_with_cached_stock(
+        [(item.product_id, item.variant_id) for item in order.items]
+    )
     await db.commit()
+    await _drop_product_details(redis, restocked)
 
     background_tasks.add_task(
         send_order_cancellation_email, current_user.email, OrderResponse.model_validate(order)
