@@ -179,11 +179,11 @@ async def is_token_superseded(user_id: str | int, issued_at: Any | None) -> bool
 
 class AsyncRedisService:
     """RedisService for coroutines: the same operations, key formats and
-    failure mapping (RedisError -> False/None, a blacklist read failure
-    means blacklisted), awaiting redis.asyncio instead of blocking. The
-    exception is consume_refresh_token, which raises TokenStateUnavailable:
-    nothing but token redemption uses it, and "cannot tell" must not read as
-    "replay".
+    failure mapping (RedisError -> False/None), awaiting redis.asyncio
+    instead of blocking. Reading whether a token is revoked is not a method
+    of it but the module functions is_token_blacklisted and
+    is_token_superseded, which raise TokenStateUnavailable. So does
+    consume_refresh_token: "cannot tell" must not read as "replay".
 
     What gets stored, and the rules for changing a cart, are not here but in
     app/services/redis_codec.py, shared with the sync RedisService; this
@@ -376,13 +376,6 @@ class AsyncRedisService:
         except RedisError as e:
             self._handle_redis_error(f"add_to_blacklist: {str(e)}")
             return False
-
-    async def is_blacklisted(self, token_id: str) -> bool:
-        try:
-            return bool(await self._redis.exists(f"{BLACKLIST_KEY_PREFIX}{token_id}"))
-        except RedisError as e:
-            self._handle_redis_error(f"is_blacklisted: {str(e)}")
-            return True  # Safer to assume token is blacklisted on error
 
     async def mark_once(self, key: str, ttl_seconds: int) -> bool:
         """SET NX EX; fails open (True) on a Redis error, like the sync one."""

@@ -262,12 +262,14 @@ def test_concurrent_async_adds_are_not_lost():
 
 
 def test_blacklist_uses_the_shared_key_and_is_seen_by_both(svc, raw):
-    assert svc.is_blacklisted("t") is False
+    # Both services write it; the sync one is the reader that exists on both
+    # (the async side reads through is_token_blacklisted, which raises).
+    assert RedisService().is_blacklisted("t") is False
     assert svc.add_to_blacklist("t", 60)
 
     assert raw.exists("blacklist:t") == 1
     assert 0 < raw.ttl("blacklist:t") <= 60
-    assert svc.is_blacklisted("t") is True
+    assert RedisService().is_blacklisted("t") is True
 
 
 def test_mark_once_is_true_only_the_first_time(svc):
@@ -373,7 +375,6 @@ def broken(monkeypatch):
         (lambda s: s.clear_cart_atomic(7), None),
         (lambda s: s.merge_guest_cart(new_guest_cart_id(), 7), False),
         (lambda s: s.add_to_blacklist("t", 60), False),
-        (lambda s: s.is_blacklisted("t"), True),  # fail closed
         (lambda s: s.mark_once("k", 60), True),  # fail open
         (lambda s: s.register_refresh_token("j", 7, "f", 60), False),
         (lambda s: s.revoke_refresh_family("f"), False),

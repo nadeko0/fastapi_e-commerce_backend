@@ -161,7 +161,6 @@ def test_the_async_service_degrades_as_documented_when_redis_hangs(hung_redis):
         try:
             return (
                 await service.get_cart(7),
-                await service.is_blacklisted("tok"),
                 await service.mark_once("once", 60),
                 await service.add_to_cart_atomic(7, 1, 1, None, "p", None, 5),
             )
@@ -169,7 +168,7 @@ def test_the_async_service_degrades_as_documented_when_redis_hangs(hung_redis):
             await client.aclose()
 
     started = time.monotonic()
-    assert asyncio.run(scenario()) == (None, True, True, None)
+    assert asyncio.run(scenario()) == (None, True, None)
     assert time.monotonic() - started < 4 * (SHORT + MARGIN)
 
 
