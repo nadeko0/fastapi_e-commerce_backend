@@ -1,0 +1,122 @@
+# Trivy ignore list (experimental YAML form; Trivy only reads it when named with
+# --ignorefile .trivyignore.yaml, see the image-scan job in .github/workflows/ci.yml).
+#
+# Every entry is the same case: the Go standard library inside
+# /usr/local/bin/gosu of the official postgres images, which tianon/gosu builds
+# with an old Go toolchain (go1.24.6) and no newer postgres image fixes. gosu's
+# SECURITY.md asks for scanner reports to be checked with govulncheck for
+# reachability. govulncheck v1.9.0 in binary mode (symbol level, vulnerability
+# database of 2026-10-21) on the gosu of postgres:15-alpine finds no call to the
+# vulnerable symbol of any ID below; gosu only drops privileges at container
+# start. Each ID is ignored for the path usr/local/bin/gosu only: the same ID
+# in any other file still fails the scan.
+#
+# Re-check when the postgres digest in docker-compose.yml changes, and drop
+# every entry whose fixed Go version a newer gosu build carries (the scan then
+# no longer reports it): run `govulncheck -mode=binary` on the extracted
+# /usr/local/bin/gosu again and `trivy image --ignorefile` without this file.
+vulnerabilities:
+  - id: CVE-2025-61726
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4341: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2025-61729
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2025-4155: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2025-68121
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4337: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-111943
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-6809: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-25679
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4601: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-27145
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-5037: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-32280
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4947: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-32281
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4946: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-32283
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4870: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-33811
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4981: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-33814
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4918: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-33818
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-5972: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-39820
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4986: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-39821
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-5026: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-39822
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4970: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-39836
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4971: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-42499
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-4977: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-42504
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-5038: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-56853
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-6089: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-56858
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-6091: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-56859
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-6088: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-56860
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-6218: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-56862
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-6090: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-78667
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-6609: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-78669
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-6611: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
+  - id: CVE-2026-97031
+    paths:
+      - "usr/local/bin/gosu"
+    statement: "GO-2026-6607: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
