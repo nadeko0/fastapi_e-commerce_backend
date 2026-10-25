@@ -172,7 +172,11 @@ def user_id_from_subject(subject: object) -> int | None:
 # expire. A token missing one is refused like any invalid token. `iat` is not
 # required: tokens issued before it was added still verify, and
 # is_token_superseded treats a missing one as older than any watermark.
-ACCESS_TOKEN_REQUIRED_CLAIMS = ["exp", "sub", "type"]
+# `jti` is what logout revokes an access token by (_blacklist_id): a signed
+# token without one could never be revoked. The reset and verification
+# tokens have none: the password fingerprint (pwd) ends a reset token's use,
+# and verifying an address twice changes nothing.
+ACCESS_TOKEN_REQUIRED_CLAIMS = ["exp", "sub", "type", "jti"]
 # type, jti and family are checked by rotate_refresh_token itself, each with its
 # own refusal message, which must not change.
 REFRESH_TOKEN_REQUIRED_CLAIMS = ["exp", "sub"]
@@ -341,7 +345,7 @@ async def get_current_user(
     # the first two are the answers of the token's own state, the third is
     # not the client's doing and is not a 401 (token_check_unavailable).
     try:
-        if await is_token_blacklisted(_blacklist_id(token, payload)):
+        if await is_token_blacklisted(_blacklist_id(payload)):
             raise credentials_exception
 
         if await is_token_superseded(user_id, issued_at):
@@ -439,24 +443,16 @@ async def get_optional_active_user(
     current_user = await get_current_user(db=db, token=token)
     return await get_current_active_user(current_user=current_user)
 
-def _blacklist_id(token: str, payload: dict) -> str:
+def _blacklist_id(payload: dict) -> str:
     """What the logout blacklist knows a verified access token by.
 
     Not the token string: one token has more than one spelling (PyJWT also
     accepts the signature segment with its base64url "=" padding), and a
     blacklist of strings let a logged-out token back in with "=" appended.
-    The jti is the same in every spelling.
-
-    Access tokens issued before they carried a jti stay valid for
-    ACCESS_TOKEN_EXPIRE_MINUTES after the deploy. They are known by the
-    token with that padding stripped: the one spelling PyJWT produces, and
-    the key a logout before the deploy already wrote, so those entries
-    still hold. This branch can go once no such token can be unexpired.
+    The jti is the same in every spelling, and every access token has one
+    (ACCESS_TOKEN_REQUIRED_CLAIMS).
     """
-    jti = payload.get("jti")
-    if jti:
-        return f"jti:{jti}"
-    return token.rstrip("=")
+    return f"jti:{payload['jti']}"
 
 # -- Token helpers --------------------------------------------------------
 #
@@ -581,11 +577,11 @@ async def blacklist_token(token: str, expires_in: int) -> bool:
     try:
         payload = decode_token(
             token,
-            options={"verify_exp": False, "require": ["exp"]},
+            options={"verify_exp": False, "require": ["exp", "jti"]},
         )
     except jwt.PyJWTError:
         return False
-    return await async_redis_service.add_to_blacklist(_blacklist_id(token, payload), expires_in)
+    return await async_redis_service.add_to_blacklist(_blacklist_id(payload), expires_in)
 
 
 async def invalidate_tokens_issued_before_now(user_id: str | int) -> bool:

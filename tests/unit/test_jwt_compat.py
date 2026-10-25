@@ -34,11 +34,14 @@ LEGACY_RESET_TOKEN = (
 )
 
 
-def test_an_access_token_issued_by_python_jose_still_authenticates(
+def test_an_access_token_issued_by_python_jose_still_decodes_but_is_no_longer_honoured(
     monkeypatch, client, db_session
 ):
-    # Through the real request path: the user it names (42) exists, and
-    # GET /users/me answers as that user.
+    # PyJWT reads it fine. Authentication refuses it anyway: it carries no
+    # jti, which every access token has since logout revokes by jti, and a
+    # token that cannot be revoked is not accepted. Its 15 minutes ended
+    # long before this test. Through the real request path: the user it names
+    # (42) exists, so the refusal is the missing jti and nothing else.
     db_session.add(User(
         id=42,
         email="legacy@example.com",
@@ -56,8 +59,8 @@ def test_an_access_token_issued_by_python_jose_still_authenticates(
         "/api/v1/users/me", headers={"Authorization": f"Bearer {LEGACY_ACCESS_TOKEN}"}
     )
 
-    assert response.status_code == 200
-    assert response.json()["id"] == 42
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == 'Bearer error="invalid_token"'
 
 
 def test_a_reset_token_issued_by_python_jose_still_decodes_but_is_no_longer_honoured(

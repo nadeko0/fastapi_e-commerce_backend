@@ -1088,18 +1088,15 @@ def test_logout_revokes_the_access_token_with_padded_signature_too(
     assert (plain_after.status_code, padded_after.status_code) == (401, 401)
 
 
-def test_logout_revokes_an_access_token_without_jti_in_every_spelling(
-    client, valid_registration_payload
-):
-    # Access tokens issued before tokens carried a jti are still valid for
-    # up to ACCESS_TOKEN_EXPIRE_MINUTES after a deploy, and logout must
-    # revoke those, in every spelling, too.
+def test_an_access_token_without_jti_is_refused(client, valid_registration_payload):
+    # Logout revokes an access token by its jti, so a signed token without
+    # one could never be revoked: it is no access token.
     access_token = _register_and_login(client, valid_registration_payload)
     user_id = client.get(
         f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {access_token}"}
     ).json()["id"]
     now = int(time.time())
-    legacy = jwt.encode(
+    unrevocable = jwt.encode(
         {
             "exp": now + 600,
             "iat": now,
@@ -1109,25 +1106,12 @@ def test_logout_revokes_an_access_token_without_jti_in_every_spelling(
         settings.JWT_SECRET_KEY.get_secret_value(),
         algorithm=settings.JWT_ALGORITHM,
     )
-    assert client.get(
-        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {legacy}"}
-    ).status_code == 200
 
-    # Logging out with one spelling revokes the others as well.
-    logout_response = client.post(
-        f"{API_PREFIX}/logout",
-        headers={"Authorization": f"Bearer {_pad_signature(legacy)}"},
-    )
-    assert logout_response.status_code == 200
+    me = client.get(f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {unrevocable}"})
+    logout = client.post(f"{API_PREFIX}/logout", headers={"Authorization": f"Bearer {unrevocable}"})
 
-    plain_after = client.get(
-        f"{API_PREFIX}/me", headers={"Authorization": f"Bearer {legacy}"}
-    )
-    padded_after = client.get(
-        f"{API_PREFIX}/me",
-        headers={"Authorization": f"Bearer {_pad_signature(legacy)}"},
-    )
-    assert (plain_after.status_code, padded_after.status_code) == (401, 401)
+    assert (me.status_code, logout.status_code) == (401, 401)
+    assert me.headers["WWW-Authenticate"] == 'Bearer error="invalid_token"'
 
 
 def test_a_blacklisted_token_is_refused_in_every_spelling(client, valid_registration_payload):

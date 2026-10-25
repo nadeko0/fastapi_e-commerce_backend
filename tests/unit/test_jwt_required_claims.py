@@ -56,7 +56,9 @@ def _user(db_session):
     return user
 
 
-@pytest.mark.parametrize("claim", ["exp", "sub", "type"])
+# jti is what logout revokes an access token by: a signed token without one
+# could never be revoked, so it is not accepted.
+@pytest.mark.parametrize("claim", ["exp", "sub", "type", "jti"])
 def test_an_access_token_missing_a_claim_is_401(client, db_session, claim):
     user = _user(db_session)
     token = _without(create_access_token(user.id), claim)
@@ -65,6 +67,7 @@ def test_an_access_token_missing_a_claim_is_401(client, db_session, claim):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Could not validate credentials"
+    assert response.headers["WWW-Authenticate"] == 'Bearer error="invalid_token"'
 
 
 def test_the_untouched_access_token_is_accepted(client, db_session):
@@ -77,7 +80,7 @@ def test_the_untouched_access_token_is_accepted(client, db_session):
     assert response.status_code == 200
 
 
-@pytest.mark.parametrize("claim", ["exp", "sub", "type"])
+@pytest.mark.parametrize("claim", ["exp", "sub", "type", "jti"])
 def test_the_rate_limiter_does_not_count_an_access_token_missing_a_claim(claim):
     token = _without(create_access_token(7), claim)
 

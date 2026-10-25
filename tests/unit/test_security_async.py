@@ -254,16 +254,18 @@ def test_blacklist_token_uses_the_key_auth_reads(fake_redis):
     assert asyncio.run(redis_async.is_token_blacklisted(f"jti:{_jti(token)}")) is True
 
 
-def test_a_token_without_jti_is_known_by_the_token_with_padding_stripped(fake_redis):
+def test_a_token_without_jti_is_not_blacklisted(fake_redis):
+    # Nothing could look it up again: a token without a jti is not accepted
+    # (ACCESS_TOKEN_REQUIRED_CLAIMS), so there is nothing to revoke.
     token = jwt.encode(
         {"sub": "7", "exp": int(time.time()) + 60},
         settings.JWT_SECRET_KEY.get_secret_value(),
         algorithm=settings.JWT_ALGORITHM,
     )
 
-    assert asyncio.run(blacklist_token(token, 60)) is True
+    assert asyncio.run(blacklist_token(token, 60)) is False
 
-    assert fake_redis.exists(f"blacklist:{token.rstrip('=')}") == 1
+    assert fake_redis.keys("blacklist:*") == []
 
 
 def test_a_token_that_does_not_verify_is_not_blacklisted(fake_redis):
