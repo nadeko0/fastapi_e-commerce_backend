@@ -27,7 +27,7 @@ from app.core.errors import Problem, ProblemType, sanitized_errors
 from app.core.location import set_location
 from app.core.openapi import LOCATION_HEADER, DocumentedRoute
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password
-from app.core.rate_limit import check_login_attempt, clear_login_failures
+from app.core.rate_limit import check_login_attempt, clear_login_failures, login_unavailable
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
     RefreshTokenError,
@@ -384,7 +384,14 @@ async def login(
 
     logger.info(f"Generating tokens for user {user_id}")
     access_token = create_access_token(user_id)
-    refresh_token = await issue_refresh_token(user_id)
+    try:
+        refresh_token = await issue_refresh_token(user_id)
+    except TokenStateUnavailable as e:
+        # The refresh token could not be recorded, so it would fail at its
+        # first use with a 401 and log the user out; hand out neither token.
+        # The password was right and nothing is wrong with the account: a
+        # 503 the client retries, as for the failed-attempt count above.
+        raise login_unavailable() from e
     logger.info(f"Tokens generated for user {user_id}")
 
     # The cart the visitor filled before logging in becomes part of the

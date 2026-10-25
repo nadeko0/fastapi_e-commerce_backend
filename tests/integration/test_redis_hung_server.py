@@ -410,6 +410,50 @@ def test_a_refresh_token_is_not_spent_by_an_outage(client, signed_in_tokens, mon
     assert client.post(f"{API}/users/refresh", json=refresh).status_code == 200
 
 
+def test_a_login_is_503_and_hands_out_no_token_when_the_refresh_token_cannot_be_registered(
+    client, valid_registration_payload, redis_outage
+):
+    """A refresh token that Redis does not know fails at its first use with a
+    401, which logs the user out: better no token and a 503 to retry."""
+    client.post(f"{API}/users/register", json=valid_registration_payload)
+    redis_outage()
+
+    response = client.post(
+        f"{API}/users/login",
+        data={"username": valid_registration_payload["email"], "password": valid_registration_payload["password"]},
+    )
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "30"
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert "WWW-Authenticate" not in response.headers
+    assert response.json()["detail"] == "Login is temporarily unavailable"
+    assert "refresh_token" not in response.text
+    assert "access_token" not in response.text
+
+
+def test_a_refresh_that_cannot_register_the_new_token_is_503_and_spends_nothing(
+    client, signed_in_tokens, fake_redis, monkeypatch
+):
+    """The new token is recorded before the old one is redeemed, so a Redis
+    that fails between the two leaves the client with the old token, still
+    good, and a 503 to retry; not a spent token and nothing to replace it."""
+    old = {"refresh_token": signed_in_tokens["refresh_token"]}
+    with monkeypatch.context() as patched:
+        async def failing(service, jti, user_id, family_id, ttl_seconds):
+            return False
+
+        patched.setattr(AsyncRedisService, "register_refresh_token", failing)
+        response = client.post(f"{API}/users/refresh", json=old)
+
+    _assert_unavailable(response)
+    assert "refresh_token" not in response.text
+
+    retry = client.post(f"{API}/users/refresh", json=old)
+    assert retry.status_code == 200
+    assert client.post(f"{API}/users/refresh", json={"refresh_token": retry.json()["refresh_token"]}).status_code == 200
+
+
 def test_a_revoked_token_is_still_401_and_a_good_one_200_when_redis_is_up(client, signed_in_tokens):
     headers = _bearer(signed_in_tokens["access_token"])
     assert client.get(f"{API}/users/me", headers=headers).status_code == 200

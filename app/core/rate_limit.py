@@ -397,6 +397,17 @@ def _login_keys(email: str, request: Request) -> tuple[str, str]:
 LOGIN_UNAVAILABLE_RETRY_AFTER = 30
 
 
+def login_unavailable() -> Problem:
+    """The 503 of a login that cannot be completed because Redis does not
+    answer: the failed-attempt count cannot be kept (check_login_attempt), or
+    the refresh token cannot be recorded (the route's issue_refresh_token)."""
+    return Problem(
+        HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Login is temporarily unavailable",
+        retry_after=LOGIN_UNAVAILABLE_RETRY_AFTER,
+    )
+
+
 async def check_login_attempt(email: str, request: Request) -> None:
     """Call before the password is looked at; raises the 429 when this
     email has used up its failed attempts, from this address or from
@@ -422,11 +433,7 @@ async def check_login_attempt(email: str, request: Request) -> None:
             )
     except RedisError as e:
         logger.error(f"Rate limiting error, login refused: {e}")
-        raise Problem(
-            HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Login is temporarily unavailable",
-            retry_after=LOGIN_UNAVAILABLE_RETRY_AFTER,
-        ) from e
+        raise login_unavailable() from e
     if retry_after:
         raise too_many_requests("Too many failed login attempts", retry_after)
 

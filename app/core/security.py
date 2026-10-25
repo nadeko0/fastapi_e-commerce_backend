@@ -455,7 +455,11 @@ async_redis_service = AsyncRedisService()
 async def issue_refresh_token(user_id: str | int, family: str | None = None) -> str:
     """Create a refresh token and register its jti with Redis so it can
     later be validated, rotated, and reuse-detected. `family` is passed when
-    rotating an existing chain (login omits it, which starts a new chain)."""
+    rotating an existing chain (login omits it, which starts a new chain).
+
+    Raises TokenStateUnavailable when Redis cannot record it: a token that is
+    not registered is refused at its first use (401, the client logs the user
+    out), so it must not be handed out."""
     token = create_refresh_token(user_id, family=family)
     payload = jwt.decode(
         token,
@@ -464,7 +468,8 @@ async def issue_refresh_token(user_id: str | int, family: str | None = None) -> 
         options={"require": REFRESH_TOKEN_REQUIRED_CLAIMS},
     )
     ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
-    await async_redis_service.register_refresh_token(payload["jti"], user_id, payload["family"], ttl_seconds)
+    if not await async_redis_service.register_refresh_token(payload["jti"], user_id, payload["family"], ttl_seconds):
+        raise TokenStateUnavailable
     return token
 
 
@@ -513,6 +518,15 @@ async def rotate_refresh_token(token: str, db: AsyncSession) -> tuple[str, str]:
     if await is_token_superseded(user_id, issued_at):
         raise RefreshTokenError("Refresh token no longer valid")
 
+    # The new token is recorded before the old one is redeemed, for the same
+    # reason: if Redis stops answering between the two, the client must still
+    # hold a good token (503, retry), not a spent one and nothing to replace
+    # it. The price is a token recorded and never handed out when the
+    # redemption then fails, the user turns out to be gone, or the old token
+    # is a replay; its jti sits in the family, so the revocation of a replay
+    # removes it, and nobody but this server has it.
+    new_refresh_token = await issue_refresh_token(user_id, family=family)
+
     consumed = await async_redis_service.consume_refresh_token(jti)
     if consumed is None:
         # Unknown jti or a replay of an already-rotated token: burn the rest
@@ -525,7 +539,6 @@ async def rotate_refresh_token(token: str, db: AsyncSession) -> tuple[str, str]:
         raise RefreshTokenError("User not found or inactive")
 
     new_access_token = create_access_token(user.id)
-    new_refresh_token = await issue_refresh_token(user.id, family=family)
 
     return new_access_token, new_refresh_token
 
