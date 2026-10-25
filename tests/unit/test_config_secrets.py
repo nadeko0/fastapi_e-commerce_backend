@@ -91,6 +91,22 @@ def test_jwt_secret_must_be_at_least_as_long_as_the_hash(algorithm, minimum):
     assert "JWT_SECRET_KEY" in str(error.value)
 
 
+@pytest.mark.parametrize("algorithm", ["HS256", "HS384", "HS512"])
+def test_jwt_algorithm_accepts_supported_hmac_algorithms(algorithm):
+    settings = _settings(JWT_ALGORITHM=algorithm, JWT_SECRET_KEY="a" * 64)
+    assert settings.JWT_ALGORITHM == algorithm
+
+
+@pytest.mark.parametrize(
+    "invalid_algo",
+    ["none", "RS256", "ES256", "HS128", "INVALID", "hs256", ""],
+)
+def test_jwt_algorithm_rejects_unsupported_or_insecure_algorithms(invalid_algo):
+    with pytest.raises(ValidationError) as error:
+        _settings(JWT_ALGORITHM=invalid_algo, JWT_SECRET_KEY="a" * 64)
+    assert "JWT_ALGORITHM" in str(error.value)
+
+
 def test_jwt_secret_length_is_counted_in_bytes():
     # "é" is two bytes in UTF-8, which is what the HMAC is keyed with.
     assert _settings(JWT_SECRET_KEY="é" * 16)

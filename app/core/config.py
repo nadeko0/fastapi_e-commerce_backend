@@ -144,7 +144,7 @@ class Settings(BaseSettings):
     ] = []
 
     JWT_SECRET_KEY: SecretStr
-    JWT_ALGORITHM: str = "HS256"
+    JWT_ALGORITHM: Literal["HS256", "HS384", "HS512"] = "HS256"
     # bcrypt cost factor. 12 (bcrypt's own default) is the deliberately slow,
     # brute-force-resistant setting production must use. Tests don't need
     # that security margin and pay real wall-clock cost for it (~400ms per
