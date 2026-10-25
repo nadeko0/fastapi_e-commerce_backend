@@ -284,11 +284,13 @@ def test_another_address_still_reaches_the_protected_routes():
     assert elsewhere.get(f"{USERS}/me", headers=_auth(elsewhere)).status_code == 200
 
 
-def test_a_country_that_outgrows_the_limit_when_title_cased_is_422_without_echoing_it(client):
+def test_a_country_that_outgrows_the_limit_when_title_cased_is_422_without_echoing_it(client, db_session):
     """'ß'.title() is 'Ss': the cased value is one character longer than the
-    100 the create schema checked, so building the response from the stored
-    row raises a ValidationError. That 422 goes through the same sanitiser
-    as request validation (app/core/errors.py): no `input`, no raw `ctx`."""
+    100 the length limit checked before the normalisation. The create schema
+    checks the limit again after it, so the request is a 422 and nothing is
+    stored (the limit used to be enforced only when the stored row was read
+    into the response, after the commit). The 422 has no `input`, no raw
+    `ctx` (app/core/errors.py)."""
     headers = _auth(client)
     country = "ß" * 100
 
@@ -296,9 +298,9 @@ def test_a_country_that_outgrows_the_limit_when_title_cased_is_422_without_echoi
 
     assert response.status_code == 422
     assert country not in response.text
+    assert db_session.query(Address).count() == 0
     problem = response.json()
-    assert problem["detail"] == "Invalid address data"
-    assert problem["errors"]
+    assert problem["errors"][0]["loc"] == ["body", "country"]
     for error in problem["errors"]:
         assert "input" not in error
         assert set(error) <= {"type", "loc", "msg", "ctx", "url"}

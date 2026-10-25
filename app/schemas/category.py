@@ -6,12 +6,15 @@ from app.schemas.common import Int32, RequestBody, input_schema
 
 
 class CategoryBase(BaseModel):
-    name: str = Field(..., min_length=2, max_length=100)
+    """No length limit on the name: it is an input rule (CategoryCreate,
+    CategoryUpdate), and a stored row that breaks it must still be readable."""
+    name: str
     description: str | None = None
     parent_id: Int32 | None = None
 
 class CategoryCreate(RequestBody, CategoryBase):
     """Schema for creating a new category"""
+    name: str = Field(..., min_length=2, max_length=100)
     metadata: dict | None = Field(default_factory=dict)
 
     # validate_parent_id: an id is positive; null (a root category) is not an id.
@@ -43,7 +46,7 @@ class CategoryInDB(CategoryBase):
     """Internal schema with all category fields"""
     id: int
     path: list[int] = Field(default_factory=list)  # Path to root for efficient traversal
-    level: int = Field(ge=0)  # Tree level (0 for root categories)
+    level: int  # Tree level (0 for root categories)
     created_at: datetime
     updated_at: datetime
     metadata: dict = Field(default_factory=dict)

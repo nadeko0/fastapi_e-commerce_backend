@@ -122,14 +122,10 @@
             "default": "home"
           },
           "city": {
-            "maxLength": 100,
-            "minLength": 2,
             "title": "City",
             "type": "string"
           },
           "country": {
-            "maxLength": 100,
-            "minLength": 2,
             "title": "Country",
             "type": "string"
           },
@@ -141,7 +137,6 @@
           "delivery_instructions": {
             "anyOf": [
               {
-                "maxLength": 500,
                 "type": "string"
               },
               {
@@ -171,20 +166,14 @@
             "type": "boolean"
           },
           "postal_code": {
-            "maxLength": 20,
-            "minLength": 3,
             "title": "Postal Code",
             "type": "string"
           },
           "state": {
-            "maxLength": 100,
-            "minLength": 2,
             "title": "State",
             "type": "string"
           },
           "street": {
-            "maxLength": 255,
-            "minLength": 5,
             "title": "Street",
             "type": "string"
           },
@@ -818,7 +807,6 @@
             "type": "integer"
           },
           "level": {
-            "minimum": 0.0,
             "title": "Level",
             "type": "integer"
           },
@@ -828,8 +816,6 @@
             "type": "object"
           },
           "name": {
-            "maxLength": 100,
-            "minLength": 2,
             "title": "Name",
             "type": "string"
           },
@@ -910,7 +896,6 @@
             "type": "integer"
           },
           "level": {
-            "minimum": 0.0,
             "title": "Level",
             "type": "integer"
           },
@@ -920,8 +905,6 @@
             "type": "object"
           },
           "name": {
-            "maxLength": 100,
-            "minLength": 2,
             "title": "Name",
             "type": "string"
           },
@@ -1848,7 +1831,6 @@
           "delivery_instructions": {
             "anyOf": [
               {
-                "maxLength": 500,
                 "type": "string"
               },
               {
@@ -2291,8 +2273,6 @@
             "type": "boolean"
           },
           "name": {
-            "maxLength": 100,
-            "minLength": 1,
             "title": "Name",
             "type": "string"
           },
@@ -2488,7 +2468,6 @@
             "type": "string"
           },
           "description": {
-            "minLength": 10,
             "title": "Description",
             "type": "string"
           },
@@ -2504,8 +2483,6 @@
             "type": "array"
           },
           "name": {
-            "maxLength": 200,
-            "minLength": 3,
             "title": "Name",
             "type": "string"
           },
@@ -2710,8 +2687,6 @@
             "type": "integer"
           },
           "sku": {
-            "maxLength": 100,
-            "minLength": 1,
             "title": "Sku",
             "type": "string"
           },
@@ -3133,8 +3108,6 @@
           "full_name": {
             "anyOf": [
               {
-                "maxLength": 100,
-                "minLength": 2,
                 "type": "string"
               },
               {
@@ -3158,7 +3131,6 @@
           "phone": {
             "anyOf": [
               {
-                "pattern": "^\\+\\d{5,15}$",
                 "type": "string"
               },
               {

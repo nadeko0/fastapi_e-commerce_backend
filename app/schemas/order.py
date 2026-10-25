@@ -194,7 +194,7 @@ class OrderItemResponse(OrderItemInDB):
 
 class OrderBase(BaseModel):
     shipping_address_id: int
-    delivery_instructions: str | None = Field(None, max_length=500)
+    delivery_instructions: str | None = None
 
 class OrderInDB(OrderBase):
     id: int

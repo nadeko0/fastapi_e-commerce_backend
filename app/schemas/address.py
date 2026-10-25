@@ -20,6 +20,26 @@ def _validate_phone(v: str | None) -> str | None:
     return f"+{phone}"
 
 
+def _read_phone(v: str | None) -> str | None:
+    """Response schemas: a stored number is normalised when it can be and
+    served as stored when it cannot (written before the rule, or edited in
+    the database). A read never fails on what the database holds."""
+    try:
+        return _validate_phone(v)
+    except ValueError:
+        return v
+
+
+def _normalise_input_country(v: str) -> str:
+    """Input schemas only: the cased value is checked against the limit again,
+    because the length limit runs before the normalisation and case mapping
+    can lengthen a value ("ß".title() is "Ss")."""
+    v = _normalise_country(v)
+    if len(v) > 100:
+        raise ValueError('String should have at most 100 characters')
+    return v
+
+
 def _validate_input_phone(v: str | None) -> str | None:
     """Input schemas only: the normalised number must also be ITU-T E.164.
     The response schemas keep _validate_phone so a number stored before this
@@ -52,15 +72,45 @@ def _normalise_country(v: str) -> str:
 
 
 class AddressBase(BaseModel):
+    """An address as stored and as served. No length limits here: they are
+    input rules (AddressCreate, AddressUpdate), and a stored row that breaks
+    one must still be readable."""
+    street: str
+    city: str
+    state: str
+    postal_code: str
+    country: str
+    address_type: AddressType = Field(default=AddressType.HOME)
+    is_default: bool = Field(default=False)
+    delivery_instructions: str | None = None
+    delivery_phone: str | None = None
+
+    @field_validator('postal_code')
+    @classmethod
+    def validate_postal_code(cls, v):
+        return ''.join(v.split())
+
+    @field_validator('country')
+    @classmethod
+    def validate_country(cls, v):
+        return _normalise_country(v)
+
+    @field_validator('delivery_phone')
+    @classmethod
+    def validate_delivery_phone(cls, v):
+        return _read_phone(v)
+
+class AddressCreate(RequestBody, AddressBase):
     street: str = Field(..., min_length=5, max_length=255)
     city: str = Field(..., min_length=2, max_length=100)
     state: str = Field(..., min_length=2, max_length=100)
     postal_code: str = Field(..., min_length=3, max_length=20)
     country: str = Field(..., min_length=2, max_length=100)
-    address_type: AddressType = Field(default=AddressType.HOME)
-    is_default: bool = Field(default=False)
     delivery_instructions: str | None = Field(None, max_length=500)
-    delivery_phone: str | None = None
+
+    model_config = ConfigDict(json_schema_extra=input_schema(
+        rules={"delivery_phone": {"pattern": INPUT_PHONE_SCHEMA_PATTERN}},
+    ))
 
     @field_validator('postal_code')
     @classmethod
@@ -73,17 +123,7 @@ class AddressBase(BaseModel):
     @field_validator('country')
     @classmethod
     def validate_country(cls, v):
-        return _normalise_country(v)
-
-    @field_validator('delivery_phone')
-    @classmethod
-    def validate_delivery_phone(cls, v):
-        return _validate_phone(v)
-
-class AddressCreate(RequestBody, AddressBase):
-    model_config = ConfigDict(json_schema_extra=input_schema(
-        rules={"delivery_phone": {"pattern": INPUT_PHONE_SCHEMA_PATTERN}},
-    ))
+        return _normalise_input_country(v)
 
     @field_validator('delivery_phone')
     @classmethod
@@ -132,7 +172,7 @@ class AddressUpdate(RequestBody):
         if v is None:
             return v
         # Basic country code validation (can be enhanced with a proper country list)
-        return _normalise_country(v)
+        return _normalise_input_country(v)
 
     @field_validator('delivery_phone')
     @classmethod

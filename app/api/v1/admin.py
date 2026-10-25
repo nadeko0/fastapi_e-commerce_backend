@@ -141,14 +141,15 @@ async def create_category(
         db_category.path = []
 
     db.add(db_category)
-    await db.commit()
+    # flush, not commit: see create_product.
+    await db.flush()
     await db.refresh(db_category)
-
-
-    await redis.delete("category:tree")
-
+    result = CategoryResponse.model_validate(db_category)
     set_location(request, response, "get_category", category_id=db_category.id)
-    return CategoryResponse.model_validate(db_category)
+
+    await db.commit()
+    await redis.delete("category:tree")
+    return result
 
 @router.post(
     "/products",
@@ -588,7 +589,7 @@ async def _variant_sku_exists(db: AsyncSession, sku: str) -> bool:
     """Pre-check only - the real guarantee against a duplicate SKU is the
     unique constraint on ProductVariant.sku, since this read-then-write
     check has a race window between two concurrent requests (see the
-    IntegrityError handling in _commit_variant below). Factored out mainly so tests can force the race window (make
+    IntegrityError handling in _flush_variant below). Factored out mainly so tests can force the race window (make
     this return False despite a real conflicting row already existing)
     without needing genuine thread interleaving against the test suite's
     single shared SQLite connection."""
@@ -596,8 +597,9 @@ async def _variant_sku_exists(db: AsyncSession, sku: str) -> bool:
     return found.first() is not None
 
 
-async def _commit_variant(db: AsyncSession, sku: str | None, variant_id: int | None = None) -> None:
-    """Commit a created or updated variant, telling a SKU conflict apart
+async def _flush_variant(db: AsyncSession, sku: str | None, variant_id: int | None = None) -> None:
+    """Write a created or updated variant (flush; the route commits once its
+    response is built, see create_product), telling a SKU conflict apart
     from any other failed constraint.
 
     Both variant routes used to answer every IntegrityError with 409 "A
@@ -610,7 +612,7 @@ async def _commit_variant(db: AsyncSession, sku: str | None, variant_id: int | N
     generic detail; the database's own message, which names constraints and
     carries the statement's values, is only logged."""
     try:
-        await db.commit()
+        await db.flush()
     except IntegrityError as e:
         await db.rollback()
         if sku is not None:
@@ -664,17 +666,19 @@ async def create_product_variant(
     # The pre-check above is a plain read-then-write: two concurrent
     # requests creating a variant with the same SKU can both pass it before
     # either commits, so the real guarantee is the DB's unique constraint on
-    # ProductVariant.sku, not the pre-check. _commit_variant turns the
+    # ProductVariant.sku, not the pre-check. _flush_variant turns the
     # loser's IntegrityError into the same 409 the pre-check path returns
     # for the sequential case, instead of a generic 500.
-    await _commit_variant(db, variant.sku)
+    await _flush_variant(db, variant.sku)
     await db.refresh(db_variant)
-
+    result = ProductVariantResponse.model_validate(db_variant)
     set_location(
         request, response, "get_product_variant",
         product_id=product_id, variant_id=db_variant.id,
     )
-    return ProductVariantResponse.model_validate(db_variant)
+
+    await db.commit()
+    return result
 
 @router.get(
     "/products/{product_id}/variants",
@@ -831,11 +835,13 @@ async def update_product_variant(
     # Same read-then-write race as create_product_variant above: the
     # "sku" != db_variant.sku pre-check can be stale by the time this
     # commits if a concurrent request claimed the same SKU in between.
-    await _commit_variant(db, update_data.get("sku"), variant_id)
+    await _flush_variant(db, update_data.get("sku"), variant_id)
     await db.refresh(db_variant)
 
     result = ProductVariantResponse.model_validate(db_variant)
     response.headers["ETag"] = etag_for(result)
+
+    await db.commit()
     return result
 
 

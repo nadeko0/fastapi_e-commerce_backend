@@ -31,18 +31,22 @@ ImageUrl = Annotated[
 
 class ProductCharacteristic(BaseModel):
     """Schema for dynamic product characteristics"""
-    name: str = Field(..., min_length=1, max_length=100)
+    # No limit on the name: it is an input rule, ProductCharacteristicInput's.
+    name: str
     value: Any
     unit: str | None = None
     filterable: bool = True
 
 class ProductCharacteristicInput(RequestBody, ProductCharacteristic):
     """ProductCharacteristic as a client sends it: no unknown members."""
+    name: str = Field(..., min_length=1, max_length=100)
 
 
 class ProductBase(BaseModel):
-    name: str = Field(..., min_length=3, max_length=200)
-    description: str = Field(..., min_length=10)
+    # No limits on the text: they are input rules (ProductCreate,
+    # ProductUpdate), and ProductBase is also what the catalog answers with.
+    name: str
+    description: str
     price: NonNegativeMoney
     stock_quantity: Int32Max = Field(..., ge=0)
     category_id: Int32
@@ -53,6 +57,8 @@ class ProductBase(BaseModel):
     characteristics: dict[str, ProductCharacteristic] = Field(default_factory=dict)
 
 class ProductCreate(RequestBody, ProductBase):
+    name: str = Field(..., min_length=3, max_length=200)
+    description: str = Field(..., min_length=10)
     # Required, not defaulted: Pydantic does not run validators on a default,
     # so an omitted `images` would have skipped the rule below and stored a
     # product without images.
@@ -162,20 +168,22 @@ class ProductSearch(BaseModel):
 
 
 class ProductVariantBase(BaseModel):
-    """Shared fields for creating/reading a product variant.
+    """Shared fields for creating/reading a product variant. No limit on the
+    sku here: it is an input rule (ProductVariantCreate, ProductVariantUpdate),
+    and a stored variant that breaks it must still be readable.
 
     `attributes` is intentionally free-form (e.g. {"size": "M", "color":
     "red"}) rather than fixed columns, so this stays usable for any product
     domain, not just apparel.
     """
-    sku: str = Field(..., min_length=1, max_length=100)
+    sku: str
     attributes: dict[str, Any] = Field(default_factory=dict)
     price_override: NonNegativeMoney | None = None
     stock_quantity: Int32Max = Field(0, ge=0)
     is_active: bool = True
 
 class ProductVariantCreate(RequestBody, ProductVariantBase):
-    pass
+    sku: str = Field(..., min_length=1, max_length=100)
 
 class ProductVariantUpdate(RequestBody):
     """Schema for updating an existing product variant. All fields optional."""

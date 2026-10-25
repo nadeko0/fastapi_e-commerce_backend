@@ -61,27 +61,41 @@ class ConsentHistory(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+def _normalise_phone(v: str | None) -> str | None:
+    if not v:
+        return v
+    # Remove any non-digit characters
+    phone = re.sub(r'\D', '', v)
+    # Basic international phone validation (5-15 digits)
+    if not 5 <= len(phone) <= 15:
+        raise ValueError('Invalid phone number length')
+    return f"+{phone}"
+
 class UserBase(BaseModel):
+    """A user as stored and as served. The rules for a name and a number are
+    input rules (UserCreate, UserUpdate): a stored row that breaks one (written
+    before the rule, or edited in the database) must still be readable."""
     email: EmailStr
-    full_name: str | None = Field(None, min_length=2, max_length=100)
-    phone: str | None = Field(None, pattern=r"^\+\d{5,15}$", description="International phone number (5-15 digits)")
+    full_name: str | None = None
+    phone: str | None = Field(None, description="International phone number (5-15 digits)")
 
     @field_validator('phone')
     @classmethod
     def validate_phone(cls, v: str | None) -> str | None:
-        if not v:
+        # Normalised when it can be, served as stored when it cannot.
+        try:
+            return _normalise_phone(v)
+        except ValueError:
             return v
-        # Remove any non-digit characters
-        phone = re.sub(r'\D', '', v)
-        # Basic international phone validation (5-15 digits)
-        if not 5 <= len(phone) <= 15:
-            raise ValueError('Invalid phone number length')
-        return f"+{phone}"
 
 class UserCreate(RequestBody, UserBase):
-    # Strict on input only: UserBase (shared with the responses) keeps the old
-    # pattern so a number stored before the E.164 rule still reads.
+    full_name: str | None = Field(None, min_length=2, max_length=100)
     phone: str | None = Field(None, pattern=E164_PHONE_PATTERN, description="International phone number (5-15 digits)")
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str | None) -> str | None:
+        return _normalise_phone(v)
 
     # No character-set or composition rule (NIST SP 800-63B-4 3.1.1.2); the
     # length floor is unchanged. Rules live in app.core.passwords.
