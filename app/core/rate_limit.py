@@ -60,7 +60,7 @@ from starlette.status import HTTP_429_TOO_MANY_REQUESTS, HTTP_503_SERVICE_UNAVAI
 from app.core.config import RATE_LIMIT_PATTERN, settings
 from app.core.errors import Problem, ProblemType
 from app.core.probes import PROBE_PATHS
-from app.core.security import ACCESS_TOKEN_REQUIRED_CLAIMS, user_id_from_subject
+from app.core.security import ACCESS_TOKEN_REQUIRED_CLAIMS, decode_token, user_id_from_subject
 from app.services.redis_async import get_async_redis
 
 logger = logging.getLogger(__name__)
@@ -190,10 +190,8 @@ def user_id_from_token(request: Request) -> str | None:
     if scheme.lower() != "bearer" or not token:
         return None
     try:
-        payload = jwt.decode(
+        payload = decode_token(
             token.strip(),
-            settings.JWT_SECRET_KEY.get_secret_value(),
-            algorithms=[settings.JWT_ALGORITHM],
             options={"require": ACCESS_TOKEN_REQUIRED_CLAIMS},
         )
     except jwt.PyJWTError:  # malformed, expired, or signed with another key

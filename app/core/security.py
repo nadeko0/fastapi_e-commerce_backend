@@ -179,6 +179,25 @@ REFRESH_TOKEN_REQUIRED_CLAIMS = ["exp", "sub"]
 RESET_TOKEN_REQUIRED_CLAIMS = ["exp", "sub", "type", "pwd"]
 VERIFY_TOKEN_REQUIRED_CLAIMS = ["exp", "sub", "type"]
 
+
+def decode_token(token: str, *, options: dict) -> dict:
+    """jwt.decode with this application's key and algorithm. Every way a token
+    can fail to decode is a jwt.PyJWTError, which each caller already turns
+    into "invalid token" - except a string that is not valid Unicode: PyJWT
+    encodes the token to UTF-8 first, and a lone surrogate (the JSON escape
+    for U+D800, say) made that raise UnicodeEncodeError, a 500 on the
+    unauthenticated refresh route. Such a string is no token."""
+    try:
+        return jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY.get_secret_value(),
+            algorithms=[settings.JWT_ALGORITHM],
+            options=options,
+        )
+    except UnicodeError:
+        raise jwt.DecodeError("Token is not valid Unicode") from None
+
+
 # `iat` is a NumericDate with sub-second precision (RFC 7519 allows a
 # fractional one): the epoch seconds as a float, compared against the
 # per-user watermark (invalidate_tokens_issued_before_now), which has the
@@ -304,10 +323,8 @@ async def get_current_user(
     )
 
     try:
-        payload = jwt.decode(
+        payload = decode_token(
             token,
-            settings.JWT_SECRET_KEY.get_secret_value(),
-            algorithms=[settings.JWT_ALGORITHM],
             options={"require": ACCESS_TOKEN_REQUIRED_CLAIMS},
         )
         user_id = user_id_from_subject(payload.get("sub"))
@@ -461,10 +478,8 @@ async def issue_refresh_token(user_id: str | int, family: str | None = None) -> 
     not registered is refused at its first use (401, the client logs the user
     out), so it must not be handed out."""
     token = create_refresh_token(user_id, family=family)
-    payload = jwt.decode(
+    payload = decode_token(
         token,
-        settings.JWT_SECRET_KEY.get_secret_value(),
-        algorithms=[settings.JWT_ALGORITHM],
         options={"require": REFRESH_TOKEN_REQUIRED_CLAIMS},
     )
     ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
@@ -491,10 +506,8 @@ async def rotate_refresh_token(token: str, db: AsyncSession) -> tuple[str, str]:
     nor a bad token: the caller answers 503, see token_check_unavailable).
     """
     try:
-        payload = jwt.decode(
+        payload = decode_token(
             token,
-            settings.JWT_SECRET_KEY.get_secret_value(),
-            algorithms=[settings.JWT_ALGORITHM],
             options={"require": REFRESH_TOKEN_REQUIRED_CLAIMS},
         )
     except jwt.PyJWTError:
@@ -550,10 +563,8 @@ async def revoke_refresh_token(token: str) -> bool:
     because the client sent a bad refresh token alongside a valid access
     token. False only when Redis could not be told."""
     try:
-        payload = jwt.decode(
+        payload = decode_token(
             token,
-            settings.JWT_SECRET_KEY.get_secret_value(),
-            algorithms=[settings.JWT_ALGORITHM],
             options={"verify_exp": False, "require": ["exp", "family"]},
         )
     except jwt.PyJWTError:
@@ -568,10 +579,8 @@ async def blacklist_token(token: str, expires_in: int) -> bool:
     """Revoke an access token for `expires_in` seconds. A token that does
     not verify is not stored: nothing would accept it anyway."""
     try:
-        payload = jwt.decode(
+        payload = decode_token(
             token,
-            settings.JWT_SECRET_KEY.get_secret_value(),
-            algorithms=[settings.JWT_ALGORITHM],
             options={"verify_exp": False, "require": ["exp"]},
         )
     except jwt.PyJWTError:
@@ -611,10 +620,8 @@ async def logout(access_token: str, refresh_token: str | None = None) -> None:
     RevocationUnavailable if any of it could not be recorded."""
     payload = {}
     try:
-        payload = jwt.decode(
+        payload = decode_token(
             access_token,
-            settings.JWT_SECRET_KEY.get_secret_value(),
-            algorithms=[settings.JWT_ALGORITHM],
             options={"require": ACCESS_TOKEN_REQUIRED_CLAIMS},
         )
         # time.time(), not a naive UTC datetime's timestamp(): the latter reads a
@@ -687,10 +694,8 @@ def verify_password_reset_token(token: str) -> PasswordResetClaims | None:
     it is still good for the account is PasswordResetClaims.matches, which
     needs the account's current hash."""
     try:
-        payload = jwt.decode(
+        payload = decode_token(
             token,
-            settings.JWT_SECRET_KEY.get_secret_value(),
-            algorithms=[settings.JWT_ALGORITHM],
             options={"require": RESET_TOKEN_REQUIRED_CLAIMS},
         )
     except jwt.PyJWTError:
@@ -709,10 +714,8 @@ def generate_email_verification_token(email: str) -> str:
 
 def verify_email_token(token: str) -> str | None:
     try:
-        payload = jwt.decode(
+        payload = decode_token(
             token,
-            settings.JWT_SECRET_KEY.get_secret_value(),
-            algorithms=[settings.JWT_ALGORITHM],
             options={"require": VERIFY_TOKEN_REQUIRED_CLAIMS},
         )
         if payload["type"] != "verify_email":
