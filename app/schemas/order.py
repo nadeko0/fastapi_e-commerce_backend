@@ -45,6 +45,13 @@ def _to_cents(value: Decimal) -> Decimal:
 _MONEY_UNSIGNED = r"\d+(\.\d{1,2}0*)?"
 _MONEY_PATTERN = "-?" + _MONEY_UNSIGNED
 _MONEY_INPUT = re.compile(_MONEY_PATTERN)
+# The same, for the OpenAPI document only, with the whole-part budget of the
+# field spelled out: max_digits=10 less decimal_places=2 leaves 8 digits before
+# the point (leading zeros are not digits). Not used to check a value: the
+# field does that, and its message must not change.
+_MONEY_SCHEMA_UNSIGNED = r"0*\d{1,8}(?:\.\d{1,2}0*)?"
+# For an amount that must be greater than zero: some digit other than 0.
+_NOT_ZERO = r"(?=[0.]*[1-9])"
 
 
 def _decimal_string_only(value):
@@ -86,7 +93,9 @@ Money = Annotated[
     Field(max_digits=ORDER_AMOUNT_MAX_DIGITS, decimal_places=ORDER_AMOUNT_DECIMAL_PLACES),
     BeforeValidator(_decimal_string_only),
     AfterValidator(_to_cents),
-    _money_input_schema(f"^{_MONEY_PATTERN}$", "Decimal string, at most two fraction digits."),
+    _money_input_schema(
+        f"^-?{_MONEY_SCHEMA_UNSIGNED}$", "Decimal string, at most two fraction digits."
+    ),
 ]
 NonNegativeMoney = Annotated[
     Decimal,
@@ -96,7 +105,7 @@ NonNegativeMoney = Annotated[
     BeforeValidator(_decimal_string_only),
     AfterValidator(_to_cents),
     _money_input_schema(
-        f"^{_MONEY_UNSIGNED}$", "Decimal string, at most two fraction digits, not negative."
+        f"^{_MONEY_SCHEMA_UNSIGNED}$", "Decimal string, at most two fraction digits, not negative."
     ),
 ]
 PositiveMoney = Annotated[
@@ -107,7 +116,7 @@ PositiveMoney = Annotated[
     BeforeValidator(_decimal_string_only),
     AfterValidator(_to_cents),
     _money_input_schema(
-        f"^{_MONEY_UNSIGNED}$", "Decimal string, at most two fraction digits, greater than zero."
+        f"^{_NOT_ZERO}{_MONEY_SCHEMA_UNSIGNED}$", "Decimal string, at most two fraction digits, greater than zero."
     ),
 ]
 # An amount in a response: a Decimal with exactly two places, serialized by

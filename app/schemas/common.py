@@ -1,4 +1,4 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import (
@@ -98,6 +98,48 @@ class RequestBody(BaseModel):
                 )],
             )
         return data
+
+
+def input_schema(
+    *,
+    not_null: Iterable[str] = (),
+    rules: Mapping[str, Mapping[str, Any]] | None = None,
+    model: Mapping[str, Any] | None = None,
+) -> Callable[[dict[str, Any], type[BaseModel]], None]:
+    """A `json_schema_extra` for a request body: it says in the OpenAPI
+    document what the code already enforces elsewhere (a validator, the
+    route), without changing what is accepted or how a refusal reads. A rule
+    moved into the field's own constraints (`min_length=1`, `gt=0`) would
+    also change the error a client gets for it.
+
+    - `not_null`: fields that may be omitted but not sent as null (their
+      validator refuses it). Pydantic writes `T | None = None` as
+      `anyOf [T, null]` with `default: null`; both go, leaving `T`.
+    - `rules`: JSON Schema keywords added to a field's schema.
+    - `model`: keywords added to the body's schema as a whole.
+
+    A name that is not a property raises KeyError when the document is
+    built, so a renamed field cannot leave a stale rule behind
+    (Pydantic: Model config `json_schema_extra`, a callable)."""
+    nullable = tuple(not_null)
+    field_rules = {name: dict(keywords) for name, keywords in (rules or {}).items()}
+    model_rules = dict(model or {})
+
+    def extend(schema: dict[str, Any], _model: type[BaseModel]) -> None:
+        properties = schema["properties"]
+        for name in nullable:
+            prop = properties[name]
+            prop.pop("default", None)
+            kept = [option for option in prop.pop("anyOf") if option != {"type": "null"}]
+            if len(kept) == 1:
+                prop.update(kept[0])
+            else:
+                prop["anyOf"] = kept
+        for name, keywords in field_rules.items():
+            properties[name].update(keywords)
+        schema.update(model_rules)
+
+    return extend
 
 
 class TokenPayload(BaseModel):

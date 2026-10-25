@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.common import Int32, RequestBody
+from app.schemas.common import Int32, RequestBody, input_schema
 
 
 class CategoryBase(BaseModel):
@@ -13,6 +13,9 @@ class CategoryBase(BaseModel):
 class CategoryCreate(RequestBody, CategoryBase):
     """Schema for creating a new category"""
     metadata: dict | None = Field(default_factory=dict)
+
+    # validate_parent_id: an id is positive; null (a root category) is not an id.
+    model_config = ConfigDict(json_schema_extra=input_schema(rules={"parent_id": {"exclusiveMinimum": 0}}))
 
     @field_validator('parent_id')
     @classmethod

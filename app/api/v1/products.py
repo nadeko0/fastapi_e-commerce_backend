@@ -127,6 +127,9 @@ _product_filter.__signature__ = _filter_signature.replace(parameters=[
         annotation=Annotated[str | None, Query(
             max_length=1000,
             description='Match on characteristics: a JSON object of name to value, e.g. {"color": "red"}.',
+            # JSON Schema 2020-12 (OpenAPI 3.1) 8.3-8.5: the string holds a
+            # JSON text, and that text is an object.
+            json_schema_extra={"contentMediaType": "application/json", "contentSchema": {"type": "object"}},
         )],
         default=None,
     ) if parameter.name == "characteristics" else parameter

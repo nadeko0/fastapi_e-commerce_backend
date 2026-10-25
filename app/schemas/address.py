@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import AddressType
-from app.schemas.common import E164_PHONE_PATTERN, Int32, RequestBody
+from app.schemas.common import E164_PHONE_PATTERN, Int32, RequestBody, input_schema
 
 
 # Mirrors app.schemas.user.UserBase's phone validation exactly - both
@@ -28,6 +28,13 @@ def _validate_input_phone(v: str | None) -> str | None:
     if v and not re.fullmatch(E164_PHONE_PATTERN, v):
         raise ValueError('Invalid phone number format')
     return v
+
+
+# What _validate_input_phone accepts, as a pattern for the OpenAPI document
+# (not used to check a value): any text whose digits, 5 to 15 of them with the
+# first not 0, make an E.164 number once everything else is dropped; or the
+# empty string, which is passed through.
+INPUT_PHONE_SCHEMA_PATTERN = r"^(\D*[1-9](\D*\d){4,14}\D*)?$"
 
 
 def _normalise_country(v: str) -> str:
@@ -74,6 +81,10 @@ class AddressBase(BaseModel):
         return _validate_phone(v)
 
 class AddressCreate(RequestBody, AddressBase):
+    model_config = ConfigDict(json_schema_extra=input_schema(
+        rules={"delivery_phone": {"pattern": INPUT_PHONE_SCHEMA_PATTERN}},
+    ))
+
     @field_validator('delivery_phone')
     @classmethod
     def validate_delivery_phone(cls, v):
@@ -89,6 +100,12 @@ class AddressUpdate(RequestBody):
     is_default: bool | None = None
     delivery_instructions: str | None = Field(None, max_length=500)
     delivery_phone: str | None = None
+
+    # Everything may be left out; the NOT NULL columns may not be null.
+    model_config = ConfigDict(json_schema_extra=input_schema(
+        not_null=("street", "city", "state", "postal_code", "country", "address_type", "is_default"),
+        rules={"delivery_phone": {"pattern": INPUT_PHONE_SCHEMA_PATTERN}},
+    ))
 
     @field_validator('street', 'city', 'state', 'postal_code', 'country', 'address_type', 'is_default')
     @classmethod

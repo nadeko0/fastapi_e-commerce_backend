@@ -41,6 +41,7 @@
                 "type": "null"
               }
             ],
+            "pattern": "^(\\D*[1-9](\\D*\\d){4,14}\\D*)?$",
             "title": "Delivery Phone"
           },
           "is_default": {
@@ -219,40 +220,19 @@
         "additionalProperties": false,
         "properties": {
           "address_type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AddressType"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/AddressType"
           },
           "city": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "minLength": 2,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "City"
+            "maxLength": 100,
+            "minLength": 2,
+            "title": "City",
+            "type": "string"
           },
           "country": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "minLength": 2,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Country"
+            "maxLength": 100,
+            "minLength": 2,
+            "title": "Country",
+            "type": "string"
           },
           "delivery_instructions": {
             "anyOf": [
@@ -275,57 +255,30 @@
                 "type": "null"
               }
             ],
+            "pattern": "^(\\D*[1-9](\\D*\\d){4,14}\\D*)?$",
             "title": "Delivery Phone"
           },
           "is_default": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Default"
+            "title": "Is Default",
+            "type": "boolean"
           },
           "postal_code": {
-            "anyOf": [
-              {
-                "maxLength": 20,
-                "minLength": 3,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Postal Code"
+            "maxLength": 20,
+            "minLength": 3,
+            "title": "Postal Code",
+            "type": "string"
           },
           "state": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "minLength": 2,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "State"
+            "maxLength": 100,
+            "minLength": 2,
+            "title": "State",
+            "type": "string"
           },
           "street": {
-            "anyOf": [
-              {
-                "maxLength": 255,
-                "minLength": 5,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Street"
+            "maxLength": 255,
+            "minLength": 5,
+            "title": "Street",
+            "type": "string"
           }
         },
         "title": "AddressUpdate",
@@ -789,6 +742,7 @@
                 "type": "null"
               }
             ],
+            "exclusiveMinimum": 0.0,
             "title": "Parent Id"
           }
         },
@@ -1256,6 +1210,16 @@
             "request_type": "deletion"
           }
         ],
+        "if": {
+          "properties": {
+            "request_type": {
+              "const": "deletion"
+            }
+          },
+          "required": [
+            "request_type"
+          ]
+        },
         "properties": {
           "password": {
             "anyOf": [
@@ -1280,6 +1244,10 @@
             "title": "Reason"
           },
           "request_type": {
+            "enum": [
+              "export",
+              "deletion"
+            ],
             "title": "Request Type",
             "type": "string"
           }
@@ -1287,6 +1255,17 @@
         "required": [
           "request_type"
         ],
+        "then": {
+          "properties": {
+            "password": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "password"
+          ]
+        },
         "title": "DataRequest",
         "type": "object"
       },
@@ -2046,7 +2025,7 @@
             "examples": [
               "10.50"
             ],
-            "pattern": "^-?\\d+(\\.\\d{1,2}0*)?$",
+            "pattern": "^-?0*\\d{1,8}(?:\\.\\d{1,2}0*)?$",
             "title": "Amount",
             "type": "string"
           },
@@ -2404,6 +2383,7 @@
               "minLength": 1,
               "type": "string"
             },
+            "minItems": 1,
             "title": "Images",
             "type": "array"
           },
@@ -2418,7 +2398,7 @@
             "examples": [
               "10.50"
             ],
-            "pattern": "^\\d+(\\.\\d{1,2}0*)?$",
+            "pattern": "^0*\\d{1,8}(?:\\.\\d{1,2}0*)?$",
             "title": "Price",
             "type": "string"
           },
@@ -2562,102 +2542,54 @@
         "additionalProperties": false,
         "properties": {
           "category_id": {
-            "anyOf": [
-              {
-                "maximum": 2147483647.0,
-                "minimum": -2147483648.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category Id"
+            "maximum": 2147483647.0,
+            "minimum": -2147483648.0,
+            "title": "Category Id",
+            "type": "integer"
           },
           "characteristics": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/ProductCharacteristicInput"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Characteristics"
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProductCharacteristicInput"
+            },
+            "title": "Characteristics",
+            "type": "object"
           },
           "description": {
-            "anyOf": [
-              {
-                "minLength": 10,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
+            "minLength": 10,
+            "title": "Description",
+            "type": "string"
           },
           "images": {
-            "anyOf": [
-              {
-                "items": {
-                  "format": "uri",
-                  "maxLength": 2083,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Images"
+            "items": {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Images",
+            "type": "array"
           },
           "name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 3,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "maxLength": 200,
+            "minLength": 3,
+            "title": "Name",
+            "type": "string"
           },
           "price": {
-            "anyOf": [
-              {
-                "description": "Decimal string, at most two fraction digits, not negative.",
-                "examples": [
-                  "10.50"
-                ],
-                "pattern": "^\\d+(\\.\\d{1,2}0*)?$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "description": "Decimal string, at most two fraction digits, not negative.",
+            "examples": [
+              "10.50"
             ],
-            "title": "Price"
+            "pattern": "^0*\\d{1,8}(?:\\.\\d{1,2}0*)?$",
+            "title": "Price",
+            "type": "string"
           },
           "stock_quantity": {
-            "anyOf": [
-              {
-                "maximum": 2147483647.0,
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stock Quantity"
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Stock Quantity",
+            "type": "integer"
           }
         },
         "title": "ProductUpdate",
@@ -2683,7 +2615,7 @@
                 "examples": [
                   "10.50"
                 ],
-                "pattern": "^\\d+(\\.\\d{1,2}0*)?$",
+                "pattern": "^0*\\d{1,8}(?:\\.\\d{1,2}0*)?$",
                 "type": "string"
               },
               {
@@ -2810,27 +2742,13 @@
         "description": "Schema for updating an existing product variant. All fields optional.",
         "properties": {
           "attributes": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attributes"
+            "additionalProperties": true,
+            "title": "Attributes",
+            "type": "object"
           },
           "is_active": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Active"
+            "title": "Is Active",
+            "type": "boolean"
           },
           "price_override": {
             "anyOf": [
@@ -2839,7 +2757,7 @@
                 "examples": [
                   "10.50"
                 ],
-                "pattern": "^\\d+(\\.\\d{1,2}0*)?$",
+                "pattern": "^0*\\d{1,8}(?:\\.\\d{1,2}0*)?$",
                 "type": "string"
               },
               {
@@ -2849,30 +2767,16 @@
             "title": "Price Override"
           },
           "sku": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sku"
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Sku",
+            "type": "string"
           },
           "stock_quantity": {
-            "anyOf": [
-              {
-                "maximum": 2147483647.0,
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stock Quantity"
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Stock Quantity",
+            "type": "integer"
           }
         },
         "title": "ProductVariantUpdate",
@@ -2961,7 +2865,7 @@
                 "examples": [
                   "10.50"
                 ],
-                "pattern": "^\\d+(\\.\\d{1,2}0*)?$",
+                "pattern": "^(?=[0.]*[1-9])0*\\d{1,8}(?:\\.\\d{1,2}0*)?$",
                 "type": "string"
               },
               {
@@ -3161,6 +3065,7 @@
             "title": "Full Name"
           },
           "gdpr_consent": {
+            "const": true,
             "description": "GDPR consent is required",
             "title": "Gdpr Consent",
             "type": "boolean"
@@ -3197,6 +3102,7 @@
             "title": "Phone"
           },
           "privacy_policy_accepted": {
+            "const": true,
             "description": "Privacy policy must be accepted",
             "title": "Privacy Policy Accepted",
             "type": "boolean"
@@ -3286,6 +3192,7 @@
       },
       "UserUpdate": {
         "additionalProperties": false,
+        "minProperties": 1,
         "properties": {
           "full_name": {
             "anyOf": [
@@ -3301,15 +3208,8 @@
             "title": "Full Name"
           },
           "marketing_consent": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Marketing Consent"
+            "title": "Marketing Consent",
+            "type": "boolean"
           },
           "phone": {
             "anyOf": [
@@ -9667,6 +9567,10 @@
                   "type": "null"
                 }
               ],
+              "contentMediaType": "application/json",
+              "contentSchema": {
+                "type": "object"
+              },
               "description": "Match on characteristics: a JSON object of name to value, e.g. {\"color\": \"red\"}.",
               "title": "Characteristics"
             }

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 # different modules also collided in the generated OpenAPI schema
 # (FastAPI disambiguates same-named schemas with an ugly
 # module-qualified name), which this avoids.
-from app.schemas.common import RequestBody
+from app.schemas.common import RequestBody, input_schema
 from app.schemas.user import ConsentHistory
 
 
@@ -36,7 +36,7 @@ class UserConsent(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class DataRequest(RequestBody):
-    request_type: str  # "export" or "deletion"
+    request_type: str  # "export" or "deletion" (the route answers 400 to any other)
     reason: str | None = None
     # The account's current password. Required for "deletion": erasure
     # cannot be undone after the grace period, and a bearer token alone (a
@@ -50,13 +50,19 @@ class DataRequest(RequestBody):
         return self
 
     model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [{
-                "request_type": "deletion",
-                "reason": "No longer using the shop",
-                "password": "your-current-password"
-            }]
-        }
+        json_schema_extra=input_schema(
+            rules={"request_type": {"enum": ["export", "deletion"]}},
+            model={
+                "examples": [{
+                    "request_type": "deletion",
+                    "reason": "No longer using the shop",
+                    "password": "your-current-password"
+                }],
+                # require_password_for_deletion, as JSON Schema.
+                "if": {"properties": {"request_type": {"const": "deletion"}}, "required": ["request_type"]},
+                "then": {"required": ["password"], "properties": {"password": {"type": "string", "minLength": 1}}},
+            },
+        )
     )
 
 class DataRequestResponse(BaseModel):

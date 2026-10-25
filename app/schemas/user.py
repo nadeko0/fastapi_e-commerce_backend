@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password, normalize_password
 from app.models.enums import UserRole
-from app.schemas.common import E164_PHONE_PATTERN, RequestBody
+from app.schemas.common import E164_PHONE_PATTERN, RequestBody, input_schema
 
 
 class ConsentType(str, Enum):
@@ -107,6 +107,12 @@ class UserCreate(RequestBody, UserBase):
     privacy_policy_accepted: bool = Field(..., description="Privacy policy must be accepted")
     marketing_consent: bool | None = Field(default=False)
 
+    # The two consents are required booleans that must be true (the validators
+    # below refuse false): a registration is not made by declining them.
+    model_config = ConfigDict(json_schema_extra=input_schema(
+        rules={"gdpr_consent": {"const": True}, "privacy_policy_accepted": {"const": True}},
+    ))
+
     @field_validator('gdpr_consent')
     @classmethod
     def validate_gdpr_consent(cls, v):
@@ -137,6 +143,12 @@ class UserUpdate(RequestBody):
             raise ValueError('Invalid phone number length')
         return f"+{phone}"
     marketing_consent: bool | None = None
+
+    # At least one member (update_current_user answers 400 to {}), and
+    # marketing_consent may not be null.
+    model_config = ConfigDict(json_schema_extra=input_schema(
+        not_null=("marketing_consent",), model={"minProperties": 1},
+    ))
 
     @field_validator('marketing_consent')
     @classmethod

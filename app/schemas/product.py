@@ -13,7 +13,7 @@ from pydantic import (
     field_validator,
 )
 
-from app.schemas.common import Int32, Int32Max, RequestBody, StoreCurrency
+from app.schemas.common import Int32, Int32Max, RequestBody, StoreCurrency, input_schema
 from app.schemas.order import NonNegativeMoney
 
 # An image URL is validated as an HttpUrl but kept as the plain string: it
@@ -61,6 +61,10 @@ class ProductBase(BaseModel):
 class ProductCreate(RequestBody, ProductBase):
     characteristics: dict[str, ProductCharacteristicInput] = Field(default_factory=dict)
 
+    # validate_images refuses `images: []` (a product with no image is not
+    # created by saying so; leaving the member out is another matter).
+    model_config = ConfigDict(json_schema_extra=input_schema(rules={"images": {"minItems": 1}}))
+
 class ProductUpdate(RequestBody):
     name: str | None = Field(None, min_length=3, max_length=200)
     description: str | None = Field(None, min_length=10)
@@ -69,6 +73,13 @@ class ProductUpdate(RequestBody):
     category_id: Int32 | None = None
     images: list[ImageUrl] | None = None
     characteristics: dict[str, ProductCharacteristicInput] | None = None
+
+    # Every member may be left out, none may be null (reject_null), and an
+    # empty image list is refused (validate_images).
+    model_config = ConfigDict(json_schema_extra=input_schema(
+        not_null=("name", "description", "price", "stock_quantity", "category_id", "images", "characteristics"),
+        rules={"images": {"minItems": 1}},
+    ))
 
     @field_validator('name', 'description', 'price', 'stock_quantity', 'category_id', 'images', 'characteristics')
     @classmethod
@@ -168,6 +179,11 @@ class ProductVariantUpdate(RequestBody):
     price_override: NonNegativeMoney | None = None
     stock_quantity: Int32Max | None = Field(None, ge=0)
     is_active: bool | None = None
+
+    # price_override is the one member that takes null (it clears the override).
+    model_config = ConfigDict(json_schema_extra=input_schema(
+        not_null=("sku", "attributes", "stock_quantity", "is_active"),
+    ))
 
     @field_validator('sku', 'attributes', 'stock_quantity', 'is_active')
     @classmethod
