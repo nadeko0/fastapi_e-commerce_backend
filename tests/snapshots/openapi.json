@@ -9384,7 +9384,7 @@
                 }
               }
             },
-            "description": "Invalid status transition, or the order is on hold for a payment dispute"
+            "description": "Invalid status transition, the order is not paid (moving it on), or it is on hold for a payment dispute"
           },
           "413": {
             "content": {

@@ -26,6 +26,15 @@ ORDER_STATUS_TRANSITIONS = {
     OrderStatus.CANCELLED: set(),
 }
 
+# The statuses an order reaches only through payment (the payment code sets
+# CONFIRMED) and that only a paid order is moved into by an admin: the only
+# payment methods are card payments, there is no way to ship against an invoice
+# or cash on delivery. Cancelling stays possible for an order in any payment
+# state.
+PAID_ONLY_STATUSES = frozenset({
+    OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.SENT, OrderStatus.DELIVERED,
+})
+
 # Order.payment_status values of an order nobody has paid for: what a
 # customer may cancel themselves and what expires.
 UNPAID_PAYMENT_STATUSES = frozenset({PaymentStatus.PENDING, PaymentStatus.FAILED})

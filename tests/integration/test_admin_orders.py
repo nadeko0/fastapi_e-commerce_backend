@@ -403,7 +403,9 @@ ALLOWED = {
 @pytest.mark.parametrize("old", STATUSES)
 @pytest.mark.parametrize("new", STATUSES)
 def test_admin_status_change_follows_the_order_lifecycle(client, db_session, old, new):
-    order = _order(db_session, _customer(db_session), status=old)
+    # Paid: an admin moves only a paid order on (test_order_status_machine.py
+    # covers the unpaid ones).
+    order = _order(db_session, _customer(db_session), status=old, payment_status="paid")
 
     response = client.put(
         f"{ORDERS}/{order.id}/status", json={"status": new},
@@ -421,8 +423,8 @@ def test_admin_status_change_follows_the_order_lifecycle(client, db_session, old
         assert stored == old
 
 
-def test_admin_walks_an_order_through_its_whole_lifecycle(client, db_session):
-    order = _order(db_session, _customer(db_session))
+def test_admin_walks_a_paid_order_through_its_whole_lifecycle(client, db_session):
+    order = _order(db_session, _customer(db_session), payment_status="paid")
     headers = _admin_headers(client, db_session)
 
     for status in ("confirmed", "processing", "sent", "delivered"):

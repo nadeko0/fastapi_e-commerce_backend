@@ -30,7 +30,10 @@ Invariants (checked after every rule, for every order):
 - stock = initial stock - the quantities of the orders not cancelled
   (stock is taken at checkout and returned only by cancellation; refunds
   and expiry of a paid order never move it);
-- an order on hold (open dispute) or cancelled is never moved on.
+- an order on hold (open dispute) or cancelled is never moved on;
+- an order in confirmed, processing, sent or delivered is paid, or refunded
+  after having been paid (an admin cannot move an unpaid order on, and
+  payment is what confirms one).
 
 Settings: max_examples=30 runs (60 under the ci profile) of up to 40 steps (stateful_step_count),
 at most 3 orders per run, no deadline. About 30-40 s on a laptop: each
@@ -283,9 +286,15 @@ class PaymentChain(RuleBasedStateMachine):
         order_id = self._order_id(index)
         before = self.shop.order(order_id).status
         response = self._ok(self.shop.set_status(self.admin, order_id, status), 200, 409)
+        if response.status_code == 200 and status != "cancelled":
+            assert self.shop.order(order_id).payment_status == "paid"
         if response.status_code == 409:
             assert self.shop.order(order_id).status == before
-            if response.json()["detail"] != "Invalid status transition":
+            detail = response.json()["detail"]
+            if detail == "Order is not paid: it cannot be confirmed, processed, sent or delivered":
+                assert status != "cancelled"
+                assert self.shop.order(order_id).payment_status != "paid"
+            elif detail != "Invalid status transition":
                 assert self._open_dispute(order_id) and status != "cancelled"
 
     @precondition(lambda self: self.orders)
@@ -339,6 +348,8 @@ class PaymentChain(RuleBasedStateMachine):
                 intent = self._mock_intent(payment.payment_intent_id)
                 if intent is not None:
                     assert intent.amount_refunded == payment.amount_refunded
+            if order.status in ("confirmed", "processing", "sent", "delivered"):
+                assert order.payment_status in ("paid", "refunded"), (order.status, order.payment_status)
             if order.status != "cancelled":
                 live_quantity += sum(item.quantity for item in order.items)
         assert db.get(Product, self.product.id).stock_quantity == STOCK - live_quantity

@@ -755,16 +755,15 @@ def test_failure_reported_after_the_attempt_succeeded_changes_nothing(shop, outb
     assert outbox.take() == []
 
 
-def test_payment_for_an_order_an_admin_already_moved_on_keeps_its_status(shop, outbox):
-    # An admin may confirm and start processing an order before it is paid
-    # (the transition table does not look at payment). The payment then
-    # marks it paid without moving it back to confirmed.
+def test_payment_for_an_order_already_moved_on_keeps_its_status(shop, outbox):
+    # Orders that an admin moved on before paying existed before the status
+    # route required payment (an admin cannot do it any more); the payment
+    # still marks such an order paid without moving it back to confirmed.
     product = shop.product(price="19.99")
     buyer = shop.buyer()
-    admin = shop.admin()
     order = shop.order_of(buyer, product)
-    for status in ("confirmed", "processing"):
-        assert shop.set_status(admin, order["id"], status).status_code == 200
+    shop.db.get(Order, order["id"]).status = "processing"
+    shop.db.commit()
     outbox.take()
 
     response = shop.pay(buyer, order["id"])

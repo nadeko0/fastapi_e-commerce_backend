@@ -66,6 +66,7 @@ from app.services.email import (
     send_order_status_update_email,
 )
 from app.services.orders import (
+    PAID_ONLY_STATUSES,
     cancel_order_and_restock,
     is_unpaid_and_new,
     is_valid_status_transition,
@@ -434,7 +435,7 @@ async def get_order(
     responses={
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
-        409: {"description": "Invalid status transition, or the order is on hold for a payment dispute"},
+        409: {"description": "Invalid status transition, the order is not paid (moving it on), or it is on hold for a payment dispute"},
     },
 )
 async def update_order_status(
@@ -479,6 +480,13 @@ async def update_order_status(
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Invalid status transition"
+        )
+
+    # A refunded order was paid but no longer is: it is not moved on either.
+    if new_status in PAID_ONLY_STATUSES and order.payment_status != PaymentStatus.PAID:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Order is not paid: it cannot be confirmed, processed, sent or delivered",
         )
 
 

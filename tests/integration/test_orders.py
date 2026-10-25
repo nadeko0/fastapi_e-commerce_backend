@@ -108,6 +108,13 @@ def _login(client, email, password):
     return login_response.json()["access_token"]
 
 
+def _mark_paid(db_session, order_id):
+    """An admin moves an order on only while it is paid; the tests of the
+    status transitions themselves do not go through a payment."""
+    db_session.get(Order, order_id).payment_status = "paid"
+    db_session.commit()
+
+
 def _checkout_ready_buyer(client, db_session, email="buyer@example.com"):
     """Register, verify email, complete profile, and add an address - all
     the preconditions create_order enforces before it'll accept an order."""
@@ -412,6 +419,7 @@ def test_update_order_status_requires_admin(client, db_session):
 
 def test_admin_updates_order_status_with_valid_transition(client, db_session):
     _, order = _create_order(client, db_session)
+    _mark_paid(db_session, order["id"])
     admin = _make_admin(db_session)
     admin_token = _login(client, admin.email, "AdminPass1")
 
@@ -690,6 +698,7 @@ def test_cancel_from_delivered_is_rejected(client, db_session):
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()
 
+    _mark_paid(db_session, order["id"])
     admin = _make_admin(db_session, email="admin-delivered@example.com")
     admin_token = _login(client, admin.email, "AdminPass1")
     _transition(client, admin_token, order["id"], "confirmed")

@@ -2,11 +2,16 @@
 The order status state machine, every pair of statuses, through the admin
 endpoint (PUT /orders/{id}/status): an allowed transition changes the
 status (and, into cancelled, returns the stock exactly once); a forbidden
-one is 400 and changes nothing.
+one is 409 and changes nothing.
 
 new -> confirmed -> processing -> sent -> delivered, and any of the first
 four -> cancelled. delivered and cancelled are terminal; nothing moves
 backwards and no status "transitions" to itself.
+
+Payment gates the way forward: the only payment methods are card payments
+(stripe), so an order is confirmed by its payment, and an admin moves an
+order into confirmed, processing, sent or delivered only while it is paid.
+An unpaid or refunded order can still be cancelled.
 """
 import uuid
 from decimal import Decimal
@@ -33,6 +38,8 @@ ALLOWED = {
     ("sent", "delivered"), ("sent", "cancelled"),
 }
 ALL_PAIRS = list(pairs([s.value for s in OrderStatus], repeat=2))
+FORWARD = ("confirmed", "processing", "sent", "delivered")
+UNPAID_DETAIL = "Order is not paid: it cannot be confirmed, processed, sent or delivered"
 
 
 @pytest.fixture(autouse=True)
@@ -50,9 +57,9 @@ def _user(db, role):
     return user
 
 
-def _order_in(db, status, quantity=3, stock_left=7):
+def _order_in(db, status, quantity=3, stock_left=7, payment_status="paid"):
     """An order for `quantity` units, already taken from a product that has
-    `stock_left` left, put directly into `status`."""
+    `stock_left` left, put directly into `status` and `payment_status`."""
     owner = _user(db, "client")
     address = Address(user_id=owner.id, street="1 Main St", city="City", state="ST",
                       postal_code="10001", country="US")
@@ -63,7 +70,7 @@ def _order_in(db, status, quantity=3, stock_left=7):
                    stock_quantity=stock_left, category_id=category.id)
     db.add(item)
     db.commit()
-    order = Order(user_id=owner.id, status=status, payment_status="pending",
+    order = Order(user_id=owner.id, status=status, payment_status=payment_status,
                   shipping_address_id=address.id, total_amount=Decimal("2.50") * quantity)
     db.add(order)
     db.commit()
@@ -109,6 +116,55 @@ def test_admin_status_change_for_every_pair(client, db_session, old, new):
         assert stock == 7
 
 
+UNPAID = ("pending", "failed", "refunded")
+
+
+@pytest.mark.parametrize("payment_status", UNPAID)
+@pytest.mark.parametrize("old,new", [pair for pair in sorted(ALLOWED) if pair[1] in FORWARD],
+                         ids=lambda v: v)
+def test_an_unpaid_order_is_not_moved_forward(client, db_session, old, new, payment_status):
+    order_id, product_id = _order_in(db_session, old, payment_status=payment_status)
+    admin = _user(db_session, "admin")
+    headers = {"Authorization": f"Bearer {create_access_token(admin.id)}"}
+
+    response = client.put(f"{ORDERS}/{order_id}/status", json={"status": new}, headers=headers)
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == UNPAID_DETAIL
+    db_session.expire_all()
+    assert db_session.get(Order, order_id).status == old
+    assert db_session.get(Product, product_id).stock_quantity == 7
+
+
+@pytest.mark.parametrize("payment_status", UNPAID)
+@pytest.mark.parametrize("old", ["new", "confirmed", "processing", "sent"])
+def test_an_unpaid_order_can_still_be_cancelled(client, db_session, old, payment_status):
+    order_id, product_id = _order_in(db_session, old, payment_status=payment_status)
+    admin = _user(db_session, "admin")
+    headers = {"Authorization": f"Bearer {create_access_token(admin.id)}"}
+
+    response = client.put(f"{ORDERS}/{order_id}/status", json={"status": "cancelled"}, headers=headers)
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    assert db_session.get(Order, order_id).status == "cancelled"
+    assert db_session.get(Product, product_id).stock_quantity == 10
+
+
+@pytest.mark.parametrize("old,new", [("new", "sent"), ("new", "delivered"), ("confirmed", "delivered")])
+def test_a_forbidden_jump_of_an_unpaid_order_is_the_transition_error(client, db_session, old, new):
+    # The transition table is checked before payment: the answer names
+    # the first rule the request breaks.
+    order_id, _ = _order_in(db_session, old, payment_status="pending")
+    admin = _user(db_session, "admin")
+    headers = {"Authorization": f"Bearer {create_access_token(admin.id)}"}
+
+    response = client.put(f"{ORDERS}/{order_id}/status", json={"status": new}, headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Invalid status transition"
+
+
 def test_status_change_requires_an_admin(client, db_session):
     order_id, _ = _order_in(db_session, "new")
     customer = _user(db_session, "client")
@@ -131,3 +187,28 @@ def test_unknown_status_is_a_validation_error(client, db_session):
                           headers=headers)
 
     assert response.status_code == 422
+
+
+def test_an_order_is_moved_on_once_its_payment_has_gone_through(client, db_session, monkeypatch):
+    # End to end: placed, refused while unpaid, paid through /pay (which
+    # confirms it), then moved on by the admin.
+    from test_order_expiry import _pay, _place
+    from test_orders import _login, _make_admin
+
+    from app.services.payment.stripe_provider import StripePaymentProvider
+
+    StripePaymentProvider.reset_mock_state()
+    monkeypatch.setattr("app.api.v1.orders.send_order_confirmation_email", lambda *a, **k: True)
+    token, order, _, _ = _place(client, db_session)
+    admin = _make_admin(db_session)
+    headers = {"Authorization": f"Bearer {_login(client, admin.email, 'AdminPass1')}"}
+
+    refused = client.put(f"{ORDERS}/{order['id']}/status", json={"status": "confirmed"}, headers=headers)
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == UNPAID_DETAIL
+
+    assert _pay(client, token, order).status_code == 200
+    for status in ("processing", "sent", "delivered"):
+        moved = client.put(f"{ORDERS}/{order['id']}/status", json={"status": status}, headers=headers)
+        assert moved.status_code == 200, (status, moved.text)
+    StripePaymentProvider.reset_mock_state()
