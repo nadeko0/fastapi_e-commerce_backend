@@ -96,7 +96,9 @@ jobs:
   test-timezones:
     # Payment and order code compares and stores timestamps; run just those
     # tests under zones that differ from UTC by the extremes (+14, -11), a
-    # 45-minute offset and a half-hour offset with DST. No coverage here: the
+    # 45-minute offset and a half-hour offset with DST, and two zones whose
+    # clocks change on the dates the DST tests use (Europe/Bratislava,
+    # America/New_York). No coverage here: the
     # full suite in the test job already measures it.
     runs-on: ubuntu-latest
     strategy:
@@ -108,6 +110,8 @@ jobs:
           - Pacific/Pago_Pago
           - Asia/Kathmandu
           - America/St_Johns
+          - Europe/Bratislava
+          - America/New_York
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install uv
@@ -144,11 +148,13 @@ jobs:
           tests/integration/test_stripe_event*.py
           tests/integration/test_reconciliation*.py
           tests/integration/test_admin_webhook_events.py
+          tests/integration/test_dst_clock.py
           tests/unit/test_payment*.py
           tests/unit/test_order*.py
           tests/unit/test_money*.py
           tests/unit/test_webhook*.py
           tests/unit/test_reconciliation*.py
+          tests/unit/test_dst_*.py
 
   test-postgres:
     # The main test job runs on a temporary SQLite database. Production is
