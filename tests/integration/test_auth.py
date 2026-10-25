@@ -131,6 +131,55 @@ def test_login_returns_tokens_for_valid_credentials(client, valid_registration_p
     assert tokens["token_type"] == "bearer"
 
 
+def test_login_accepts_explicit_grant_type_password(client, valid_registration_payload):
+    """RFC 6749 Section 4.3.2 specifies grant_type='password' for resource owner password flow."""
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+
+    response = client.post(
+        f"{API_PREFIX}/login",
+        data={
+            "username": valid_registration_payload["email"],
+            "password": valid_registration_payload["password"],
+            "grant_type": "password",
+        },
+    )
+
+    assert response.status_code == 200
+    tokens = response.json()
+    assert tokens["access_token"]
+    assert tokens["refresh_token"]
+    assert tokens["token_type"] == "bearer"
+
+
+@pytest.mark.parametrize(
+    "invalid_grant_type",
+    [
+        "client_credentials",
+        "authorization_code",
+        "refresh_token",
+        "implicit",
+        "Password",
+        "unsupported",
+    ],
+)
+def test_login_rejects_invalid_grant_type(client, valid_registration_payload, invalid_grant_type):
+    """Wrong grant_type values must be rejected with 422 per RFC 6749 Section 4.3.2."""
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+
+    response = client.post(
+        f"{API_PREFIX}/login",
+        data={
+            "username": valid_registration_payload["email"],
+            "password": valid_registration_payload["password"],
+            "grant_type": invalid_grant_type,
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert any("grant_type" in err.get("loc", []) for err in body.get("errors", []))
+
+
 def test_login_rejects_wrong_password(client, valid_registration_payload):
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
 
