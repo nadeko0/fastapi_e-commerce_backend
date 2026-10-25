@@ -7,10 +7,20 @@ from typing import (
     Literal,
 )
 
-from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    create_model,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from app.core.clock import UTCDatetime, utc_now
 from app.core.config import settings
+from app.core.text_input import first_unusable_text
 
 # ITU-T E.164: "+", a country code whose first digit is 1-9, at most 15 digits
 # in all (here also at least 5, as before). Applied to input schemas only.
@@ -62,9 +72,32 @@ class RequestBody(BaseModel):
     must keep reading rows and cache entries written under older shapes, so
     a model shared by input and output has its input side split off.
     Query parameter models stay on BaseModel: an unknown query parameter is
-    ignored."""
+    ignored.
+
+    Also the one place that refuses unusable text in a body: a string, a
+    member name or a list element anywhere in it that holds a NUL character
+    or a lone surrogate is a 422 at its loc (app/core/text_input.py says
+    why). Run before the fields, on the raw input, so that it covers a field
+    typed `Any` or a free-form dict as well as every `str`, and what a
+    nested model sends is checked once more by that model, relative to
+    itself (Pydantic: model_validator mode="before")."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_unusable_text(cls, data: Any) -> Any:
+        problem = first_unusable_text(data)
+        if problem:
+            raise ValidationError.from_exception_data(
+                cls.__name__,
+                [InitErrorDetails(
+                    type=PydanticCustomError(problem["type"], problem["msg"]),
+                    loc=problem["loc"],
+                    input="",
+                )],
+            )
+        return data
 
 
 class TokenPayload(BaseModel):

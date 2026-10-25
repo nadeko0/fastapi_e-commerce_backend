@@ -13,6 +13,7 @@ from app.core.dependencies import Cache, DbSession
 from app.core.etag import IfNoneMatch, etag_for, if_none_match_hits
 from app.core.openapi import DocumentedRoute
 from app.core.sorting import order_clauses
+from app.core.text_input import first_unusable_text
 from app.models.category import Category
 from app.models.product import Product
 from app.schemas.category import (
@@ -92,6 +93,11 @@ def _characteristics_filter(raw: str | None) -> dict | None:
         raise RequestValidationError([
             {"type": problem[0], "loc": ("query", "characteristics"), "msg": problem[1]}
         ])
+    # The JSON can spell a NUL as the escape \u0000, which the query string
+    # check (app/core/text_input.py) does not see.
+    unusable = first_unusable_text(parsed, ("query", "characteristics"))
+    if unusable:
+        raise RequestValidationError([unusable])
     return parsed
 
 

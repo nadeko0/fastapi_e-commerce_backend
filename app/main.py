@@ -19,6 +19,7 @@ from app.core.overload import InFlightLimitMiddleware
 from app.core.rate_limit import rate_limit
 from app.core.request_context import RequestContextMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware, server_error_handler
+from app.core.text_input import reject_unusable_text
 from app.services.redis import RedisService
 from app.services.redis_async import close_async_redis
 
@@ -71,7 +72,9 @@ app = FastAPI(
     # Starlette's ExceptionMiddleware and had to turn its own exception into
     # a response by hand; before that was noticed, every 429 came out as a
     # 500.)
-    dependencies=[Depends(rate_limit)],
+    # Then the path, query and form parameters are checked for text the
+    # database cannot store (app/core/text_input.py).
+    dependencies=[Depends(rate_limit), Depends(reject_unusable_text)],
 )
 
 register_error_handlers(app)
