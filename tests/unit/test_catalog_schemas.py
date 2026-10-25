@@ -70,6 +70,14 @@ def test_product_create_refuses(field, value):
         ProductCreate(**{**_PRODUCT, field: value})
 
 
+def test_product_create_requires_images():
+    # Pydantic does not validate a default, so images is required rather than
+    # defaulted: leaving it out must be refused like an empty list.
+    payload = {k: v for k, v in _PRODUCT.items() if k != "images"}
+    with pytest.raises(ValidationError):
+        ProductCreate(**payload)
+
+
 def test_product_images_are_deduplicated_in_order_and_stored_as_strings():
     images = ["https://example.com/b.png", "https://example.com/a.png", "https://example.com/b.png"]
     assert ProductCreate(**{**_PRODUCT, "images": images}).images == [

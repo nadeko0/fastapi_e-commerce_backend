@@ -50,8 +50,8 @@ PHONES = st.one_of(st.none(), st.from_regex(r"\+[1-9][0-9]{6,14}", fullmatch=Tru
 # Rules a model enforces in a validator rather than in a field type, which a
 # strategy built from the types cannot see.
 FIELD_STRATEGIES = {
-    # ProductBase.validate_images: at least one image, no duplicates.
-    ("ProductResponse", "images"): st.lists(IMAGE_URLS, min_size=1, max_size=2, unique=True),
+    # A product without images is readable (ProductBase.images has no minimum).
+    ("ProductResponse", "images"): st.lists(IMAGE_URLS, max_size=2, unique=True),
     # _validate_phone: 5 to 15 digits after the plus sign.
     ("UserResponse", "phone"): PHONES,
     ("AddressResponse", "delivery_phone"): PHONES,

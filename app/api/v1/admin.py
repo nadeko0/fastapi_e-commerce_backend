@@ -182,9 +182,9 @@ async def create_product(
 
     db_product = Product(**product.model_dump())
     db.add(db_product)
-    await db.commit()
-    await db.refresh(db_product)
-
+    # flush, not commit: the response is built from the stored row below, and
+    # a response that cannot be built must not leave the row behind.
+    await db.flush()
 
     # populate_existing: the product is already in the session, and its
     # category must be loaded by this query (no lazy load under asyncio).
@@ -198,10 +198,6 @@ async def create_product(
         )
     ).scalars().first()
 
-
-    await redis.invalidate_category_cache()
-
-
     # ProductResponse requires category_name, which is not a Product column,
     # so from_attributes alone can't populate it. Validate the ORM-mapped
     # fields first (ProductInDB has no such requirement), then build the
@@ -209,8 +205,12 @@ async def create_product(
     # spreading Product.__dict__ (which includes SQLAlchemy's internal
     # _sa_instance_state) into the Pydantic constructor.
     base = ProductInDB.model_validate(db_product, from_attributes=True)
+    result = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
     set_location(request, response, "get_product", product_id=db_product.id)
-    return ProductResponse(**base.model_dump(), category_name=db_product.category.name)
+
+    await db.commit()
+    await redis.invalidate_category_cache()
+    return result
 
 # PATCH shares the PUT handler: same schema, checks, side effects, response.
 @router.patch(
@@ -286,9 +286,8 @@ async def update_product(
         setattr(db_product, field, value)
 
     db_product.updated_at = utc_now()
-    await db.commit()
-    await db.refresh(db_product)
-
+    # flush, not commit: see create_product.
+    await db.flush()
 
     db_product = (
         await db.execute(
@@ -300,14 +299,13 @@ async def update_product(
         )
     ).scalars().first()
 
-
-    await redis.invalidate_product_cache(product_id)
-    await redis.invalidate_category_cache()
-
-
     base = ProductInDB.model_validate(db_product, from_attributes=True)
     result = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
     response.headers["ETag"] = etag_for(result)
+
+    await db.commit()
+    await redis.invalidate_product_cache(product_id)
+    await redis.invalidate_category_cache()
     return result
 
 @router.delete(

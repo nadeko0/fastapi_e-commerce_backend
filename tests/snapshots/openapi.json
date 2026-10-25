@@ -2414,7 +2414,8 @@
           "description",
           "price",
           "stock_quantity",
-          "category_id"
+          "category_id",
+          "images"
         ],
         "title": "ProductCreate",
         "type": "object"

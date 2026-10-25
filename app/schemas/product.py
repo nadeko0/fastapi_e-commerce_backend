@@ -46,8 +46,20 @@ class ProductBase(BaseModel):
     price: NonNegativeMoney
     stock_quantity: Int32Max = Field(..., ge=0)
     category_id: Int32
+    # No minimum here: ProductBase is also what the catalog answers with, and
+    # a row without images (stored before the rule, or edited in the database)
+    # must stay readable. The rule for what a client sends is ProductCreate's.
     images: list[ImageUrl] = Field(default_factory=list)
     characteristics: dict[str, ProductCharacteristic] = Field(default_factory=dict)
+
+class ProductCreate(RequestBody, ProductBase):
+    # Required, not defaulted: Pydantic does not run validators on a default,
+    # so an omitted `images` would have skipped the rule below and stored a
+    # product without images.
+    images: list[ImageUrl]
+    characteristics: dict[str, ProductCharacteristicInput] = Field(default_factory=dict)
+
+    model_config = ConfigDict(json_schema_extra=input_schema(rules={"images": {"minItems": 1}}))
 
     @field_validator('images')
     @classmethod
@@ -57,13 +69,6 @@ class ProductBase(BaseModel):
             raise ValueError('At least one image is required')
         # Convert HttpUrl objects to strings and remove duplicates
         return list(dict.fromkeys(str(url) for url in v))
-
-class ProductCreate(RequestBody, ProductBase):
-    characteristics: dict[str, ProductCharacteristicInput] = Field(default_factory=dict)
-
-    # validate_images refuses `images: []` (a product with no image is not
-    # created by saying so; leaving the member out is another matter).
-    model_config = ConfigDict(json_schema_extra=input_schema(rules={"images": {"minItems": 1}}))
 
 class ProductUpdate(RequestBody):
     name: str | None = Field(None, min_length=3, max_length=200)
