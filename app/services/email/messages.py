@@ -1,9 +1,10 @@
 import html
+from datetime import datetime
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 import app.services.email as email
-from app.core.clock import utc_now
+from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.models.order import Order
 from app.models.product import Product
@@ -32,6 +33,13 @@ def _frontend_link(page_path: str, token: str) -> str:
     # base is FRONTEND_URL, validated without a trailing slash, never the
     # request's Host header.
     return f"{settings.FRONTEND_URL}{page_path}?token={quote(token, safe='')}"
+
+
+def _utc_text(moment: datetime) -> str:
+    # A bare "2026-10-25 01:30:00" reads as the customer's local time. The
+    # stored instant is UTC, so it is written in UTC with the zone marked,
+    # like the other timestamps in these emails.
+    return as_utc(moment).strftime('%Y-%m-%d %H:%M:%S UTC')
 
 
 def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool:
@@ -83,7 +91,7 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
             <p>Total Amount: {order.total_amount} {order.currency}</p>
             <p>Order Status: {status_value}</p>
 
-            <p>Order Date: {order.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <p>Order Date: {_utc_text(order.created_at)}</p>
 
             <p>Thank you for shopping with us!</p>
         </body>
@@ -115,7 +123,7 @@ def send_order_status_update_email(to_email: str, order: Order) -> bool:
             <p>New Status: <strong>{status_value}</strong></p>
 
             <h3>Order Details:</h3>
-            <p>Order Date: {order.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <p>Order Date: {_utc_text(order.created_at)}</p>
             <p>Total Amount: {order.total_amount} {order.currency}</p>
 
             <p>Thank you for your patience!</p>
@@ -137,7 +145,7 @@ def send_order_cancellation_email(to_email: str, order: Order) -> bool:
             <p>Your order #{order.id} has been cancelled.</p>
 
             <h3>Order Details:</h3>
-            <p>Order Date: {order.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <p>Order Date: {_utc_text(order.created_at)}</p>
             <p>Total Amount: {order.total_amount} {order.currency}</p>
 
             <p>If you have any questions, please contact our support team.</p>

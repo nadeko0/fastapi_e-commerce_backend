@@ -4,7 +4,7 @@ update, cancellation), rendered with the real message builders and only
 the email provider replaced: amounts are stated in the order's own
 currency.
 """
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -72,3 +72,24 @@ def test_each_line_price_is_in_the_orders_currency_too(outbox):
     [(_, subject, body)] = outbox
     assert subject == "Order Confirmation #42"
     assert "<td>Widget &lt;b&gt;</td><td>5</td><td>2.50 EUR</td>" in body
+
+
+# The date was printed bare ("2026-10-25 01:30:00"). It is UTC, but a customer
+# reads it as local time, and on the night the clocks change in Europe that
+# reading is off by one or two hours and 02:30 happens twice.
+@pytest.mark.parametrize("email", list(SENDERS))
+def test_the_order_date_names_its_time_zone(outbox, email):
+    SENDERS[email]("EUR")
+
+    [(_, _, body)] = outbox
+    assert "Order Date: 2026-10-25 01:30:00 UTC</p>" in body
+
+
+def test_an_order_date_in_another_offset_is_written_in_utc(outbox):
+    order = _confirmation_order("EUR")
+    order.created_at = datetime(2026, 10, 25, 2, 30, 0, tzinfo=timezone(timedelta(hours=1)))
+
+    messages.send_order_confirmation_email("buyer@example.com", order)
+
+    [(_, _, body)] = outbox
+    assert "Order Date: 2026-10-25 01:30:00 UTC</p>" in body
