@@ -790,6 +790,9 @@ def _assert_stock_invariants(carts, responses, initial):
             order, got = by_user[buyer.user_id]
             assert r.json()["id"] == order.id
             assert got == want, "partial order"
+        elif r.status_code >= 500:
+            # Checked by check_responses afterwards; here only: all or nothing.
+            assert buyer.user_id not in by_user, "a failed checkout left an order behind"
         else:
             assert r.status_code == 409, r.text
             assert problem_type(r) == "insufficient-stock", r.text
@@ -829,9 +832,11 @@ def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
 
     responses = _checkout_burst(shop, carts)
 
-    check_responses(responses, {201, 409})
+    # Stock invariants first, so that they are checked even in a round
+    # where a deadlock 503 fails the burst.
     _assert_stock_invariants(carts, responses, initial)
     assert any(r.status_code == 201 for r in responses)
+    check_responses(responses, {201, 409})
 
 
 @requires_postgres
@@ -856,9 +861,9 @@ def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
 
     responses = _checkout_burst(shop, carts)
 
+    _assert_stock_invariants(carts, responses, initial)
     hist = check_responses(responses, {201})
     assert hist == {201: N}, hist
-    _assert_stock_invariants(carts, responses, initial)
 
 
 @requires_postgres

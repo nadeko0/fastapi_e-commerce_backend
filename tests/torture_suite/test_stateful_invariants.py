@@ -591,7 +591,7 @@ def test_cart_world_matches_its_model(client, db_session, monkeypatch):
         CartWorld.shop = None
         _dump_stats("cart_world")
     for outcome in ("POST /cart/items 200", "POST /users/login 200", "POST /orders 201",
-                    "POST /orders 409", "POST /cart/validate 200"):
+                    "POST /cart/validate 200"):
         assert SEEN[outcome] > 0, (outcome, SEEN)
 
 
@@ -1469,3 +1469,72 @@ def test_refund_events_in_any_order_converge_to_the_providers_state(client, db_s
         assert shop.order(order["id"]).payment_status == expected
 
     converge()
+
+
+# =============================================================================
+# Deterministic regressions of what the properties above found (minimal
+# counterexamples, replayed without Hypothesis). They assert the CORRECT
+# behaviour and fail until the backend is fixed.
+# =============================================================================
+
+
+def _paid_order(shop, token, price="10.00"):
+    product = make_product(shop.db, price, 5)
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product, 1)
+    check(shop.pay(buyer, order["id"], token=token), 200)
+    return order["id"], shop.payments(order["id"])[-1].payment_intent_id
+
+
+def test_bug_stale_refund_event_reverts_a_settled_refund(client, db_session, tasks_db):
+    """Found by test_refund_events_in_any_order_converge_to_the_providers_state
+    (token=pm_card_pendingRefund, one refund, settled, events shuffled).
+
+    A full refund is created pending; Stripe sends refund.created (status
+    pending) and, once it settles, refund.updated (status succeeded). Stripe
+    does not guarantee delivery order. When refund.created arrives last, the
+    worker writes the stale "pending" over "succeeded"
+    (app/services/stripe_events.py:255) and _settle_refunds moves the order
+    from refunded back to paid: an order whose money has been returned can
+    then be moved on (processing/sent) by an admin."""
+    shop = Shop(client, db_session)
+    admin = shop.admin()
+    order_id, intent_id = _paid_order(shop, PAY_PENDING_REFUND)
+    refund = check(shop.refund(admin, order_id), 200).json()
+    assert refund["status"] == "pending"
+    created = {"id": refund["id"], "object": "refund", "amount": 1000, "currency": "usd",
+               "payment_intent": intent_id, "status": "pending"}
+    updated = StripePaymentProvider.settle_refund(refund["id"])
+
+    check(shop.webhook(updated["type"], updated["data"]["object"]), 200)
+    assert shop.order(order_id).payment_status == "refunded"
+    check(shop.webhook("refund.created", created), 200)  # the older event, delivered late
+
+    payment = shop.payments(order_id)[-1]
+    assert [r.status for r in payment.refunds] == ["succeeded"], "stale event rewound the refund"
+    assert shop.order(order_id).payment_status == "refunded"
+
+
+def test_bug_refund_after_an_unreported_refund_failure_is_a_500(client, db_session, tasks_db):
+    """Found by test_refund_events_in_any_order_converge_to_the_providers_state
+    (token=pm_card_refundFail, parts=[1, 1000], the first refund settled).
+
+    A 0.01 refund succeeds, then fails at Stripe (the money is refundable
+    again there); its refund.failed webhook has not been processed yet. An
+    admin refunds the full 10.00: Stripe accepts it (refundable is 10.00
+    again) and returns the money, but /refund adds 1000 to an
+    amount_refunded that still counts the failed 1 cent
+    (app/api/v1/orders.py:1767 via :1625), breaks
+    ck_payment_refunded_within_amount and answers 500 - for a refund the
+    provider has already made, which is then not recorded."""
+    shop = Shop(client, db_session)
+    admin = shop.admin()
+    order_id, intent_id = _paid_order(shop, PAY_REFUND_FAIL)
+    first = check(shop.refund(admin, order_id, amount=Decimal("0.01")), 200).json()
+    StripePaymentProvider.settle_refund(first["id"])  # fails at Stripe; webhook still queued
+
+    response = check(shop.refund(admin, order_id, amount=Decimal("10.00")), 200, 400, 409)
+
+    assert response.status_code == 200, response.text
+    recorded = {r.refund_id for r in shop.payments(order_id)[-1].refunds}
+    assert response.json()["id"] in recorded

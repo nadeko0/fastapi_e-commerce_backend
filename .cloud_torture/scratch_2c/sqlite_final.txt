@@ -1,0 +1,212 @@
+============================= test session starts ==============================
+collecting ... collected 97 items
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[0] SKIPPED [  1%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[1] SKIPPED [  2%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[2] SKIPPED [  3%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[3] SKIPPED [  4%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[4] SKIPPED [  5%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[5] SKIPPED [  6%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[0] SKIPPED [  7%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[1] SKIPPED [  8%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[2] SKIPPED [  9%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[3] SKIPPED [ 10%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[4] SKIPPED [ 11%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[5] SKIPPED [ 12%]
+tests/torture_suite/test_concurrency_torture.py::test_bug_logout_racing_refresh_leaves_a_live_refresh_token SKIPPED [ 13%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[0] SKIPPED [ 14%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[1] SKIPPED [ 15%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[2] SKIPPED [ 16%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[3] SKIPPED [ 17%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[4] SKIPPED [ 18%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[5] SKIPPED [ 19%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[0] SKIPPED [ 20%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[1] SKIPPED [ 21%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[2] SKIPPED [ 22%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[3] SKIPPED [ 23%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[4] SKIPPED [ 24%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[5] SKIPPED [ 25%]
+tests/torture_suite/test_concurrency_torture.py::test_bug_order_replay_racing_its_first_request_answers_cart_empty FAILED [ 26%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[0] SKIPPED [ 27%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[1] SKIPPED [ 28%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[2] SKIPPED [ 29%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[3] SKIPPED [ 30%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[4] SKIPPED [ 31%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[5] SKIPPED [ 32%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[0] SKIPPED [ 34%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[1] SKIPPED [ 35%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[2] SKIPPED [ 36%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[3] SKIPPED [ 37%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[4] SKIPPED [ 38%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[5] SKIPPED [ 39%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[0] SKIPPED [ 40%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[1] SKIPPED [ 41%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[2] SKIPPED [ 42%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[3] SKIPPED [ 43%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[4] SKIPPED [ 44%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[5] SKIPPED [ 45%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[0] SKIPPED [ 46%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[1] SKIPPED [ 47%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[2] SKIPPED [ 48%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[3] SKIPPED [ 49%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[4] SKIPPED [ 50%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[5] SKIPPED [ 51%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[0] SKIPPED [ 52%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[1] SKIPPED [ 53%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[2] SKIPPED [ 54%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[3] SKIPPED [ 55%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[4] SKIPPED [ 56%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[5] SKIPPED [ 57%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[0] SKIPPED [ 58%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[1] SKIPPED [ 59%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[2] SKIPPED [ 60%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[3] SKIPPED [ 61%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[4] SKIPPED [ 62%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[5] SKIPPED [ 63%]
+tests/torture_suite/test_concurrency_torture.py::test_bug_mock_provider_refund_key_is_not_atomic SKIPPED [ 64%]
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[0] SKIPPED [ 65%]
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[1] SKIPPED [ 67%]
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[2] SKIPPED [ 68%]
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[3] SKIPPED [ 69%]
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[4] SKIPPED [ 70%]
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[5] SKIPPED [ 71%]
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[0] SKIPPED [ 72%]
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[1] SKIPPED [ 73%]
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[2] SKIPPED [ 74%]
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[3] SKIPPED [ 75%]
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[4] SKIPPED [ 76%]
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[5] SKIPPED [ 77%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[0] SKIPPED [ 78%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[1] SKIPPED [ 79%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[2] SKIPPED [ 80%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[3] SKIPPED [ 81%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[4] SKIPPED [ 82%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[5] SKIPPED [ 83%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[6] SKIPPED [ 84%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[7] SKIPPED [ 85%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[0] SKIPPED [ 86%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[1] SKIPPED [ 87%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[2] SKIPPED [ 88%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[3] SKIPPED [ 89%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[4] SKIPPED [ 90%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[5] SKIPPED [ 91%]
+tests/torture_suite/test_concurrency_torture.py::test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout SKIPPED [ 92%]
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[0] SKIPPED [ 93%]
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[1] SKIPPED [ 94%]
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[2] SKIPPED [ 95%]
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[3] SKIPPED [ 96%]
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[4] SKIPPED [ 97%]
+tests/torture_suite/test_concurrency_torture.py::test_bug_webhook_stored_after_erasure_keeps_personal_data FAILED [ 98%]
+tests/torture_suite/test_concurrency_torture.py::test_harness_runs_requests_concurrently_on_one_loop PASSED [100%]
+
+=================================== FAILURES ===================================
+______ test_bug_order_replay_racing_its_first_request_answers_cart_empty _______
+
+shop = <payment_support.Shop object at 0x7f6db05523c0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f6db06850f0>
+
+    def test_bug_order_replay_racing_its_first_request_answers_cart_empty(shop, monkeypatch):
+        """A retry of POST /orders with the key of a request still in flight.
+        Interleaving (app/api/v1/orders.py create_order):
+    
+          retry:  _order_by_idempotency_key -> None   (first not committed yet)
+          first:  commit; remove_ordered_items_atomic  (cart now empty)
+          retry:  redis.get_cart -> empty -> 400 "Cart is empty"
+    
+        The documented answer to a reused key is the first order (201). Widened
+        here by holding the retry right after its key lookup until the first
+        request has finished."""
+        product = shop.product(price="10.00", stock=50)
+        buyer = shop.buyer()
+        assert shop.add_to_cart(buyer, product, quantity=1).status_code == 200
+        key = new_key()
+        real_lookup = orders_module._order_by_idempotency_key
+        state = {"held": False}
+    
+        async def scenario():
+            retry_paused = asyncio.Event()
+            first_done = asyncio.Event()
+    
+            async def lookup(db, user_id, idempotency_key):
+                found = await real_lookup(db, user_id, idempotency_key)
+                if found is None and not state["held"]:
+                    state["held"] = True
+                    retry_paused.set()
+                    await first_done.wait()
+                return found
+    
+            monkeypatch.setattr(orders_module, "_order_by_idempotency_key", lookup)
+            request = {"json": {"shipping_address_id": buyer.address_id},
+                       "headers": {**buyer.headers, "Idempotency-Key": key}}
+            async with httpx2.AsyncClient(transport=_transport(), base_url="http://test") as ac:
+                retry = asyncio.create_task(ac.post(ORDERS, **request))
+                await retry_paused.wait()
+                first = await ac.post(ORDERS, **request)
+                first_done.set()
+                return first, await retry
+    
+        first, retry = asyncio.run(scenario())
+    
+        assert first.status_code == 201, first.text
+        assert _order_count(buyer.user_id) == 1
+>       assert retry.status_code == 201, (
+            f"a replay of the in-flight key answered {retry.status_code}: {retry.text}"
+        )
+E       AssertionError: a replay of the in-flight key answered 400: {"type":"about:blank","title":"Bad Request","status":400,"detail":"Cart is empty","instance":"/api/v1/orders","request_id":"17e8da55964a4eb49cf0da9e094307b3"}
+E       assert 400 == 201
+E        +  where 400 = <Response [400 Bad Request]>.status_code
+
+tests/torture_suite/test_concurrency_torture.py:433: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+__________ test_bug_webhook_stored_after_erasure_keeps_personal_data ___________
+
+shop = <payment_support.Shop object at 0x7f6dafb89950>
+
+    def test_bug_webhook_stored_after_erasure_keeps_personal_data(shop):
+        """The anonymisation task redacts the stored webhook events about the
+        erased account's payments (redact_users_events), once: the account is
+        then excluded from every later run. An event about those payments that
+        is stored after that run - a late redelivery, a refund or dispute
+        months later, or one that simply raced the task - keeps its personal
+        data forever: neither the webhook route (app/api/v1/orders.py
+        stripe_webhook -> stripe_events.store_event) nor the worker redacts it."""
+        product = shop.product(price="12.00", stock=50)
+        buyer = shop.buyer()
+        order, attempt = _requires_action_attempt(shop, buyer, product)
+        request = shop.client.post(f"{LEGAL}/data-request",
+                                   json={"request_type": "deletion", "password": PASSWORD},
+                                   headers=buyer.headers)
+        assert request.status_code == 200, request.text
+        _backdate_erasure(buyer.user_id)
+        assert _purge() == 1
+        assert _pii_left(buyer.email) == []
+    
+        body, headers = _intent_event(attempt.payment_intent_id, order["id"], attempt.amount,
+                                      attempt.currency, buyer.email)
+        response = shop.client.post(WEBHOOK, content=body, headers=headers)
+        assert response.status_code == 200
+        run_event(json.loads(body)["id"])
+        # A later run of the task does not pick it up either.
+        assert _purge() == 0
+    
+>       assert _pii_left(buyer.email) == [], "an erased customer's data was stored after erasure"
+E       AssertionError: an erased customer's data was stored after erasure
+E       assert [('webhook_ev...8c29e9586f1')] == []
+E         
+E         Left contains one more item: ('webhook_events', 'evt_367ed64ddf0748c29e9586f1')
+E         
+E         Full diff:
+E         - []
+E         + [
+E         +     (...
+E         
+E         ...Full output truncated (4 lines hidden), use '-vv' to show
+
+tests/torture_suite/test_concurrency_torture.py:1118: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+=========================== short test summary info ============================
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_order_replay_racing_its_first_request_answers_cart_empty
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_webhook_stored_after_erasure_keeps_personal_data
+=================== 2 failed, 1 passed, 94 skipped in 0.64s ====================

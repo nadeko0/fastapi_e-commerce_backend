@@ -1,0 +1,693 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+============================= test session starts ==============================
+collecting ... collected 298 items
+
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_accepts_the_smallest_and_largest_shapes[1/second-expected0] PASSED [  0%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_accepts_the_smallest_and_largest_shapes[1/seconds-expected1] PASSED [  0%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_accepts_the_smallest_and_largest_shapes[300/minute-expected2] PASSED [  1%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_accepts_the_smallest_and_largest_shapes[10/15 minutes-expected3] PASSED [  1%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_accepts_the_smallest_and_largest_shapes[10/15minutes-expected4] PASSED [  1%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_accepts_the_smallest_and_largest_shapes[100/hour-expected5] PASSED [  2%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_accepts_the_smallest_and_largest_shapes[1/1 day-expected6] PASSED [  2%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_accepts_the_smallest_and_largest_shapes[2147483647/day-expected7] PASSED [  2%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_refuses_just_outside_the_pattern[0/minute] PASSED [  3%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_refuses_just_outside_the_pattern[10/0 minutes] PASSED [  3%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_refuses_just_outside_the_pattern[01/minute] PASSED [  3%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_refuses_just_outside_the_pattern[-1/minute] PASSED [  4%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_refuses_just_outside_the_pattern[1/week] PASSED [  4%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_refuses_just_outside_the_pattern[1/ minute] PASSED [  4%]
+tests/torture_suite/test_boundary_mutants.py::test_parse_rate_refuses_just_outside_the_pattern[] PASSED [  5%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[4-60000-0] PASSED [  5%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[5-60000-0] PASSED [  5%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[6-60000-60] PASSED [  6%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[6-59001-60] PASSED [  6%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[6-59000-59] PASSED [  6%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[6-58999-59] PASSED [  7%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[6-1001-2] PASSED [  7%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[6-1000-1] PASSED [  7%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[6-999-1] PASSED [  8%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[6-1-1] PASSED [  8%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[6-0-1] PASSED [  8%]
+tests/torture_suite/test_boundary_mutants.py::test_wait_is_zero_up_to_the_limit_and_the_ceiled_rest_of_the_window_after[6--1-1] PASSED [  9%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_remaining_reaches_zero_exactly_at_the_limit[1-4] PASSED [  9%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_remaining_reaches_zero_exactly_at_the_limit[4-1] PASSED [  9%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_remaining_reaches_zero_exactly_at_the_limit[5-0] PASSED [ 10%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_remaining_reaches_zero_exactly_at_the_limit[6-0] PASSED [ 10%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_remaining_reaches_zero_exactly_at_the_limit[100-0] PASSED [ 10%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_reset_is_the_ceiled_window_rest[0-0] PASSED [ 11%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_reset_is_the_ceiled_window_rest[1-1] PASSED [ 11%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_reset_is_the_ceiled_window_rest[999-1] PASSED [ 11%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_reset_is_the_ceiled_window_rest[1000-1] PASSED [ 12%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_reset_is_the_ceiled_window_rest[1001-2] PASSED [ 12%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_reset_is_the_ceiled_window_rest[-2-0] PASSED [ 12%]
+tests/torture_suite/test_boundary_mutants.py::test_user_id_from_subject_at_the_int32_edge[0-None] PASSED [ 13%]
+tests/torture_suite/test_boundary_mutants.py::test_user_id_from_subject_at_the_int32_edge[1-1] PASSED [ 13%]
+tests/torture_suite/test_boundary_mutants.py::test_user_id_from_subject_at_the_int32_edge[2147483646-2147483646] PASSED [ 13%]
+tests/torture_suite/test_boundary_mutants.py::test_user_id_from_subject_at_the_int32_edge[2147483647-2147483647] PASSED [ 14%]
+tests/torture_suite/test_boundary_mutants.py::test_user_id_from_subject_at_the_int32_edge[2147483648-None] PASSED [ 14%]
+tests/torture_suite/test_boundary_mutants.py::test_user_id_from_subject_at_the_int32_edge[9999999999-None] PASSED [ 14%]
+tests/torture_suite/test_boundary_mutants.py::test_user_id_from_subject_at_the_int32_edge[10000000000-None] PASSED [ 15%]
+tests/torture_suite/test_boundary_mutants.py::test_user_id_from_subject_at_the_int32_edge[01-None] PASSED [ 15%]
+tests/torture_suite/test_boundary_mutants.py::test_user_id_from_subject_at_the_int32_edge[ 1-None] PASSED [ 15%]
+tests/torture_suite/test_boundary_mutants.py::test_user_id_from_subject_at_the_int32_edge[1-None] PASSED [ 16%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_doubles_until_the_cap[1-30] PASSED [ 16%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_doubles_until_the_cap[2-60] PASSED [ 16%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_doubles_until_the_cap[3-120] PASSED [ 17%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_doubles_until_the_cap[4-240] PASSED [ 17%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_doubles_until_the_cap[5-480] PASSED [ 17%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_doubles_until_the_cap[6-900] PASSED [ 18%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_doubles_until_the_cap[7-900] PASSED [ 18%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_doubles_until_the_cap[11-900] PASSED [ 18%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_cap_is_inclusive[480-4-240] PASSED [ 19%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_cap_is_inclusive[480-5-480] PASSED [ 19%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_cap_is_inclusive[480-6-480] PASSED [ 19%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_cap_is_inclusive[479-5-479] PASSED [ 20%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_delay_cap_is_inclusive[481-5-480] PASSED [ 20%]
+tests/torture_suite/test_boundary_mutants.py::test_ordering_a_line_removes_it_exactly_when_all_of_it_was_ordered[5-4-1] PASSED [ 20%]
+tests/torture_suite/test_boundary_mutants.py::test_ordering_a_line_removes_it_exactly_when_all_of_it_was_ordered[5-5-None] PASSED [ 21%]
+tests/torture_suite/test_boundary_mutants.py::test_ordering_a_line_removes_it_exactly_when_all_of_it_was_ordered[5-6-None] PASSED [ 21%]
+tests/torture_suite/test_boundary_mutants.py::test_ordering_a_line_removes_it_exactly_when_all_of_it_was_ordered[1-1-None] PASSED [ 21%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_merge_takes_new_lines_while_below_the_cap[0-3-3-3-0] PASSED [ 22%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_merge_takes_new_lines_while_below_the_cap[0-4-3-3-1] PASSED [ 22%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_merge_takes_new_lines_while_below_the_cap[2-1-3-3-0] PASSED [ 22%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_merge_takes_new_lines_while_below_the_cap[2-2-3-3-1] PASSED [ 23%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_merge_takes_new_lines_while_below_the_cap[3-1-3-3-1] PASSED [ 23%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_merge_takes_new_lines_while_below_the_cap[3-0-3-3-0] PASSED [ 23%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_merge_takes_new_lines_while_below_the_cap[4-1-3-4-1] PASSED [ 24%]
+tests/torture_suite/test_boundary_mutants.py::test_access_token_is_refused_on_and_after_its_exp[T-1us] PASSED [ 24%]
+tests/torture_suite/test_boundary_mutants.py::test_access_token_is_refused_on_and_after_its_exp[T] PASSED [ 24%]
+tests/torture_suite/test_boundary_mutants.py::test_access_token_is_refused_on_and_after_its_exp[T+1us] PASSED [ 25%]
+tests/torture_suite/test_boundary_mutants.py::test_access_token_exp_is_whole_seconds_so_lifetime_is_at_most_the_setting[1e-06] PASSED [ 25%]
+tests/torture_suite/test_boundary_mutants.py::test_access_token_exp_is_whole_seconds_so_lifetime_is_at_most_the_setting[0.5] PASSED [ 25%]
+tests/torture_suite/test_boundary_mutants.py::test_access_token_exp_is_whole_seconds_so_lifetime_is_at_most_the_setting[0.999999] PASSED [ 26%]
+tests/torture_suite/test_boundary_mutants.py::test_refresh_token_is_refused_on_and_after_its_exp[T-1us] PASSED [ 26%]
+tests/torture_suite/test_boundary_mutants.py::test_refresh_token_is_refused_on_and_after_its_exp[T] PASSED [ 26%]
+tests/torture_suite/test_boundary_mutants.py::test_refresh_token_is_refused_on_and_after_its_exp[T+1us] PASSED [ 27%]
+tests/torture_suite/test_boundary_mutants.py::test_password_reset_link_works_for_exactly_its_lifetime[T-1us] PASSED [ 27%]
+tests/torture_suite/test_boundary_mutants.py::test_password_reset_link_works_for_exactly_its_lifetime[T] PASSED [ 27%]
+tests/torture_suite/test_boundary_mutants.py::test_password_reset_link_works_for_exactly_its_lifetime[T+1us] PASSED [ 28%]
+tests/torture_suite/test_boundary_mutants.py::test_email_verification_link_works_for_exactly_its_lifetime[T-1us] PASSED [ 28%]
+tests/torture_suite/test_boundary_mutants.py::test_email_verification_link_works_for_exactly_its_lifetime[T] PASSED [ 28%]
+tests/torture_suite/test_boundary_mutants.py::test_email_verification_link_works_for_exactly_its_lifetime[T+1us] PASSED [ 29%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[whole-second] PASSED [ 29%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[1ms] FAILED [ 29%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[500ms] FAILED [ 30%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[999ms] FAILED [ 30%]
+tests/torture_suite/test_boundary_mutants.py::test_logout_everywhere_has_no_gap_before_exp PASSED [ 30%]
+tests/torture_suite/test_boundary_mutants.py::test_sign_out_everywhere_refuses_tokens_issued_strictly_before_it[T-1us] PASSED [ 31%]
+tests/torture_suite/test_boundary_mutants.py::test_sign_out_everywhere_refuses_tokens_issued_strictly_before_it[T] PASSED [ 31%]
+tests/torture_suite/test_boundary_mutants.py::test_sign_out_everywhere_refuses_tokens_issued_strictly_before_it[T+1us] PASSED [ 31%]
+tests/torture_suite/test_boundary_mutants.py::test_default_limit_admits_exactly_n_requests[1] PASSED [ 32%]
+tests/torture_suite/test_boundary_mutants.py::test_default_limit_admits_exactly_n_requests[2] PASSED [ 32%]
+tests/torture_suite/test_boundary_mutants.py::test_default_limit_admits_exactly_n_requests[5] PASSED [ 32%]
+tests/torture_suite/test_boundary_mutants.py::test_ratelimit_remaining_counts_down_to_zero_at_the_limit PASSED [ 33%]
+tests/torture_suite/test_boundary_mutants.py::test_fixed_window_ends_after_its_length[W-1ms] PASSED [ 33%]
+tests/torture_suite/test_boundary_mutants.py::test_fixed_window_ends_after_its_length[W+1ms] PASSED [ 33%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_rate_limit_client_waiting_exactly_retry_after_is_refused_again FAILED [ 34%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_after_is_the_ceiled_rest_of_the_window[0.0-60] PASSED [ 34%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_after_is_the_ceiled_rest_of_the_window[0.001-60] PASSED [ 34%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_after_is_the_ceiled_rest_of_the_window[0.999-60] PASSED [ 35%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_after_is_the_ceiled_rest_of_the_window[1.0-59] PASSED [ 35%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_after_is_the_ceiled_rest_of_the_window[1.001-59] PASSED [ 35%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_after_is_the_ceiled_rest_of_the_window[30.5-30] PASSED [ 36%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_after_is_the_ceiled_rest_of_the_window[59.0-1] PASSED [ 36%]
+tests/torture_suite/test_boundary_mutants.py::test_retry_after_is_the_ceiled_rest_of_the_window[59.999-1] PASSED [ 36%]
+tests/torture_suite/test_boundary_mutants.py::test_login_lock_after_exactly_n_failures_per_email_and_address[1] PASSED [ 37%]
+tests/torture_suite/test_boundary_mutants.py::test_login_lock_after_exactly_n_failures_per_email_and_address[3] PASSED [ 37%]
+tests/torture_suite/test_boundary_mutants.py::test_login_lock_after_exactly_n_failures_per_email_and_address[10] PASSED [ 37%]
+tests/torture_suite/test_boundary_mutants.py::test_login_n_minus_one_failures_still_lets_the_owner_in[1] PASSED [ 38%]
+tests/torture_suite/test_boundary_mutants.py::test_login_n_minus_one_failures_still_lets_the_owner_in[3] PASSED [ 38%]
+tests/torture_suite/test_boundary_mutants.py::test_login_n_minus_one_failures_still_lets_the_owner_in[10] PASSED [ 38%]
+tests/torture_suite/test_boundary_mutants.py::test_login_backstop_counts_failures_from_every_address[limit-1] PASSED [ 39%]
+tests/torture_suite/test_boundary_mutants.py::test_login_backstop_counts_failures_from_every_address[limit] PASSED [ 39%]
+tests/torture_suite/test_boundary_mutants.py::test_login_lock_lifts_when_its_window_ends[W-1ms] PASSED [ 39%]
+tests/torture_suite/test_boundary_mutants.py::test_login_lock_lifts_when_its_window_ends[W+1ms] PASSED [ 40%]
+tests/torture_suite/test_boundary_mutants.py::test_an_address_opens_exactly_n_guest_carts[1] PASSED [ 40%]
+tests/torture_suite/test_boundary_mutants.py::test_an_address_opens_exactly_n_guest_carts[3] PASSED [ 40%]
+tests/torture_suite/test_boundary_mutants.py::test_checkout_limit_admits_exactly_n_order_attempts[1] PASSED [ 41%]
+tests/torture_suite/test_boundary_mutants.py::test_checkout_limit_admits_exactly_n_order_attempts[2] PASSED [ 41%]
+tests/torture_suite/test_boundary_mutants.py::test_add_up_to_exactly_the_stock[-1-200] PASSED [ 41%]
+tests/torture_suite/test_boundary_mutants.py::test_add_up_to_exactly_the_stock[0-200] PASSED [ 42%]
+tests/torture_suite/test_boundary_mutants.py::test_add_up_to_exactly_the_stock[1-409] PASSED [ 42%]
+tests/torture_suite/test_boundary_mutants.py::test_adding_more_of_a_line_counts_what_is_already_in_the_cart[-1-200] PASSED [ 42%]
+tests/torture_suite/test_boundary_mutants.py::test_adding_more_of_a_line_counts_what_is_already_in_the_cart[0-200] PASSED [ 43%]
+tests/torture_suite/test_boundary_mutants.py::test_adding_more_of_a_line_counts_what_is_already_in_the_cart[1-409] PASSED [ 43%]
+tests/torture_suite/test_boundary_mutants.py::test_update_quantity_up_to_exactly_the_stock[-1-200] PASSED [ 43%]
+tests/torture_suite/test_boundary_mutants.py::test_update_quantity_up_to_exactly_the_stock[0-200] PASSED [ 44%]
+tests/torture_suite/test_boundary_mutants.py::test_update_quantity_up_to_exactly_the_stock[1-409] PASSED [ 44%]
+tests/torture_suite/test_boundary_mutants.py::test_variant_stock_is_the_bound_for_a_variant_line[-1-200] PASSED [ 44%]
+tests/torture_suite/test_boundary_mutants.py::test_variant_stock_is_the_bound_for_a_variant_line[0-200] PASSED [ 45%]
+tests/torture_suite/test_boundary_mutants.py::test_variant_stock_is_the_bound_for_a_variant_line[1-409] PASSED [ 45%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_quantity_bounds[0-10-422] PASSED [ 45%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_quantity_bounds[1-10-200] PASSED [ 46%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_quantity_bounds[-1-10-422] PASSED [ 46%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_quantity_bounds[2147483647-2147483647-200] PASSED [ 46%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_quantity_bounds[2147483648-2147483647-422] PASSED [ 47%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_holds_exactly_max_lines_distinct_items[1] PASSED [ 47%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_holds_exactly_max_lines_distinct_items[3] PASSED [ 47%]
+tests/torture_suite/test_boundary_mutants.py::test_guest_cart_holds_exactly_max_lines_distinct_items[1] PASSED [ 48%]
+tests/torture_suite/test_boundary_mutants.py::test_guest_cart_holds_exactly_max_lines_distinct_items[3] PASSED [ 48%]
+tests/torture_suite/test_boundary_mutants.py::test_login_merge_fills_the_account_cart_up_to_max_lines[1-1-2] PASSED [ 48%]
+tests/torture_suite/test_boundary_mutants.py::test_login_merge_fills_the_account_cart_up_to_max_lines[2-1-3] PASSED [ 49%]
+tests/torture_suite/test_boundary_mutants.py::test_login_merge_fills_the_account_cart_up_to_max_lines[3-1-3] PASSED [ 49%]
+tests/torture_suite/test_boundary_mutants.py::test_login_merge_fills_the_account_cart_up_to_max_lines[2-2-3] PASSED [ 50%]
+tests/torture_suite/test_boundary_mutants.py::test_login_merge_fills_the_account_cart_up_to_max_lines[0-3-3] PASSED [ 50%]
+tests/torture_suite/test_boundary_mutants.py::test_login_merge_fills_the_account_cart_up_to_max_lines[0-4-3] PASSED [ 50%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_validate_is_valid_exactly_when_stock_covers_the_quantity[-1-False] PASSED [ 51%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_validate_is_valid_exactly_when_stock_covers_the_quantity[0-True] PASSED [ 51%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_validate_is_valid_exactly_when_stock_covers_the_quantity[1-True] PASSED [ 51%]
+tests/torture_suite/test_boundary_mutants.py::test_order_takes_stock_down_to_exactly_zero[-1-409] PASSED [ 52%]
+tests/torture_suite/test_boundary_mutants.py::test_order_takes_stock_down_to_exactly_zero[0-201] PASSED [ 52%]
+tests/torture_suite/test_boundary_mutants.py::test_order_takes_stock_down_to_exactly_zero[1-201] PASSED [ 52%]
+tests/torture_suite/test_boundary_mutants.py::test_account_cart_lives_its_ttl_after_the_last_write[TTL-1ms] PASSED [ 53%]
+tests/torture_suite/test_boundary_mutants.py::test_account_cart_lives_its_ttl_after_the_last_write[TTL+1ms] PASSED [ 53%]
+tests/torture_suite/test_boundary_mutants.py::test_guest_cart_and_its_cookie_expire_together[TTL-1ms] PASSED [ 53%]
+tests/torture_suite/test_boundary_mutants.py::test_guest_cart_and_its_cookie_expire_together[TTL+1ms] PASSED [ 54%]
+tests/torture_suite/test_boundary_mutants.py::test_unpaid_order_expires_only_when_older_than_the_window[T-1us] PASSED [ 54%]
+tests/torture_suite/test_boundary_mutants.py::test_unpaid_order_expires_only_when_older_than_the_window[T] PASSED [ 54%]
+tests/torture_suite/test_boundary_mutants.py::test_unpaid_order_expires_only_when_older_than_the_window[T+1us] PASSED [ 55%]
+tests/torture_suite/test_boundary_mutants.py::test_idempotency_key_expires_only_when_older_than_the_ttl[T-1us] PASSED [ 55%]
+tests/torture_suite/test_boundary_mutants.py::test_idempotency_key_expires_only_when_older_than_the_ttl[T] PASSED [ 55%]
+tests/torture_suite/test_boundary_mutants.py::test_idempotency_key_expires_only_when_older_than_the_ttl[T+1us] PASSED [ 56%]
+tests/torture_suite/test_boundary_mutants.py::test_order_key_is_replayed_for_exactly_its_ttl_through_the_api[T-1us] PASSED [ 56%]
+tests/torture_suite/test_boundary_mutants.py::test_order_key_is_replayed_for_exactly_its_ttl_through_the_api[T] PASSED [ 56%]
+tests/torture_suite/test_boundary_mutants.py::test_order_key_is_replayed_for_exactly_its_ttl_through_the_api[T+1us] PASSED [ 57%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_window_edges_to_the_microsecond[T-1us-oldest] PASSED [ 57%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_window_edges_to_the_microsecond[T-1us-youngest] PASSED [ 57%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_window_edges_to_the_microsecond[T-oldest] PASSED [ 58%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_window_edges_to_the_microsecond[T-youngest] PASSED [ 58%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_window_edges_to_the_microsecond[T+1us-oldest] PASSED [ 58%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_window_edges_to_the_microsecond[T+1us-youngest] PASSED [ 59%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_cap_truncates_only_beyond_it[2-False] PASSED [ 59%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_cap_truncates_only_beyond_it[3-False] PASSED [ 59%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_cap_truncates_only_beyond_it[4-True] PASSED [ 60%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_stops_after_exactly_n_errors_in_a_row[2-False] PASSED [ 60%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_stops_after_exactly_n_errors_in_a_row[3-True] PASSED [ 60%]
+tests/torture_suite/test_boundary_mutants.py::test_reconciliation_stops_after_exactly_n_errors_in_a_row[4-True] PASSED [ 61%]
+tests/torture_suite/test_boundary_mutants.py::test_an_in_flight_attempt_blocks_another_until_it_is_stale[T-1us] PASSED [ 61%]
+tests/torture_suite/test_boundary_mutants.py::test_an_in_flight_attempt_blocks_another_until_it_is_stale[T+1us] PASSED [ 61%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_attempt_exactly_stale_after_minutes_old_no_longer_blocks FAILED [ 62%]
+tests/torture_suite/test_boundary_mutants.py::test_an_event_waits_for_an_attempt_still_storing_its_id_until_stale[T-1us] PASSED [ 62%]
+tests/torture_suite/test_boundary_mutants.py::test_an_event_waits_for_an_attempt_still_storing_its_id_until_stale[T+1us] PASSED [ 62%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_event_held_back_by_attempt_exactly_stale_after_minutes_old FAILED [ 63%]
+tests/torture_suite/test_boundary_mutants.py::test_event_order_id_outside_int32_is_never_looked_up[0] PASSED [ 63%]
+tests/torture_suite/test_boundary_mutants.py::test_event_order_id_outside_int32_is_never_looked_up[-1] PASSED [ 63%]
+tests/torture_suite/test_boundary_mutants.py::test_event_order_id_outside_int32_is_never_looked_up[2147483648] PASSED [ 64%]
+tests/torture_suite/test_boundary_mutants.py::test_event_order_id_outside_int32_is_never_looked_up[9223372036854775808] PASSED [ 64%]
+tests/torture_suite/test_boundary_mutants.py::test_event_order_id_outside_int32_is_never_looked_up[1.5] PASSED [ 64%]
+tests/torture_suite/test_boundary_mutants.py::test_event_order_id_outside_int32_is_never_looked_up[] PASSED [ 65%]
+tests/torture_suite/test_boundary_mutants.py::test_event_order_id_outside_int32_is_never_looked_up[None] PASSED [ 65%]
+tests/torture_suite/test_boundary_mutants.py::test_event_order_id_at_the_int32_edges_is_looked_up[1] PASSED [ 65%]
+tests/torture_suite/test_boundary_mutants.py::test_event_order_id_at_the_int32_edges_is_looked_up[2147483647] PASSED [ 66%]
+tests/torture_suite/test_boundary_mutants.py::test_sweeper_publishes_events_older_than_the_sweep_age[T-1us] PASSED [ 66%]
+tests/torture_suite/test_boundary_mutants.py::test_sweeper_publishes_events_older_than_the_sweep_age[T] PASSED [ 66%]
+tests/torture_suite/test_boundary_mutants.py::test_sweeper_publishes_events_older_than_the_sweep_age[T+1us] PASSED [ 67%]
+tests/torture_suite/test_boundary_mutants.py::test_sweeper_batch_is_capped_at_exactly_the_setting[2] PASSED [ 67%]
+tests/torture_suite/test_boundary_mutants.py::test_sweeper_batch_is_capped_at_exactly_the_setting[3] PASSED [ 67%]
+tests/torture_suite/test_boundary_mutants.py::test_sweeper_batch_is_capped_at_exactly_the_setting[4] PASSED [ 68%]
+tests/torture_suite/test_boundary_mutants.py::test_erasure_runs_once_the_grace_period_has_passed[T-1us] PASSED [ 68%]
+tests/torture_suite/test_boundary_mutants.py::test_erasure_runs_once_the_grace_period_has_passed[T] PASSED [ 68%]
+tests/torture_suite/test_boundary_mutants.py::test_erasure_runs_once_the_grace_period_has_passed[T+1us] PASSED [ 69%]
+tests/torture_suite/test_boundary_mutants.py::test_retention_purge_needs_more_than_the_retention_period[T-1us] PASSED [ 69%]
+tests/torture_suite/test_boundary_mutants.py::test_retention_purge_needs_more_than_the_retention_period[T] PASSED [ 69%]
+tests/torture_suite/test_boundary_mutants.py::test_retention_purge_needs_more_than_the_retention_period[T+1us] PASSED [ 70%]
+tests/torture_suite/test_boundary_mutants.py::test_retention_purge_uses_the_users_own_period[T-1us-30-30] PASSED [ 70%]
+tests/torture_suite/test_boundary_mutants.py::test_retention_purge_uses_the_users_own_period[T-1us-1-1] PASSED [ 70%]
+tests/torture_suite/test_boundary_mutants.py::test_retention_purge_uses_the_users_own_period[T+1us-30-30] PASSED [ 71%]
+tests/torture_suite/test_boundary_mutants.py::test_retention_purge_uses_the_users_own_period[T+1us-1-1] PASSED [ 71%]
+tests/torture_suite/test_boundary_mutants.py::test_data_retention_status_inside_the_period[age0-True] PASSED [ 71%]
+tests/torture_suite/test_boundary_mutants.py::test_data_retention_status_inside_the_period[age1-True] PASSED [ 72%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_data_retention_status_truncates_age_to_whole_days[1us] FAILED [ 72%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_data_retention_status_truncates_age_to_whole_days[1h] FAILED [ 72%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_data_retention_status_truncates_age_to_whole_days[23h59m] FAILED [ 73%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_order_date_filters_are_inclusive_to_the_microsecond[start_date-+00:00] PASSED [ 73%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_order_date_filters_are_inclusive_to_the_microsecond[start_date-+05:30] PASSED [ 73%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_order_date_filters_are_inclusive_to_the_microsecond[start_date--08:00] PASSED [ 74%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_order_date_filters_are_inclusive_to_the_microsecond[end_date-+00:00] PASSED [ 74%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_order_date_filters_are_inclusive_to_the_microsecond[end_date-+05:30] PASSED [ 74%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_order_date_filters_are_inclusive_to_the_microsecond[end_date--08:00] PASSED [ 75%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_stats_24h_window_edge[T-1us] PASSED [ 75%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_stats_24h_window_edge[T] PASSED [ 75%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_stats_24h_window_edge[T+1us] PASSED [ 76%]
+tests/torture_suite/test_boundary_mutants.py::test_webhook_signature_tolerance_is_inclusive_like_stripes[299-200] PASSED [ 76%]
+tests/torture_suite/test_boundary_mutants.py::test_webhook_signature_tolerance_is_inclusive_like_stripes[300-200] PASSED [ 76%]
+tests/torture_suite/test_boundary_mutants.py::test_webhook_signature_tolerance_is_inclusive_like_stripes[301-400] PASSED [ 77%]
+tests/torture_suite/test_boundary_mutants.py::test_webhook_signature_tolerance_at_sub_second_now[0.0-200] PASSED [ 77%]
+tests/torture_suite/test_boundary_mutants.py::test_webhook_signature_tolerance_at_sub_second_now[1e-06-400] PASSED [ 77%]
+tests/torture_suite/test_boundary_mutants.py::test_webhook_signature_tolerance_at_sub_second_now[0.5-400] PASSED [ 78%]
+tests/torture_suite/test_boundary_mutants.py::test_idempotency_key_length_bounds[7-400] PASSED [ 78%]
+tests/torture_suite/test_boundary_mutants.py::test_idempotency_key_length_bounds[8-201] PASSED [ 78%]
+tests/torture_suite/test_boundary_mutants.py::test_idempotency_key_length_bounds[9-201] PASSED [ 79%]
+tests/torture_suite/test_boundary_mutants.py::test_idempotency_key_length_bounds[254-201] PASSED [ 79%]
+tests/torture_suite/test_boundary_mutants.py::test_idempotency_key_length_bounds[255-201] PASSED [ 79%]
+tests/torture_suite/test_boundary_mutants.py::test_idempotency_key_length_bounds[256-400] PASSED [ 80%]
+tests/torture_suite/test_boundary_mutants.py::test_password_length_bounds[aB3$xyz-422] PASSED [ 80%]
+tests/torture_suite/test_boundary_mutants.py::test_password_length_bounds[aB3$xyzQ-202] PASSED [ 80%]
+tests/torture_suite/test_boundary_mutants.py::test_password_length_bounds[aB3$xyzQr-202] PASSED [ 81%]
+tests/torture_suite/test_boundary_mutants.py::test_password_length_bounds[Qz9!kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk-202] PASSED [ 81%]
+tests/torture_suite/test_boundary_mutants.py::test_password_length_bounds[Qz9!kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk-422] PASSED [ 81%]
+tests/torture_suite/test_boundary_mutants.py::test_password_length_bounds[Qz9!kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\xe9-202] PASSED [ 82%]
+tests/torture_suite/test_boundary_mutants.py::test_password_length_bounds[Qz9!kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\xe9-422] PASSED [ 82%]
+tests/torture_suite/test_boundary_mutants.py::test_pagination_bounds[params0-422] PASSED [ 82%]
+tests/torture_suite/test_boundary_mutants.py::test_pagination_bounds[params1-200] PASSED [ 83%]
+tests/torture_suite/test_boundary_mutants.py::test_pagination_bounds[params2-200] PASSED [ 83%]
+tests/torture_suite/test_boundary_mutants.py::test_pagination_bounds[params3-422] PASSED [ 83%]
+tests/torture_suite/test_boundary_mutants.py::test_pagination_bounds[params4-422] PASSED [ 84%]
+tests/torture_suite/test_boundary_mutants.py::test_pagination_bounds[params5-200] PASSED [ 84%]
+tests/torture_suite/test_boundary_mutants.py::test_pagination_bounds[params6-200] PASSED [ 84%]
+tests/torture_suite/test_boundary_mutants.py::test_pagination_bounds[params7-422] PASSED [ 85%]
+tests/torture_suite/test_boundary_mutants.py::test_search_query_length_bounds[2-422] PASSED [ 85%]
+tests/torture_suite/test_boundary_mutants.py::test_search_query_length_bounds[3-200] PASSED [ 85%]
+tests/torture_suite/test_boundary_mutants.py::test_search_query_length_bounds[100-200] PASSED [ 86%]
+tests/torture_suite/test_boundary_mutants.py::test_search_query_length_bounds[101-422] PASSED [ 86%]
+tests/torture_suite/test_boundary_mutants.py::test_price_filters_are_inclusive_to_the_cent[min_price-9.99-True] PASSED [ 86%]
+tests/torture_suite/test_boundary_mutants.py::test_price_filters_are_inclusive_to_the_cent[min_price-10.00-True] PASSED [ 87%]
+tests/torture_suite/test_boundary_mutants.py::test_price_filters_are_inclusive_to_the_cent[min_price-10.01-False] PASSED [ 87%]
+tests/torture_suite/test_boundary_mutants.py::test_price_filters_are_inclusive_to_the_cent[max_price-9.99-False] PASSED [ 87%]
+tests/torture_suite/test_boundary_mutants.py::test_price_filters_are_inclusive_to_the_cent[max_price-10.00-True] PASSED [ 88%]
+tests/torture_suite/test_boundary_mutants.py::test_price_filters_are_inclusive_to_the_cent[max_price-10.01-True] PASSED [ 88%]
+tests/torture_suite/test_boundary_mutants.py::test_in_stock_filter_starts_at_one_unit[0-False] PASSED [ 88%]
+tests/torture_suite/test_boundary_mutants.py::test_in_stock_filter_starts_at_one_unit[1-True] PASSED [ 89%]
+tests/torture_suite/test_boundary_mutants.py::test_has_more_is_true_only_beyond_the_page[2-False] PASSED [ 89%]
+tests/torture_suite/test_boundary_mutants.py::test_has_more_is_true_only_beyond_the_page[3-False] PASSED [ 89%]
+tests/torture_suite/test_boundary_mutants.py::test_has_more_is_true_only_beyond_the_page[4-True] PASSED [ 90%]
+tests/torture_suite/test_boundary_mutants.py::test_frozen_time_resolves_a_microsecond_at_the_suites_instant PASSED [ 90%]
+tests/torture_suite/test_boundary_mutants.py::test_cart_ttl_comes_from_the_settings PASSED [ 90%]
+tests/torture_suite/test_boundary_mutants.py::test_order_total_up_to_the_largest_numeric_10_2[lines0-99999999.99] PASSED [ 91%]
+tests/torture_suite/test_boundary_mutants.py::test_order_total_up_to_the_largest_numeric_10_2[lines1-99999999.98] PASSED [ 91%]
+tests/torture_suite/test_boundary_mutants.py::test_order_total_up_to_the_largest_numeric_10_2[lines2-99999999.99] PASSED [ 91%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[qty-x-price] FAILED [ 92%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[two-lines] FAILED [ 92%]
+tests/torture_suite/test_boundary_mutants.py::test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[far-past] FAILED [ 92%]
+tests/torture_suite/test_boundary_mutants.py::test_refunds_cover_the_charge_exactly_at_its_amount[amounts0-codes0-paid] PASSED [ 93%]
+tests/torture_suite/test_boundary_mutants.py::test_refunds_cover_the_charge_exactly_at_its_amount[amounts1-codes1-refunded] PASSED [ 93%]
+tests/torture_suite/test_boundary_mutants.py::test_refunds_cover_the_charge_exactly_at_its_amount[amounts2-codes2-paid] PASSED [ 93%]
+tests/torture_suite/test_boundary_mutants.py::test_refunds_cover_the_charge_exactly_at_its_amount[amounts3-codes3-paid] PASSED [ 94%]
+tests/torture_suite/test_boundary_mutants.py::test_refunds_cover_the_charge_exactly_at_its_amount[amounts4-codes4-refunded] PASSED [ 94%]
+tests/torture_suite/test_boundary_mutants.py::test_refunds_cover_the_charge_exactly_at_its_amount[amounts5-codes5-paid] PASSED [ 94%]
+tests/torture_suite/test_boundary_mutants.py::test_refunds_cover_the_charge_exactly_at_its_amount[amounts6-codes6-refunded] PASSED [ 95%]
+tests/torture_suite/test_boundary_mutants.py::test_refunds_cover_the_charge_exactly_at_its_amount[amounts7-codes7-paid] PASSED [ 95%]
+tests/torture_suite/test_boundary_mutants.py::test_webhook_signature_from_the_future_is_bounded_by_the_same_tolerance[299-200] PASSED [ 95%]
+tests/torture_suite/test_boundary_mutants.py::test_webhook_signature_from_the_future_is_bounded_by_the_same_tolerance[300-200] PASSED [ 96%]
+tests/torture_suite/test_boundary_mutants.py::test_webhook_signature_from_the_future_is_bounded_by_the_same_tolerance[301-400] PASSED [ 96%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_stats_longer_window_edges[T-1us-7d-window0] PASSED [ 96%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_stats_longer_window_edges[T-1us-30d-window1] PASSED [ 97%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_stats_longer_window_edges[T-7d-window0] PASSED [ 97%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_stats_longer_window_edges[T-30d-window1] PASSED [ 97%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_stats_longer_window_edges[T+1us-7d-window0] PASSED [ 98%]
+tests/torture_suite/test_boundary_mutants.py::test_admin_stats_longer_window_edges[T+1us-30d-window1] PASSED [ 98%]
+tests/torture_suite/test_boundary_mutants.py::test_second_page_holds_what_the_first_did_not[3-0] PASSED [ 98%]
+tests/torture_suite/test_boundary_mutants.py::test_second_page_holds_what_the_first_did_not[4-1] PASSED [ 99%]
+tests/torture_suite/test_boundary_mutants.py::test_second_page_holds_what_the_first_did_not[6-3] PASSED [ 99%]
+tests/torture_suite/test_boundary_mutants.py::test_second_page_holds_what_the_first_did_not[7-3] PASSED [100%]
+
+=================================== FAILURES ===================================
+________ test_bug_logout_blacklist_expires_before_the_access_token[1ms] ________
+
+client = <starlette.testclient.TestClient object at 0x7fe3f4d4d7b0>
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3f4266120>
+clock = <function freeze_time at 0x7fe3f500a200>, logout_after = 0.001
+
+    @pytest.mark.parametrize("logout_after", [1.0, 0.001, 0.5, 0.999],
+                             ids=["whole-second", "1ms", "500ms", "999ms"])
+    def test_bug_logout_blacklist_expires_before_the_access_token(client, db_session, clock,
+                                                                  logout_after):
+        """Logout (with its refresh token) blacklists the access token for "its
+        remaining lifetime" (blacklist_token / test_security_time). expires_in is
+        int(exp - now): truncated, so the blacklist entry lapses up to a second
+        BEFORE the token expires, and the logged-out token is accepted again in
+        that gap. Checked 1 us before exp."""
+        user = make_user(db_session)
+        with clock(T0) as frozen:
+            tokens = login(client, user.email).json()
+            access = tokens["access_token"]
+            exp = at(claims(access)["exp"])
+            frozen.move_to(T0 + timedelta(seconds=logout_after))
+            out = client.post(f"{USERS}/logout", json={"refresh_token": tokens["refresh_token"]},
+                              headers=bearer(access))
+            assert out.status_code == 200, out.text
+            frozen.move_to(exp - US)
+            me = client.get(f"{USERS}/me", headers=bearer(access))
+>       assert me.status_code == 401, "a logged-out access token was accepted before its exp"
+E       AssertionError: a logged-out access token was accepted before its exp
+E       assert 200 == 401
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests/torture_suite/test_boundary_mutants.py:440: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+_______ test_bug_logout_blacklist_expires_before_the_access_token[500ms] _______
+
+client = <starlette.testclient.TestClient object at 0x7fe3f4d4c050>
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3eee22a80>
+clock = <function freeze_time at 0x7fe3f500a200>, logout_after = 0.5
+
+    @pytest.mark.parametrize("logout_after", [1.0, 0.001, 0.5, 0.999],
+                             ids=["whole-second", "1ms", "500ms", "999ms"])
+    def test_bug_logout_blacklist_expires_before_the_access_token(client, db_session, clock,
+                                                                  logout_after):
+        """Logout (with its refresh token) blacklists the access token for "its
+        remaining lifetime" (blacklist_token / test_security_time). expires_in is
+        int(exp - now): truncated, so the blacklist entry lapses up to a second
+        BEFORE the token expires, and the logged-out token is accepted again in
+        that gap. Checked 1 us before exp."""
+        user = make_user(db_session)
+        with clock(T0) as frozen:
+            tokens = login(client, user.email).json()
+            access = tokens["access_token"]
+            exp = at(claims(access)["exp"])
+            frozen.move_to(T0 + timedelta(seconds=logout_after))
+            out = client.post(f"{USERS}/logout", json={"refresh_token": tokens["refresh_token"]},
+                              headers=bearer(access))
+            assert out.status_code == 200, out.text
+            frozen.move_to(exp - US)
+            me = client.get(f"{USERS}/me", headers=bearer(access))
+>       assert me.status_code == 401, "a logged-out access token was accepted before its exp"
+E       AssertionError: a logged-out access token was accepted before its exp
+E       assert 200 == 401
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests/torture_suite/test_boundary_mutants.py:440: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+_______ test_bug_logout_blacklist_expires_before_the_access_token[999ms] _______
+
+client = <starlette.testclient.TestClient object at 0x7fe3f4d4df20>
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3f42646e0>
+clock = <function freeze_time at 0x7fe3f500a200>, logout_after = 0.999
+
+    @pytest.mark.parametrize("logout_after", [1.0, 0.001, 0.5, 0.999],
+                             ids=["whole-second", "1ms", "500ms", "999ms"])
+    def test_bug_logout_blacklist_expires_before_the_access_token(client, db_session, clock,
+                                                                  logout_after):
+        """Logout (with its refresh token) blacklists the access token for "its
+        remaining lifetime" (blacklist_token / test_security_time). expires_in is
+        int(exp - now): truncated, so the blacklist entry lapses up to a second
+        BEFORE the token expires, and the logged-out token is accepted again in
+        that gap. Checked 1 us before exp."""
+        user = make_user(db_session)
+        with clock(T0) as frozen:
+            tokens = login(client, user.email).json()
+            access = tokens["access_token"]
+            exp = at(claims(access)["exp"])
+            frozen.move_to(T0 + timedelta(seconds=logout_after))
+            out = client.post(f"{USERS}/logout", json={"refresh_token": tokens["refresh_token"]},
+                              headers=bearer(access))
+            assert out.status_code == 200, out.text
+            frozen.move_to(exp - US)
+            me = client.get(f"{USERS}/me", headers=bearer(access))
+>       assert me.status_code == 401, "a logged-out access token was accepted before its exp"
+E       AssertionError: a logged-out access token was accepted before its exp
+E       assert 200 == 401
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests/torture_suite/test_boundary_mutants.py:440: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+___ test_bug_rate_limit_client_waiting_exactly_retry_after_is_refused_again ____
+
+client = <starlette.testclient.TestClient object at 0x7fe3eff9f460>
+limits = <function limits.<locals>.lower at 0x7fe3ee5df240>
+clock = <function freeze_time at 0x7fe3f500a200>
+
+    def test_bug_rate_limit_client_waiting_exactly_retry_after_is_refused_again(
+        client, limits, clock
+    ):
+        """A 429 says Retry-After = "seconds until the window ends" (module
+        docstring, docs/API.md). A client that waits exactly that long is still
+        refused: Redis (and fakeredis) keep a key alive AT its expiry instant
+        (expired only when now > expireat), and the window's length is an exact
+        multiple of 1000 ms, so the counter outlives Retry-After by 1 ms."""
+        limits(RATE_LIMIT_DEFAULT="2/minute")
+        with clock(T0) as frozen:
+            for _ in range(2):
+                client.get(f"{API}/categories")
+            refused = client.get(f"{API}/categories")
+            assert refused.status_code == 429
+            wait = int(refused.headers["Retry-After"])
+            frozen.move_to(T0 + timedelta(seconds=wait))
+            again = client.get(f"{API}/categories")
+>       assert again.status_code == 200, f"refused again after waiting Retry-After={wait}s"
+E       AssertionError: refused again after waiting Retry-After=60s
+E       assert 429 == 200
+E        +  where 429 = <Response [429 Too Many Requests]>.status_code
+
+tests/torture_suite/test_boundary_mutants.py:523: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+______ test_bug_attempt_exactly_stale_after_minutes_old_no_longer_blocks _______
+
+client = <starlette.testclient.TestClient object at 0x7fe3f4d4c270>
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3ee5c97c0>
+clock = <function freeze_time at 0x7fe3f500a200>
+
+    def test_bug_attempt_exactly_stale_after_minutes_old_no_longer_blocks(client, db_session,
+                                                                          clock):
+        """_guard_no_attempt_in_flight: "An attempt in flight for LONGER than
+        PAYMENT_ATTEMPT_STALE_AFTER_MINUTES no longer blocks". One exactly that
+        old is not longer than it, so it must still block (409); the query uses
+        created_at > now - window, which already lets the second attempt in."""
+        shop = Shop(client, db_session)
+        stale = timedelta(minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES)
+        now = T0 + timedelta(microseconds=250000)
+        with clock(now):
+            buyer = shop.buyer()
+            order = shop.order_of(buyer, shop.product(price="10.00"))
+            _in_flight_attempt(db_session, order["id"], now - stale)
+            response = shop.pay(buyer, order["id"], token=PAY_OK)
+>       assert response.status_code == 409, response.text
+E       AssertionError: {"order_id":1,"payment_method":"stripe","amount":"10.00","currency":"USD","payment_method_token":"pm_card_visa","id":2,"status":"paid","created_at":"2030-01-15T12:00:00.250000Z","transaction_id":"pi_49347859fefb49a0b742afff","client_secret":"pi_35311cdeee824d39ba773d1e_secret_0b70be3d29514972","requires_action":false,"next_action":null}
+E       assert 200 == 409
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests/torture_suite/test_boundary_mutants.py:958: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+_____ test_bug_event_held_back_by_attempt_exactly_stale_after_minutes_old ______
+
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3ee2872f0>
+clock = <function freeze_time at 0x7fe3f500a200>
+buyer_row = (<User u-483e9a31d5@example.com (client)>, <Address 1 Main Street, Metropolis (home)>)
+
+    def test_bug_event_held_back_by_attempt_exactly_stale_after_minutes_old(db_session, clock,
+                                                                            buyer_row):
+        """Same window, second site (stripe_events._attempt_still_storing_its_id):
+        "an attempt in flight for LONGER than PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
+        (its request died) does not hold events back" - one exactly that old
+        still does."""
+        user, address = buyer_row
+        stale = timedelta(minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES)
+        now = T0 + timedelta(microseconds=750000)
+        order = make_order(db_session, user, address, created_at=now - timedelta(hours=1))
+        _in_flight_attempt(db_session, order.id, now - stale, pending_id=True)
+        with clock(now):
+>           assert stripe_events._attempt_still_storing_its_id(
+                db_session, {"metadata": {"order_id": str(order.id)}}) is True
+E           AssertionError: assert False is True
+E            +  where False = <function _attempt_still_storing_its_id at 0x7fe3f6bb0c20>(<sqlalchemy.orm.session.Session object at 0x7fe3ee2872f0>, {'metadata': {'order_id': '1'}})
+E            +    where <function _attempt_still_storing_its_id at 0x7fe3f6bb0c20> = stripe_events._attempt_still_storing_its_id
+
+tests/torture_suite/test_boundary_mutants.py:988: AssertionError
+_______ test_bug_data_retention_status_truncates_age_to_whole_days[1us] ________
+
+client = <starlette.testclient.TestClient object at 0x7fe3eff9ead0>
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3ee5d6e40>
+clock = <function freeze_time at 0x7fe3f500a200>
+past = datetime.timedelta(microseconds=1)
+
+    @pytest.mark.parametrize("past", [US, timedelta(hours=1), timedelta(hours=23, minutes=59)],
+                             ids=["1us", "1h", "23h59m"])
+    def test_bug_data_retention_status_truncates_age_to_whole_days(client, db_session, clock,
+                                                                   past):
+        """GET /legal/data-retention ("Check if user data is within the retention
+        period") computes (now - created_at).days <= retention: the age is floored
+        to whole days, so an account up to 23h59m59.999999s PAST its 365 days is
+        still reported "within" - while purge_expired_retention treats anything
+        past `timedelta(days=365)` as expired."""
+        now = T0
+        user = make_user(db_session, created_at=now - timedelta(days=365) - past)
+        with clock(now):
+            body = client.get(f"{API}/legal/data-retention", headers=auth(user.id)).json()
+>       assert body["within_retention_period"] is False
+E       assert True is False
+
+tests/torture_suite/test_boundary_mutants.py:1125: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+________ test_bug_data_retention_status_truncates_age_to_whole_days[1h] ________
+
+client = <starlette.testclient.TestClient object at 0x7fe3eff9d9d0>
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3ee5d6d50>
+clock = <function freeze_time at 0x7fe3f500a200>
+past = datetime.timedelta(seconds=3600)
+
+    @pytest.mark.parametrize("past", [US, timedelta(hours=1), timedelta(hours=23, minutes=59)],
+                             ids=["1us", "1h", "23h59m"])
+    def test_bug_data_retention_status_truncates_age_to_whole_days(client, db_session, clock,
+                                                                   past):
+        """GET /legal/data-retention ("Check if user data is within the retention
+        period") computes (now - created_at).days <= retention: the age is floored
+        to whole days, so an account up to 23h59m59.999999s PAST its 365 days is
+        still reported "within" - while purge_expired_retention treats anything
+        past `timedelta(days=365)` as expired."""
+        now = T0
+        user = make_user(db_session, created_at=now - timedelta(days=365) - past)
+        with clock(now):
+            body = client.get(f"{API}/legal/data-retention", headers=auth(user.id)).json()
+>       assert body["within_retention_period"] is False
+E       assert True is False
+
+tests/torture_suite/test_boundary_mutants.py:1125: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+______ test_bug_data_retention_status_truncates_age_to_whole_days[23h59m] ______
+
+client = <starlette.testclient.TestClient object at 0x7fe3ee5b5e10>
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3ee5d4f50>
+clock = <function freeze_time at 0x7fe3f500a200>
+past = datetime.timedelta(seconds=86340)
+
+    @pytest.mark.parametrize("past", [US, timedelta(hours=1), timedelta(hours=23, minutes=59)],
+                             ids=["1us", "1h", "23h59m"])
+    def test_bug_data_retention_status_truncates_age_to_whole_days(client, db_session, clock,
+                                                                   past):
+        """GET /legal/data-retention ("Check if user data is within the retention
+        period") computes (now - created_at).days <= retention: the age is floored
+        to whole days, so an account up to 23h59m59.999999s PAST its 365 days is
+        still reported "within" - while purge_expired_retention treats anything
+        past `timedelta(days=365)` as expired."""
+        now = T0
+        user = make_user(db_session, created_at=now - timedelta(days=365) - past)
+        with clock(now):
+            body = client.get(f"{API}/legal/data-retention", headers=auth(user.id)).json()
+>       assert body["within_retention_period"] is False
+E       assert True is False
+
+tests/torture_suite/test_boundary_mutants.py:1125: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+__ test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[qty-x-price] __
+
+client = <starlette.testclient.TestClient object at 0x7fe3f4d4df20>
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3ee27f3e0>
+lines = [('50000000.00', 2)]
+
+    @pytest.mark.parametrize("lines", [
+        [("50000000.00", 2)],                 # one cent past: 100000000.00
+        [("99999999.99", 1), ("0.01", 1)],
+        [("99999999.99", 2)],
+    ], ids=["qty-x-price", "two-lines", "far-past"])
+    def test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly(client, db_session, lines):
+        """app/schemas/order.py: "Order.total_amount is Numeric(10, 2), so no
+        amount paid or refunded for an order has more digits than that", and an
+        amount that does not fit "used to answer 500 (... the database refuses
+        the value)" (test_catalog_money). Every price fits, but their sum is
+        never checked: one cent past 99999999.99 the order is a 500 on
+        PostgreSQL (numeric field overflow) and, on SQLite, a stored order whose
+        total no payment request can even name (Money: max_digits=10). Expected:
+        a 4xx refusal, no order, no stock taken - on both back ends."""
+        shop = Shop(client, db_session)
+        buyer = shop.buyer()
+        products = []
+        for price, quantity in lines:
+            product = shop.product(price=price)
+            products.append(product)
+            assert shop.add_to_cart(buyer, product, quantity).status_code == 200
+        response = shop.place_order(buyer)
+        db_session.expire_all()
+>       assert 400 <= response.status_code < 500, (response.status_code, response.text[:200])
+E       AssertionError: (500, '{"type":"about:blank","title":"Internal Server Error","status":500,"detail":"A database error occurred","instance":"/api/v1/orders","request_id":"dd7a7f2347fb4d128d2e1406654191d5"}')
+E       assert 500 < 500
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests/torture_suite/test_boundary_mutants.py:1344: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+___ test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[two-lines] ___
+
+client = <starlette.testclient.TestClient object at 0x7fe3f4d4d8c0>
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3f42667b0>
+lines = [('99999999.99', 1), ('0.01', 1)]
+
+    @pytest.mark.parametrize("lines", [
+        [("50000000.00", 2)],                 # one cent past: 100000000.00
+        [("99999999.99", 1), ("0.01", 1)],
+        [("99999999.99", 2)],
+    ], ids=["qty-x-price", "two-lines", "far-past"])
+    def test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly(client, db_session, lines):
+        """app/schemas/order.py: "Order.total_amount is Numeric(10, 2), so no
+        amount paid or refunded for an order has more digits than that", and an
+        amount that does not fit "used to answer 500 (... the database refuses
+        the value)" (test_catalog_money). Every price fits, but their sum is
+        never checked: one cent past 99999999.99 the order is a 500 on
+        PostgreSQL (numeric field overflow) and, on SQLite, a stored order whose
+        total no payment request can even name (Money: max_digits=10). Expected:
+        a 4xx refusal, no order, no stock taken - on both back ends."""
+        shop = Shop(client, db_session)
+        buyer = shop.buyer()
+        products = []
+        for price, quantity in lines:
+            product = shop.product(price=price)
+            products.append(product)
+            assert shop.add_to_cart(buyer, product, quantity).status_code == 200
+        response = shop.place_order(buyer)
+        db_session.expire_all()
+>       assert 400 <= response.status_code < 500, (response.status_code, response.text[:200])
+E       AssertionError: (500, '{"type":"about:blank","title":"Internal Server Error","status":500,"detail":"A database error occurred","instance":"/api/v1/orders","request_id":"4b7207e1db654b018721b5977f7ad91e"}')
+E       assert 500 < 500
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests/torture_suite/test_boundary_mutants.py:1344: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+___ test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[far-past] ____
+
+client = <starlette.testclient.TestClient object at 0x7fe3f4d4c050>
+db_session = <sqlalchemy.orm.session.Session object at 0x7fe3efc36d50>
+lines = [('99999999.99', 2)]
+
+    @pytest.mark.parametrize("lines", [
+        [("50000000.00", 2)],                 # one cent past: 100000000.00
+        [("99999999.99", 1), ("0.01", 1)],
+        [("99999999.99", 2)],
+    ], ids=["qty-x-price", "two-lines", "far-past"])
+    def test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly(client, db_session, lines):
+        """app/schemas/order.py: "Order.total_amount is Numeric(10, 2), so no
+        amount paid or refunded for an order has more digits than that", and an
+        amount that does not fit "used to answer 500 (... the database refuses
+        the value)" (test_catalog_money). Every price fits, but their sum is
+        never checked: one cent past 99999999.99 the order is a 500 on
+        PostgreSQL (numeric field overflow) and, on SQLite, a stored order whose
+        total no payment request can even name (Money: max_digits=10). Expected:
+        a 4xx refusal, no order, no stock taken - on both back ends."""
+        shop = Shop(client, db_session)
+        buyer = shop.buyer()
+        products = []
+        for price, quantity in lines:
+            product = shop.product(price=price)
+            products.append(product)
+            assert shop.add_to_cart(buyer, product, quantity).status_code == 200
+        response = shop.place_order(buyer)
+        db_session.expire_all()
+>       assert 400 <= response.status_code < 500, (response.status_code, response.text[:200])
+E       AssertionError: (500, '{"type":"about:blank","title":"Internal Server Error","status":500,"detail":"A database error occurred","instance":"/api/v1/orders","request_id":"17ee6a21e04944a6bf0678f23cfeb0a5"}')
+E       assert 500 < 500
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests/torture_suite/test_boundary_mutants.py:1344: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+=========================== short test summary info ============================
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[1ms]
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[500ms]
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[999ms]
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_rate_limit_client_waiting_exactly_retry_after_is_refused_again
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_attempt_exactly_stale_after_minutes_old_no_longer_blocks
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_event_held_back_by_attempt_exactly_stale_after_minutes_old
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_data_retention_status_truncates_age_to_whole_days[1us]
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_data_retention_status_truncates_age_to_whole_days[1h]
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_data_retention_status_truncates_age_to_whole_days[23h59m]
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[qty-x-price]
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[two-lines]
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[far-past]
+======================= 12 failed, 286 passed in 17.13s ========================
