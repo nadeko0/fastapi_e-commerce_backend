@@ -568,3 +568,110 @@ def test_a_call_through_the_sdk_uses_the_configured_timeout(fresh_stripe_client,
         provider.retrieve_payment_intent("pi_1")
 
     assert seen["timeout"] == (5.0, 20.0)
+
+
+
+def test_translate_card_error_missing_decline_code_attr():
+    import types
+
+    err_payload = types.SimpleNamespace()
+    card_err = stripe.CardError("declined", None, "card_declined")
+    card_err.error = err_payload
+
+    res = LiveStripePaymentProvider._translate_card_error(card_err)
+    assert res.decline_code is None
+    assert str(res) == "declined"
+
+
+def test_construct_webhook_event_enforces_custom_tolerance(provider, monkeypatch):
+    calls = []
+    orig = stripe.WebhookSignature.verify_header
+
+    def fake_verify(*args, **kwargs):
+        calls.append((args, kwargs))
+        return orig(*args, **kwargs)
+
+    monkeypatch.setattr(stripe.WebhookSignature, "verify_header", fake_verify)
+    payload = _event_payload()
+    sig = _signed(payload)
+    provider.construct_webhook_event(payload, sig, WEBHOOK_SECRET, tolerance_seconds=42)
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    tolerance_passed = args[3] if len(args) > 3 else kwargs.get("tolerance")
+    assert tolerance_passed == 42
+
+
+def test_construct_webhook_event_signature_error_message(provider, monkeypatch):
+    class FakeSigError(stripe.SignatureVerificationError):
+        @property
+        def user_message(self):
+            return None
+
+    def fake_verify(*args, **kwargs):
+        raise FakeSigError("bad signature message", "bad_sig", "payload")
+
+    monkeypatch.setattr(stripe.WebhookSignature, "verify_header", fake_verify)
+    with pytest.raises(SignatureVerificationError) as exc_info:
+        provider.construct_webhook_event(b"{}", "bad_sig", "secret")
+    assert str(exc_info.value) == "bad signature message"
+
+
+def test_list_refunds_invalid_request_default_code(provider, monkeypatch):
+    class StubRefundService:
+        def list(self, params=None):
+            raise stripe.InvalidRequestError("bad param", param="p", code=None)
+
+    monkeypatch.setattr(provider._client.v1.refunds, "list", StubRefundService().list)
+    with pytest.raises(InvalidRequestError) as exc_info:
+        provider.list_refunds("pi_123")
+    assert exc_info.value.code == "parameter_invalid"
+
+
+def test_list_refunds_translates_invalid_request_message(provider, monkeypatch):
+    class FakeInvalidRequestError(stripe.InvalidRequestError):
+        @property
+        def user_message(self):
+            return None
+
+    err = FakeInvalidRequestError("invalid limit", param="limit")
+
+    class StubRefundService:
+        def list(self, params=None):
+            raise err
+
+    monkeypatch.setattr(provider._client.v1.refunds, "list", StubRefundService().list)
+    with pytest.raises(InvalidRequestError) as exc_info:
+        provider.list_refunds("pi_123")
+    assert str(exc_info.value) == "invalid limit"
+
+
+def test_list_refunds_too_many_pages_message(provider, monkeypatch):
+    from app.services.payment.live_stripe_provider import (
+        _REFUND_MAX_PAGES,
+        _REFUND_PAGE_SIZE,
+    )
+
+    class StubPage:
+        def __init__(self):
+            self.has_more = True
+            self.data = [
+                _SdkObject(
+                    id="re_1",
+                    payment_intent="pi_test",
+                    amount=100,
+                    currency="usd",
+                    status="succeeded",
+                )
+            ]
+
+    class StubRefundService:
+        def list(self, params=None):
+            return StubPage()
+
+    monkeypatch.setattr(provider._client.v1.refunds, "list", StubRefundService().list)
+    with pytest.raises(InvalidRequestError) as exc_info:
+        provider.list_refunds("pi_test")
+    expected_threshold = _REFUND_PAGE_SIZE * _REFUND_MAX_PAGES
+    assert f"More than {expected_threshold} refunds on pi_test; not read" == str(exc_info.value)
+    assert exc_info.value.code == "too_many_refunds"
