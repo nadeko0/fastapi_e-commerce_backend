@@ -209,7 +209,7 @@ def test_user_id_comes_from_a_valid_access_token():
 
 
 def _token(**claims):
-    payload = {"sub": "42", "type": "access", "exp": int(time.time()) + 600, **claims}
+    payload = {"sub": "42", "type": "access", "exp": int(time.time()) + 600, "jti": "test-jti-token", **claims}
     return jwt.encode(payload, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
 
 
@@ -258,6 +258,18 @@ def test_no_user_id_from_a_signed_token_whose_subject_is_not_a_user_id(subject):
     # Such a token authenticates nobody (get_current_user answers 401), so
     # it must not open a per-user counter either: the address pays.
     request = make_request(authorization=f"Bearer {_token(sub=subject)}")
+    assert user_id_from_token(request) is None
+
+
+def test_user_id_from_token_non_bearer_scheme_rejected():
+    token = create_access_token(42)
+    request = make_request(authorization=f"Token {token}")
+    assert user_id_from_token(request) is None
+
+
+def test_user_id_from_token_unresolvable_subject_returns_none():
+    token = _token(sub="unresolvable")
+    request = make_request(authorization=f"Bearer {token}")
     assert user_id_from_token(request) is None
 
 
