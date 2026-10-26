@@ -278,3 +278,135 @@ def test_no_stripe_customer_is_created_so_nothing_is_erased_there():
     )
     assert "customer_email" not in source
     assert "customers.create" not in source
+
+
+
+def test_redact_users_events_redacts_by_checkout_session_id(db_session):
+    user = _user(db_session, "cs_user@example.com", idle_days=1)
+    _order_with_payment(db_session, user, "pending-cs1", session_id="cs_user_123")
+    evt = _event(db_session, "evt_cs_123", {"id": "cs_user_123"})
+
+    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    db_session.commit()
+    assert _payload(db_session, evt)["redacted"] is True
+
+
+def test_redact_users_events_handles_null_payment_intent_id(db_session, monkeypatch):
+    class StubResult:
+        def all(self):
+            return [(None, "cs_abc", 1)]
+
+    monkeypatch.setattr(db_session, "execute", lambda *args, **kwargs: StubResult())
+    assert stripe_events.redact_users_events(db_session, [1]) == 0
+
+
+def test_redact_users_events_matches_compact_json_order_id(db_session):
+    user = _user(db_session, "compact@example.com", idle_days=1)
+    order = _order_with_payment(db_session, user, "pi_compact")
+    compact_payload = json.dumps(
+        {
+            "id": "evt_compact",
+            "object": "event",
+            "type": "payment_intent.succeeded",
+            "created": 1,
+            "data": {"object": {"id": "pi_other", "metadata": {"order_id": str(order.id)}}},
+        },
+        separators=(",", ":"),
+    )
+    row = WebhookEvent(
+        event_id="evt_compact",
+        event_type="payment_intent.succeeded",
+        payload=compact_payload,
+        status="processed",
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    db_session.commit()
+    assert _payload(db_session, row)["redacted"] is True
+
+
+def test_redact_users_events_applies_sql_needle_filter(db_session, monkeypatch):
+    user = _user(db_session, "sql_filter@example.com", idle_days=1)
+    _order_with_payment(db_session, user, "pi_sql_filter")
+
+    captured = []
+    orig_scalars = db_session.scalars
+
+    def spy_scalars(statement, *args, **kwargs):
+        captured.append(statement)
+        return orig_scalars(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "scalars", spy_scalars)
+    stripe_events.redact_users_events(db_session, [user.id])
+
+    assert len(captured) == 1
+    compiled = str(captured[0].compile(compile_kwargs={"literal_binds": True}))
+    assert "LIKE" in compiled or "like" in compiled
+
+
+def test_redact_users_events_continues_past_malformed_json_row(db_session):
+    user = _user(db_session, "corrupt@example.com", idle_days=1)
+    order = _order_with_payment(db_session, user, "pi_corrupt")
+    bad = WebhookEvent(
+        event_id="evt_bad_json",
+        event_type="payment_intent.succeeded",
+        payload=f"invalid json containing pi_corrupt order_id {order.id}",
+        status="processed",
+    )
+    db_session.add(bad)
+    db_session.commit()
+    good = _event(db_session, "evt_good_json", {"id": "pi_corrupt"})
+
+    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    db_session.commit()
+    assert _payload(db_session, good)["redacted"] is True
+
+
+def test_redact_users_events_continues_past_already_redacted_row(db_session):
+    user = _user(db_session, "already@example.com", idle_days=1)
+    _order_with_payment(db_session, user, "pi_already")
+    already = WebhookEvent(
+        event_id="evt_already",
+        event_type="payment_intent.succeeded",
+        payload=json.dumps({"redacted": True, "data": {"object": {"id": "pi_already"}}}),
+        status="processed",
+    )
+    db_session.add(already)
+    db_session.commit()
+    unredacted = _event(db_session, "evt_unredacted", {"id": "pi_already"})
+
+    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    db_session.commit()
+    assert _payload(db_session, unredacted)["redacted"] is True
+
+
+def test_redact_users_events_continues_past_non_dict_json_row(db_session):
+    user = _user(db_session, "nondict@example.com", idle_days=1)
+    _order_with_payment(db_session, user, "pi_nondict")
+    nondict_row = WebhookEvent(
+        event_id="evt_nondict",
+        event_type="payment_intent.succeeded",
+        payload=json.dumps(["pi_nondict"]),
+        status="processed",
+    )
+    db_session.add(nondict_row)
+    db_session.commit()
+    valid_row = _event(db_session, "evt_valid_after_nondict", {"id": "pi_nondict"})
+
+    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    db_session.commit()
+    assert _payload(db_session, valid_row)["redacted"] is True
+
+
+def test_redact_users_events_counts_multiple_redactions(db_session):
+    user = _user(db_session, "multi@example.com", idle_days=1)
+    _order_with_payment(db_session, user, "pi_multi_1", session_id="cs_multi_2")
+    e1 = _event(db_session, "evt_multi_1", {"id": "pi_multi_1"})
+    e2 = _event(db_session, "evt_multi_2", {"id": "cs_multi_2"})
+
+    assert stripe_events.redact_users_events(db_session, [user.id]) == 2
+    db_session.commit()
+    assert _payload(db_session, e1)["redacted"] is True
+    assert _payload(db_session, e2)["redacted"] is True
