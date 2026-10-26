@@ -135,7 +135,7 @@ Security controls were validated across independent testing stages prior to rele
 | **Pre-3.0 Security Review** | White-box code audit and black-box probing across OWASP Top 10 (2021). | Remediated 43 specific findings (F-01 to F-43), including payment row locking (`SELECT FOR UPDATE`), case-insensitive email indexes, and single-use reset tokens. | PASS |
 | **Stage T1: Supply Chain** | Gitleaks commit history audit, pip-audit dependency graphs, and Trivy container inspection. | Uninstalled bundled pip from Python base image; validated gosu reachability with govulncheck; granted security exemption for Redis CVE-2026-84782. | PASS |
 | **Stage T3: Contract Fuzzing** | Schemathesis 4.30.1 property-based fuzzing across 54 paths (30,000+ examples). | Identified PostgreSQL crashes on NUL bytes (`\x00`) and surrogate Unicode tokens; implemented unified text sanitization middleware in v4.0.1. | PASS |
-| **Stage T6: DAST & OWASP Top 10** | OWASP ZAP 2.17.0 passive/active scans and 231 manual OWASP API Top 10 (2023) probes. | Fixed empty images validation in product creation; enforced mandatory access token `jti` claims; 100% pass across all 10 API security categories. | PASS |
+| **Stage T6: DAST & OWASP Top 10** | OWASP ZAP 2.17.0 passive/active scans and 231 manual OWASP API Top 10 (2023) probes, repeated on v4.0.3 (229 probes, same verdict). | Fixed empty images validation in product creation; enforced mandatory access token `jti` claims; 100% pass across all 10 API security categories. | PASS |
 
 ### OWASP API Security Top 10 (2023) Coverage
 

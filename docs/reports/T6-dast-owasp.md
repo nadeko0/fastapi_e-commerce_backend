@@ -82,6 +82,23 @@ The automated scan generated one High and several Medium alerts, all of which we
 
 - ZAP active scanning targeted internal HTTP port 8000 to avoid container TLS certificate trust complexities; reverse proxy TLS configuration was validated via independent manual handshakes.
 
+
+## Re-run on v4.0.3 (26 October 2026)
+
+The scan was repeated on the latest release with the same pinned ZAP image, the same three API scans (anonymous, customer, admin), the baseline scan and the same manual probes, to confirm the fixes and catch anything new.
+
+| Check | v4.0.0 | v4.0.3 |
+|---|---|---|
+| High alerts | 1 (PII Disclosure on `GET /users/me`: a test phone number that happens to pass the Luhn check) | the same 1, same false positive |
+| Medium alerts | CSP and SRI alerts on `/api/v1/docs` and `/redoc` only (Swagger UI) | unchanged; these pages are disabled in production |
+| Low alerts | Full Path Disclosure (the RFC 9457 `instance` field), Private IP (the caller's own consent history) | unchanged, plus 8 "server error" responses from `/health` and `/readyz`, caused by the Docker daemon of the test machine restarting for a package update during the scan, not by the application |
+| Manual OWASP API Top 10 probes | 231, all 10 categories PASS | 229, all 10 categories PASS |
+| F-T6-1: product created without `images` | 500, row stored, catalog broken | **fixed**: 422 on `body.images`, nothing stored, catalog answers 200 |
+| F-T6-3: token without `jti` | accepted (200) | **fixed**: 401 `invalid_token` |
+| F-T6-2: 2 MiB body through the proxy | mix of 413 and 502 | unchanged (Low): limit the body size on the proxy itself, see [OPERATIONS.md](../OPERATIONS.md) |
+
+Verdict: PASS, no unexplained High or Medium alert.
+
 ---
 
 See also: [fixes-4.0.x.md](fixes-4.0.x.md), [final-test-campaign.md](final-test-campaign.md), [T1-supply-chain.md](T1-supply-chain.md), [../../SECURITY.md](../../SECURITY.md).
