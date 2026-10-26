@@ -10,7 +10,16 @@ import torture_support  # noqa: F401, I001  (must precede payment_support & co.)
 # property test found; see .cloud_torture/02b_protocol_torture.md.
 #
 # Runs on SQLite (default) and on PostgreSQL (TEST_DATABASE_URL=...).
+#
+# Phase 3 validation (.cloud_torture/03a_validation_protocol_boundary.md):
+# every `test_bug_*` that reproduces a confirmed backend defect is a strict
+# xfail ("BUG DISCOVERED: ..."), so the suite is green and turns red the day
+# the defect is fixed (XPASS(strict)), as a reminder to drop the marker. The
+# property tests stay green by leaving the known-bug input class out of their
+# generators (each exclusion names its strict-xfail reproducer); set
+# TORTURE_STRICT=1 to put those inputs back and re-reveal the bugs.
 import json
+import os
 import re
 import unicodedata
 import uuid
@@ -33,6 +42,36 @@ from app.models.user import User
 from app.schemas.address import AddressUpdate
 from app.schemas.product import ProductUpdate, ProductVariantUpdate
 from app.schemas.user import UserUpdate, normalize_email
+
+# TORTURE_STRICT=1: property tests also generate the inputs of the known
+# (strict-xfailed) bugs below, so they fail again.
+TORTURE_STRICT = os.environ.get("TORTURE_STRICT") == "1"
+
+
+def bug(reason: str, condition: bool = True):
+    """Strict xfail for a confirmed backend defect (an XPASS fails the run)."""
+    return pytest.mark.xfail(condition, strict=True, reason=f"BUG DISCOVERED: {reason}")
+
+
+def strict_only(decorator):
+    """Apply a Hypothesis @example that hits a known bug only under TORTURE_STRICT=1."""
+    return decorator if TORTURE_STRICT else (lambda test: test)
+
+
+BUG_B1 = ("login looks the account up by normalize_email() only, registration stores email-validator's "
+          "IDNA/UTS #46 form (app/api/v1/users.py:124 vs app/schemas/user.py:104-108)")
+BUG_B2 = ("free-form JSON nested ~255 deep is stored, then every serialisation of it is a 500 "
+          "(no depth bound in app/core/text_input.py:69 first_unusable_text; commit at app/api/v1/admin.py:212)")
+BUG_B3 = ("NaN/Infinity/1e400 in free-form JSON accepted (app/core/text_input.py:58, RequestBody): "
+          "500 from jsonb on PostgreSQL, silently stored as null on SQLite")
+BUG_B4 = ("a '*' anywhere in If-Match/If-None-Match is read as the wildcard "
+          "(app/core/etag.py:21 _TAG with finditer, :29-31 _parse)")
+BUG_B5 = ("money accepts non-ASCII Unicode digits: str-pattern \\d at app/schemas/order.py:45/47 "
+          "(the published OpenAPI pattern is ASCII)")
+BUG_B7 = ("PATCH with application/json-patch+json (any application/*+json) is applied as a merge "
+          "patch instead of 415 (app/api/merge_patch.py, app/core/errors.py:236)")
+BUG_B9 = ("price filter with an exponent beyond PostgreSQL numeric is a 500: bare Decimal "
+          "min_price/max_price at app/schemas/product.py:140-141")
 
 API = "/api/v1"
 PROBLEM = "application/problem+json"

@@ -1,0 +1,8 @@
+no tests ran in 14.26s
+{"timestamp": "2026-10-26T22:02:40.289Z", "level": "INFO", "logger": "app.core.logging_config", "message": "Starting application in development environment (Version: 4.0.3)"}
+{"timestamp": "2026-10-26T22:02:40.289Z", "level": "INFO", "logger": "app.core.logging_config", "message": "Log file disabled (LOG_FILE is not set); logging to stdout only"}
+{"timestamp": "2026-10-26T22:02:40.289Z", "level": "INFO", "logger": "app.main", "message": "Initializing FastAPI application"}
+{"timestamp": "2026-10-26T22:02:40.289Z", "level": "INFO", "logger": "app.main", "message": "Configuring FastAPI middleware, CORS, and rate limiting"}
+{"timestamp": "2026-10-26T22:02:40.289Z", "level": "INFO", "logger": "app.main", "message": "Initializing FastAPI application with rate limiting"}
+{"timestamp": "2026-10-26T22:02:40.290Z", "level": "INFO", "logger": "app.main", "message": "Initializing service connections"}
+{"timestamp": "2026-10-26T22:02:40.290Z", "level": "INFO", "logger": "app.main", "message": "Redis service initialized"}
