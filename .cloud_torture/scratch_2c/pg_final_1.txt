@@ -1,0 +1,1407 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 482750d08d54, initial schema
+INFO  [alembic.runtime.migration] Running upgrade 482750d08d54 -> 5fe510d5d45e, add product variants
+INFO  [alembic.runtime.migration] Running upgrade 5fe510d5d45e -> b6d7b96c6d17, add variant id to order items
+INFO  [alembic.runtime.migration] Running upgrade b6d7b96c6d17 -> ed98c07e2fbc, add checkout session columns to payments
+INFO  [alembic.runtime.migration] Running upgrade ed98c07e2fbc -> 76d14f9f12e5, add CHECK constraints on money and stock
+INFO  [alembic.runtime.migration] Running upgrade 76d14f9f12e5 -> e1959653f4a2, add currency to orders
+INFO  [alembic.runtime.migration] Running upgrade e1959653f4a2 -> 3f6c2a9d1b7e, unique index on lower(email)
+INFO  [alembic.runtime.migration] Running upgrade 3f6c2a9d1b7e -> a7c3e5b19d42, add payment_refunds
+INFO  [alembic.runtime.migration] Running upgrade a7c3e5b19d42 -> c2d8f4a6b913, add payment_disputes
+INFO  [alembic.runtime.migration] Running upgrade c2d8f4a6b913 -> d4b7e1f93a62, add payment_discrepancies
+INFO  [alembic.runtime.migration] Running upgrade d4b7e1f93a62 -> d4e9a1c7b265, store webhook event payloads and processing state
+INFO  [alembic.runtime.migration] Running upgrade d4e9a1c7b265 -> ada27dd39537, timestamps with time zone
+INFO  [alembic.runtime.migration] Running upgrade ada27dd39537 -> 821e97899aca, index foreign keys, drop useless indexes
+INFO  [alembic.runtime.migration] Running upgrade 821e97899aca -> b6f1c8d2a047, store the request fingerprint next to the Idempotency-Key
+INFO  [alembic.runtime.migration] Running upgrade b6f1c8d2a047 -> c5e2a8f4b196, name foreign keys and unique constraints by the naming convention
+============================= test session starts ==============================
+collecting ... collected 97 items
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[0] {"timestamp": "2026-10-26T20:42:04.284Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "f35be8018331489aac2eacec124c34b2"}
+HIST {200: 1, 401: 29}
+PASSED{"timestamp": "2026-10-26T20:42:04.398Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[1] {"timestamp": "2026-10-26T20:42:04.450Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "8789650afd62463fb859d9e46cd17e2b"}
+HIST {200: 1, 401: 29}
+PASSED{"timestamp": "2026-10-26T20:42:04.537Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[2] {"timestamp": "2026-10-26T20:42:04.589Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "a083a2db3224470e92926e309968f0a0"}
+HIST {200: 1, 401: 29}
+PASSED{"timestamp": "2026-10-26T20:42:04.681Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[3] {"timestamp": "2026-10-26T20:42:04.723Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "bb29e0332cae42ca9ff3b2f092bf4143"}
+HIST {200: 1, 401: 29}
+PASSED{"timestamp": "2026-10-26T20:42:04.811Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[4] {"timestamp": "2026-10-26T20:42:04.855Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "e8287a0158174bf483b05ae11cc61218"}
+HIST {200: 1, 401: 29}
+PASSED{"timestamp": "2026-10-26T20:42:04.944Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[5] {"timestamp": "2026-10-26T20:42:04.989Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "4d60066ea9cd445d8da7c7533cce3879"}
+HIST {200: 1, 401: 29}
+PASSED{"timestamp": "2026-10-26T20:42:05.090Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[0] {"timestamp": "2026-10-26T20:42:05.136Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "7f09b6c449204a24a06841ab86c0cb90"}
+HIST {200: 2, 401: 28}
+PASSED{"timestamp": "2026-10-26T20:42:05.236Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[1] {"timestamp": "2026-10-26T20:42:05.284Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "bf18e5f1046d4397983bcfcfdddb7f7c"}
+HIST {200: 2, 401: 28}
+PASSED{"timestamp": "2026-10-26T20:42:05.389Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[2] {"timestamp": "2026-10-26T20:42:05.434Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "dcec98fa8ac2428bb421a13ec03a54bf"}
+HIST {200: 2, 401: 28}
+PASSED{"timestamp": "2026-10-26T20:42:05.526Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[3] {"timestamp": "2026-10-26T20:42:05.570Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "ed445cca0602408c9c22d9f687eaf693"}
+HIST {200: 2, 401: 28}
+PASSED{"timestamp": "2026-10-26T20:42:05.665Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[4] {"timestamp": "2026-10-26T20:42:05.705Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "9ab1d941864e402aa0715175a177ef89"}
+HIST {200: 2, 401: 28}
+PASSED{"timestamp": "2026-10-26T20:42:05.803Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[5] {"timestamp": "2026-10-26T20:42:05.847Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "71d11fe80ae341adb49c97d77b65c025"}
+HIST {200: 2, 401: 28}
+PASSED{"timestamp": "2026-10-26T20:42:05.942Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_bug_logout_racing_refresh_leaves_a_live_refresh_token {"timestamp": "2026-10-26T20:42:05.996Z", "level": "INFO", "logger": "app.api.v1.users", "message": "Generating tokens for user 1", "request_id": "9dc0c6bad50042f7805fe401a9b17ce8"}
+FAILED{"timestamp": "2026-10-26T20:42:06.277Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[0] {"timestamp": "2026-10-26T20:42:06.387Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 30}
+PASSED{"timestamp": "2026-10-26T20:42:07.221Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[1] {"timestamp": "2026-10-26T20:42:07.271Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 30}
+PASSED{"timestamp": "2026-10-26T20:42:08.107Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[2] {"timestamp": "2026-10-26T20:42:08.160Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 30}
+PASSED{"timestamp": "2026-10-26T20:42:08.893Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[3] {"timestamp": "2026-10-26T20:42:08.939Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 30}
+PASSED{"timestamp": "2026-10-26T20:42:09.711Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[4] {"timestamp": "2026-10-26T20:42:09.760Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 30}
+PASSED{"timestamp": "2026-10-26T20:42:10.581Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[5] {"timestamp": "2026-10-26T20:42:10.629Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 30}
+PASSED{"timestamp": "2026-10-26T20:42:11.438Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[0] {"timestamp": "2026-10-26T20:42:11.489Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 15, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:12.347Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[1] {"timestamp": "2026-10-26T20:42:12.402Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 15, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:13.191Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[2] {"timestamp": "2026-10-26T20:42:13.244Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 15, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:14.016Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[3] {"timestamp": "2026-10-26T20:42:14.094Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 15, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:14.881Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[4] {"timestamp": "2026-10-26T20:42:14.938Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 15, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:15.733Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[5] {"timestamp": "2026-10-26T20:42:15.785Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 15, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:16.650Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_bug_order_replay_racing_its_first_request_answers_cart_empty {"timestamp": "2026-10-26T20:42:16.700Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:42:16.796Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[0] {"timestamp": "2026-10-26T20:42:16.842Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:17.451Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[1] {"timestamp": "2026-10-26T20:42:17.500Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 19, 409: 11}
+PASSED{"timestamp": "2026-10-26T20:42:18.124Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[2] {"timestamp": "2026-10-26T20:42:18.174Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:18.745Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[3] {"timestamp": "2026-10-26T20:42:18.791Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:19.361Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[4] {"timestamp": "2026-10-26T20:42:19.411Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:19.995Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[5] {"timestamp": "2026-10-26T20:42:20.040Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:20.638Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[0] {"timestamp": "2026-10-26T20:42:20.684Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 14, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:21.283Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[1] {"timestamp": "2026-10-26T20:42:21.330Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 14, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:21.923Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[2] {"timestamp": "2026-10-26T20:42:21.971Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 14, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:22.500Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[3] {"timestamp": "2026-10-26T20:42:22.546Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 14, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:23.106Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[4] {"timestamp": "2026-10-26T20:42:23.155Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 14, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:23.722Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[5] {"timestamp": "2026-10-26T20:42:23.769Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 12, 409: 3, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:42:24.378Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[0] {"timestamp": "2026-10-26T20:42:24.424Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:25.034Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[1] {"timestamp": "2026-10-26T20:42:25.080Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:25.750Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[2] {"timestamp": "2026-10-26T20:42:25.795Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:26.375Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[3] {"timestamp": "2026-10-26T20:42:26.420Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:27.034Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[4] {"timestamp": "2026-10-26T20:42:27.084Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:27.647Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[5] {"timestamp": "2026-10-26T20:42:27.693Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:28.385Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[0] {"timestamp": "2026-10-26T20:42:28.434Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:42:29.709Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[1] {"timestamp": "2026-10-26T20:42:29.763Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:42:31.008Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[2] {"timestamp": "2026-10-26T20:42:31.054Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:42:32.289Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[3] {"timestamp": "2026-10-26T20:42:32.348Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:42:33.616Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[4] {"timestamp": "2026-10-26T20:42:33.665Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:42:34.652Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[5] {"timestamp": "2026-10-26T20:42:34.702Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:42:35.734Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[0] {"timestamp": "2026-10-26T20:42:35.779Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 15, 409: 15}
+PASSED{"timestamp": "2026-10-26T20:42:36.623Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[1] {"timestamp": "2026-10-26T20:42:36.674Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 15, 409: 15}
+PASSED{"timestamp": "2026-10-26T20:42:37.510Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[2] {"timestamp": "2026-10-26T20:42:37.557Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 15, 409: 15}
+PASSED{"timestamp": "2026-10-26T20:42:38.416Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[3] {"timestamp": "2026-10-26T20:42:38.461Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 15, 409: 15}
+PASSED{"timestamp": "2026-10-26T20:42:39.391Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[4] {"timestamp": "2026-10-26T20:42:39.435Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 17, 409: 13}
+FAILED{"timestamp": "2026-10-26T20:42:40.294Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[5] {"timestamp": "2026-10-26T20:42:40.344Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 15, 409: 15}
+PASSED{"timestamp": "2026-10-26T20:42:41.343Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[0] {"timestamp": "2026-10-26T20:42:41.395Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 19, 400: 11}
+PASSED{"timestamp": "2026-10-26T20:42:42.464Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[1] {"timestamp": "2026-10-26T20:42:42.514Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 19, 400: 11}
+PASSED{"timestamp": "2026-10-26T20:42:43.590Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[2] {"timestamp": "2026-10-26T20:42:43.642Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 19, 400: 11}
+PASSED{"timestamp": "2026-10-26T20:42:44.773Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[3] {"timestamp": "2026-10-26T20:42:44.829Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 19, 400: 11}
+PASSED{"timestamp": "2026-10-26T20:42:45.946Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[4] {"timestamp": "2026-10-26T20:42:46.000Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 19, 400: 11}
+PASSED{"timestamp": "2026-10-26T20:42:46.936Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[5] {"timestamp": "2026-10-26T20:42:46.980Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 19, 400: 11}
+PASSED{"timestamp": "2026-10-26T20:42:48.028Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_bug_mock_provider_refund_key_is_not_atomic {"timestamp": "2026-10-26T20:42:48.075Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 5}
+FAILED{"timestamp": "2026-10-26T20:42:48.467Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[0] {"timestamp": "2026-10-26T20:42:48.518Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:42:49.006Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[1] {"timestamp": "2026-10-26T20:42:49.066Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:42:49.523Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[2] {"timestamp": "2026-10-26T20:42:49.580Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:42:50.021Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[3] {"timestamp": "2026-10-26T20:42:50.082Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:42:50.511Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[4] {"timestamp": "2026-10-26T20:42:50.568Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:42:51.006Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_webhook_redeliveries_and_workers_apply_once[5] {"timestamp": "2026-10-26T20:42:51.067Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:42:51.528Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[0] {"timestamp": "2026-10-26T20:42:51.594Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:52.316Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[1] {"timestamp": "2026-10-26T20:42:52.383Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:53.212Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[2] {"timestamp": "2026-10-26T20:42:53.270Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:54.007Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[3] {"timestamp": "2026-10-26T20:42:54.069Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:54.789Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[4] {"timestamp": "2026-10-26T20:42:54.851Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:55.527Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_concurrent_cancellations_restock_once[5] {"timestamp": "2026-10-26T20:42:55.584Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:42:56.305Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[0] {"timestamp": "2026-10-26T20:42:56.734Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:43:03.303Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[1] {"timestamp": "2026-10-26T20:43:03.775Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:43:09.497Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[2] {"timestamp": "2026-10-26T20:43:09.928Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:43:15.963Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[3] {"timestamp": "2026-10-26T20:43:16.412Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {201: 3, 409: 37}
+PASSED{"timestamp": "2026-10-26T20:43:20.542Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[4] {"timestamp": "2026-10-26T20:43:20.996Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:43:29.018Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[5] {"timestamp": "2026-10-26T20:43:29.427Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:43:35.331Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[6] {"timestamp": "2026-10-26T20:43:35.760Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:43:42.377Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[7] {"timestamp": "2026-10-26T20:43:42.844Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:43:48.738Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[0] {"timestamp": "2026-10-26T20:43:49.032Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:43:58.408Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[1] {"timestamp": "2026-10-26T20:43:58.717Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:44:08.871Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[2] {"timestamp": "2026-10-26T20:44:09.180Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:44:13.338Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[3] {"timestamp": "2026-10-26T20:44:13.654Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:44:18.930Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[4] {"timestamp": "2026-10-26T20:44:19.208Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:44:23.571Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[5] {"timestamp": "2026-10-26T20:44:23.833Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:44:34.042Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout {"timestamp": "2026-10-26T20:44:34.103Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:44:35.276Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[0] {"timestamp": "2026-10-26T20:44:35.336Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 23, 201: 5, 409: 2}
+PASSED{"timestamp": "2026-10-26T20:44:36.341Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[1] {"timestamp": "2026-10-26T20:44:36.394Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 23, 201: 5, 409: 2}
+PASSED{"timestamp": "2026-10-26T20:44:37.435Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[2] {"timestamp": "2026-10-26T20:44:37.491Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 23, 201: 5, 409: 2}
+PASSED{"timestamp": "2026-10-26T20:44:38.503Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[3] {"timestamp": "2026-10-26T20:44:38.565Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 23, 201: 5, 409: 2}
+PASSED{"timestamp": "2026-10-26T20:44:39.524Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[4] {"timestamp": "2026-10-26T20:44:39.590Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 23, 201: 5, 409: 2}
+PASSED{"timestamp": "2026-10-26T20:44:40.556Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_bug_webhook_stored_after_erasure_keeps_personal_data {"timestamp": "2026-10-26T20:44:40.607Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+FAILED{"timestamp": "2026-10-26T20:44:40.830Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_harness_runs_requests_concurrently_on_one_loop {"timestamp": "2026-10-26T20:44:40.881Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {404: 20}
+PASSED{"timestamp": "2026-10-26T20:44:41.238Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+
+=================================== FAILURES ===================================
+__________ test_bug_logout_racing_refresh_leaves_a_live_refresh_token __________
+
+shop = <payment_support.Shop object at 0x7fc788535710>
+fake_redis = <fakeredis._clients._sync.FakeRedis(<redis.connection.ConnectionPool(<fakeredis._clients._sync.FakeRedisConnection(ver...type=None),orig_host_address=2faaee70bdce44cc9ed9574620acd820,orig_socket_timeout=5,orig_socket_connect_timeout=5)>)>)>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc789804dd0>
+
+    @requires_postgres
+    def test_bug_logout_racing_refresh_leaves_a_live_refresh_token(
+        shop, fake_redis, monkeypatch
+    ):
+        """Deterministic regression for the interleaving the burst above can hit:
+    
+          logout:  SMEMBERS refresh_family:F -> {J1}     (slow reply)
+          refresh: SET refresh_active:J2; SADD F J2; GET+DEL refresh_active:J1 -> ok
+          logout:  DEL refresh_active:J1; DEL refresh_family:F
+          => logout answers 200, and J2 (returned by refresh) is still redeemable.
+    
+        app/services/redis_async.py revoke_refresh_family reads the members and
+        deletes them in two round trips with no atomicity, and
+        rotate_refresh_token registers the new jti before redeeming the old one.
+        """
+        server = fake_redis.connection_pool.connection_kwargs["server"]
+        monkeypatch.setattr(
+            redis_async_module, "_create_client",
+            lambda: _SlowSmembersRedis(server=server, decode_responses=True),
+        )
+        buyer = shop.buyer()
+        tokens = login(shop, buyer.email)
+        family = claims(tokens["refresh_token"])["family"]
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    
+        async def scenario():
+            async with httpx2.AsyncClient(transport=_transport(), base_url="http://test") as ac:
+                logout = asyncio.create_task(ac.post(
+                    f"{USERS}/logout", json={"refresh_token": tokens["refresh_token"]},
+                    headers=headers,
+                ))
+                await asyncio.sleep(_SlowSmembersRedis.delay / 4)  # logout is inside SMEMBERS
+                refresh = await ac.post(
+                    f"{USERS}/refresh", json={"refresh_token": tokens["refresh_token"]}
+                )
+                return await logout, refresh
+    
+        logout, refresh = asyncio.run(scenario())
+    
+        assert logout.status_code == 200, logout.text
+        if refresh.status_code == 200:
+            # The token handed out while logout ran must be dead once logout is done.
+            survivor = refresh.json()["refresh_token"]
+            reuse = shop.client.post(f"{USERS}/refresh", json={"refresh_token": survivor})
+>           assert reuse.status_code == 401, (
+                f"refresh token rotated during logout survived the logout: {reuse.status_code}"
+            )
+E           AssertionError: refresh token rotated during logout survived the logout: 200
+E           assert 200 == 401
+E            +  where 200 = <Response [200 OK]>.status_code
+
+tests/torture_suite/test_concurrency_torture.py:309: AssertionError
+______ test_bug_order_replay_racing_its_first_request_answers_cart_empty _______
+
+shop = <payment_support.Shop object at 0x7fc7883b6d60>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc78852f690>
+
+    def test_bug_order_replay_racing_its_first_request_answers_cart_empty(shop, monkeypatch):
+        """A retry of POST /orders with the key of a request still in flight.
+        Interleaving (app/api/v1/orders.py create_order):
+    
+          retry:  _order_by_idempotency_key -> None   (first not committed yet)
+          first:  commit; remove_ordered_items_atomic  (cart now empty)
+          retry:  redis.get_cart -> empty -> 400 "Cart is empty"
+    
+        The documented answer to a reused key is the first order (201). Widened
+        here by holding the retry right after its key lookup until the first
+        request has finished."""
+        product = shop.product(price="10.00", stock=50)
+        buyer = shop.buyer()
+        assert shop.add_to_cart(buyer, product, quantity=1).status_code == 200
+        key = new_key()
+        real_lookup = orders_module._order_by_idempotency_key
+        state = {"held": False}
+    
+        async def scenario():
+            retry_paused = asyncio.Event()
+            first_done = asyncio.Event()
+    
+            async def lookup(db, user_id, idempotency_key):
+                found = await real_lookup(db, user_id, idempotency_key)
+                if found is None and not state["held"]:
+                    state["held"] = True
+                    retry_paused.set()
+                    await first_done.wait()
+                return found
+    
+            monkeypatch.setattr(orders_module, "_order_by_idempotency_key", lookup)
+            request = {"json": {"shipping_address_id": buyer.address_id},
+                       "headers": {**buyer.headers, "Idempotency-Key": key}}
+            async with httpx2.AsyncClient(transport=_transport(), base_url="http://test") as ac:
+                retry = asyncio.create_task(ac.post(ORDERS, **request))
+                await retry_paused.wait()
+                first = await ac.post(ORDERS, **request)
+                first_done.set()
+                return first, await retry
+    
+        first, retry = asyncio.run(scenario())
+    
+        assert first.status_code == 201, first.text
+        assert _order_count(buyer.user_id) == 1
+>       assert retry.status_code == 201, (
+            f"a replay of the in-flight key answered {retry.status_code}: {retry.text}"
+        )
+E       AssertionError: a replay of the in-flight key answered 400: {"type":"about:blank","title":"Bad Request","status":400,"detail":"Cart is empty","instance":"/api/v1/orders","request_id":"914ca1d2638e431e935dc36432710cde"}
+E       assert 400 == 201
+E        +  where 400 = <Response [400 Bad Request]>.status_code
+
+tests/torture_suite/test_concurrency_torture.py:433: AssertionError
+__________________ test_refund_same_key_twins_refund_once[0] ___________________
+
+shop = <payment_support.Shop object at 0x7fc78962ba70>, round_ = 0
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_refund_same_key_twins_refund_once(shop, round_):
+        """N identical full refunds with one key: one provider refund, one
+        PaymentRefund row, amount_refunded == the charge once, order refunded;
+        every answer names the same refund (or is a 409 in-use)."""
+        buyer, order, admin = _paid_order(shop)
+        key = new_key()
+    
+        responses = burst([
+            ("POST", f"{ORDERS}/{order['id']}/refund",
+             {"json": {}, "headers": {**admin, "Idempotency-Key": key}})
+            for _ in range(N)
+        ])
+    
+>       check_responses(responses, {200, 409})
+
+tests/torture_suite/test_concurrency_torture.py:568: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [200 OK]>, <Response [200 OK]>, <Response [200 OK]>, <Response [200 OK]>, <Response [200 OK]>, <Response [400 Bad Request]>, ...]
+allowed = {200, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+        assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+>       assert set(hist) <= set(allowed), f"unexpected statuses {hist}, allowed {allowed}: " + str(
+            {r.status_code: r.text[:200] for r in responses if r.status_code not in allowed}
+        )
+E       AssertionError: unexpected statuses {200: 29, 400: 1}, allowed {200, 409}: {400: '{"type":"about:blank","title":"Bad Request","status":400,"detail":"Refund amount (0) exceeds the refundable amount (0)","instance":"/api/v1/orders/1/refund","request_id":"4a3ab9cc1109480d8a56a2ba289c7'}
+E       assert {200, 400} <= {200, 409}
+E         
+E         Extra items in the left set:
+E         400
+
+tests/torture_suite/test_concurrency_torture.py:135: AssertionError
+__________________ test_refund_same_key_twins_refund_once[5] ___________________
+
+shop = <payment_support.Shop object at 0x7fc7887fcc50>, round_ = 5
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_refund_same_key_twins_refund_once(shop, round_):
+        """N identical full refunds with one key: one provider refund, one
+        PaymentRefund row, amount_refunded == the charge once, order refunded;
+        every answer names the same refund (or is a 409 in-use)."""
+        buyer, order, admin = _paid_order(shop)
+        key = new_key()
+    
+        responses = burst([
+            ("POST", f"{ORDERS}/{order['id']}/refund",
+             {"json": {}, "headers": {**admin, "Idempotency-Key": key}})
+            for _ in range(N)
+        ])
+    
+>       check_responses(responses, {200, 409})
+
+tests/torture_suite/test_concurrency_torture.py:568: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [200 OK]>, <Response [200 OK]>, <Response [200 OK]>, <Response [200 OK]>, <Response [400 Bad Request]>, <Response [200 OK]>, ...]
+allowed = {200, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+        assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+>       assert set(hist) <= set(allowed), f"unexpected statuses {hist}, allowed {allowed}: " + str(
+            {r.status_code: r.text[:200] for r in responses if r.status_code not in allowed}
+        )
+E       AssertionError: unexpected statuses {200: 29, 400: 1}, allowed {200, 409}: {400: '{"type":"about:blank","title":"Bad Request","status":400,"detail":"Refund amount (0) exceeds the refundable amount (0)","instance":"/api/v1/orders/1/refund","request_id":"721efb63fdce4b3c9774ae3e4c601'}
+E       assert {200, 400} <= {200, 409}
+E         
+E         Extra items in the left set:
+E         400
+
+tests/torture_suite/test_concurrency_torture.py:135: AssertionError
+____________ test_refund_same_key_different_amounts_execute_once[4] ____________
+
+shop = <payment_support.Shop object at 0x7fc7884c3290>, round_ = 4
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_refund_same_key_different_amounts_execute_once(shop, round_):
+        """Same key, two partial amounts: one refund; the other amount's requests
+        are refused (409 idempotency-key-in-use from the provider's key check)."""
+        buyer, order, admin = _paid_order(shop)
+        key = new_key()
+        amounts = ["1.00", "2.00"]
+    
+        responses = burst([
+            ("POST", f"{ORDERS}/{order['id']}/refund",
+             {"json": {"amount": amounts[i % 2]}, "headers": {**admin, "Idempotency-Key": key}})
+            for i in range(N)
+        ])
+    
+        check_responses(responses, {200, 409})
+        refunds = _refunds(order["id"])
+>       assert len(refunds) == 1
+E       assert 2 == 1
+E        +  where 2 = len([<app.models.payment_ledger.PaymentRefund object at 0x7fc7884909f0>, <app.models.payment_ledger.PaymentRefund object at 0x7fc78849e150>])
+
+tests/torture_suite/test_concurrency_torture.py:596: AssertionError
+_______________ test_bug_mock_provider_refund_key_is_not_atomic ________________
+
+shop = <payment_support.Shop object at 0x7fc7884c1490>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc78b3f9ef0>
+
+    @requires_postgres
+    def test_bug_mock_provider_refund_key_is_not_atomic(shop, monkeypatch):
+        """POST /refund relies on the provider alone for the Idempotency-Key
+        (the key is not stored locally). The in-process mock
+        (app/services/payment/stripe_provider.py create_refund) checks
+        _refunds_by_key and records the new refund later, with no lock, while
+        the route calls it from a thread pool: two concurrent requests with the
+        same key both miss the cache and both refund. Real Stripe answers the
+        second with an idempotency error (409). Seen without any hook in the
+        bursts above (2 of 36 rounds); widened here by a slow intent lookup
+        between the key check and the insert."""
+        buyer, order, admin = _paid_order(shop)
+        monkeypatch.setattr(StripePaymentProvider, "_intents_by_id",
+                            _SlowLookupDict(StripePaymentProvider._intents_by_id))
+        key = new_key()
+    
+        responses = burst([
+            ("POST", f"{ORDERS}/{order['id']}/refund",
+             {"json": {"amount": "1.00"}, "headers": {**admin, "Idempotency-Key": key}})
+            for _ in range(5)
+        ])
+    
+        check_responses(responses, {200, 409})
+>       assert len(_refunds(order["id"])) == 1, "one Idempotency-Key, several refunds"
+E       AssertionError: one Idempotency-Key, several refunds
+E       assert 5 == 1
+E        +  where 5 = len([<app.models.payment_ledger.PaymentRefund object at 0x7fc7884909f0>, <app.models.payment_ledger.PaymentRefund object at 0x7fc78849c680>, <app.models.payment_ledger.PaymentRefund object at 0x7fc78849c260>, <app.models.payment_ledger.PaymentRefund object at 0x7fc7886efcd0>, <app.models.payment_ledger.PaymentRefund object at 0x7fc7886ee2b0>])
+E        +    where [<app.models.payment_ledger.PaymentRefund object at 0x7fc7884909f0>, <app.models.payment_ledger.PaymentRefund object at 0x7fc78849c680>, <app.models.payment_ledger.PaymentRefund object at 0x7fc78849c260>, <app.models.payment_ledger.PaymentRefund object at 0x7fc7886efcd0>, <app.models.payment_ledger.PaymentRefund object at 0x7fc7886ee2b0>] = _refunds(1)
+
+tests/torture_suite/test_concurrency_torture.py:665: AssertionError
+__________ test_last_unit_contention_never_oversells_or_deadlocks[0] ___________
+
+shop = <payment_support.Shop object at 0x7fc78899f1d0>, round_ = 0
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:832: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [409 Conflict]>, <Response [409 Conflict]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [409 Conflict]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 3, 409: 31, 503: 6} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"e0638fa7724e4496954f9f4d2b877c3d","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc788bec110>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+__________ test_last_unit_contention_never_oversells_or_deadlocks[1] ___________
+
+shop = <payment_support.Shop object at 0x7fc7883e0890>, round_ = 1
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:832: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [201 Created]>, <Response [409 Conflict]>, <Response [503 Service Unavailable]>, <Response [409 Conflict]>, <Response [503 Service Unavailable]>, <Response [409 Conflict]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 2, 409: 34, 503: 4} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"77b5ecd9789f4771bd8512773e8c8e59","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc7895fb030>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+__________ test_last_unit_contention_never_oversells_or_deadlocks[2] ___________
+
+shop = <payment_support.Shop object at 0x7fc788429c10>, round_ = 2
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:832: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [409 Conflict]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [409 Conflict]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 4, 409: 31, 503: 5} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"29f18e44a5da49d985b33a70d873ef79","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc7895fb030>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+__________ test_last_unit_contention_never_oversells_or_deadlocks[4] ___________
+
+shop = <payment_support.Shop object at 0x7fc7884c2270>, round_ = 4
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:832: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [409 Conflict]>, <Response [201 Created]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [503 Service Unavailable]>, <Response [409 Conflict]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 4, 409: 31, 503: 5} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"317303be82364d19b53ff910eb07c5e0","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc7886cde50>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+__________ test_last_unit_contention_never_oversells_or_deadlocks[5] ___________
+
+shop = <payment_support.Shop object at 0x7fc78809f110>, round_ = 5
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:832: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [201 Created]>, <Response [409 Conflict]>, <Response [201 Created]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 3, 409: 29, 503: 8} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"ac343e19f7784649b0c8e917f58ea09a","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc788662f60>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+__________ test_last_unit_contention_never_oversells_or_deadlocks[6] ___________
+
+shop = <payment_support.Shop object at 0x7fc788a1fd10>, round_ = 6
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:832: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 2, 409: 32, 503: 6} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"9ab4e7ffbd294ddc9a0e232e358b6ef6","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc788c05560>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+__________ test_last_unit_contention_never_oversells_or_deadlocks[7] ___________
+
+shop = <payment_support.Shop object at 0x7fc788ce05f0>, round_ = 7
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:832: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [409 Conflict]>, <Response [409 Conflict]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 3, 409: 30, 503: 7} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"f7c9ea7b8c734b17972b92ff463a1e79","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc788adaa80>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[0] ________
+
+shop = <payment_support.Shop object at 0x7fc7884237d0>, round_ = 0
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:859: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 7, 503: 23} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"1ba5f6eb4afc47b79187b24690e11898","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc788c07440>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[1] ________
+
+shop = <payment_support.Shop object at 0x7fc78962af30>, round_ = 1
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:859: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 4, 503: 26} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"c5a71d0d592b4fd4b6c9be41f357c9a6","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc788bedbe0>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[2] ________
+
+shop = <payment_support.Shop object at 0x7fc788792d50>, round_ = 2
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:859: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 9, 503: 21} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"d452170571d9457ea9f93cc91c3001c0","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc788c07370>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[3] ________
+
+shop = <payment_support.Shop object at 0x7fc788a1e0f0>, round_ = 3
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:859: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 7, 503: 23} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"fa22dabb1621477f9c93bc0241303f29","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc788bed220>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[4] ________
+
+shop = <payment_support.Shop object at 0x7fc788106b70>, round_ = 4
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:859: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 7, 503: 23} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"11de43e2b1ec4d2692c7a469f6df02f8","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc7886cf6b0>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[5] ________
+
+shop = <payment_support.Shop object at 0x7fc788b26690>, round_ = 5
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:859: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 8, 503: 22} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"d32d586cd7ba424eb7b22151b9c4bcfc","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fc7888d71d0>)
+
+tests/torture_suite/test_concurrency_torture.py:134: AssertionError
+______ test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout _______
+
+shop = <payment_support.Shop object at 0x7fc7884c3a10>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc7882141a0>
+
+    @requires_postgres
+    def test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout(shop, monkeypatch):
+        """Deterministic two-transaction version of the deadlock above.
+    
+          A (cart {V of P}):    lock_stock_rows -> V FOR UPDATE; UPDATE V ...
+          B (cart {P, V}):      lock_stock_rows -> P FOR UPDATE; V FOR UPDATE (waits on A)
+          A commit:             INSERT order_items(product_id=P) -> FK check takes
+                                FOR KEY SHARE on P (waits on B's FOR UPDATE)  => 40P01
+    
+        lock_stock_rows (app/services/orders.py) locks only the rows whose stock
+        changes, with FOR UPDATE, which conflicts with the FOR KEY SHARE that the
+        order_items -> products foreign key takes on the product of a variant
+        line at commit. Each request runs on its own thread and loop; A is held
+        right after its locks until B is seen waiting for a lock."""
+        p = shop.product(price="5.00", stock=100, name="P")
+        v = shop.variant(p, stock=100)
+        a, b = shop.buyer(), shop.buyer()
+        assert shop.add_to_cart(a, p, variant=v).status_code == 200
+        assert shop.add_to_cart(b, p).status_code == 200
+        assert shop.add_to_cart(b, p, variant=v).status_code == 200
+    
+        real_lock = orders_module.lock_stock_rows
+        a_locked = threading.Event()
+        release_a = threading.Event()
+    
+        def lock(db, lines):
+            real_lock(db, lines)
+            if list(lines) == [(p.id, v.id)] and not a_locked.is_set():
+                a_locked.set()
+                release_a.wait(timeout=20)
+    
+        monkeypatch.setattr(orders_module, "lock_stock_rows", lock)
+        results = {}
+    
+        def checkout(name, buyer):
+            async def go():
+                async with httpx2.AsyncClient(transport=_transport(), base_url="http://test",
+                                              timeout=60) as ac:
+                    return await ac.post(ORDERS, json={"shipping_address_id": buyer.address_id},
+                                         headers={**buyer.headers, "Idempotency-Key": new_key()})
+            results[name] = asyncio.run(go())
+    
+        ta = threading.Thread(target=checkout, args=("a", a))
+        tb = threading.Thread(target=checkout, args=("b", b))
+        ta.start()
+        assert a_locked.wait(timeout=20)
+        tb.start()
+        deadline = time.monotonic() + 10
+        with fresh() as db:
+            while time.monotonic() < deadline:
+                waiting = db.scalar(text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                ))
+                db.rollback()
+                if waiting:
+                    break
+                time.sleep(0.02)
+        release_a.set()
+        ta.join(timeout=60)
+        tb.join(timeout=60)
+    
+        statuses = {name: (r.status_code, r.text[:200]) for name, r in results.items()}
+>       assert results["a"].status_code == 201 and results["b"].status_code == 201, statuses
+E       AssertionError: {'b': (503, '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"7db1d271e486432ca7097a852617'), 'a': (201, '{"shipping_address_id":1,"delivery_instructions":null,"id":1,"user_id":1,"status":"new","payment_status":"pending","total_amount":"5.00","currency":"USD","created_at":"2026-10-26T20:44:34.189067Z","up')}
+E       assert (201 == 201 and 503 == 201)
+E        +  where 201 = <Response [201 Created]>.status_code
+E        +  and   503 = <Response [503 Service Unavailable]>.status_code
+
+tests/torture_suite/test_concurrency_torture.py:927: AssertionError
+__________ test_bug_webhook_stored_after_erasure_keeps_personal_data ___________
+
+shop = <payment_support.Shop object at 0x7fc78899d0d0>
+
+    def test_bug_webhook_stored_after_erasure_keeps_personal_data(shop):
+        """The anonymisation task redacts the stored webhook events about the
+        erased account's payments (redact_users_events), once: the account is
+        then excluded from every later run. An event about those payments that
+        is stored after that run - a late redelivery, a refund or dispute
+        months later, or one that simply raced the task - keeps its personal
+        data forever: neither the webhook route (app/api/v1/orders.py
+        stripe_webhook -> stripe_events.store_event) nor the worker redacts it."""
+        product = shop.product(price="12.00", stock=50)
+        buyer = shop.buyer()
+        order, attempt = _requires_action_attempt(shop, buyer, product)
+        request = shop.client.post(f"{LEGAL}/data-request",
+                                   json={"request_type": "deletion", "password": PASSWORD},
+                                   headers=buyer.headers)
+        assert request.status_code == 200, request.text
+        _backdate_erasure(buyer.user_id)
+        assert _purge() == 1
+        assert _pii_left(buyer.email) == []
+    
+        body, headers = _intent_event(attempt.payment_intent_id, order["id"], attempt.amount,
+                                      attempt.currency, buyer.email)
+        response = shop.client.post(WEBHOOK, content=body, headers=headers)
+        assert response.status_code == 200
+        run_event(json.loads(body)["id"])
+        # A later run of the task does not pick it up either.
+        assert _purge() == 0
+    
+>       assert _pii_left(buyer.email) == [], "an erased customer's data was stored after erasure"
+E       AssertionError: an erased customer's data was stored after erasure
+E       assert [('webhook_ev...fc38c9c4343')] == []
+E         
+E         Left contains one more item: ('webhook_events', 'evt_2137d3a875914fc38c9c4343')
+E         
+E         Full diff:
+E         - []
+E         + [
+E         +     (...
+E         
+E         ...Full output truncated (4 lines hidden), use '-vv' to show
+
+tests/torture_suite/test_concurrency_torture.py:1118: AssertionError
+=========================== short test summary info ============================
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_logout_racing_refresh_leaves_a_live_refresh_token
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_order_replay_racing_its_first_request_answers_cart_empty
+FAILED tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[0]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[5]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[4]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_mock_provider_refund_key_is_not_atomic
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[0]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[1]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[2]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[4]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[5]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[6]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[7]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[0]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[1]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[2]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[3]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[4]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[5]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_webhook_stored_after_erasure_keeps_personal_data
+================== 21 failed, 76 passed in 157.09s (0:02:37) ===================

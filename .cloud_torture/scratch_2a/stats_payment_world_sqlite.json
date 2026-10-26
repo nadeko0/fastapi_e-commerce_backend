@@ -1,0 +1,43 @@
+{
+ "seen": {
+  "DELETE /cart 200": 347,
+  "POST /cart/items 200": 506,
+  "POST /cart/items 409": 134,
+  "POST /orders 201": 595,
+  "POST /orders 400": 12,
+  "POST /orders/{id}/cancel 200": 22,
+  "POST /orders/{id}/cancel 404": 15,
+  "POST /orders/{id}/cancel 409": 1,
+  "POST /orders/{id}/checkout-session 200": 21,
+  "POST /orders/{id}/checkout-session 409": 33,
+  "POST /orders/{id}/pay 200": 269,
+  "POST /orders/{id}/pay 404": 19,
+  "POST /orders/{id}/pay 409": 511,
+  "POST /orders/{id}/pay 422": 7,
+  "POST /orders/{id}/refund 200": 70,
+  "POST /orders/{id}/refund 409": 201,
+  "PUT /admin/products/{id} 200": 266,
+  "PUT /admin/products/{id}/variants/{id} 200": 100,
+  "PUT /orders/{id}/status 200": 42,
+  "PUT /orders/{id}/status 409": 206,
+  "webhook charge.dispute.created 200": 12,
+  "webhook charge.refunded 200": 88,
+  "webhook checkout.session.expired 200": 10,
+  "webhook payment_intent.payment_failed 200": 5,
+  "webhook payment_intent.succeeded 200": 133,
+  "webhook refund.created 200": 85,
+  "webhook refund.failed 200": 2
+ },
+ "transitions": {
+  "attempt processing->failed": 7,
+  "attempt requires_action->succeeded": 7,
+  "order confirmed->cancelled": 3,
+  "order confirmed->processing": 19,
+  "order new->cancelled": 101,
+  "order new->confirmed": 113,
+  "payment_status paid->refunded": 15,
+  "payment_status pending->failed": 14,
+  "payment_status pending->paid": 113,
+  "refund succeeded->failed": 2
+ }
+}

@@ -1,0 +1,28 @@
+{
+ "seen": {
+  "DELETE /admin/products/{id} 204": 42,
+  "DELETE /cart 200": 181,
+  "DELETE /cart/items/{id} 200": 64,
+  "DELETE /cart/items/{id} 404": 628,
+  "GET /cart 200": 10914,
+  "POST /cart/items 200": 326,
+  "POST /cart/items 404": 54,
+  "POST /cart/items 409": 183,
+  "POST /cart/items 422": 169,
+  "POST /cart/validate 200": 304,
+  "POST /orders 201": 78,
+  "POST /orders 401": 69,
+  "POST /orders 409": 12,
+  "POST /orders/{id}/cancel 200": 54,
+  "POST /users/login 200": 70,
+  "PUT /admin/products/{id} 200": 262,
+  "PUT /admin/products/{id} 404": 16,
+  "PUT /admin/products/{id}/variants/{id} 200": 823,
+  "PUT /admin/products/{id}/variants/{id} 404": 5,
+  "PUT /cart/items/{id} 200": 24,
+  "PUT /cart/items/{id} 404": 185,
+  "PUT /cart/items/{id} 409": 30,
+  "PUT /cart/items/{id} 422": 132
+ },
+ "transitions": {}
+}

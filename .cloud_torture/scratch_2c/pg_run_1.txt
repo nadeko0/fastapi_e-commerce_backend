@@ -1,0 +1,1021 @@
+============================= test session starts ==============================
+collecting ... collected 84 items
+
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[0] PASSED [  1%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[1] PASSED [  2%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[2] PASSED [  3%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[3] PASSED [  4%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[4] PASSED [  5%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_token_reuse_race_has_one_winner_and_burns_the_family[5] PASSED [  7%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[0] PASSED [  8%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[1] PASSED [  9%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[2] PASSED [ 10%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[3] PASSED [ 11%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[4] PASSED [ 13%]
+tests/torture_suite/test_concurrency_torture.py::test_refresh_racing_logout_leaves_no_live_refresh_token[5] PASSED [ 14%]
+tests/torture_suite/test_concurrency_torture.py::test_bug_logout_racing_refresh_leaves_a_live_refresh_token FAILED [ 15%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[0] PASSED [ 16%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[1] PASSED [ 17%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[2] PASSED [ 19%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[3] PASSED [ 20%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[4] PASSED [ 21%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_twins_create_one_order[5] PASSED [ 22%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[0] PASSED [ 23%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[1] PASSED [ 25%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[2] PASSED [ 26%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[3] PASSED [ 27%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[4] PASSED [ 28%]
+tests/torture_suite/test_concurrency_torture.py::test_order_same_key_different_address_executes_once[5] PASSED [ 29%]
+tests/torture_suite/test_concurrency_torture.py::test_bug_order_replay_racing_its_first_request_answers_cart_empty FAILED [ 30%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[0] PASSED [ 32%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[1] PASSED [ 33%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[2] PASSED [ 34%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[3] PASSED [ 35%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[4] PASSED [ 36%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_twins_charge_once[5] PASSED [ 38%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[0] PASSED [ 39%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[1] PASSED [ 40%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[2] PASSED [ 41%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[3] PASSED [ 42%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[4] PASSED [ 44%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[5] PASSED [ 45%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[0] PASSED [ 46%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[1] PASSED [ 47%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[2] PASSED [ 48%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[3] PASSED [ 50%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[4] PASSED [ 51%]
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[5] PASSED [ 52%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[0] PASSED [ 53%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[1] PASSED [ 54%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[2] PASSED [ 55%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[3] PASSED [ 57%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[4] PASSED [ 58%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[5] PASSED [ 59%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[0] PASSED [ 60%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[1] PASSED [ 61%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[2] PASSED [ 63%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[3] PASSED [ 64%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[4] FAILED [ 65%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[5] PASSED [ 66%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[0] PASSED [ 67%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[1] PASSED [ 69%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[2] PASSED [ 70%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[3] PASSED [ 71%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[4] PASSED [ 72%]
+tests/torture_suite/test_concurrency_torture.py::test_refund_distinct_keys_never_over_refund[5] PASSED [ 73%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[0] FAILED [ 75%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[1] FAILED [ 76%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[2] FAILED [ 77%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[3] FAILED [ 78%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[4] FAILED [ 79%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[5] PASSED [ 80%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[6] FAILED [ 82%]
+tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[7] FAILED [ 83%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[0] FAILED [ 84%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[1] FAILED [ 85%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[2] FAILED [ 86%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[3] FAILED [ 88%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[4] FAILED [ 89%]
+tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[5] FAILED [ 90%]
+tests/torture_suite/test_concurrency_torture.py::test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout FAILED [ 91%]
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[0] PASSED [ 92%]
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[1] PASSED [ 94%]
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[2] PASSED [ 95%]
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[3] PASSED [ 96%]
+tests/torture_suite/test_concurrency_torture.py::test_erasure_racing_the_accounts_activity[4] PASSED [ 97%]
+tests/torture_suite/test_concurrency_torture.py::test_bug_webhook_stored_after_erasure_keeps_personal_data FAILED [ 98%]
+tests/torture_suite/test_concurrency_torture.py::test_harness_runs_requests_concurrently_on_one_loop PASSED [100%]
+
+=================================== FAILURES ===================================
+__________ test_bug_logout_racing_refresh_leaves_a_live_refresh_token __________
+
+shop = <payment_support.Shop object at 0x7fd84b7f5630>
+fake_redis = <fakeredis._clients._sync.FakeRedis(<redis.connection.ConnectionPool(<fakeredis._clients._sync.FakeRedisConnection(ver...type=None),orig_host_address=e97a951b73e945d893c50321113da51e,orig_socket_timeout=5,orig_socket_connect_timeout=5)>)>)>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fd8512ffa10>
+
+    @requires_postgres
+    def test_bug_logout_racing_refresh_leaves_a_live_refresh_token(
+        shop, fake_redis, monkeypatch
+    ):
+        """Deterministic regression for the interleaving the burst above can hit:
+    
+          logout:  SMEMBERS refresh_family:F -> {J1}     (slow reply)
+          refresh: SET refresh_active:J2; SADD F J2; GET+DEL refresh_active:J1 -> ok
+          logout:  DEL refresh_active:J1; DEL refresh_family:F
+          => logout answers 200, and J2 (returned by refresh) is still redeemable.
+    
+        app/services/redis_async.py revoke_refresh_family reads the members and
+        deletes them in two round trips with no atomicity, and
+        rotate_refresh_token registers the new jti before redeeming the old one.
+        """
+        server = fake_redis.connection_pool.connection_kwargs["server"]
+        monkeypatch.setattr(
+            redis_async_module, "_create_client",
+            lambda: _SlowSmembersRedis(server=server, decode_responses=True),
+        )
+        buyer = shop.buyer()
+        tokens = login(shop, buyer.email)
+        family = claims(tokens["refresh_token"])["family"]
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    
+        async def scenario():
+            async with httpx2.AsyncClient(transport=_transport(), base_url="http://test") as ac:
+                logout = asyncio.create_task(ac.post(
+                    f"{USERS}/logout", json={"refresh_token": tokens["refresh_token"]},
+                    headers=headers,
+                ))
+                await asyncio.sleep(_SlowSmembersRedis.delay / 4)  # logout is inside SMEMBERS
+                refresh = await ac.post(
+                    f"{USERS}/refresh", json={"refresh_token": tokens["refresh_token"]}
+                )
+                return await logout, refresh
+    
+        logout, refresh = asyncio.run(scenario())
+    
+        assert logout.status_code == 200, logout.text
+        if refresh.status_code == 200:
+            # The token handed out while logout ran must be dead once logout is done.
+            survivor = refresh.json()["refresh_token"]
+            reuse = shop.client.post(f"{USERS}/refresh", json={"refresh_token": survivor})
+>           assert reuse.status_code == 401, (
+                f"refresh token rotated during logout survived the logout: {reuse.status_code}"
+            )
+E           AssertionError: refresh token rotated during logout survived the logout: 200
+E           assert 200 == 401
+E            +  where 200 = <Response [200 OK]>.status_code
+
+tests/torture_suite/test_concurrency_torture.py:307: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+______ test_bug_order_replay_racing_its_first_request_answers_cart_empty _______
+
+shop = <payment_support.Shop object at 0x7fd84ac23a10>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fd84bd2d1d0>
+
+    @requires_postgres
+    def test_bug_order_replay_racing_its_first_request_answers_cart_empty(shop, monkeypatch):
+        """A retry of POST /orders with the key of a request still in flight.
+        Interleaving (app/api/v1/orders.py create_order):
+    
+          retry:  _order_by_idempotency_key -> None   (first not committed yet)
+          first:  commit; remove_ordered_items_atomic  (cart now empty)
+          retry:  redis.get_cart -> empty -> 400 "Cart is empty"
+    
+        The documented answer to a reused key is the first order (201). Widened
+        here by holding the retry right after its key lookup until the first
+        request has finished."""
+        product = shop.product(price="10.00", stock=50)
+        buyer = shop.buyer()
+        assert shop.add_to_cart(buyer, product, quantity=1).status_code == 200
+        key = new_key()
+        real_lookup = orders_module._order_by_idempotency_key
+        state = {"held": False}
+    
+        async def scenario():
+            retry_paused = asyncio.Event()
+            first_done = asyncio.Event()
+    
+            async def lookup(db, user_id, idempotency_key):
+                found = await real_lookup(db, user_id, idempotency_key)
+                if found is None and not state["held"]:
+                    state["held"] = True
+                    retry_paused.set()
+                    await first_done.wait()
+                return found
+    
+            monkeypatch.setattr(orders_module, "_order_by_idempotency_key", lookup)
+            request = {"json": {"shipping_address_id": buyer.address_id},
+                       "headers": {**buyer.headers, "Idempotency-Key": key}}
+            async with httpx2.AsyncClient(transport=_transport(), base_url="http://test") as ac:
+                retry = asyncio.create_task(ac.post(ORDERS, **request))
+                await retry_paused.wait()
+                first = await ac.post(ORDERS, **request)
+                first_done.set()
+                return first, await retry
+    
+        first, retry = asyncio.run(scenario())
+    
+        assert first.status_code == 201, first.text
+        assert _order_count(buyer.user_id) == 1
+>       assert retry.status_code == 201, (
+            f"a replay of the in-flight key answered {retry.status_code}: {retry.text}"
+        )
+E       AssertionError: a replay of the in-flight key answered 400: {"type":"about:blank","title":"Bad Request","status":400,"detail":"Cart is empty","instance":"/api/v1/orders","request_id":"d7a1b67397314c76af88aa85ba45fb14"}
+E       assert 400 == 201
+E        +  where 400 = <Response [400 Bad Request]>.status_code
+
+tests/torture_suite/test_concurrency_torture.py:432: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+____________ test_refund_same_key_different_amounts_execute_once[4] ____________
+
+shop = <payment_support.Shop object at 0x7fd850088830>, round_ = 4
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_refund_same_key_different_amounts_execute_once(shop, round_):
+        """Same key, two partial amounts: one refund; the other amount's requests
+        are refused (409 idempotency-key-in-use from the provider's key check)."""
+        buyer, order, admin = _paid_order(shop)
+        key = new_key()
+        amounts = ["1.00", "2.00"]
+    
+        responses = burst([
+            ("POST", f"{ORDERS}/{order['id']}/refund",
+             {"json": {"amount": amounts[i % 2]}, "headers": {**admin, "Idempotency-Key": key}})
+            for i in range(N)
+        ])
+    
+        check_responses(responses, {200, 409})
+        refunds = _refunds(order["id"])
+>       assert len(refunds) == 1
+E       assert 2 == 1
+E        +  where 2 = len([<app.models.payment_ledger.PaymentRefund object at 0x7fd8514c7c20>, <app.models.payment_ledger.PaymentRefund object at 0x7fd8514c6a40>])
+
+tests/torture_suite/test_concurrency_torture.py:595: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+__________ test_last_unit_contention_never_oversells_or_deadlocks[0] ___________
+
+shop = <payment_support.Shop object at 0x7fd85008a810>, round_ = 0
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:729: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [503 Service Unavailable]>, <Response [409 Conflict]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 5, 409: 31, 503: 4} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"9b6828c6602142f797fe1f7499174f9e","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd84bf2f2a0>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+__________ test_last_unit_contention_never_oversells_or_deadlocks[1] ___________
+
+shop = <payment_support.Shop object at 0x7fd84991b710>, round_ = 1
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:729: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [201 Created]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [201 Created]>, <Response [409 Conflict]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 4, 409: 34, 503: 2} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"965f1e1a6b8f4d7092b6437c2ebc04f8","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd8514c3100>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+__________ test_last_unit_contention_never_oversells_or_deadlocks[2] ___________
+
+shop = <payment_support.Shop object at 0x7fd84be32a50>, round_ = 2
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:729: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [409 Conflict]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [201 Created]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 4, 409: 30, 503: 6} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"3e9c46ab82b0441fbe283fe8cf076505","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd851326810>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+__________ test_last_unit_contention_never_oversells_or_deadlocks[3] ___________
+
+shop = <payment_support.Shop object at 0x7fd84a442b10>, round_ = 3
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:729: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [409 Conflict]>, <Response [201 Created]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 3, 409: 34, 503: 3} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"20a4fb24ed0f4f93b9d6a1d3812a2bc4","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd84bd07920>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+__________ test_last_unit_contention_never_oversells_or_deadlocks[4] ___________
+
+shop = <payment_support.Shop object at 0x7fd84bd32390>, round_ = 4
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:729: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [201 Created]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 3, 409: 34, 503: 3} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"fc141c1bc0fe4b7abf107119adb1bbd6","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd84bc4adc0>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+__________ test_last_unit_contention_never_oversells_or_deadlocks[6] ___________
+
+shop = <payment_support.Shop object at 0x7fd8501e4290>, round_ = 6
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:729: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [201 Created]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 4, 409: 30, 503: 6} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"8cf6cd537e7a4c5ba3a7f445b396e712","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd84ae79e50>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+__________ test_last_unit_contention_never_oversells_or_deadlocks[7] ___________
+
+shop = <payment_support.Shop object at 0x7fd85008aff0>, round_ = 7
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(8))
+    def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
+        """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
+        and variant lines, the same product both ways), each cart filled in a
+        random line order (A,B vs B,A), all checking out at once."""
+        rng = random.Random(1000 + round_)
+        p1 = shop.product(price="5.00", stock=1, name="P1")
+        p2 = shop.product(price="6.00", stock=2, name="P2")
+        p3 = shop.product(price="7.00", stock=3, name="P3")
+        p4 = shop.product(price="8.00", stock=1, name="P4")
+        v4a = shop.variant(p4, stock=1)
+        v4b = shop.variant(p4, stock=2)
+        p5 = shop.product(price="9.00", stock=2, name="P5")
+        pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+        initial = _stock_rows()
+        carts = []
+        for _ in range(40):
+            picks = rng.sample(pool, rng.choice([2, 3]))
+            lines = []
+            for product, variant in picks:
+                stock = (variant or product).stock_quantity
+                lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       check_responses(responses, {201, 409})
+
+tests/torture_suite/test_concurrency_torture.py:729: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [409 Conflict]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201, 409}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 4, 409: 32, 503: 4} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"85f480f97b50440c82a2c3e157246a17","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd8514c3100>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[0] ________
+
+shop = <payment_support.Shop object at 0x7fd8501e50d0>, round_ = 0
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:756: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 13, 503: 17} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"3b6c5aea11974f5d8fafb8cd34055eab","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd84bf2dbe0>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[1] ________
+
+shop = <payment_support.Shop object at 0x7fd849ad5730>, round_ = 1
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:756: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 7, 503: 23} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"3067251d23fa42d39f3e27791293c8d3","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd84ad9e8e0>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[2] ________
+
+shop = <payment_support.Shop object at 0x7fd850089490>, round_ = 2
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:756: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 9, 503: 21} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"858642388d5e432db569f995caa271e0","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd84a43f510>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[3] ________
+
+shop = <payment_support.Shop object at 0x7fd84be32810>, round_ = 3
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:756: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 7, 503: 23} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"ef45d3ed39794e9b9d0a57e09fc7196b","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd84bff5630>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[4] ________
+
+shop = <payment_support.Shop object at 0x7fd84a534bf0>, round_ = 4
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:756: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [503 Service Unavailable]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 7, 503: 23} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"a2f1594ab9b748cdb12b286b3c1ccadf","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd849b17d30>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+________ test_plain_and_variant_lines_of_one_product_do_not_deadlock[5] ________
+
+shop = <payment_support.Shop object at 0x7fd84a40f710>, round_ = 5
+
+    @requires_postgres
+    @pytest.mark.parametrize("round_", range(ROUNDS))
+    def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
+        """Plenty of stock, so every checkout must succeed. Half the carts hold
+        a variant of P only, half hold P itself AND that variant. lock_stock_rows
+        promises consistent lock ordering (products by id, then variants by id)
+        so checkouts cannot deadlock (SQLSTATE 40P01); a deadlock surfaces as a
+        503 'database temporarily unavailable'."""
+        p = shop.product(price="5.00", stock=1000, name="P")
+        v = shop.variant(p, stock=1000)
+        q = shop.product(price="6.00", stock=1000, name="Q")
+        initial = _stock_rows()
+        carts = []
+        for i in range(N):
+            if i % 2:
+                lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
+            else:
+                lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            carts.append((shop.buyer(), lines))
+    
+        responses = _checkout_burst(shop, carts)
+    
+>       hist = check_responses(responses, {201})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/torture_suite/test_concurrency_torture.py:756: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+responses = [<Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, <Response [503 Service Unavailable]>, <Response [201 Created]>, ...]
+allowed = {201}
+
+    def check_responses(responses, allowed):
+        """No 5xx, nothing outside `allowed`, every error is problem+json."""
+        hist = histogram(responses)
+        bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
+>       assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
+E       AssertionError: 5xx in burst: {201: 9, 503: 21} {503: '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"d937d6a528794759bb097aca895493a0","retry_after":5}'}
+E       assert not True
+E        +  where True = any(<generator object check_responses.<locals>.<genexpr> at 0x7fd849bb93c0>)
+
+tests/torture_suite/test_concurrency_torture.py:133: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+______ test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout _______
+
+shop = <payment_support.Shop object at 0x7fd84bd30110>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fd85139c750>
+
+    @requires_postgres
+    def test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout(shop, monkeypatch):
+        """Deterministic two-transaction version of the deadlock above.
+    
+          A (cart {V of P}):    lock_stock_rows -> V FOR UPDATE; UPDATE V ...
+          B (cart {P, V}):      lock_stock_rows -> P FOR UPDATE; V FOR UPDATE (waits on A)
+          A commit:             INSERT order_items(product_id=P) -> FK check takes
+                                FOR KEY SHARE on P (waits on B's FOR UPDATE)  => 40P01
+    
+        lock_stock_rows (app/services/orders.py) locks only the rows whose stock
+        changes, with FOR UPDATE, which conflicts with the FOR KEY SHARE that the
+        order_items -> products foreign key takes on the product of a variant
+        line at commit. Each request runs on its own thread and loop; A is held
+        right after its locks until B is seen waiting for a lock."""
+        p = shop.product(price="5.00", stock=100, name="P")
+        v = shop.variant(p, stock=100)
+        a, b = shop.buyer(), shop.buyer()
+        assert shop.add_to_cart(a, p, variant=v).status_code == 200
+        assert shop.add_to_cart(b, p).status_code == 200
+        assert shop.add_to_cart(b, p, variant=v).status_code == 200
+    
+        real_lock = orders_module.lock_stock_rows
+        a_locked = threading.Event()
+        release_a = threading.Event()
+    
+        def lock(db, lines):
+            real_lock(db, lines)
+            if list(lines) == [(p.id, v.id)] and not a_locked.is_set():
+                a_locked.set()
+                release_a.wait(timeout=20)
+    
+        monkeypatch.setattr(orders_module, "lock_stock_rows", lock)
+        results = {}
+    
+        def checkout(name, buyer):
+            async def go():
+                async with httpx2.AsyncClient(transport=_transport(), base_url="http://test",
+                                              timeout=60) as ac:
+                    return await ac.post(ORDERS, json={"shipping_address_id": buyer.address_id},
+                                         headers={**buyer.headers, "Idempotency-Key": new_key()})
+            results[name] = asyncio.run(go())
+    
+        ta = threading.Thread(target=checkout, args=("a", a))
+        tb = threading.Thread(target=checkout, args=("b", b))
+        ta.start()
+        assert a_locked.wait(timeout=20)
+        tb.start()
+        deadline = time.monotonic() + 10
+        with fresh() as db:
+            while time.monotonic() < deadline:
+                waiting = db.scalar(text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                ))
+                db.rollback()
+                if waiting:
+                    break
+                time.sleep(0.02)
+        release_a.set()
+        ta.join(timeout=60)
+        tb.join(timeout=60)
+    
+        statuses = {name: (r.status_code, r.text[:200]) for name, r in results.items()}
+>       assert results["a"].status_code == 201 and results["b"].status_code == 201, statuses
+E       AssertionError: {'b': (503, '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"The database is temporarily unavailable, please retry","instance":"/api/v1/orders","request_id":"03bd7af3029e45a79955c35a83ac'), 'a': (201, '{"shipping_address_id":1,"delivery_instructions":null,"id":1,"user_id":1,"status":"new","payment_status":"pending","total_amount":"5.00","currency":"USD","created_at":"2026-10-26T20:34:33.539692Z","up')}
+E       assert (201 == 201 and 503 == 201)
+E        +  where 201 = <Response [201 Created]>.status_code
+E        +  and   503 = <Response [503 Service Unavailable]>.status_code
+
+tests/torture_suite/test_concurrency_torture.py:824: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+__________ test_bug_webhook_stored_after_erasure_keeps_personal_data ___________
+
+shop = <payment_support.Shop object at 0x7fd851347d10>
+
+    @requires_postgres
+    def test_bug_webhook_stored_after_erasure_keeps_personal_data(shop):
+        """The anonymisation task redacts the stored webhook events about the
+        erased account's payments (redact_users_events), once: the account is
+        then excluded from every later run. An event about those payments that
+        is stored after that run - a late redelivery, a refund or dispute
+        months later, or one that simply raced the task - keeps its personal
+        data forever: neither the webhook route (app/api/v1/orders.py
+        stripe_webhook -> stripe_events.store_event) nor the worker redacts it."""
+        product = shop.product(price="12.00", stock=50)
+        buyer = shop.buyer()
+        order, attempt = _requires_action_attempt(shop, buyer, product)
+        request = shop.client.post(f"{LEGAL}/data-request",
+                                   json={"request_type": "deletion", "password": PASSWORD},
+                                   headers=buyer.headers)
+        assert request.status_code == 200, request.text
+        _backdate_erasure(buyer.user_id)
+        assert _purge() == 1
+        assert _pii_left(buyer.email) == []
+    
+        body, headers = _intent_event(attempt.payment_intent_id, order["id"], attempt.amount,
+                                      attempt.currency, buyer.email)
+        response = shop.client.post(WEBHOOK, content=body, headers=headers)
+        assert response.status_code == 200
+        run_event(json.loads(body)["id"])
+        # A later run of the task does not pick it up either.
+        assert _purge() == 0
+    
+>       assert _pii_left(buyer.email) == [], "an erased customer's data was stored after erasure"
+E       AssertionError: an erased customer's data was stored after erasure
+E       assert [('webhook_ev...5709cdc76d6')] == []
+E         
+E         Left contains one more item: ('webhook_events', 'evt_15fcd63e1e7145709cdc76d6')
+E         
+E         Full diff:
+E         - []
+E         + [
+E         +     (...
+E         
+E         ...Full output truncated (4 lines hidden), use '-vv' to show
+
+tests/torture_suite/test_concurrency_torture.py:1016: AssertionError
+----------------------------- Captured stdout call -----------------------------
+--------------------------- Captured stdout teardown ---------------------------
+=========================== short test summary info ============================
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_logout_racing_refresh_leaves_a_live_refresh_token
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_order_replay_racing_its_first_request_answers_cart_empty
+FAILED tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[4]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[0]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[1]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[2]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[3]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[4]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[6]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_last_unit_contention_never_oversells_or_deadlocks[7]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[0]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[1]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[2]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[3]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[4]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_plain_and_variant_lines_of_one_product_do_not_deadlock[5]
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_webhook_stored_after_erasure_keeps_personal_data
+================== 18 failed, 66 passed in 128.03s (0:02:08) ===================
