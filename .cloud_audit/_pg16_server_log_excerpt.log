@@ -1,0 +1,11 @@
+2026-10-26 20:57:39.487 UTC [1252] ERROR:  deadlock detected
+2026-10-26 20:57:39.487 UTC [1252] DETAIL:  Process 1252 waits for ShareLock on transaction 983; blocked by process 1247.
+	Process 1247 waits for ShareLock on transaction 984; blocked by process 1252.
+--
+2026-10-26 20:57:40.710 UTC [1279] ERROR:  deadlock detected
+2026-10-26 20:57:40.710 UTC [1279] DETAIL:  Process 1279 waits for ShareLock on transaction 994; blocked by process 1274.
+	Process 1274 waits for ShareLock on transaction 995; blocked by process 1279.
+--
+2026-10-26 20:57:41.080 UTC [1304] FATAL:  terminating connection due to idle-in-transaction timeout
+2026-10-26 20:57:41.288 UTC [865] LOG:  checkpoint starting: immediate force wait
+2026-10-26 20:57:41.291 UTC [865] LOG:  checkpoint complete: wrote 6 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.001 s, total=0.004 s; sync files=5, longest=0.001 s, average=0.001 s; distance=5806 kB, estimate=5806 kB; lsn=0/1A9AE60, redo lsn=0/1A9AE28

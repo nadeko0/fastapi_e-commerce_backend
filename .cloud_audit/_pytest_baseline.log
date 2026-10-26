@@ -1,0 +1,162 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  6%]
+........................................................................ [  8%]
+........................................................................ [  9%]
+......ssssssss.......................................................... [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+........................................................................ [ 14%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+........................................................................ [ 18%]
+........................................................................ [ 20%]
+........................................................................ [ 21%]
+........................................................................ [ 22%]
+........................................................................ [ 24%]
+........................................................................ [ 25%]
+........................s............................................... [ 27%]
+.....................................................sssssssssssssssssss [ 28%]
+ssssssssssss..................................................s......... [ 29%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+...............................................................sssssssss [ 33%]
+sssssssssssssssssssssssssssssss.............s.s.s..s.................... [ 35%]
+...s.s..s..s....................s..s.s.s.s.s.s.s..s.s.s..s.............. [ 36%]
+......s................s...........................................s.... [ 37%]
+...................s..s.s.s.s........................................... [ 39%]
+........................................................................ [ 40%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 56%]
+........................................................................ [ 58%]
+........................................................................ [ 59%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 90%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+...................................................................      [100%]
+=========================== short test summary info ============================
+SKIPPED [1] tests/integration/test_checkout_session_live_stripe.py:84: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Checkout Session integration suite.
+SKIPPED [1] tests/integration/test_checkout_session_live_stripe.py:108: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Checkout Session integration suite.
+SKIPPED [1] tests/integration/test_checkout_session_live_stripe.py:124: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Checkout Session integration suite.
+SKIPPED [1] tests/integration/test_checkout_session_live_stripe.py:144: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Checkout Session integration suite.
+SKIPPED [1] tests/integration/test_checkout_session_live_stripe.py:157: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Checkout Session integration suite.
+SKIPPED [1] tests/integration/test_checkout_session_live_stripe.py:167: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Checkout Session integration suite.
+SKIPPED [1] tests/integration/test_checkout_session_live_stripe.py:190: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Checkout Session integration suite.
+SKIPPED [1] tests/integration/test_checkout_session_live_stripe.py:206: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Checkout Session integration suite.
+SKIPPED [1] tests/integration/test_idempotency_fingerprint.py:348: two real concurrent requests need row locks
+SKIPPED [1] tests/integration/test_postgres_constraint_names.py:58: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_constraint_names.py:65: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_constraint_names.py:86: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_constraint_names.py:107: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_data_migrations.py:108: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_data_migrations.py:149: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_data_migrations.py:171: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_data_migrations.py:195: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_indexes.py:24: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_indexes.py:41: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_only.py:88: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_only.py:117: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_only.py:190: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [2] tests/integration/test_postgres_only.py:210: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [6] tests/integration/test_postgres_only.py:236: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_only.py:256: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_only.py:272: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_only.py:287: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_only.py:336: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_only.py:387: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_pool_recovery.py:64: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_pool_recovery.py:71: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_pool_recovery.py:88: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_pool_recovery.py:103: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_postgres_statement_timeout.py:49: needs a real PostgreSQL server: set TEST_DATABASE_URL=postgresql+psycopg://...
+SKIPPED [1] tests/integration/test_reconciliation_live_stripe.py:66: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live reconciliation test.
+SKIPPED [1] tests/integration/test_payment_live_journey.py:138: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe journey.
+SKIPPED [9] tests/integration/test_payment_live_journey.py:171: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe journey.
+SKIPPED [9] tests/integration/test_payment_live_journey.py:186: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe journey.
+SKIPPED [4] tests/integration/test_payment_live_journey.py:205: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe journey.
+SKIPPED [1] tests/integration/test_payment_live_journey.py:220: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe journey.
+SKIPPED [2] tests/integration/test_payment_live_journey.py:233: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe journey.
+SKIPPED [1] tests/integration/test_payment_live_journey.py:253: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe journey.
+SKIPPED [1] tests/integration/test_payment_live_journey.py:272: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe journey.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:95: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:115: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:135: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:161: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:176: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:189: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:203: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:216: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:261: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:269: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:278: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_payment_live_stripe.py:285: No real Stripe test-mode STRIPE_SECRET_KEY in the environment (set STRIPE_SECRET_KEY or provide .env.test) - skipping the live Stripe integration suite.
+SKIPPED [1] tests/integration/test_real_redis_parity.py:156: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [1] tests/integration/test_real_redis_parity.py:178: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [1] tests/integration/test_real_redis_parity.py:190: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [1] tests/integration/test_real_redis_parity.py:201: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [1] tests/integration/test_real_redis_parity.py:215: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [1] tests/integration/test_real_redis_parity.py:230: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [1] tests/integration/test_real_redis_parity.py:242: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [1] tests/integration/test_real_redis_parity.py:265: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [1] tests/integration/test_real_redis_parity.py:282: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [1] tests/integration/test_real_redis_parity.py:296: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [2] tests/integration/test_real_redis_parity.py:316: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [2] tests/integration/test_real_redis_parity.py:337: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [2] tests/integration/test_real_redis_parity.py:356: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [2] tests/integration/test_real_redis_parity.py:379: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [2] tests/integration/test_real_redis_parity.py:411: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [2] tests/integration/test_real_redis_parity.py:423: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [2] tests/integration/test_real_redis_parity.py:434: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [2] tests/integration/test_real_redis_parity.py:447: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+SKIPPED [2] tests/integration/test_real_redis_parity.py:466: set REAL_REDIS_URL=redis://host:port/db to run on a real Redis
+5214 passed, 109 skipped in 136.60s (0:02:16)
+{"timestamp": "2026-10-26T20:08:09.594Z", "level": "INFO", "logger": "app.core.logging_config", "message": "Starting application in development environment (Version: 4.0.3)"}
+{"timestamp": "2026-10-26T20:08:09.594Z", "level": "INFO", "logger": "app.core.logging_config", "message": "Log file disabled (LOG_FILE is not set); logging to stdout only"}
+{"timestamp": "2026-10-26T20:08:09.594Z", "level": "INFO", "logger": "app.main", "message": "Initializing FastAPI application"}
+{"timestamp": "2026-10-26T20:08:09.594Z", "level": "INFO", "logger": "app.main", "message": "Configuring FastAPI middleware, CORS, and rate limiting"}
+{"timestamp": "2026-10-26T20:08:09.594Z", "level": "INFO", "logger": "app.main", "message": "Initializing FastAPI application with rate limiting"}
+{"timestamp": "2026-10-26T20:08:09.595Z", "level": "INFO", "logger": "app.main", "message": "Initializing service connections"}
+{"timestamp": "2026-10-26T20:08:09.596Z", "level": "INFO", "logger": "app.main", "message": "Redis service initialized"}
+EXIT=0

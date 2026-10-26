@@ -1,0 +1,3 @@
+$ uv run pytest tests/ -q -n 4 -m "not timing_sensitive" -p no:cacheprovider
+5244 passed, 113 skipped in 135.54s (0:02:15)
+EXIT=0

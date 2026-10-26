@@ -1,0 +1,160 @@
+[main]	INFO	profile include tests: None
+[main]	INFO	profile exclude tests: None
+[main]	INFO	cli include tests: None
+[main]	INFO	cli exclude tests: None
+[main]	INFO	running on Python 3.13.17
+Working... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:00
+Run started:2026-10-26 20:08:20.740451+00:00
+
+Test results:
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'bearer'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b106_hardcoded_password_funcarg.html
+   Location: app/api/v1/users.py:408:11
+407	        refresh_token=refresh_token,
+408	        token_type="bearer"
+409	    )
+410	
+411	@router.post(
+412	    "/refresh",
+413	    response_model=Token,
+
+--------------------------------------------------
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'bearer'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b106_hardcoded_password_funcarg.html
+   Location: app/api/v1/users.py:445:11
+444	        refresh_token=new_refresh_token,
+445	        token_type="bearer"
+446	    )
+447	
+448	# One shared default: pydantic models are mutable, so a call in the signature is
+449	# flagged (B008); logout only reads it.
+450	_NO_LOGOUT_BODY = LogoutRequest()
+
+--------------------------------------------------
+>> Issue: [B104:hardcoded_bind_all_interfaces] Possible binding to all interfaces.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-605 (https://cwe.mitre.org/data/definitions/605.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b104_hardcoded_bind_all_interfaces.html
+   Location: app/core/config.py:114:16
+113	
+114	    HOST: str = "0.0.0.0"
+115	    PORT: int = 8000
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'access'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/core/security.py:338:44
+337	
+338	        if user_id is None or token_type != "access":
+339	            raise credentials_exception
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'your-current-password'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/schemas/legal.py:59:20
+58	                    "reason": "No longer using the shop",
+59	                    "password": "your-current-password"
+60	                }],
+61	                # require_password_for_deletion, as JSON Schema.
+62	                "if": {"properties": {"request_type": {"const": "deletion"}}, "required": ["request_type"]},
+63	                "then": {"required": ["password"], "properties": {"password": {"type": "string", "minLength": 1}}},
+64	            },
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: '/reset-password'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/email/messages.py:22:27
+21	VERIFY_EMAIL_PAGE_PATH = "/verify-email"
+22	RESET_PASSWORD_PAGE_PATH = "/reset-password"
+23	
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'pm_card_visa_chargeDeclined'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/payment/stripe_provider.py:48:16
+47	# Stripe's own decline card successfully.
+48	TOKEN_DECLINE = "pm_card_visa_chargeDeclined"
+49	TOKEN_REQUIRES_ACTION = "pm_card_authenticationRequired"
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'pm_card_authenticationRequired'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/payment/stripe_provider.py:49:24
+48	TOKEN_DECLINE = "pm_card_visa_chargeDeclined"
+49	TOKEN_REQUIRES_ACTION = "pm_card_authenticationRequired"
+50	TOKEN_SUCCESS_DEFAULT = "pm_card_visa"
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'pm_card_visa'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/payment/stripe_provider.py:50:24
+49	TOKEN_REQUIRES_ACTION = "pm_card_authenticationRequired"
+50	TOKEN_SUCCESS_DEFAULT = "pm_card_visa"
+51	TOKEN_PENDING_REFUND = "pm_card_pendingRefund"
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'pm_card_pendingRefund'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/payment/stripe_provider.py:51:23
+50	TOKEN_SUCCESS_DEFAULT = "pm_card_visa"
+51	TOKEN_PENDING_REFUND = "pm_card_pendingRefund"
+52	TOKEN_REFUND_FAIL = "pm_card_refundFail"
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'pm_card_refundFail'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/payment/stripe_provider.py:52:20
+51	TOKEN_PENDING_REFUND = "pm_card_pendingRefund"
+52	TOKEN_REFUND_FAIL = "pm_card_refundFail"
+53	
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'pwd_changed:'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html
+   Location: app/services/redis_async.py:59:30
+58	BLACKLIST_KEY_PREFIX = "blacklist:"
+59	PASSWORD_CHANGED_KEY_PREFIX = "pwd_changed:"
+60	
+
+--------------------------------------------------
+
+Code scanned:
+	Total lines of code: 13693
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 0
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 11
+		Medium: 1
+		High: 0
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 0
+		Medium: 12
+		High: 0
+Files skipped (0):
+exit=1
