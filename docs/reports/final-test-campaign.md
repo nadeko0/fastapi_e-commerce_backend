@@ -1,6 +1,6 @@
 # Final Test Campaign: Release v4.0.0 to v4.0.3
 
-This report documents the final testing campaign conducted from 24 to 26 October 2026 for the FastAPI e-commerce backend. The campaign began against release candidate v4.0.0. Identified defects were remediated across patch releases v4.0.1 and v4.0.2, followed by v4.0.3 which added test cases for mutation coverage gaps without changing application code. The current stable release is **v4.0.3** (commit `43266ce`), with all 16 CI jobs passing, 0 Dependabot alerts, and 0 CodeQL alerts.
+This report documents the final testing campaign conducted from 24 to 26 October 2026 for the FastAPI e-commerce backend. The campaign began against release candidate v4.0.0. Identified defects were remediated across patch releases v4.0.1 and v4.0.2, followed by v4.0.3 which added test cases for mutation coverage gaps without changing application code. The current stable release is **v4.0.3** (commit `76e10e3`), with all 16 CI jobs passing, 0 Dependabot alerts, and 0 CodeQL alerts.
 
 All seven exit criteria groups were met. The long-duration soak test met its stability target with a caveat regarding allocator warm-up, and all findings were resolved and released.
 

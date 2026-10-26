@@ -13,7 +13,7 @@ Exit criteria:
 ## Environment
 
 - **Host Machine:** WSL2 Ubuntu on a multi-core workstation (4 CPU cores and 8 GB RAM allocated to the VM).
-- **Target Repository State:** Git clone checked out at tag `v4.0.0` (commit `0d794fc3`).
+- **Target Repository State:** Git clone checked out at tag `v4.0.0` (commit `3af3e688`).
 - **Configuration:** `ENVIRONMENT=staging` (enforcing strict production deployment checks via `app/core/config.py`).
 - **Components and Container Images:**
   - `api`: FastAPI application running under Python 3.13.16 and Uvicorn with 4 workers, `MAX_IN_FLIGHT_REQUESTS=15`, internal port 8000 (not exposed to host).

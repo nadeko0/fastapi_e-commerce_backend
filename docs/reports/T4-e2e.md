@@ -14,7 +14,7 @@ Exit criteria:
 
 ## Environment
 
-- **Host:** WSL2 Ubuntu staging environment (commit `0d794fc3`, tag `v4.0.0`).
+- **Host:** WSL2 Ubuntu staging environment (commit `3af3e688`, tag `v4.0.0`).
 - **Entry point:** `https://localhost:8443` via Caddy 2.11.6 (`caddy-root.crt`).
 - **Email capture:** Mailpit v1.31.4 on `127.0.0.1:8025`.
 - **Payment provider:** Real Stripe test mode.

@@ -6,19 +6,19 @@ This report provides the complete engineering record of every bug fix and test h
 
 | Package | Category | Primary Concern | Discovered In | Release | Key Commits |
 |---|---|---|---|---|---|
-| **X1** | Supply Chain & Build | Runtime image minimization, pip removal, and gitleaks secret scanning | Stage T1 | 4.0.1 | `1ee3d13`, `a52ef55`, `fe5a613` |
-| **L1** | Test Hygiene | Deterministic CI profiles, OpenAPI diff snapshots, and model round-trips | Stage L1 | 4.0.1 | `e2b317a`, `ec99543`, `031ee5b`, `d70d723`, `98eb0af`, `4e62651`, `ea6e46a`, `25f628e` |
-| **L2** | Real Service Parity | PostgreSQL 15/16/18 CI matrix, real Redis parity, and connection pool recovery | Stage L2 | 4.0.1 | `de95e71`, `4cd018e`, `f26502d`, `57a8df3`, `9e3bbeb`, `7a9e13a`, `6b334c7`, `295b41b` |
-| **X2** | Resilience & Auth | Returning 503 instead of 401 when Redis is unavailable during token checks | Stage L2 | 4.0.1 | `d34e8e0` |
-| **X3** | Input & State | Unicode normalization case-folding, probe route cleanup, and atomic token rotation | Stage L1/L2 | 4.0.1 | `cb15c9b`, `a2295ec`, `916a0ca`, `f763da6` |
-| **X4** | Robustness & Schema | Rejecting NUL/surrogates as 422, OpenAPI schema accuracy, and 405 Allow headers | Stage T3 | 4.0.1 | `e52f4d3`, `333f965`, `f1f58bb`, `91e68b2`, `bdefdcf` |
-| **X5** | Business Logic | Product cache invalidation on stock change, and blocking shipment of unpaid orders | Stage T4 | 4.0.1 | `4c20b48`, `9a12c55` |
-| **X6** | Time & Invariants | Daylight saving time verification, UTC email dates, and tolerant database reads | Stage DST / T6 | 4.0.1 | `10982d7`, `cf4f3a3`, `a445032` |
-| **X7** | Data Validation | Requiring product images on creation, flush before commit, and mandatory token jti | Stage T6 | 4.0.1 | `12f3519`, `ad82d33` |
-| **X8** | Vulnerability Analysis | Redis 7.4.11 security exception repin, govulncheck proof for gosu, and Trivy gate | Stage T1 | 4.0.1 | `2b95828`, `66ab41d`, `0a655d5` |
-| **L3** | Worker & Auth Tests | Embedded Celery testing, Stripe rate limits, beat schedule check, and JWT algorithm allowlist | Stage L3 | 4.0.2 | `8a732b2`, `9d0c203`, `aa0f042`, `2b67122`, `f8bdf7c`, `856e6b1`, `586b213` |
-| **X9** | Chaos Remediation | Mapping unreachable database errors to 503 with Retry-After and compact broker logs | Stage T8 | 4.0.2 | `cec7363`, `3ae8eac` |
-| **X10** | Mutation Testing | Adding targeted test cases to eliminate 50 surviving mutation gaps (mutmut 3.8.0) | Stage T10 | 4.0.3 | `a792faa`, `835c938`, `8b668fb`, `00df365`, `10a7639`, `56183bd` |
+| **X1** | Supply Chain & Build | Runtime image minimization, pip removal, and gitleaks secret scanning | Stage T1 | 4.0.1 | `86bf331`, `588acbb`, `359a56c` |
+| **L1** | Test Hygiene | Deterministic CI profiles, OpenAPI diff snapshots, and model round-trips | Stage L1 | 4.0.1 | `3d961bd`, `589eb74`, `387f7e2`, `cf1b9a1`, `da181d1`, `3235436`, `1cd7f44`, `42d8c0b` |
+| **L2** | Real Service Parity | PostgreSQL 15/16/18 CI matrix, real Redis parity, and connection pool recovery | Stage L2 | 4.0.1 | `666fc99`, `47ac349`, `7eb114d`, `f98e3d8`, `423d76d`, `5feb0b7`, `65bd21d`, `757b934` |
+| **X2** | Resilience & Auth | Returning 503 instead of 401 when Redis is unavailable during token checks | Stage L2 | 4.0.1 | `3558db3` |
+| **X3** | Input & State | Unicode normalization case-folding, probe route cleanup, and atomic token rotation | Stage L1/L2 | 4.0.1 | `41be915`, `5c3a8b6`, `8ad4af8`, `bf0c59b` |
+| **X4** | Robustness & Schema | Rejecting NUL/surrogates as 422, OpenAPI schema accuracy, and 405 Allow headers | Stage T3 | 4.0.1 | `b323430`, `55daed6`, `e1d9483`, `7aa419f`, `9c2287e` |
+| **X5** | Business Logic | Product cache invalidation on stock change, and blocking shipment of unpaid orders | Stage T4 | 4.0.1 | `34fbf52`, `ec7e98c` |
+| **X6** | Time & Invariants | Daylight saving time verification, UTC email dates, and tolerant database reads | Stage DST / T6 | 4.0.1 | `acc6e6d`, `c112037`, `83d80cd` |
+| **X7** | Data Validation | Requiring product images on creation, flush before commit, and mandatory token jti | Stage T6 | 4.0.1 | `3eef892`, `ab1ace9` |
+| **X8** | Vulnerability Analysis | Redis 7.4.11 security exception repin, govulncheck proof for gosu, and Trivy gate | Stage T1 | 4.0.1 | `4a0a595`, `209000c`, `9e96d28` |
+| **L3** | Worker & Auth Tests | Embedded Celery testing, Stripe rate limits, beat schedule check, and JWT algorithm allowlist | Stage L3 | 4.0.2 | `c0c7944`, `acdb220`, `1fdedd7`, `fc71030`, `3ca5bca`, `9525e21`, `8157da7` |
+| **X9** | Chaos Remediation | Mapping unreachable database errors to 503 with Retry-After and compact broker logs | Stage T8 | 4.0.2 | `0ff2a05`, `5e93477` |
+| **X10** | Mutation Testing | Adding targeted test cases to eliminate 50 surviving mutation gaps (mutmut 3.8.0) | Stage T10 | 4.0.3 | `0fffe4c`, `f22e4ec`, `ba6346a`, `3de64ae`, `b225d5d`, `5812b0e` |
 
 ---
 
@@ -34,7 +34,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** Pre-change Trivy reported 1 CRITICAL and 4 HIGH alerts. Post-change scan verified 0 fixable CRITICAL/HIGH. Gitleaks scanned 384 git commits, reporting 0 real leaks.
 - **Standards:** OWASP Container Security Top 10, NIST SP 800-190.
 - **Release:** 4.0.1
-- **Commits:** `1ee3d13`, `a52ef55`, `fe5a613`
+- **Commits:** `86bf331`, `588acbb`, `359a56c`
 
 ### L1: Test Suite Hygiene and Property Profiles
 - **Finding (Stage L1):** Test executions showed non-deterministic run times in CI due to unconstrained Hypothesis iteration budgets. Shrunk property failure cases were not captured as deterministic regression tests.
@@ -49,7 +49,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** Seed 6 regression failed on pre-fix commit and passed on 4.0.1. Random ordering via `pytest-randomly` across seeds 101, 20260, and 777777 verified 4825 passed tests with zero ordering dependencies.
 - **Standards:** Hypothesis Testing Guidelines, Starlette ASGI specifications.
 - **Release:** 4.0.1
-- **Commits:** `e2b317a`, `ec99543`, `031ee5b`, `d70d723`, `98eb0af`, `4e62651`, `ea6e46a`, `25f628e`
+- **Commits:** `3d961bd`, `589eb74`, `387f7e2`, `cf1b9a1`, `da181d1`, `3235436`, `1cd7f44`, `42d8c0b`
 
 ### L2: Real Service Parity and Database Resilience
 - **Finding (Stage L2 & Stage T1):** Integration tests were run against SQLite and fakeredis. In addition, `alembic upgrade head --sql` failed on migration `3f6c2a9d1b7e` because offline execution attempted live database queries.
@@ -64,7 +64,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** `alembic upgrade head --sql` initially exited with errors, then generated the full migration chain cleanly. List endpoints executed identical statement counts (<= 12 queries) for 1 and 20 items.
 - **Standards:** PostgreSQL 18 Documentation, SQLAlchemy 2.0 Connection Pooling, Alembic Offline Scripting.
 - **Release:** 4.0.1
-- **Commits:** `de95e71`, `4cd018e`, `f26502d`, `57a8df3`, `9e3bbeb`, `7a9e13a`, `6b334c7`, `295b41b`
+- **Commits:** `666fc99`, `47ac349`, `7eb114d`, `f98e3d8`, `423d76d`, `5feb0b7`, `65bd21d`, `757b934`
 
 ### X2: Fail-Closed Redis Outage Semantics on Token Checks
 - **Finding (Stage L2):** When Redis was unreachable or timed out, authenticated requests bearing valid JWT access tokens returned 401 Unauthorized, falsely logging out users.
@@ -76,7 +76,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** Pre-fix tests returned 401 on Redis connection errors; post-fix tests verified 503 with `Retry-After: 30` across protected routes, while genuinely revoked tokens continue to receive 401.
 - **Standards:** RFC 9110 §15.5.2 (401 Unauthorized) and §15.6.4 (503 Service Unavailable), RFC 6750 §3.1.
 - **Release:** 4.0.1
-- **Commit:** `d34e8e0`
+- **Commit:** `3558db3`
 
 ### X3: Normalization Case-Folding, State Isolation, and Atomic Rotation
 - **Finding (Stage L1/L2 Property Testing):** Property-based fuzzing identified that storing an address with country `"0ß"` produced `"0SS"` in the database, which subsequent reads formatted as `"0Ss"`. In addition, dynamic OpenAPI probe routes leaked into subsequent tests, and a Redis failure during login handed out unrevokable refresh tokens.
@@ -89,7 +89,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** Added explicit `@example("0ß")` and `@example("ß1")` property checks. Added sequence tests proving isolation between dynamic routes and OpenAPI snapshots. Verified failure handling during token rotation.
 - **Standards:** Unicode Standard Annex #44 (Case Folding), RFC 6749.
 - **Release:** 4.0.1
-- **Commits:** `cb15c9b`, `a2295ec`, `916a0ca`, `f763da6`
+- **Commits:** `41be915`, `5c3a8b6`, `8ad4af8`, `bf0c59b`
 
 ### X4: String Input Sanitization and OpenAPI Contract Alignment
 - **Finding (Stage T3 Schemathesis):** Contract fuzzing with Schemathesis revealed that string inputs containing NUL bytes (`\x00`) or unpaired surrogates caused unhandled 500 Internal Server Errors. Additionally, 405 Method Not Allowed responses failed to advertise all available HTTP methods in the `Allow` header.
@@ -103,7 +103,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** Pre-fix fuzzing generated 500 responses; post-fix fuzzing verified 422 `validation-error` with redacted error structures. Automated tests verified `Allow` headers across all paths declared in OpenAPI.
 - **Standards:** RFC 9110 §15.5.6 (405 Method Not Allowed and Allow header), RFC 9457 Problem Details.
 - **Release:** 4.0.1
-- **Commits:** `e52f4d3`, `333f965`, `f1f58bb`, `91e68b2`, `bdefdcf`
+- **Commits:** `b323430`, `55daed6`, `e1d9483`, `7aa419f`, `9c2287e`
 
 ### X5: Cache Invalidation on Stock Mutation & Unpaid Order Transition Guards
 - **Finding (Stage T4 E2E):** The product detail cache served stale inventory counts for up to one hour following orders or cancellations. Additionally, administrative users could advance unpaid orders to `confirmed`, `processing`, `sent`, or `delivered`.
@@ -114,7 +114,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** 10 cache tests verified cache eviction, ETag regeneration, and response consistency across order creation, admin cancellation, customer cancellation, and background expiration. Verified 12 prohibited status transitions across unpaid, pending, and refunded orders.
 - **Standards:** RFC 9110 §15.5.10 (409 Conflict), RFC 9111 HTTP Caching.
 - **Release:** 4.0.1
-- **Commits:** `4c20b48`, `9a12c55`
+- **Commits:** `34fbf52`, `ec7e98c`
 
 ### X6: Daylight Saving Time Invariants and Tolerant Read Schemas
 - **Finding (Stage DST-check & Stage T6):** Order emails printed timestamps without UTC timezone identifiers. In addition, existing database rows containing short strings crashed read operations with 500 errors because response schemas reused input validation rules.
@@ -127,7 +127,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** Directly inserted database rows breaking input length rules; list and detail endpoints returned 200 OK across products, categories, variants, and users. Beat schedules verified to fire exactly once per 24-hour period across autumn and spring clock shifts.
 - **Standards:** PEP 495 (Local Time Disambiguation), RFC 3339 (Date and Time on the Internet).
 - **Release:** 4.0.1
-- **Commits:** `10982d7`, `cf4f3a3`, `a445032`
+- **Commits:** `acc6e6d`, `c112037`, `83d80cd`
 
 ### X7: Product Image Requirements and Mandatory JTI Validation
 - **Finding (Stage T6 DAST):** Creating a product without images committed the row to PostgreSQL but crashed during response serialization with 500, corrupting catalog listings. Furthermore, access tokens without a `jti` claim were accepted.
@@ -139,7 +139,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** Pre-fix product creation with `images: []` returned 500 and persisted orphaned rows; post-fix returns 422 without writing to the database. Tokens without `jti` verified to return 401.
 - **Standards:** RFC 7519 §4.1.7 (JWT ID), RFC 8725 (JWT Best Current Practices).
 - **Release:** 4.0.1
-- **Commits:** `12f3519`, `ad82d33`
+- **Commits:** `3eef892`, `ab1ace9`
 
 ### X8: Security Exception Repinning and Upstream Reachability Analysis
 - **Finding (Stage T1):** The project maintains a strict rule requiring base image digests to be at least two weeks old. However, Trivy identified 2 HIGH vulnerabilities in `redis:7-alpine` (CVE-2026-84782 in libssl3) and 26 vulnerabilities in `postgres:15-alpine` (gosu compiled with Go 1.24.6).
@@ -151,7 +151,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** Without `.trivyignore.yaml`, Trivy scan exited 1 on PostgreSQL; with the verified exception file, all container images exit 0.
 - **Standards:** NIST SP 800-161 (Supply Chain Risk Management), OpenSSF Vulnerability Disclosure.
 - **Release:** 4.0.1
-- **Commits:** `2b95828`, `66ab41d`, `0a655d5`
+- **Commits:** `4a0a595`, `209000c`, `9e96d28`
 
 ---
 
@@ -171,7 +171,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** the `JWT_ALGORITHM` tests were red first (7 values accepted that must be refused) and green after the change; the other items pin behaviour that was already correct.
 - **Standards:** RFC 6749 §4.3.2 (Password Credentials Grant), RFC 8725 §2.1 (Algorithm Allowlist), Stripe Webhook Security documentation.
 - **Release:** 4.0.2
-- **Commits:** `8a732b2`, `9d0c203`, `aa0f042`, `2b67122`, `f8bdf7c`, `856e6b1`, `586b213`
+- **Commits:** `c0c7944`, `acdb220`, `1fdedd7`, `fc71030`, `3ca5bca`, `9525e21`, `8157da7`
 
 ### X9: Unreachable Database Error Mapping and Concise Broker Logging
 - **Finding (Stage T8 Chaos E3 & E6):** When PostgreSQL was stopped, API routes returned 500 Internal Server Error without a `Retry-After` header. When the Redis broker was down, Stripe webhook processing logged an 80-line kombu connection traceback even though the webhook event was safely recorded in PostgreSQL for background retry.
@@ -182,7 +182,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** Mocked database operational errors, pool timeouts, and connection invalidations to verify 503 responses with `Retry-After: 5`. Tested closed PostgreSQL ports to confirm 503 responses on live engines. Verified caplog output confirms absence of tracebacks during broker outages.
 - **Standards:** RFC 9110 §15.6.4 (503 Service Unavailable), RFC 9457 Problem Details.
 - **Release:** 4.0.2
-- **Commits:** `cec7363`, `3ae8eac`
+- **Commits:** `0ff2a05`, `5e93477`
 
 ---
 
@@ -201,7 +201,7 @@ This report provides the complete engineering record of every bug fix and test h
 - **Tests (Red then Green):** Each new test was proven by running `mutmut run "<mutant_name>"` in an isolated environment, confirming transition from survived to killed. Mutation score increased from 96.8% (3063/3165) to 98.4% (3113/3165), with 100% of remaining survivors verified as equivalent.
 - **Standards:** IEEE 1008-1987 (Standard for Software Unit Testing), Mutation Testing Best Practices.
 - **Release:** 4.0.3
-- **Commits:** `a792faa`, `835c938`, `8b668fb`, `00df365`, `10a7639`, `56183bd`
+- **Commits:** `0fffe4c`, `f22e4ec`, `ba6346a`, `3de64ae`, `b225d5d`, `5812b0e`
 
 ---
 

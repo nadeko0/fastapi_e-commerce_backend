@@ -13,7 +13,7 @@ Exit criteria:
 
 ## Environment
 
-- **Target:** Staging stack running release candidate v4.0.0 (commit `0d794fc3`).
+- **Target:** Staging stack running release candidate v4.0.0 (commit `3af3e688`).
 - **Scanner Image:** `zaproxy/zap-stable:20261008` (digest `sha256:7aaa659b0d...`, containing ZAP 2.17.0).
 - **Scanner Network Placement:** ZAP was executed inside the Docker network targeting `http://api:8000` directly. This bypassed container-internal TLS hostname mismatches (Caddy certificate was issued only for `localhost:8443`), testing the application's native security boundaries directly. TLS and Caddy proxy headers were validated separately.
 - **Exclusions:** Endpoints executing live financial transactions (`/pay`, `/checkout-session`, `/refund`) were excluded from automated fuzzer scans to avoid uncontrolled external calls to Stripe; these endpoints were audited manually.

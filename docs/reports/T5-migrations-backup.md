@@ -14,7 +14,7 @@ Exit criteria:
 
 ## Environment
 
-- **Host:** WSL2 staging environment (commit `0d794fc`, tag `v4.0.0`).
+- **Host:** WSL2 staging environment (commit `3af3e68`, tag `v4.0.0`).
 - **PostgreSQL Version:** 15.19 (`postgres:15-alpine` digest `sha256:f7d23353...`).
 - **Backup & Restore Tooling:** `pg_dump`, `pg_restore`, and `psql` version 15.19 executed from within the container.
 - **Migration Runner:** Alembic executed via the stack migration container with `DATABASE_URI` configured.

@@ -13,7 +13,7 @@ Exit criteria:
 
 ## Environment
 
-- **Target:** Staging stack running release candidate v4.0.0 (commit `0d794fc`) via Caddy HTTPS (`https://localhost:8443` with `caddy-root.crt`).
+- **Target:** Staging stack running release candidate v4.0.0 (commit `3af3e68`) via Caddy HTTPS (`https://localhost:8443` with `caddy-root.crt`).
 - **Tooling:** Schemathesis 4.30.1 executed via `uvx schemathesis==4.30.1` (seed 20261024, 4 workers). Python test tooling: pytest 9.1.1, requests.
 - **Specification:** OpenAPI 3.1.0 document served at `/api/v1/openapi.json` (54 paths, 67 operations, version 4.0.0). No explicit `links` in spec; Schemathesis inferred 115 links autonomously; 24 explicit links were injected for stateful phase d.
 - **Configuration adjustments:** Rate limits temporarily elevated in `.env` (to 100000/minute) for fuzzing runs and verified restored to production defaults immediately afterwards.
