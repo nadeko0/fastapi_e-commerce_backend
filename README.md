@@ -78,6 +78,7 @@ uv run pytest tests/ -n 2 -m "not timing_sensitive"   # the fast local run
 | [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | What it deliberately does not do, and known limitations |
 | [CHANGELOG.md](CHANGELOG.md) | Every release from 1.0.0 to today |
 | [docs/reports/](docs/reports/README.md) | The full test reports: every stage, every number, every fix |
+| [docs/HOW-THIS-WAS-BUILT.md](docs/HOW-THIS-WAS-BUILT.md) | Who did what, where the decisions came from, what went wrong |
 
 ## 📊 At a glance (v4.0.3)
 
@@ -99,7 +100,7 @@ Python 3.13 · FastAPI and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and A
 
 ## 📌 About this project
 
-A learning and portfolio project, built with the help of AI coding agents (Claude, Gemini) under human review. The commit history and the reports show how the work was planned, checked and corrected, mistakes included.
+A learning and portfolio project, built with the help of AI coding agents (Claude, Gemini) under human review. The commit history and the reports show how the work was planned, checked and corrected, mistakes included; [docs/HOW-THIS-WAS-BUILT.md](docs/HOW-THIS-WAS-BUILT.md) tells the story in my own words.
 
 ## License
 
