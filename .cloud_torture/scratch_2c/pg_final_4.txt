@@ -148,4 +148,82 @@ tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bod
 HIST {200: 1, 409: 14, 422: 15}
 PASSED{"timestamp": "2026-10-26T20:54:56.684Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
 
-tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[1] {"timestamp": "2026-10-26T20:54:56.730Z", "level": "INFO", "logger": "httpx2", "me
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[1] {"timestamp": "2026-10-26T20:54:56.730Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 12, 409: 3, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:54:57.338Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[2] {"timestamp": "2026-10-26T20:54:57.386Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 14, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:54:57.992Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[3] {"timestamp": "2026-10-26T20:54:58.046Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 14, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:54:58.656Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[4] {"timestamp": "2026-10-26T20:54:58.699Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 14, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:54:59.347Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_same_key_different_bodies_execute_once[5] {"timestamp": "2026-10-26T20:54:59.398Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 14, 422: 15}
+PASSED{"timestamp": "2026-10-26T20:55:00.026Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[0] {"timestamp": "2026-10-26T20:55:00.078Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:55:00.788Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[1] {"timestamp": "2026-10-26T20:55:00.834Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:55:01.588Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[2] {"timestamp": "2026-10-26T20:55:01.646Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:55:02.295Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[3] {"timestamp": "2026-10-26T20:55:02.346Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:55:03.008Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[4] {"timestamp": "2026-10-26T20:55:03.056Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:55:03.616Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_pay_distinct_keys_charge_once[5] {"timestamp": "2026-10-26T20:55:03.662Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 1, 409: 29}
+PASSED{"timestamp": "2026-10-26T20:55:04.305Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[0] {"timestamp": "2026-10-26T20:55:04.358Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:55:05.396Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[1] {"timestamp": "2026-10-26T20:55:05.443Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:55:06.543Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[2] {"timestamp": "2026-10-26T20:55:06.587Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:55:07.530Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[3] {"timestamp": "2026-10-26T20:55:07.580Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:55:08.532Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[4] {"timestamp": "2026-10-26T20:55:08.578Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:55:09.577Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_twins_refund_once[5] {"timestamp": "2026-10-26T20:55:09.622Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 30}
+PASSED{"timestamp": "2026-10-26T20:55:10.714Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[0] {"timestamp": "2026-10-26T20:55:10.770Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 15, 409: 15}
+PASSED{"timestamp": "2026-10-26T20:55:11.671Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[1] {"timestamp": "2026-10-26T20:55:11.733Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 15, 409: 15}
+PASSED{"timestamp": "2026-10-26T20:55:12.626Z", "level": "INFO", "logger": "app.main", "message": "FastAPI shutdown event triggered"}
+
+tests/torture_suite/test_concurrency_torture.py::test_refund_same_key_different_amounts_execute_once[2] {"timestamp": "2026-10-26T20:55:12.674Z", "level": "INFO", "logger": "httpx2", "message": "HTTP Request: POST http://testserver/api/v1/cart/items \"HTTP/1.1 200 OK\""}
+HIST {200: 15, 409: 15}
+PASSED{"timestamp": "2026-10-26T20:55:13.504Z", "level": "INFO", "logger": "app.main", "message": "FastAPI sh
