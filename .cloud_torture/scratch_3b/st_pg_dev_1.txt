@@ -1,2 +1,29 @@
 warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
-....
+......xxxx                                                               [100%]
+============================== slowest durations ===============================
+80.43s call     tests/torture_suite/test_stateful_invariants.py::test_payment_world_keeps_its_invariants
+54.68s call     tests/torture_suite/test_stateful_invariants.py::test_cart_world_matches_its_model
+18.33s call     tests/torture_suite/test_stateful_invariants.py::test_refund_events_in_any_order_converge_to_the_providers_state
+13.48s call     tests/torture_suite/test_stateful_invariants.py::test_admin_refunds_never_exceed_the_charge
+7.80s call     tests/torture_suite/test_stateful_invariants.py::test_merge_at_login_sums_overlaps_appends_and_drops_beyond_the_cap
+5.82s call     tests/torture_suite/test_stateful_invariants.py::test_checkout_never_sells_more_than_the_stock
+0.24s call     tests/torture_suite/test_stateful_invariants.py::test_bug_refund_after_an_unreported_refund_failure_is_a_500
+0.23s call     tests/torture_suite/test_stateful_invariants.py::test_bug_stale_refund_event_reverts_a_settled_refund
+0.21s call     tests/torture_suite/test_stateful_invariants.py::test_bug_restock_past_int32_max_aborts_the_expiry_sweep
+0.15s call     tests/torture_suite/test_stateful_invariants.py::test_bug_restock_past_int32_max_is_a_500_on_cancel
+0.01s setup    tests/torture_suite/test_stateful_invariants.py::test_merge_at_login_sums_overlaps_appends_and_drops_beyond_the_cap
+0.01s teardown tests/torture_suite/test_stateful_invariants.py::test_cart_world_matches_its_model
+0.01s setup    tests/torture_suite/test_stateful_invariants.py::test_payment_world_keeps_its_invariants
+0.01s setup    tests/torture_suite/test_stateful_invariants.py::test_refund_events_in_any_order_converge_to_the_providers_state
+0.01s setup    tests/torture_suite/test_stateful_invariants.py::test_bug_stale_refund_event_reverts_a_settled_refund
+0.01s setup    tests/torture_suite/test_stateful_invariants.py::test_admin_refunds_never_exceed_the_charge
+0.01s setup    tests/torture_suite/test_stateful_invariants.py::test_checkout_never_sells_more_than_the_stock
+0.01s teardown tests/torture_suite/test_stateful_invariants.py::test_payment_world_keeps_its_invariants
+0.01s setup    tests/torture_suite/test_stateful_invariants.py::test_cart_world_matches_its_model
+
+(11 durations < 0.005s hidden.  Use -vv to show these durations.)
+6 passed, 4 xfailed in 181.94s (0:03:01)
+
+real	3m4.920s
+user	1m35.359s
+sys	0m11.239s
