@@ -259,6 +259,16 @@ def test_a_broker_that_is_down_still_gets_a_200_and_the_event_is_kept(
     assert event_id not in published_ids()
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any(event_id in message and "sweeper" in message for message in warnings)
+    event_warnings = [
+        r for r in caplog.records
+        if r.levelno == logging.WARNING and event_id in r.getMessage()
+    ]
+    assert len(event_warnings) == 1
+    record = event_warnings[0]
+    assert record.exc_info is None
+    assert "the sweeper re-queues it" in record.getMessage()
+    assert "ConnectionError" in record.getMessage()
+    assert "Connection refused" in record.getMessage()
     assert order_state(shop, order["id"]) == ("new", "pending")
 
 

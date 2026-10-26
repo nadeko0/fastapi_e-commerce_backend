@@ -472,10 +472,12 @@ def enqueue_event(event_id: str) -> bool:
     try:
         # No publish retries: the caller is a request Stripe is waiting on.
         tasks.process_stripe_event.apply_async(args=[event_id], retry=False)
-    except Exception:
+    except Exception as exc:
         logger.warning(
-            "Could not enqueue Stripe event %s; it stays stored and the sweeper will enqueue it",
-            event_id, exc_info=True,
+            "Could not enqueue Stripe event %s: %s: %s; the sweeper re-queues it",
+            event_id,
+            type(exc).__name__,
+            exc,
         )
         return False
     return True
