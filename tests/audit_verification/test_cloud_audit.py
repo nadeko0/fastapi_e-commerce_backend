@@ -954,3 +954,39 @@ def test_2D07_order_email_celery_tasks_are_never_enqueued():
     assert enqueued == {"process_stripe_event", "check_payment_reconciliation"}
     beat = {entry["task"] for entry in tasks.celery.conf.beat_schedule.values()}
     assert not beat & {"send_order_confirmation", "send_order_status_update"}
+
+
+def test_BUGNEW1_redis_blip_on_cart_read_answers_400_cart_is_empty(client, db_session, monkeypatch):
+    """BUG-NEW-1 (found by 3C, confirmed in 04_validation_phase3.md), Low.
+    app/services/redis_async.py:213-222 (get_cart swallows RedisError and
+    returns None); app/api/v1/orders.py:211-216 maps a falsy cart to 400.
+
+    Scenario: a transient Redis error while checkout reads the cart makes it
+    answer 400 "Cart is empty" with no Retry-After; the same request succeeds
+    right after, because the cart was intact all along.
+
+    When fixed, invert the assertion: the blip answers 503 with Retry-After.
+    """
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    import app.services.redis_async as redis_async
+
+    reset_provider()
+    shop = Shop(client, db_session)
+    product = shop.product(stock=5)
+    buyer = shop.buyer()
+    assert shop.add_to_cart(buyer, product).status_code == 200
+
+    real_load = redis_async.codec.load_cart
+
+    def blip(*args, **kwargs):
+        raise RedisConnectionError("simulated blip on GET cart")
+
+    monkeypatch.setattr(redis_async.codec, "load_cart", blip)
+    during = shop.place_order(buyer)
+    assert during.status_code == 400
+    assert "Cart is empty" in during.text
+    assert "retry-after" not in during.headers
+
+    monkeypatch.setattr(redis_async.codec, "load_cart", real_load)
+    assert shop.place_order(buyer).status_code == 201
