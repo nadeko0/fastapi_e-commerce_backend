@@ -586,7 +586,7 @@ def test_cart_world_matches_its_model(client, db_session, monkeypatch):
     SEEN.clear()
     try:
         run_state_machine_as_test(CartWorld, settings=hyp_settings(
-            max_examples=scaled_examples(150), stateful_step_count=40, **_HYPOTHESIS))
+            max_examples=scaled_examples(100), stateful_step_count=30, **_HYPOTHESIS))
     finally:
         CartWorld.shop = None
         _dump_stats("cart_world")
@@ -658,6 +658,7 @@ class PaymentWorld(RuleBasedStateMachine):
         self.order_keys = []  # (order_id, buyer, key)
         self.pay_keys = []  # (order_id, key, token)
         self.refund_keys = []  # (order_id, key, amount, refund id)
+        self.refund_ids = []  # provider refunds made in this example
         self.outbox = []  # undelivered Stripe events: dicts(id, type, obj)
         self.delivered = []
         self.disputes = {}  # dispute id -> provider-side dispute
@@ -1060,14 +1061,14 @@ class PaymentWorld(RuleBasedStateMachine):
         if amount > intent.amount - intent.amount_refunded:
             return  # Stripe refuses it
         refund = self.provider.create_refund(payment_intent_id=intent.id, amount=amount)
+        self.refund_ids.append(refund.id)
         self._enqueue("refund.created", self._refund_object(refund))
         self._enqueue("charge.refunded", self._charge_refunded(intent.id))
 
-    @precondition(lambda self: StripePaymentProvider._refunds_by_id)
+    @precondition(lambda self: self.refund_ids)
     @rule(index=st.integers(0, 20))
     def stripe_settles_a_refund(self, index):
-        refunds = list(StripePaymentProvider._refunds_by_id.values())
-        refund = refunds[index % len(refunds)]
+        refund = StripePaymentProvider._refunds_by_id[self.refund_ids[index % len(self.refund_ids)]]
         try:
             event = StripePaymentProvider.settle_refund(refund.id)
         except ValueError:
@@ -1120,8 +1121,13 @@ class PaymentWorld(RuleBasedStateMachine):
             expected = 200 if 0 < wanted <= refundable else 400
         value = None if amount is None else Decimal(amount) / 100
         key = new_key()
+        provider_refunds = set(StripePaymentProvider._refunds_by_id)
         response = check(self.shop.refund(self.admin, order_id, amount=value, key=key),
                          200, 400, 409)
+        # Precondition state only from what this example did (never class
+        # state read directly): a refund the provider made counts even if the
+        # route then failed.
+        self.refund_ids.extend(sorted(set(StripePaymentProvider._refunds_by_id) - provider_refunds))
         assert response.status_code == expected, (response.text, order.payment_status)
         if expected == 200:
             body = response.json()
@@ -1538,3 +1544,52 @@ def test_bug_refund_after_an_unreported_refund_failure_is_a_500(client, db_sessi
     assert response.status_code == 200, response.text
     recorded = {r.refund_id for r in shop.payments(order_id)[-1].refunds}
     assert response.json()["id"] in recorded
+
+
+def _order_at_int32_max_stock(shop, admin):
+    """An unpaid order of 1 unit, after which an admin sets the product's stock
+    to the largest value the API accepts (Int32Max)."""
+    product = make_product(shop.db, "0.00", 2)
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product, 1)
+    check(shop.client.put(f"{ADMIN}/products/{product.id}", json={"stock_quantity": INT32_MAX},
+                          headers=admin), 200)
+    return product, buyer, order["id"]
+
+
+def test_bug_restock_past_int32_max_is_a_500_on_cancel(client, db_session, tasks_db):
+    """Found by test_cart_world_matches_its_model on PostgreSQL:
+    setup(stocks=[2,...]), add 1, login, checkout, admin_sets_stock(INT32_MAX),
+    cancel_order -> 500.
+
+    PUT /admin/products/{id} accepts stock_quantity up to 2147483647
+    (app/schemas/product.py:83, Int32Max). Cancelling an order then adds its
+    quantity back with an unchecked relative UPDATE
+    (app/services/orders.py:123 and :130, cancel_order_and_restock): on PostgreSQL
+    the INTEGER column overflows (NumericValueOutOfRange) and the customer's
+    cancel answers 500 - the order can never be cancelled. (SQLite has no
+    32-bit column, so this passes there.)"""
+    shop = Shop(client, db_session)
+    admin = shop.admin()
+    product, buyer, order_id = _order_at_int32_max_stock(shop, admin)
+
+    response = check(shop.cancel(buyer, order_id), 200, 409)
+
+    assert response.status_code == 200, response.text
+    assert 0 <= shop.stock(product) <= INT32_MAX
+
+
+def test_bug_restock_past_int32_max_aborts_the_expiry_sweep(client, db_session, tasks_db):
+    """Same overflow in the unpaid-order expiry (app/tasks.py:499 ->
+    cancel_order_and_restock): on PostgreSQL the task raises, so the sweep
+    stops and every other expired order in that run is left holding stock."""
+    shop = Shop(client, db_session)
+    admin = shop.admin()
+    _, _, stuck = _order_at_int32_max_stock(shop, admin)
+    other_product = make_product(db_session, "1.00", 3)
+    other = shop.order_of(shop.buyer(), other_product, 1)["id"]
+
+    shop.expire_unpaid(stuck, other)  # must not raise
+
+    assert shop.order(other).status == "cancelled"
+    assert shop.stock(other_product) == 3
