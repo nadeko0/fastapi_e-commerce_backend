@@ -93,8 +93,9 @@ def test_without_pre_ping_the_same_kill_fails_one_request_and_the_pool_then_heal
 
         failed = client.get(PRODUCTS)
 
-        assert failed.status_code == 500
-        assert failed.json()["detail"] == "A database error occurred"
+        assert failed.status_code == 503
+        assert failed.headers.get("Retry-After") == "5"
+        assert failed.json()["detail"] == "The database is temporarily unavailable, please retry"
         assert client.get(PRODUCTS).status_code == 200
         assert engine.pool.checkedout() == 0
 

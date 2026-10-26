@@ -1,15 +1,26 @@
 import logging
 from collections.abc import AsyncGenerator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
+from psycopg.errors import QueryCanceled
 from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import (
+    DBAPIError,
+    DisconnectionError,
+    InterfaceError,
+    OperationalError,
+    SQLAlchemyError,
+)
+from sqlalchemy.exc import (
+    TimeoutError as SATimeoutError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
+from app.core.errors import Problem
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +114,39 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False,
 )
 
+DATABASE_UNAVAILABLE_RETRY_AFTER = 5
+
+
+def database_unavailable() -> Problem:
+    """The 503 for a request that cannot reach the database: connection
+    refused, lost, pool checkout timeout, or invalidated connection.
+    RFC 9110 15.6.4 with Retry-After: 5."""
+    return Problem(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="The database is temporarily unavailable, please retry",
+        retry_after=DATABASE_UNAVAILABLE_RETRY_AFTER,
+    )
+
+
+def is_database_unavailable_error(exc: BaseException | None) -> bool:
+    """Return True if `exc` represents a temporary reachability/connection issue
+    (connection refused, lost, pool checkout timeout, connection invalidated)
+    rather than a server bug or constraint violation (e.g. IntegrityError, ProgrammingError)."""
+    while exc is not None:
+        # A statement cancelled by statement_timeout is not a reachability issue:
+        # the database is running and answered; the query was cancelled.
+        if isinstance(getattr(exc, "orig", None), QueryCanceled):
+            return False
+        if isinstance(exc, (OperationalError, InterfaceError, SATimeoutError, DisconnectionError)):
+            return True
+        if isinstance(exc, DBAPIError) and bool(getattr(exc, "connection_invalidated", False)):
+            return True
+        if isinstance(exc, (ConnectionRefusedError, ConnectionResetError)):
+            return True
+        exc = exc.__cause__
+    return False
+
+
 @contextmanager
 def session_scope():
     session = SessionLocal()
@@ -110,7 +154,11 @@ def session_scope():
         yield session
         session.commit()
     except SQLAlchemyError as e:
-        session.rollback()
+        with suppress(SQLAlchemyError):
+            session.rollback()
+        if is_database_unavailable_error(e):
+            logger.error("Database unavailable in session_scope", exc_info=e)
+            raise database_unavailable() from e
         # str(e) on a SQLAlchemy error includes the failing SQL statement
         # and its bound parameter values by default - for an INSERT/UPDATE
         # that's frequently user-submitted data (email, address, etc).
@@ -120,29 +168,36 @@ def session_scope():
         logger.error("Database error in session_scope", exc_info=e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="A database error occurred"
+            detail="A database error occurred",
         ) from e
     finally:
         session.close()
 
+
 async def get_async_db() -> AsyncGenerator[AsyncSession]:
     # Commit on success, roll back and answer
-    # with a generic 500 on a database error (never the raw SQLAlchemy
-    # message - see session_scope above for why). `async with` closes the
-    # session in this same task, including when the request is cancelled, so
-    # the "cancelled before teardown ran" leak described at the top of this
-    # module has no equivalent here.
+    # with a 503 + Retry-After on a temporary database outage (connection
+    # refused, lost, invalidated, pool timeout) or a generic 500 on a genuine
+    # server bug (never the raw SQLAlchemy message - see session_scope above
+    # for why). `async with` closes the session in this same task, including
+    # when the request is cancelled, so the "cancelled before teardown ran"
+    # leak described at the top of this module has no equivalent here.
     async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
         except SQLAlchemyError as e:
-            await session.rollback()
+            with suppress(SQLAlchemyError):
+                await session.rollback()
+            if is_database_unavailable_error(e):
+                logger.error("Database unavailable in get_async_db", exc_info=e)
+                raise database_unavailable() from e
             logger.error("Database error in get_async_db", exc_info=e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="A database error occurred"
+                detail="A database error occurred",
             ) from e
+
 
 # The session dependency, declared once. scope="function" ends the session
 # (commit, close) after the route returns but before the response is sent

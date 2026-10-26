@@ -42,7 +42,9 @@ def test_session_scope_rolls_back_and_raises_http_exception_on_db_error(
     with pytest.raises(HTTPException) as exc_info, database_module.session_scope() as session:
         session.execute(text("SELECT * FROM this_table_does_not_exist"))
 
-    assert exc_info.value.status_code == 500
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.headers.get("Retry-After") == "5"
+    assert exc_info.value.detail == "The database is temporarily unavailable, please retry"
 
 
 @pytest.fixture
@@ -110,7 +112,84 @@ def test_get_async_db_rolls_back_and_raises_http_exception_on_db_error(
         return exc_info.value, rows
 
     http_exc, rows = asyncio.run(scenario())
+    assert http_exc.status_code == 503
+    assert http_exc.headers.get("Retry-After") == "5"
+    assert http_exc.detail == "The database is temporarily unavailable, please retry"
+    assert rows == 0
+
+
+def test_get_async_db_rolls_back_and_raises_500_on_unhandled_integrity_error(
+    async_sqlite_session_factory,
+):
+    import asyncio
+
+    from fastapi import HTTPException
+    from sqlalchemy.exc import IntegrityError
+
+    async def scenario():
+        async with async_sqlite_session_factory() as setup:
+            await setup.execute(text("CREATE TABLE t (id INTEGER PRIMARY KEY)"))
+            await setup.commit()
+
+        gen = database_module.get_async_db()
+        session = await anext(gen)
+        await session.execute(text("INSERT INTO t VALUES (1)"))
+        err = IntegrityError("INSERT INTO t VALUES (1)", {}, Exception("duplicate"))
+        with pytest.raises(HTTPException) as exc_info:
+            await gen.athrow(err)
+
+        async with async_sqlite_session_factory() as other:
+            rows = (await other.execute(text("SELECT COUNT(*) FROM t"))).scalar()
+        return exc_info.value, rows
+
+    http_exc, rows = asyncio.run(scenario())
     assert http_exc.status_code == 500
-    # Generic message only - never the raw SQLAlchemy error text.
+    assert "Retry-After" not in (http_exc.headers or {})
     assert http_exc.detail == "A database error occurred"
     assert rows == 0
+
+
+def test_is_database_unavailable_error():
+    from sqlalchemy.exc import (
+        DataError,
+        DBAPIError,
+        DisconnectionError,
+        IntegrityError,
+        InterfaceError,
+        OperationalError,
+        ProgrammingError,
+    )
+    from sqlalchemy.exc import (
+        TimeoutError as SATimeoutError,
+    )
+
+    # Database unavailable signals -> True
+    assert database_module.is_database_unavailable_error(
+        OperationalError("SELECT 1", {}, Exception("connection refused"))
+    )
+    assert database_module.is_database_unavailable_error(
+        InterfaceError("SELECT 1", {}, Exception("closed"))
+    )
+    assert database_module.is_database_unavailable_error(
+        SATimeoutError("pool timeout")
+    )
+    assert database_module.is_database_unavailable_error(
+        DisconnectionError("disconnected")
+    )
+    dbapi_inval = DBAPIError("SELECT 1", {}, Exception("lost"))
+    dbapi_inval.connection_invalidated = True
+    assert database_module.is_database_unavailable_error(dbapi_inval)
+
+    # Programmer / data / constraint errors -> False
+    dbapi_normal = DBAPIError("SELECT 1", {}, Exception("bad"))
+    dbapi_normal.connection_invalidated = False
+    assert not database_module.is_database_unavailable_error(dbapi_normal)
+    assert not database_module.is_database_unavailable_error(
+        IntegrityError("INSERT", {}, Exception("duplicate"))
+    )
+    assert not database_module.is_database_unavailable_error(
+        ProgrammingError("SELECT", {}, Exception("syntax"))
+    )
+    assert not database_module.is_database_unavailable_error(
+        DataError("INSERT", {}, Exception("value too large"))
+    )

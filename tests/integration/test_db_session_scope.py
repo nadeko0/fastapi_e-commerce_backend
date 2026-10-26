@@ -18,7 +18,7 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 import app.core.database as database_module
 from app.main import app
@@ -38,7 +38,9 @@ class _RecordingSession:
     async def commit(self):
         self.events.append("commit")
         if self.fail_commit:
-            raise OperationalError("COMMIT", {}, Exception("deferred constraint"))
+            if isinstance(self.fail_commit, Exception):
+                raise self.fail_commit
+            raise IntegrityError("COMMIT", {}, Exception("deferred constraint"))
 
     async def rollback(self):
         self.events.append("rollback")
@@ -78,6 +80,17 @@ def test_failing_final_commit_answers_500_not_200(monkeypatch):
         response = c.get("/write")
     assert response.status_code == 500
     assert response.json()["detail"] == "A database error occurred"
+    assert events == ["commit", "rollback", "close"]
+
+
+def test_failing_final_commit_disconnect_answers_503(monkeypatch):
+    events = []
+    with TestClient(_app(monkeypatch, events, fail_commit=OperationalError("COMMIT", {}, Exception("connection lost"))),
+                    raise_server_exceptions=False) as c:
+        response = c.get("/write")
+    assert response.status_code == 503
+    assert response.headers.get("Retry-After") == "5"
+    assert response.json()["detail"] == "The database is temporarily unavailable, please retry"
     assert events == ["commit", "rollback", "close"]
 
 

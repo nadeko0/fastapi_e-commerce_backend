@@ -106,7 +106,12 @@ async def server_error_handler(request: Request, exc: Exception) -> Response:
     Registered for Exception, which Starlette hands to ServerErrorMiddleware
     as its handler. The exception is still re-raised after this response is
     sent, so server logs and the test client see it as before."""
-    response = problem_response(request.scope, Problem(500))
+    from app.core.database import database_unavailable, is_database_unavailable_error
+
+    if is_database_unavailable_error(exc):
+        response = problem_response(request.scope, database_unavailable())
+    else:
+        response = problem_response(request.scope, Problem(500))
     apply_security_headers(response.headers, request.scope)
     # ServerErrorMiddleware is outside RequestContextMiddleware, which has
     # already left; its id is on the scope.
