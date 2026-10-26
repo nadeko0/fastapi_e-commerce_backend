@@ -162,6 +162,32 @@ def test_a_json_body_with_another_content_type_is_415_with_accept(client):
     assert response.headers["Accept"] == "application/json"
 
 
+def test_patch_with_another_content_type_is_415_with_merge_patch_accept():
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+
+    from app.core.errors import register_error_handlers
+
+    class Item(BaseModel):
+        name: str
+
+    test_app = FastAPI()
+    register_error_handlers(test_app)
+
+    @test_app.patch("/items")
+    def patch_item(item: Item):
+        return item
+
+    test_client = TestClient(test_app)
+    response = test_client.patch(
+        "/items",
+        content=b"name=abc",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert response.status_code == 415
+    assert response.headers["Accept"] == "application/merge-patch+json, application/json"
+
+
 def test_a_json_body_without_a_content_type_is_415(client):
     response = client.post(
         f"{API}/users/register", content='{"email": "a@example.com"}',
