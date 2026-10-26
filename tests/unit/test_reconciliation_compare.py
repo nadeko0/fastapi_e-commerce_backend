@@ -3,10 +3,13 @@ reconciliation.compare(): one payment's record against the provider's, as a
 pure function. Which of our statuses agree with which PaymentIntent status,
 and the refund comparison by itself.
 """
+from types import SimpleNamespace
+
 import pytest
 
 from app.models.payment_discrepancy import (
     KIND_AMOUNT,
+    KIND_CURRENCY,
     KIND_PAYMENT_MISSING,
     KIND_REFUND_NOT_RECORDED,
     KIND_REFUND_STATUS,
@@ -20,6 +23,7 @@ from app.services.reconciliation import (
     RefundSnapshot,
     compare,
     provider_refunded_total,
+    snapshot_payment,
 )
 
 S = PaymentIntentStatus
@@ -127,3 +131,32 @@ def test_a_refund_only_the_provider_has_carries_its_status_and_amount():
     found = compare(snapshot(), intent(), [refund("re_9", 250)])
 
     assert Difference(KIND_REFUND_NOT_RECORDED, "re_9", None, "succeeded 250") in found
+
+
+def test_currency_mismatch_records_difference():
+    diffs = compare(snapshot(amount=5000), intent(currency="EUR"), [])
+    assert diffs == [Difference(KIND_CURRENCY, "", "USD", "EUR")]
+    assert diffs[0].subject == ""
+
+
+def test_snapshot_payment_preserves_payment_fields():
+    dummy_refund = SimpleNamespace(id=1, refund_id="re_test", amount=500, status="succeeded")
+    dummy_payment = SimpleNamespace(
+        id=42,
+        payment_intent_id="pi_dummy",
+        status="succeeded",
+        amount=1000,
+        amount_refunded=500,
+        currency="USD",
+        refunds=[dummy_refund],
+    )
+    snap = snapshot_payment(dummy_payment)
+    assert snap.id == 42
+    assert snap.payment_intent_id == "pi_dummy"
+    assert snap.status == "succeeded"
+    assert snap.amount == 1000
+    assert snap.amount_refunded == 500
+    assert snap.currency == "USD"
+    assert len(snap.refunds) == 1
+    assert snap.refunds[0].refund_id == "re_test"
+

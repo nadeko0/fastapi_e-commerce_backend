@@ -623,3 +623,95 @@ def test_the_existing_beat_entries_are_unchanged():
         "cleanup-inactive-accounts", "update-product-stats", "check-low-stock",
         "cancel-expired-unpaid-orders",
     ]
+
+
+def test_newly_opened_discrepancy_records_last_seen_at(shop, provider):
+    _, payment = paid(shop)
+    payment.amount = 2600
+    shop.db.commit()
+    now = utc_now() + timedelta(hours=2)
+
+    result = run(shop.db, provider, now=now)
+    assert result.opened == 1
+    (row,) = rows(shop.db)
+    assert row.last_seen_at == now
+    assert row.detected_at == now
+
+
+def test_multiple_differences_reopening_increment_opened_count(shop, provider):
+    _, payment = paid(shop)
+    payment.amount = 2600
+    payment.status = "processing"
+    shop.db.commit()
+    run(shop.db, provider)
+    assert len(rows(shop.db)) == 2
+
+    payment.amount = 2500
+    payment.status = "succeeded"
+    shop.db.commit()
+    resolved_res = run(shop.db, provider)
+    assert resolved_res.resolved == 2
+
+    payment.amount = 2600
+    payment.status = "processing"
+    shop.db.commit()
+    reopen_res = run(shop.db, provider)
+    assert reopen_res.opened == 2
+
+
+def test_reconcile_payments_query_limits_to_cap_plus_one(shop, provider, monkeypatch):
+    monkeypatch.setattr(settings, "RECONCILIATION_MAX_PAYMENTS", 2)
+    captured = []
+    orig_scalars = shop.db.scalars
+
+    def spy_scalars(statement, *args, **kwargs):
+        captured.append(statement)
+        return orig_scalars(statement, *args, **kwargs)
+
+    monkeypatch.setattr(shop.db, "scalars", spy_scalars)
+    run(shop.db, provider)
+
+    assert len(captured) >= 1
+    assert captured[0]._limit == 3
+
+
+def test_pending_checkout_sessions_skipped_and_loop_continues(shop, provider):
+    paid(shop)
+    buyer = shop.buyer()
+    order1 = shop.order_of(buyer, shop.product())
+    order2 = shop.order_of(buyer, shop.product())
+    assert shop.checkout_session(buyer, order1["id"]).status_code == 200
+    assert shop.checkout_session(buyer, order2["id"]).status_code == 200
+
+    result = run(shop.db, provider)
+    assert result.skipped == 2
+    assert result.checked == 1
+
+
+def test_multiple_payments_opening_discrepancies_accumulate(shop, provider):
+    _, p1 = paid(shop)
+    _, p2 = paid(shop)
+    p1.amount = 2600
+    p2.amount = 2600
+    shop.db.commit()
+
+    result = run(shop.db, provider)
+    assert result.checked >= 2
+    assert result.opened == 2
+
+
+def test_multiple_payments_resolving_discrepancies_accumulate(shop, provider):
+    _, p1 = paid(shop)
+    _, p2 = paid(shop)
+    p1.amount = 2600
+    p2.amount = 2600
+    shop.db.commit()
+    run(shop.db, provider)
+
+    p1.amount = 2500
+    p2.amount = 2500
+    shop.db.commit()
+
+    result = run(shop.db, provider)
+    assert result.checked >= 2
+    assert result.resolved == 2
