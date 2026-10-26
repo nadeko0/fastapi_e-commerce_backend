@@ -1,0 +1,1 @@
+export JWT_SECRET_KEY=test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test POSTGRES_SERVER=localhost POSTGRES_USER=t POSTGRES_PASSWORD=t POSTGRES_DB=t ENVIRONMENT=development REDIS_HOST=localhost SMTP_HOST=localhost SMTP_USER=t@example.com SMTP_PASSWORD=t EMAILS_FROM_EMAIL=t@example.com EMAILS_FROM_NAME=T BCRYPT_ROUNDS=4 LOG_FILE=
