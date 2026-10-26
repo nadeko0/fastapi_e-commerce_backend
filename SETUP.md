@@ -1,254 +1,193 @@
-# Setup Instructions
+# Setup and Local Development
 
-This document provides detailed instructions for setting up the E-commerce Backend project in both local and Docker environments.
+Getting a transactional e-commerce backend running locally should be predictable: clone the repository, synchronize pinned dependencies, configure environment variables, and run migrations.
 
 ## Prerequisites
 
-### Local Development
-- Python 3.13 or higher
-- PostgreSQL 15+ (the Docker setup pins `postgres:15-alpine`; local dev has
-  been tested against PostgreSQL 18 too)
-- Redis 7+
-- Git
+- **Python 3.13** or higher
+- **uv 0.13+** for dependency management ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
+- **Docker Engine 24.0+** and **Docker Compose v2.20+**
+- **Git**
+- Optional: **Stripe CLI** for local webhook forwarding
 
-### Docker Development
-- Docker Engine 24.0+
-- Docker Compose v2.20+
-- Git
+## Local Development Setup
 
-## Local Setup
+### 1. Synchronize Dependencies
 
-1. **Clone the Repository**
-```bash
-git clone https://github.com/nadeko0/fastapi_e-commerce_backend.git
-cd fastapi_e-commerce_backend
-```
+This project manages virtual environments and dependencies with `uv`:
 
-2. **Install [uv](https://docs.astral.sh/uv/getting-started/installation/)**
-
-uv manages the virtual environment for you - there's no separate `venv`
-creation step.
-
-3. **Install Dependencies**
 ```bash
 uv sync
 ```
-This creates `.venv` and installs the exact versions pinned in `uv.lock`.
-Prefix subsequent commands with `uv run` (e.g. `uv run alembic upgrade head`),
-or activate the environment directly with `.venv\Scripts\activate` (Windows)
-/ `source .venv/bin/activate` (Linux/Mac).
 
-4. **Set Up Environment Variables**
+This creates `.venv` and installs the exact dependency versions locked in `uv.lock`. Execute subsequent commands using `uv run <command>`, or activate the environment directly via `.venv\Scripts\activate` (Windows) or `source .venv/bin/activate` (Linux/macOS).
+
+### 2. Configure Environment Variables
+
+Copy the template configuration to create a local `.env`:
+
 ```bash
 cp .env.example .env
-# Edit .env with your configurations
 ```
 
-5. **Set Up PostgreSQL**
-```bash
-# Create database
-createdb ecommerce
+The application uses Pydantic Settings (`app/core/config.py`). The following settings have no defaults and **must** be defined in `.env`:
 
-# Or using psql
-psql -U postgres
-CREATE DATABASE ecommerce;
-```
+| Setting Name | Purpose | Example Value for Local Development |
+|---|---|---|
+| `ENVIRONMENT` | Runtime mode: `development`, `test`, `staging`, or `production` | `development` |
+| `JWT_SECRET_KEY` | HMAC secret for signing access and refresh tokens | Random 64-character hex string (`openssl rand -hex 32`) |
+| `POSTGRES_SERVER` | PostgreSQL server hostname or IP | `localhost` (or `db` inside Docker Compose) |
+| `POSTGRES_USER` | PostgreSQL superuser and schema owner | `postgres` |
+| `POSTGRES_PASSWORD` | PostgreSQL superuser password | Local database password |
+| `POSTGRES_DB` | PostgreSQL database name | `ecommerce` |
+| `REDIS_HOST` | Redis server hostname or IP | `localhost` (or `redis` inside Docker Compose) |
+| `SMTP_HOST` | Mail transfer agent hostname | `localhost` |
+| `SMTP_USER` | Mail authentication username | Local username or placeholder |
+| `SMTP_PASSWORD` | Mail authentication password | Local password or placeholder |
+| `EMAILS_FROM_EMAIL` | Sender address on transactional emails | `noreply@example.com` |
+| `EMAILS_FROM_NAME` | Sender display name | `Store Support` |
 
-6. **Run Migrations**
+#### Environment Modes (`ENVIRONMENT`)
+
+The `ENVIRONMENT` variable dictates security constraints and runtime behavior:
+- `development`: Automatically forces `DEBUG=True`, `RELOAD=True`, and `WORKERS=1`. Connection pool sizes (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`) are halved. Interactive OpenAPI documentation is enabled at `/api/v1/docs` and `/redoc`. Deployment secret strength checks are skipped.
+- `test`: Used by pytest. Allows `LOG_LEVEL=DEBUG`, skips production secret checks, and maintains interactive documentation.
+- `staging` and `production`: Enforces strict production deployment gates in `Settings.check_deployment_settings`. Forbids `LOG_LEVEL=DEBUG`, requires `BCRYPT_ROUNDS >= 12`, enforces `PAYMENT_PROVIDER=stripe`, mandates non-placeholder secrets meeting minimum length requirements, and requires `FRONTEND_URL` to start with `https://`. In `production`, interactive documentation (`/api/v1/docs`, `/redoc`, and `/api/v1/openapi.json`) is disabled (returns 404).
+
+### 3. Running Services Locally
+
+Start local PostgreSQL and Redis servers, then run database migrations:
+
 ```bash
 uv run alembic upgrade head
 ```
-The initial migration (`migrations/versions/`, tracked in git) has been
-generated and applied against a real local PostgreSQL 18 instance, verified
-with `alembic check` (zero drift between the migration and the current
-models) and `scripts/pg_smoke_test.py` (see below). If you change a model,
-regenerate with `uv run alembic revision --autogenerate -m "description"`
-and re-run `alembic check` before committing the new revision.
 
-7. **(Optional) Seed demo data**
+Run the application components in separate terminal windows:
 
-To get a working catalog to develop against without hand-creating
-categories/products, run the demo seed script after migrating:
 ```bash
-uv run python scripts/seed_demo_data.py
-```
-This creates a small illustrative category tree (a generic "general
-store" catalog - replace it with your own domain), a dozen or so
-products (a couple with `ProductVariant`s), and one admin user plus one
-regular user. Credentials are generated fresh each run and printed to
-stdout - they are not stored anywhere, so save them from the terminal
-output. Safe to re-run: existing categories/products/users (matched by
-name/email) are skipped rather than duplicated.
-
-8. **(Optional) Run the Postgres-specific smoke test**
-
-The main test suite (`uv run pytest`) runs against an in-memory SQLite
-database for speed - it does not have Postgres available and cannot
-validate Postgres-only behavior (ARRAY columns, JSONB path filtering,
-partial unique indexes). After `alembic upgrade head` against a real,
-disposable Postgres database, run:
-```bash
-uv run python scripts/pg_smoke_test.py
-```
-This TRUNCATEs the tables it touches - point it at a throwaway database,
-never a real one.
-
-9. **Start Redis Server**
-```bash
-# Windows (if using WSL)
-wsl sudo service redis-server start
-
-# Linux/Mac
-sudo service redis-server start
-```
-
-10. **Run the Application**
-```bash
+# 1. FastAPI application (uvicorn)
 uv run python main.py
-# or: uv run uvicorn app.main:app --reload
+# (On Windows, main.py explicitly selects SelectorEventLoop for psycopg async compatibility)
+
+# 2. Celery background worker
+uv run celery -A app.tasks worker --loglevel=info
+
+# 3. Celery beat periodic scheduler
+uv run celery -A app.tasks beat --loglevel=info
 ```
 
-## Docker Setup
+The API will be available at `http://localhost:8000` (docs at `http://localhost:8000/api/v1/docs`).
 
-1. **Clone the Repository**
-```bash
-git clone https://github.com/nadeko0/fastapi_e-commerce_backend.git
-cd fastapi_e-commerce_backend
-```
+## Docker Compose Setup
 
-2. **Set Up Environment Variables**
-```bash
-cp .env.example .env
-# Edit .env with your configurations
-# Make sure to use 'db' as POSTGRES_SERVER and 'redis' as REDIS_HOST
-```
+Docker Compose provides a complete, isolated environment matching production topology.
 
-3. **Build and Start Services**
+### 1. Compose Configuration and Roles
+
+Inside `docker-compose.yml`, services connect using internal container hostnames:
+- `POSTGRES_SERVER=db`
+- `REDIS_HOST=redis`
+- `REDIS_PASSWORD` is strictly required (`:?` expansion prevents starting unauthenticated)
+
+PostgreSQL implements role separation via `docker/postgres/initdb/10-app-role.sh`:
+- `POSTGRES_USER`: Superuser and schema owner. Owns the tables and executes schema migrations.
+- `APP_DB_USER`: Unprivileged runtime role used by the `api`, `celery-worker`, and `celery-beat` services. It possesses DML rights (SELECT, INSERT, UPDATE, DELETE) and sequence usage, but zero DDL rights (cannot CREATE, ALTER, or DROP tables).
+
+### 2. Build and Start the Stack
+
 ```bash
-# Build and start all services
+# Start background infrastructure (db, redis) and runtime services (api, celery-worker, celery-beat)
 docker compose up --build -d
 
-# View logs
-docker compose logs -f
-
-# Check service status
+# Check service health
 docker compose ps
+
+# View logs
+docker compose logs -f api
 ```
 
-4. **Run Migrations**
+### 3. Run Database Migrations
+
+Because the `api` container runs under the unprivileged `APP_DB_USER` role, it cannot modify database schemas. Migrations must be executed via the dedicated `migrate` profile as the schema owner:
+
 ```bash
-docker compose exec api alembic upgrade head
+docker compose --profile migrate run --rm migrate
 ```
 
-5. **(Optional) Seed Demo Data (creates an admin user, among other things)**
+> [!WARNING]
+> Never attempt to run `docker compose exec api alembic upgrade head`. The runtime application role has no DDL permissions, and Alembic will fail with a PostgreSQL permission denied error.
+
+Published host ports:
+- API: `http://localhost:8000` (controlled by `DOCKER_API_PORT`, container binds to internal 8000)
+- PostgreSQL: `127.0.0.1:5432` (loopback only, controlled by `DOCKER_POSTGRES_PORT`)
+- Redis: `127.0.0.1:6379` (loopback only, controlled by `DOCKER_REDIS_PORT`)
+
+## Creating the First Administrator
+
+The system does not provide a command-line account creation utility. To create an administrator:
+
+1. Register a standard user account through the API (`POST /api/v1/users/register`) or interactive documentation:
+   ```bash
+   curl -X POST http://localhost:8000/api/v1/users/register \
+     -H "Content-Type: application/json" \
+     -d '{"email": "admin@example.com", "password": "SuperSecretPassword123!", "gdpr_consent": true, "privacy_policy_accepted": true}'
+   ```
+2. Promote the user to the `admin` role (and mark the e-mail verified) as the database owner. The variables are expanded inside the `db` container, which has them from `.env`:
+   ```bash
+   docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+   UPDATE users SET role = 'admin', is_email_verified = true
+   WHERE lower(email) = lower('admin@example.com');
+   SQL
+   ```
+
+For a local non-Docker PostgreSQL database, execute the same query via `psql -U postgres -d ecommerce`.
+
+## Payment Configuration
+
+### Mock Provider
+
+For offline testing without a Stripe account, keep the default setting:
+
+```env
+PAYMENT_PROVIDER=mock
+```
+
+The mock provider simulates successful transactions, test-card declines, and refund lifecycles entirely in-memory without making external network calls.
+
+### Real Stripe Development
+
+To integrate with Stripe test mode:
+
+1. In `.env`, set `PAYMENT_PROVIDER=stripe` and provide your test keys:
+   ```env
+   PAYMENT_PROVIDER=stripe
+   STRIPE_SECRET_KEY=<your-stripe-secret-key>
+   ```
+2. Forward incoming Stripe webhooks to your local API instance using the Stripe CLI:
+   ```bash
+   stripe listen --forward-to http://localhost:8000/api/v1/orders/webhooks/stripe
+   ```
+3. Copy the webhook signing secret printed by the Stripe CLI into `.env`:
+   ```env
+   STRIPE_WEBHOOK_SECRET=<your-webhook-signing-secret>
+   ```
+4. Restart the API and Celery worker so they read the updated secrets.
+
+Standard Stripe test payment method tokens:
+- `pm_card_visa`: Generates an immediately successful charge (`PaymentStatus.PAID`).
+- `pm_card_visa_chargeDeclined`: Simulates a declined card (`card_declined / generic_decline`).
+- `pm_card_createDispute`: Triggers a chargeback dispute webhook (`charge.dispute.created`), placing the associated order on hold for administrative review.
+
+## Running Tests
+
+The test suite includes over 5,200 automated tests covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
+
+To run the full suite locally:
+
 ```bash
-docker compose exec api python scripts/seed_demo_data.py
+uv run pytest
 ```
 
-## Development Workflow
+See [docs/TESTING.md](docs/TESTING.md) for details on testing against real PostgreSQL engines, running property fuzzing with Hypothesis, and executing mutation tests.
 
-1. **Code Style**
-- Follow PEP 8 guidelines
-- Use type hints
-- Write docstrings for functions and classes
-- Keep functions small and focused
-
-2. **Git Workflow**
-```bash
-# Create feature branch
-git checkout -b feature/your-feature
-
-# Make changes and commit
-git add .
-git commit -m "feat: your feature description"
-
-# Push changes
-git push origin feature/your-feature
-```
-
-3. **Running Tests**
-```bash
-# Local
-uv run pytest --cov=app
-
-# Docker
-docker compose exec api uv run pytest --cov=app
-```
-
-4. **API Documentation**
-- Swagger UI: http://localhost:8000/api/v1/docs
-- ReDoc: http://localhost:8000/api/v1/redoc
-
-## Common Issues and Solutions
-
-### Database Connection Issues
-1. Check PostgreSQL service is running
-2. Verify database credentials in .env
-3. Ensure database exists
-4. Check network connectivity
-
-### Redis Connection Issues
-1. Verify Redis service is running
-2. Check Redis password in .env
-3. Test Redis connection:
-```bash
-redis-cli ping
-```
-
-### Docker Issues
-1. **Services won't start**
-   - Check docker logs
-   - Verify port availability
-   - Ensure no conflicts with local services
-
-2. **Database migrations fail**
-   - Wait for database to be ready
-   - Check database connection settings
-   - Verify migration files exist
-
-## Production Deployment
-
-1. **Update Environment Variables**
-```bash
-# Set production values
-ENVIRONMENT=production
-DEBUG=False
-```
-
-2. **Security Checklist**
-- [ ] Set strong passwords
-- [ ] Configure CORS properly
-- [ ] Enable HTTPS
-- [ ] Set up proper logging
-- [ ] Configure backups
-- [ ] Set up monitoring
-
-3. **Performance Tuning**
-- Adjust worker count based on CPU cores
-- Configure database pool size
-- Set appropriate cache TTLs
-- Enable compression
-
-4. **Backup Setup**
-```bash
-# Database backup
-docker compose exec db pg_dump -U postgres ecommerce > backup.sql
-
-# Restore if needed
-docker compose exec db psql -U postgres ecommerce < backup.sql
-```
-
-## Additional Resources
-
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [SQLAlchemy Documentation](https://docs.sqlalchemy.org/)
-- [Alembic Documentation](https://alembic.sqlalchemy.org/)
-- [Docker Documentation](https://docs.docker.com/)
-- [PostgreSQL Documentation](https://www.postgresql.org/docs/)
-- [Redis Documentation](https://redis.io/documentation)
-
-## Support
-
-For technical issues:
-- Open an issue in the repository
-- Check the logs: `docker compose logs -f service_name`
+See also: [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/TESTING.md](docs/TESTING.md), [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
