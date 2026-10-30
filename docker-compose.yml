@@ -166,7 +166,7 @@ services:
     # an official image that removes known CRITICAL/HIGH findings may be
     # pinned earlier (redis, 2026-10-25: two HIGH in libssl3/libcrypto3, scan
     # before and after kept in the change record).
-    image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
+    image: postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
     # max_connections: each API worker can open up to 2 x (DB_POOL_SIZE +
     # DB_MAX_OVERFLOW) connections (a sync and an async pool), so 4 workers
     # with the default 10 + 5 can reach 120, plus the Celery worker. The
