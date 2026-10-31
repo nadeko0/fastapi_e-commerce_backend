@@ -67,6 +67,21 @@ ORDERS = f"{API}/orders"
 UNLIMITED = "1000000/minute"
 PASSWORD = "Str0ngPass1"
 
+
+def bug(reason: str):
+    """Strict xfail for a confirmed backend defect (an XPASS fails the run)."""
+    return pytest.mark.xfail(strict=True, reason=f"BUG DISCOVERED: {reason}")
+
+
+BUG_D1 = ("logout blacklists the access token for int(exp - now) seconds, which floors, so the entry "
+          "lapses up to 1 s before the token expires (app/core/security.py:625)")
+BUG_D2 = ("a client waiting exactly Retry-After is refused again: Redis keeps the counter alive AT "
+          "its expiry instant, 1 ms past the ceiled Retry-After (app/core/rate_limit.py:219-221,251-253)")
+BUG_D4 = ("data-retention status floors the age to whole days ((now - created_at).days <= period), "
+          "so an account up to 23h59m past its period is 'within' (app/services/gdpr.py:180-181)")
+BUG_D5 = ("order total beyond Numeric(10,2) is never checked: 500 on PostgreSQL, stored on SQLite "
+          "(app/api/v1/orders.py:366-368)")
+
 US = timedelta(microseconds=1)
 MS = timedelta(milliseconds=1)
 ZERO = timedelta(0)
@@ -417,8 +432,12 @@ def test_email_verification_link_works_for_exactly_its_lifetime(client, db_sessi
     assert response.status_code == (200 if offset < ZERO else 400), response.text
 
 
-@pytest.mark.parametrize("logout_after", [1.0, 0.001, 0.5, 0.999],
-                         ids=["whole-second", "1ms", "500ms", "999ms"])
+@pytest.mark.parametrize("logout_after", [
+    pytest.param(1.0, id="whole-second"),  # exp - now is whole: int() loses nothing
+    pytest.param(0.001, id="1ms", marks=bug(BUG_D1)),
+    pytest.param(0.5, id="500ms", marks=bug(BUG_D1)),
+    pytest.param(0.999, id="999ms", marks=bug(BUG_D1)),
+])
 def test_bug_logout_blacklist_expires_before_the_access_token(client, db_session, clock,
                                                               logout_after):
     """Logout (with its refresh token) blacklists the access token for "its
@@ -503,6 +522,7 @@ def test_fixed_window_ends_after_its_length(client, limits, clock, offset, expec
         assert client.get(f"{API}/categories").status_code == expected
 
 
+@bug(BUG_D2)
 def test_bug_rate_limit_client_waiting_exactly_retry_after_is_refused_again(
     client, limits, clock
 ):
@@ -941,12 +961,13 @@ def test_an_in_flight_attempt_blocks_another_until_it_is_stale(client, db_sessio
     assert response.status_code == (409 if blocked else 200), response.text
 
 
-def test_bug_attempt_exactly_stale_after_minutes_old_no_longer_blocks(client, db_session,
-                                                                      clock):
-    """_guard_no_attempt_in_flight: "An attempt in flight for LONGER than
-    PAYMENT_ATTEMPT_STALE_AFTER_MINUTES no longer blocks". One exactly that
-    old is not longer than it, so it must still block (409); the query uses
-    created_at > now - window, which already lets the second attempt in."""
+def test_attempt_exactly_stale_after_minutes_old_is_stale(client, db_session,
+                                                          clock):
+    """POLICY (D3): an attempt exactly PAYMENT_ATTEMPT_STALE_AFTER_MINUTES old
+    no longer blocks (created_at > now - window); the existing suite pins the
+    same edge (tests/integration/test_payment_webhook_mutants.py::
+    test_an_attempt_exactly_at_the_stale_limit_does_not). The window is closed
+    at its far end: "stale" begins AT the limit, not 1 us after."""
     shop = Shop(client, db_session)
     stale = timedelta(minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES)
     now = T0 + timedelta(microseconds=250000)
@@ -955,7 +976,7 @@ def test_bug_attempt_exactly_stale_after_minutes_old_no_longer_blocks(client, db
         order = shop.order_of(buyer, shop.product(price="10.00"))
         _in_flight_attempt(db_session, order["id"], now - stale)
         response = shop.pay(buyer, order["id"], token=PAY_OK)
-    assert response.status_code == 409, response.text
+    assert response.status_code == 200, response.text
 
 
 @pytest.mark.parametrize("offset,holds", [(-US, False), (US, True)], ids=["T-1us", "T+1us"])
@@ -973,12 +994,12 @@ def test_an_event_waits_for_an_attempt_still_storing_its_id_until_stale(db_sessi
     assert result is holds
 
 
-def test_bug_event_held_back_by_attempt_exactly_stale_after_minutes_old(db_session, clock,
+def test_event_not_held_back_by_attempt_exactly_stale_after_minutes_old(db_session, clock,
                                                                         buyer_row):
-    """Same window, second site (stripe_events._attempt_still_storing_its_id):
-    "an attempt in flight for LONGER than PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
-    (its request died) does not hold events back" - one exactly that old
-    still does."""
+    """POLICY (D3, second site: stripe_events._attempt_still_storing_its_id): an
+    attempt exactly that old is already stale and does not hold events back -
+    pinned by tests/integration/test_payment_webhook_mutants.py::
+    test_an_attempt_exactly_at_the_stale_limit_does_not."""
     user, address = buyer_row
     stale = timedelta(minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES)
     now = T0 + timedelta(microseconds=750000)
@@ -986,7 +1007,7 @@ def test_bug_event_held_back_by_attempt_exactly_stale_after_minutes_old(db_sessi
     _in_flight_attempt(db_session, order.id, now - stale, pending_id=True)
     with clock(now):
         assert stripe_events._attempt_still_storing_its_id(
-            db_session, {"metadata": {"order_id": str(order.id)}}) is True
+            db_session, {"metadata": {"order_id": str(order.id)}}) is False
 
 
 @pytest.mark.parametrize("order_id", ["0", "-1", str(2**31), str(2**63), "1.5", "", None])
@@ -1109,6 +1130,7 @@ def test_data_retention_status_inside_the_period(client, db_session, clock, age,
     assert body["within_retention_period"] is within
 
 
+@bug(BUG_D4)
 @pytest.mark.parametrize("past", [US, timedelta(hours=1), timedelta(hours=23, minutes=59)],
                          ids=["1us", "1h", "23h59m"])
 def test_bug_data_retention_status_truncates_age_to_whole_days(client, db_session, clock,
@@ -1318,6 +1340,7 @@ def test_order_total_up_to_the_largest_numeric_10_2(client, db_session, lines, t
     assert response.json()["total_amount"] == total
 
 
+@bug(BUG_D5)
 @pytest.mark.parametrize("lines", [
     [("50000000.00", 2)],                 # one cent past: 100000000.00
     [("99999999.99", 1), ("0.01", 1)],

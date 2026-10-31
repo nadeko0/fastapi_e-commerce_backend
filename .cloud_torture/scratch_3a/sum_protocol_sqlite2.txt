@@ -1,0 +1,2 @@
+646 passed, 46 xfailed in 58.03s
+wall 61s

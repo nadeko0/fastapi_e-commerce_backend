@@ -1,0 +1,2 @@
+288 passed, 10 xfailed in 23.21s
+wall 28s

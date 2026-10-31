@@ -1,0 +1,3 @@
+[XPASS(strict)] BUG DISCOVERED: logout blacklists the access token for int(exp - now) seconds, which floors, so the entry lapses up to 1 s before the token expires (app/core/security.py:625)
+FAILED tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[whole-second]
+1 failed, 285 passed, 12 xfailed in 12.01s

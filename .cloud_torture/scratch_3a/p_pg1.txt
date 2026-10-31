@@ -1,0 +1,3 @@
+E       AssertionError: {"type":"https://github.com/nadeko0/fastapi_e-commerce_backend/problems/validation-error","title":"Request validation failed","status":422,"detail":"The request is invalid; see errors","instance":"/api/v1/admin/products/1/vari
+FAILED tests/torture_suite/test_protocol_rfc_torture.py::test_merge_patch_replaces_a_free_form_object_wholesale
+1 failed, 641 passed, 50 xfailed in 130.91s (0:02:10)

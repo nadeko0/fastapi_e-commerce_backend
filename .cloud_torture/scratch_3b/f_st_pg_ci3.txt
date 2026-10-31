@@ -1,0 +1,12 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+......xxxx                                                               [100%]
+=========================== short test summary info ============================
+XFAIL tests/torture_suite/test_stateful_invariants.py::test_bug_stale_refund_event_reverts_a_settled_refund - BUG DISCOVERED (bug 1): a stale refund.created/charge.refunded snapshot (status pending) delivered after refund.updated (succeeded) rewinds the refund succeeded->pending and the order refunded->paid - _apply_refund_object treats only failed/canceled as final (app/services/stripe_events.py:253-255), _settle_refunds recomputes the order (app/api/v1/orders.py:1771)
+XFAIL tests/torture_suite/test_stateful_invariants.py::test_bug_refund_after_an_unreported_refund_failure_is_a_500 - BUG DISCOVERED (bug 2): /refund answers 500 for a refund the provider already made when an earlier refund failed at the provider and its refund.failed is not processed yet - _record_refund adds to a stale amount_refunded (app/api/v1/orders.py:1767, called at :1625) and violates ck_payment_refunded_within_amount
+XFAIL tests/torture_suite/test_stateful_invariants.py::test_bug_restock_past_int32_max_is_a_500_on_cancel - BUG DISCOVERED (bug 3): restocking a cancelled order onto a stock an admin set to Int32Max (accepted by app/schemas/product.py:83,193) overflows - unchecked stock + qty in cancel_order_and_restock (app/services/orders.py:123,130): 500 NumericValueOutOfRange on PostgreSQL, stock 2147483648 (above the API's maximum) on SQLite
+XFAIL tests/torture_suite/test_stateful_invariants.py::test_bug_restock_past_int32_max_aborts_the_expiry_sweep - BUG DISCOVERED (bug 3, PostgreSQL): the unpaid-order expiry sweep (app/tasks.py:499 -> cancel_order_and_restock, app/services/orders.py:123,130) raises NumericValueOutOfRange on an order whose restock passes Int32Max, aborting the sweep for every other order
+6 passed, 4 xfailed in 200.74s (0:03:20)
+
+real	3m25.619s
+user	2m7.152s
+sys	0m12.699s

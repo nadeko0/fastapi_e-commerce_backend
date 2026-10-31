@@ -1,0 +1,19 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+........................................................................ [ 24%]
+................xxx..........x.......................................... [ 48%]
+.......................................................................x [ 72%]
+xx........................................................xxx........... [ 96%]
+..........                                                               [100%]
+=========================== short test summary info ============================
+XFAIL tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[1ms] - BUG DISCOVERED: logout blacklists the access token for int(exp - now) seconds, which floors, so the entry lapses up to 1 s before the token expires (app/core/security.py:625)
+XFAIL tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[500ms] - BUG DISCOVERED: logout blacklists the access token for int(exp - now) seconds, which floors, so the entry lapses up to 1 s before the token expires (app/core/security.py:625)
+XFAIL tests/torture_suite/test_boundary_mutants.py::test_bug_logout_blacklist_expires_before_the_access_token[999ms] - BUG DISCOVERED: logout blacklists the access token for int(exp - now) seconds, which floors, so the entry lapses up to 1 s before the token expires (app/core/security.py:625)
+XFAIL tests/torture_suite/test_boundary_mutants.py::test_bug_rate_limit_client_waiting_exactly_retry_after_is_refused_again - BUG DISCOVERED: a client waiting exactly Retry-After is refused again: Redis keeps the counter alive AT its expiry instant, 1 ms past the ceiled Retry-After (app/core/rate_limit.py:219-221,251-253)
+XFAIL tests/torture_suite/test_boundary_mutants.py::test_bug_data_retention_status_truncates_age_to_whole_days[1us] - BUG DISCOVERED: data-retention status floors the age to whole days ((now - created_at).days <= period), so an account up to 23h59m past its period is 'within' (app/services/gdpr.py:180-181)
+XFAIL tests/torture_suite/test_boundary_mutants.py::test_bug_data_retention_status_truncates_age_to_whole_days[1h] - BUG DISCOVERED: data-retention status floors the age to whole days ((now - created_at).days <= period), so an account up to 23h59m past its period is 'within' (app/services/gdpr.py:180-181)
+XFAIL tests/torture_suite/test_boundary_mutants.py::test_bug_data_retention_status_truncates_age_to_whole_days[23h59m] - BUG DISCOVERED: data-retention status floors the age to whole days ((now - created_at).days <= period), so an account up to 23h59m past its period is 'within' (app/services/gdpr.py:180-181)
+XFAIL tests/torture_suite/test_boundary_mutants.py::test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[qty-x-price] - BUG DISCOVERED: order total beyond Numeric(10,2) is never checked: 500 on PostgreSQL, stored on SQLite (app/api/v1/orders.py:366-368)
+XFAIL tests/torture_suite/test_boundary_mutants.py::test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[two-lines] - BUG DISCOVERED: order total beyond Numeric(10,2) is never checked: 500 on PostgreSQL, stored on SQLite (app/api/v1/orders.py:366-368)
+XFAIL tests/torture_suite/test_boundary_mutants.py::test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly[far-past] - BUG DISCOVERED: order total beyond Numeric(10,2) is never checked: 500 on PostgreSQL, stored on SQLite (app/api/v1/orders.py:366-368)
+288 passed, 10 xfailed in 23.21s
+wall 28s
