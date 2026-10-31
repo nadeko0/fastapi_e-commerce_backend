@@ -1,0 +1,198 @@
+diff --git a/app/services/gdpr.py b/app/services/gdpr.py
+index f02f2d3..c3558f7 100644
+--- a/app/services/gdpr.py
++++ b/app/services/gdpr.py
+@@ -177,5 +177,4 @@ class GDPRService:
+             return True
+ 
+         retention_days = user.data_retention_period or settings.USER_DATA_RETENTION_DAYS
+-        age_in_days = (utc_now() - user.created_at).days
+-        return age_in_days <= retention_days
++        return utc_now() - user.created_at <= timedelta(days=retention_days)
+diff --git a/app/schemas/product.py b/app/schemas/product.py
+index c6fa151..e9e0b54 100644
+--- a/app/schemas/product.py
++++ b/app/schemas/product.py
+@@ -137,10 +137,16 @@ class ProductListResponse(BaseModel):
+ class ProductFilter(BaseModel):
+     """Schema for product filtering"""
+     category_id: Int32 | None = None
+-    min_price: Decimal | None = Field(None, ge=0)
+-    max_price: Decimal | None = Field(None, ge=0)
++    min_price: Decimal | None = Field(None, ge=0, le=Decimal("99999999.99"), decimal_places=6)
++    max_price: Decimal | None = Field(None, ge=0, le=Decimal("99999999.99"), decimal_places=6)
+     in_stock: bool | None = None
+     characteristics: dict[str, Any] | None = None
++
++    @field_validator("min_price", "max_price")
++    @classmethod
++    def _zero_has_no_exponent(cls, v):
++        return Decimal(0) if v == 0 else v
++
+     # Bounded like ProductSearch.query: a search term, not a document.
+     search_query: str | None = Field(None, max_length=100)
+     sort_by: str | None = Field(None, pattern="^(name|price|created_at)_(asc|desc)$")
+diff --git a/app/schemas/order.py b/app/schemas/order.py
+index fa9deaf..54d1391 100644
+--- a/app/schemas/order.py
++++ b/app/schemas/order.py
+@@ -42,7 +42,7 @@ def _to_cents(value: Decimal) -> Decimal:
+ # digits after a point (trailing zeros do not count: 10.500 is 10.50, as
+ # ORDER_AMOUNT_DECIMAL_PLACES says). A sign is let through so that a negative
+ # amount is refused by its bound (with the message of the bound).
+-_MONEY_UNSIGNED = r"\d+(\.\d{1,2}0*)?"
++_MONEY_UNSIGNED = r"[0-9]+(\.[0-9]{1,2}0*)?"
+ _MONEY_PATTERN = "-?" + _MONEY_UNSIGNED
+ _MONEY_INPUT = re.compile(_MONEY_PATTERN)
+ # The same, for the OpenAPI document only, with the whole-part budget of the
+diff --git a/app/api/v1/users.py b/app/api/v1/users.py
+index 1ae63f8..b5c48ad 100644
+--- a/app/api/v1/users.py
++++ b/app/api/v1/users.py
+@@ -1,6 +1,7 @@
+ import logging
+ from typing import Annotated
+ 
++from email_validator import EmailNotValidError, validate_email
+ from fastapi import (
+     APIRouter,
+     BackgroundTasks,
+@@ -120,8 +121,13 @@ async def _user_by_email(db: AsyncSession, email: str):
+     lower(email) on the column, not just the normalised input: rows stored
+     before emails were normalised keep the spelling their owner typed. The
+     comparison is what the unique index on lower(email) covers."""
++    canonical = normalize_email(email)
++    try:  # the spelling registration stores (EmailStr: IDNA / UTS #46 domain)
++        canonical = validate_email(canonical, check_deliverability=False).normalized
++    except EmailNotValidError:
++        pass
+     result = await db.execute(
+-        select(User).where(func.lower(User.email) == normalize_email(email)).limit(1)
++        select(User).where(func.lower(User.email) == canonical).limit(1)
+     )
+     return result.scalars().first()
+ 
+diff --git a/app/api/v1/orders.py b/app/api/v1/orders.py
+index 3789916..dcfe806 100644
+--- a/app/api/v1/orders.py
++++ b/app/api/v1/orders.py
+@@ -365,6 +365,13 @@ async def create_order(
+ 
+         total_amount += price_at_time * item.quantity
+ 
++    if total_amount > Decimal("99999999.99"):  # Order.total_amount is Numeric(10, 2)
++        await db.rollback()
++        raise Problem(
++            status.HTTP_422_UNPROCESSABLE_ENTITY,
++            type=ProblemType.VALIDATION_ERROR,
++            detail="Order total exceeds the maximum amount",
++        )
+     order.total_amount = total_amount
+     await db.commit()
+     await _drop_product_details(redis, products_with_cached_stock(
+diff --git a/app/core/text_input.py b/app/core/text_input.py
+index 0c638b3..40c1a32 100644
+--- a/app/core/text_input.py
++++ b/app/core/text_input.py
+@@ -28,6 +28,7 @@ It is applied once per kind of input, not per field:
+   where that JSON is parsed.
+ """
+ 
++import math
+ import re
+ from collections.abc import Iterable
+ from typing import Any
+@@ -41,6 +42,7 @@ NUL_MESSAGE = "String must not contain NUL characters"
+ SURROGATE_TYPE = "invalid_unicode"
+ SURROGATE_MESSAGE = "String must be valid Unicode"
+ 
++MAX_JSON_DEPTH = 64
+ _NUL = re.compile("\x00")
+ _SURROGATE = re.compile("[\ud800-\udfff]")
+ 
+@@ -69,6 +71,10 @@ def first_unusable_text(value: Any, loc: tuple[str | int, ...] = ()) -> dict | N
+     pending = [(value, loc)]
+     while pending:
+         item, where = pending.pop()
++        if isinstance(item, float) and not math.isfinite(item):
++            return {"type": "finite_number", "loc": where, "msg": "Number must be finite"}
++        if isinstance(item, (dict, list, tuple)) and len(where) - len(loc) > MAX_JSON_DEPTH:
++            return {"type": "too_deep", "loc": where, "msg": "Value is nested too deeply"}
+         if isinstance(item, str):
+             found = _problem(item)
+             if found:
+@@ -104,6 +110,10 @@ async def reject_unusable_text(request: Request) -> None:
+     reason to accept it. Raised as RequestValidationError, so the answer is
+     the same 422 problem as any other bad parameter. It runs ahead of the
+     route's own dependencies, so such a request is a 422 before it is a 401."""
++    media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
++    if request.method == "PATCH" and media_type.endswith("+json") and media_type != "application/merge-patch+json":
++        from app.core.errors import _unsupported_media_type  # RFC 5789 2.2: a patch format we do not know
++        raise _unsupported_media_type(request)
+     sources = [("path", request.path_params), ("query", _by_name(request.query_params.multi_items()))]
+     route = request.scope.get("route")
+     body_field = getattr(route, "body_field", None)
+diff --git a/app/core/security.py b/app/core/security.py
+index d52a5d2..b21a66d 100644
+--- a/app/core/security.py
++++ b/app/core/security.py
+@@ -1,6 +1,7 @@
+ import asyncio
+ import hashlib
+ import hmac
++import math
+ import os
+ import re
+ import time
+@@ -622,7 +623,7 @@ async def logout(access_token: str, refresh_token: str | None = None) -> None:
+         )
+         # time.time(), not a naive UTC datetime's timestamp(): the latter reads a
+         # naive UTC value as local time and is off by the host's UTC offset.
+-        expires_in = max(int(payload["exp"] - time.time()), 1)
++        expires_in = max(math.ceil(payload["exp"] - time.time()), 1)
+     except jwt.PyJWTError:
+         expires_in = 1
+     # The access token was authenticated by the route a moment ago, so it
+diff --git a/app/core/etag.py b/app/core/etag.py
+index 7ae1f94..db5fb7b 100644
+--- a/app/core/etag.py
++++ b/app/core/etag.py
+@@ -18,7 +18,8 @@ from pydantic import BaseModel
+ IfMatch = Annotated[str | None, Header(description="Entity tag(s) the current resource must match, or *")]
+ IfNoneMatch = Annotated[str | None, Header(description="Entity tag(s) the client already holds, or *")]
+ 
+-_TAG = re.compile(r'(W/)?"([^"]*)"|\*')
++_ENTITY = re.compile(r'(W/)?"([^"]*)"')
++_LIST = re.compile(r'[ \t,]*(?:W/)?"[^"]*"(?:[ \t]*,[ \t,]*(?:W/)?"[^"]*")*[ \t,]*')
+ 
+ 
+ def etag_for(model: BaseModel) -> str:
+@@ -28,7 +29,12 @@ def etag_for(model: BaseModel) -> str:
+ 
+ def _parse(header: str) -> list[tuple[bool, str | None]]:
+     """(is_weak, opaque_tag) pairs; a bare '*' is (False, None)."""
+-    return [(bool(m.group(1)), m.group(2)) for m in _TAG.finditer(header)]
++    value = header.strip(" \t")
++    if value == "*":
++        return [(False, None)]
++    if not _LIST.fullmatch(value):  # RFC 9110: "*" or a comma-separated list of entity-tags
++        return []
++    return [(bool(m.group(1)), m.group(2)) for m in _ENTITY.finditer(value)]
+ 
+ 
+ def if_match_passes(header: str | None, current: str) -> bool:
+diff --git a/app/core/rate_limit.py b/app/core/rate_limit.py
+index a25f4a4..143abac 100644
+--- a/app/core/rate_limit.py
++++ b/app/core/rate_limit.py
+@@ -214,6 +214,10 @@ def user_id_from_token(request: Request) -> str | None:
+ # because INCR and PEXPIRE must not be separable: a key that got its INCR
+ # but never its expiry would count, and block, forever.
+ _COUNT_LUA = """
++-- Redis keeps a key alive AT its expiry instant (PTTL 0); the window is over.
++if redis.call('PTTL', KEYS[1]) == 0 then
++    redis.call('DEL', KEYS[1])
++end
+ local count = redis.call('INCR', KEYS[1])
+ local ttl = redis.call('PTTL', KEYS[1])
+ if ttl < 0 then
