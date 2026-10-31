@@ -1,0 +1,10 @@
+[XPASS(strict)] BUG DISCOVERED (bug 1): a stale refund.created/charge.refunded snapshot (status pending) delivered after refund.updated (succeeded) re
+[XPASS(strict)] BUG DISCOVERED (bug 2): /refund answers 500 for a refund the provider already made when an earlier refund failed at the provider and i
+{"timestamp": "2026-10-31T13:54:07.152Z", "level": "WARNING", "logger": "app.services.stripe_events", "message": "Refund re_6c73678bfab6465daace6e66 o
+WARNING  app.services.stripe_events:stripe_events.py:271 Refund re_6c73678bfab6465daace6e66 of payment 1 (order 1) is failed after it was recorded (No
+FAILED tests/torture_suite/test_stateful_invariants.py::test_bug_stale_refund_event_reverts_a_settled_refund
+FAILED tests/torture_suite/test_stateful_invariants.py::test_bug_refund_after_an_unreported_refund_failure_is_a_500
+FAILED tests/torture_suite/test_stateful_invariants.py::test_bug_restock_past_int32_max_is_a_500_on_cancel
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_order_replay_racing_its_first_request_answers_cart_empty
+FAILED tests/torture_suite/test_concurrency_torture.py::test_bug_webhook_stored_after_erasure_keeps_personal_data
+5 failed, 1 passed, 3 skipped, 98 deselected in 1.33s

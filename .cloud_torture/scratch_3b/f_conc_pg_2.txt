@@ -1,0 +1,14 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+............x............x....................................x......... [ 74%]
+.................x.....x.                                                [100%]
+=========================== short test summary info ============================
+XFAIL tests/torture_suite/test_concurrency_torture.py::test_bug_logout_racing_refresh_leaves_a_live_refresh_token - BUG DISCOVERED (BUG-1): a refresh token rotated while logout revokes its family survives the logout - revoke_refresh_family reads the members then deletes them in separate round trips (app/services/redis_async.py:424-429) while rotate_refresh_token adds the new jti before redeeming the old one (app/core/security.py:537-539)
+XFAIL tests/torture_suite/test_concurrency_torture.py::test_bug_order_replay_racing_its_first_request_answers_cart_empty - BUG DISCOVERED (BUG-2): a retry of POST /orders whose key lookup ran before the first request committed reads the cart that request emptied and answers 400 'Cart is empty' instead of the order (201) or idempotency-key-in-use (409) - app/api/v1/orders.py:206 (key lookup) -> :211-215 (empty cart 400)
+XFAIL tests/torture_suite/test_concurrency_torture.py::test_bug_mock_provider_refund_key_is_not_atomic - BUG DISCOVERED (BUG-5, mock provider, dev/CI only): concurrent same-key refunds both pass the mock's Idempotency-Key check and both refund - check at app/services/payment/stripe_provider.py:486, insert at :532, no lock, called from a thread pool (app/api/v1/orders.py:1591)
+XFAIL tests/torture_suite/test_concurrency_torture.py::test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout - BUG DISCOVERED (BUG-3): checkouts deadlock (40P01, answered 503) when a variant line and a plain line of the same product meet - lock_stock_rows takes FOR UPDATE (app/services/orders.py:84-91), which conflicts with the FOR KEY SHARE the order_items -> products foreign key takes on a variant line's product; 40P01 is classified as 'database unavailable' (app/core/database.py:131-147)
+XFAIL tests/torture_suite/test_concurrency_torture.py::test_bug_webhook_stored_after_erasure_keeps_personal_data - BUG DISCOVERED (BUG-4): a Stripe event about an erased customer's payment stored after the anonymisation run keeps their personal data forever - the purge skips anonymised accounts (app/tasks.py:341) and redacts events once (:363); store_event (app/services/stripe_events.py:438) and process_stored_event (:544) never redact
+92 passed, 5 xfailed in 177.42s (0:02:57)
+
+real	3m1.529s
+user	1m40.284s
+sys	0m10.042s
