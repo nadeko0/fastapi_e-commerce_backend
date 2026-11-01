@@ -451,3 +451,32 @@ def test_migrations_round_trip_and_agree_with_the_session_schema():
 def test_every_model_table_exists_after_the_migrations(db_session):
     existing = set(inspect(db_session.connection()).get_table_names())
     assert {table.name for table in Base.metadata.sorted_tables} <= existing
+
+
+def test_webhook_event_claimed_once_with_skip_locked():
+    """3B-11: Proves one webhook event is claimed once with FOR UPDATE SKIP LOCKED
+    across two concurrent PostgreSQL connections."""
+    from app.models.payment import WebhookEvent
+    from app.services import stripe_events
+
+    event_id = f"evt_skip_locked_{uuid.uuid4().hex[:16]}"
+    with TestingSessionLocal() as setup_db:
+        setup_db.add(WebhookEvent(event_id=event_id, event_type="charge.dispute.created", payload="{}"))
+        setup_db.commit()
+
+    conn1 = TestingSessionLocal()
+    conn2 = TestingSessionLocal()
+    try:
+        claimed1 = stripe_events._claim_event(conn1, event_id)
+        assert claimed1 is not None
+        assert claimed1.event_id == event_id
+
+        # Connection 2 attempts to claim the same event while connection 1 holds it.
+        # With SKIP LOCKED, PostgreSQL returns None immediately instead of blocking.
+        claimed2 = stripe_events._claim_event(conn2, event_id)
+        assert claimed2 is None
+    finally:
+        conn1.rollback()
+        conn1.close()
+        conn2.rollback()
+        conn2.close()

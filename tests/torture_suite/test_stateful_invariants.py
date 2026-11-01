@@ -24,18 +24,8 @@
 # random permutation and then checks that our database converged to what the
 # provider says.
 #
-# Discovered backend defects, each with a deterministic test_bug_* reproducer
-# at the end of this module marked xfail(strict=True) (an XPASS - the fix -
-# fails the run until the marker is dropped):
-#   bug 1  a stale refund event rewinds a settled refund (refunded -> paid)
-#   bug 2  /refund answers 500 after an unreported refund failure
-#   bug 3  restock past Int32Max: 500 on cancel / expiry sweep (PostgreSQL),
-#          stock above the API's own maximum (SQLite)
-# Known-bug allowances: the state machines and @given properties find these
-# at random, so they must not be strict-xfailed; instead they tolerate (or
-# step around) exactly the defect's signature - see KNOWN_BUG_ALLOWANCES -
-# and keep every other invariant strict. TORTURE_STRICT=1 switches the
-# allowances off and re-reveals the defects.
+# Discovered backend defects: bugs 1, 2, and 3 have been fixed and all
+# known-bug allowances have been removed.
 #
 # Budgets: the defaults keep the module within a few minutes per back end
 # under HYPOTHESIS_PROFILE=ci; TORTURE_FULL=1 restores the Phase 2 campaign
@@ -89,8 +79,6 @@ from app.services.payment.types import CheckoutSessionStatus, PaymentIntentStatu
 
 pytestmark = pytest.mark.db_sensitive
 
-# TORTURE_STRICT=1: no known-bug allowance (see the header).
-KNOWN_BUG_ALLOWANCES = os.environ.get("TORTURE_STRICT") != "1"
 # TORTURE_FULL=1: the Phase 2 campaign budgets.
 TORTURE_FULL = os.environ.get("TORTURE_FULL") == "1"
 # Examples per test (scaled_examples doubles them under the ci/explore
@@ -703,7 +691,6 @@ class PaymentWorld(RuleBasedStateMachine):
         self.outbox = []  # undelivered Stripe events: dicts(id, type, obj)
         self.delivered = []
         self.disputes = {}  # dispute id -> provider-side dispute
-        self.rewound = {}  # refund id -> stale status a late event wrote over succeeded (bug 1)
         self.snap = self._snapshot()
 
     # -- helpers -----------------------------------------------------------------
@@ -799,11 +786,6 @@ class PaymentWorld(RuleBasedStateMachine):
         refund_failed_for = {order_id for rid, (status, order_id) in after["refunds"].items()
                              if status in ("failed", "canceled")
                              and before["refunds"].get(rid, (None,))[0] not in ("failed", "canceled")}
-        # Orders of which a refund was just rewound by a stale event (bug 1,
-        # tolerated - see _deliver).
-        rewound_for = {order_id for rid, (status, order_id) in after["refunds"].items()
-                       if self.rewound.get(rid) == status
-                       and before["refunds"].get(rid, (None,))[0] == "succeeded"}
         for order_id, (status, pay) in after["orders"].items():
             if order_id not in before["orders"]:
                 assert (status, pay) == ("new", "pending"), (why, order_id, status, pay)
@@ -815,7 +797,7 @@ class PaymentWorld(RuleBasedStateMachine):
             if pay != pay0:
                 TRANSITIONS[f"payment_status {pay0}->{pay}"] += 1
                 assert pay in ALLOWED_PAYMENT_STATUS[pay0], (why, order_id, pay0, pay)
-                if (pay0, pay) == ("refunded", "paid") and order_id not in rewound_for:
+                if (pay0, pay) == ("refunded", "paid"):
                     assert order_id in refund_failed_for, (
                         f"{why}: order {order_id} went refunded->paid without any refund failing")
                 # A refund that failed on a cancelled order returns it to paid, which is the
@@ -834,8 +816,6 @@ class PaymentWorld(RuleBasedStateMachine):
             if refund_id in before["refunds"] and before["refunds"][refund_id][0] != status:
                 status0 = before["refunds"][refund_id][0]
                 TRANSITIONS[f"refund {status0}->{status}"] += 1
-                if status0 == "succeeded" and self.rewound.get(refund_id) == status:
-                    continue  # bug 1, tolerated (see _deliver)
                 assert status in ALLOWED_REFUND[status0], (
                     why, f"refund {refund_id} of order {order_id} went {status0}->{status}")
         for dispute_id, status in after["disputes"].items():
@@ -854,32 +834,7 @@ class PaymentWorld(RuleBasedStateMachine):
         refunds = obj.get("refunds")
         return list(refunds.get("data", [])) if isinstance(refunds, dict) else []
 
-    def _note_stale_refund_reports(self, event):
-        """KNOWN-BUG ALLOWANCE, bug 1 (strict reproducer:
-        test_bug_stale_refund_event_reverts_a_settled_refund). Stripe does
-        not order events: a snapshot taken while a refund was pending can
-        arrive after the event that reported it succeeded, and the worker
-        writes the stale status over "succeeded" (and may move the order
-        from refunded back to paid). Exactly that is tolerated afterwards -
-        the refund going from succeeded to the status this event reported,
-        the order's refunded -> paid in the same step, our record differing
-        from the provider's for that refund after a drain - and nothing
-        else. Off under TORTURE_STRICT=1."""
-        if not KNOWN_BUG_ALLOWANCES:
-            return
-        ours = {}
-        for order_id in self.order_ids:
-            for payment in self._payments(order_id):
-                ours.update({r.refund_id: r.status for r in payment.refunds})
-        for refund in self._reported_refunds(event["obj"]):
-            stale = refund.get("status")
-            if ours.get(refund.get("id")) == "succeeded" and stale in ("pending", "requires_action"):
-                self.rewound[refund["id"]] = stale
-                SEEN["known bug 1: stale refund report delivered"] += 1
-
     def _deliver(self, event, duplicate=False):
-        if not duplicate:
-            self._note_stale_refund_reports(event)
         response = self.shop.webhook(event["type"], event["obj"], event_id=event["id"])
         check(response, 200, where=f"webhook {event['type']}")
         route = getattr(response, "route_response", response)
@@ -1124,9 +1079,6 @@ class PaymentWorld(RuleBasedStateMachine):
                 ours = {r.refund_id: r for r in payment.refunds}
                 assert set(provider_refunds) == set(ours), (order_id, provider_refunds, ours)
                 for refund_id, refund in provider_refunds.items():
-                    if (refund.status.value == "succeeded"
-                            and self.rewound.get(refund_id) == ours[refund_id].status):
-                        continue  # bug 1, tolerated (see _note_stale_refund_reports)
                     assert ours[refund_id].status == refund.status.value, (
                         f"order {order_id}: refund {refund_id} is {ours[refund_id].status} here, "
                         f"{refund.status.value} at the provider (all events delivered)")
@@ -1143,13 +1095,7 @@ class PaymentWorld(RuleBasedStateMachine):
                 lost = any(d["status"] == "lost" and d["pi"] == intent.id
                            for d in self.disputes.values())
                 expected = "refunded" if lost or returned >= intent.amount else "paid"
-                if any(r.refund_id in self.rewound for r in charge.refunds):
-                    # bug 1, tolerated: the order follows our (rewound) record.
-                    ours = sum(r.amount for r in charge.refunds if r.status == "succeeded")
-                    expected = {expected, "refunded" if lost or ours >= charge.amount else "paid"}
-                else:
-                    expected = {expected}
-                assert order.payment_status in expected, (order_id, order.payment_status, expected)
+                assert order.payment_status == expected, (order_id, order.payment_status, expected)
 
     # -- Stripe-side actions -----------------------------------------------------------
 
@@ -1222,16 +1168,6 @@ class PaymentWorld(RuleBasedStateMachine):
             refundable = intent.amount - intent.amount_refunded
             wanted = refundable if amount is None else amount
             expected = 200 if 0 < wanted <= refundable else 400
-            if (expected == 200 and KNOWN_BUG_ALLOWANCES
-                    and charge.amount_refunded + wanted > charge.amount):
-                # KNOWN-BUG ALLOWANCE, bug 2 (strict reproducer:
-                # test_bug_refund_after_an_unreported_refund_failure_is_a_500):
-                # a refund that failed at the provider, whose refund.failed is
-                # still in the outbox, counts in our amount_refunded; the
-                # provider would accept this refund and the route answer 500.
-                # Not attempted; TORTURE_STRICT=1 attempts it.
-                SEEN["known bug 2: refund over an unreported failure skipped"] += 1
-                return
         value = None if amount is None else Decimal(amount) / 100
         key = new_key()
         provider_refunds = set(StripePaymentProvider._refunds_by_id)
@@ -1581,14 +1517,7 @@ def test_refund_events_in_any_order_converge_to_the_providers_state(client, db_s
                 events.append((event["type"], event["data"]["object"], None))
         events = [(t, o, f"evt_{uuid.uuid4().hex[:24]}") for t, o, _ in events]
         order_seed.shuffle(events)
-        rewound = {}  # refund id -> stale status delivered after it succeeded (bug 1)
         for event_type, obj, event_id in events:
-            if KNOWN_BUG_ALLOWANCES:
-                ours = {r.refund_id: r.status for r in shop.payments(order["id"])[-1].refunds}
-                for reported in PaymentWorld._reported_refunds(obj):
-                    if (ours.get(reported["id"]) == "succeeded"
-                            and reported["status"] in ("pending", "requires_action")):
-                        rewound[reported["id"]] = reported["status"]
             response = shop.webhook(event_type, obj, event_id=event_id)
             check(response, 200, where=f"webhook {event_type}")
             assert response.json()["status"] == "processed", response.json()
@@ -1600,24 +1529,14 @@ def test_refund_events_in_any_order_converge_to_the_providers_state(client, db_s
         payment = shop.payments(order["id"])[-1]
         provider_refunds = {r.id: r.status.value for r in provider.list_refunds(intent_id)}
         ours = {r.refund_id: r.status for r in payment.refunds}
-        tolerated = {rid for rid, status in ours.items()
-                     if provider_refunds.get(rid) == "succeeded" and rewound.get(rid) == status}
-        # KNOWN-BUG ALLOWANCE, bug 1 (strict reproducer:
-        # test_bug_stale_refund_event_reverts_a_settled_refund): a refund that
-        # a stale pending snapshot, delivered after the event that settled
-        # it, rewound - and only that - may differ from the provider's.
-        assert {rid: s for rid, s in ours.items() if rid not in tolerated} == {
-            rid: s for rid, s in provider_refunds.items() if rid not in tolerated}
+        assert ours == provider_refunds
         assert set(ours) == set(provider_refunds)
         intent = StripePaymentProvider._intents_by_id[intent_id]
         assert payment.amount_refunded == intent.amount_refunded
         returned = sum(r.amount for r in provider.list_refunds(intent_id)
                        if r.status.value == "succeeded")
-        expected = {"refunded" if returned >= payment.amount else "paid"}
-        if tolerated:
-            ours_returned = sum(r.amount for r in payment.refunds if r.status == "succeeded")
-            expected.add("refunded" if ours_returned >= payment.amount else "paid")
-        assert shop.order(order["id"]).payment_status in expected
+        expected = "refunded" if returned >= payment.amount else "paid"
+        assert shop.order(order["id"]).payment_status == expected
 
     converge()
 

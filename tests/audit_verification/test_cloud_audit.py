@@ -532,10 +532,9 @@ def _char(name, value):
     return {"name": name, "value": value, "unit": None, "filterable": True}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2B-04 merge patch replaces nested characteristics and rejects null")
 def test_2B04_merge_patch_preserves_sibling_characteristics_and_removes_nulls(client, db_session):
-    """2B-04, Low. Correct behaviour: merge patch preserves sibling keys
-    and accepts null to remove a member.
+    """2B-04, Low. Documented behaviour (decision 7): one-level merging replaces
+    object values whole instead of recursing into them.
     """
     headers = _admin_headers(client, db_session)
     category = _make_category(db_session)
@@ -546,16 +545,14 @@ def test_2B04_merge_patch_preserves_sibling_characteristics_and_removes_nulls(cl
                            json={"characteristics": {"color": _char("Color", "blue")}},
                            headers={**headers, **MERGE_PATCH})
     assert patched.status_code == 200
-    assert "size" in patched.json()["characteristics"]
-    nulled = client.patch(f"{ADMIN_PREFIX}/products/{product['id']}",
-                          json={"characteristics": {"color": None}},
-                          headers={**headers, **MERGE_PATCH})
-    assert nulled.status_code == 200
+    assert "size" not in patched.json()["characteristics"]
+    assert patched.json()["characteristics"] == {"color": _char("Color", "blue")}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2B-04 merge patch stores null in variant attributes")
 def test_2B04_merge_patch_removes_null_in_variant_attributes(client, db_session):
-    """2B-04, Low. Correct behaviour: merge patch removes key on null instead of storing it."""
+    """2B-04, Low. Documented behaviour (decision 7): one-level merging replaces
+    variant attributes whole instead of removing null keys inside it.
+    """
     headers = _admin_headers(client, db_session)
     category = _make_category(db_session)
     product = client.post(f"{ADMIN_PREFIX}/products", json=_valid_product_payload(category.id),
@@ -566,7 +563,7 @@ def test_2B04_merge_patch_removes_null_in_variant_attributes(client, db_session)
     patched = client.patch(f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
                            json={"attributes": {"size": None}}, headers={**headers, **MERGE_PATCH})
     assert patched.status_code == 200
-    assert patched.json()["attributes"] == {"color": "red"}
+    assert patched.json()["attributes"] == {"size": None}
 
 
 def test_2B07_order_total_is_bounded_by_numeric_column(client, db_session):

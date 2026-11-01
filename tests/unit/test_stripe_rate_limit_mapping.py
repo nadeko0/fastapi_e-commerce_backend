@@ -122,6 +122,9 @@ def test_orders_pay_endpoint_maps_rate_limit_to_503(client, db_session):
         reloaded_order = db_session.get(Order, order.id)
         assert reloaded_order.status == OrderStatus.NEW
         assert reloaded_order.payment_status == PaymentStatus.PENDING
+        payment = db_session.query(Payment).filter(Payment.order_id == order.id).first()
+        assert payment is not None
+        assert payment.status == "unknown"
     finally:
         app.dependency_overrides.pop(get_payment_provider, None)
 

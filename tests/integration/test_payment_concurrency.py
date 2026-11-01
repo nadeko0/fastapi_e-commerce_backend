@@ -24,6 +24,8 @@ requires_action intents cancelled). If a double charge still slips through,
 the second success is recorded and flagged for manual review (a refund),
 never applied to the order a second time.
 """
+import json
+import time
 import uuid
 
 import pytest
@@ -318,3 +320,126 @@ def test_decline_whose_order_is_paid_while_the_provider_call_is_in_flight_keeps_
     assert response.status_code == 422
     assert _get_order(db_session, order["id"]).payment_status == "paid"
     assert [p.status for p in _get_payments(db_session, order["id"])] == ["failed"]
+
+
+def test_stripe_events_refund_created_locks_order_with_for_update(client, db_session, postgres_sql):
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    pay = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order),
+        headers=_with_idempotency_key(setup["headers"]),
+    )
+    assert pay.status_code == 200
+    intent_id = pay.json()["transaction_id"]
+
+    postgres_sql.clear()
+    body = json.dumps({
+        "id": f"evt_{uuid.uuid4().hex[:24]}",
+        "type": "refund.created",
+        "created": int(time.time()),
+        "data": {
+            "object": {
+                "id": f"re_{uuid.uuid4().hex[:24]}",
+                "payment_intent": intent_id,
+                "amount": 500,
+                "status": "succeeded",
+            }
+        },
+    }).encode()
+    response = _post_webhook(client, body, _sign(body))
+    assert response.status_code == 200
+    reads = _order_reads(postgres_sql)
+    assert reads, "no read of the order was recorded"
+    assert any("FOR UPDATE" in s for s in reads), reads
+
+
+def test_stripe_events_charge_dispute_created_locks_order_with_for_update(client, db_session, postgres_sql):
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    pay = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=_payment_payload(order),
+        headers=_with_idempotency_key(setup["headers"]),
+    )
+    assert pay.status_code == 200
+    intent_id = pay.json()["transaction_id"]
+
+    postgres_sql.clear()
+    body = json.dumps({
+        "id": f"evt_{uuid.uuid4().hex[:24]}",
+        "type": "charge.dispute.created",
+        "created": int(time.time()),
+        "data": {
+            "object": {
+                "id": f"dp_{uuid.uuid4().hex[:24]}",
+                "payment_intent": intent_id,
+                "amount": 500,
+                "status": "warning_needs_response",
+            }
+        },
+    }).encode()
+    response = _post_webhook(client, body, _sign(body))
+    assert response.status_code == 200
+    reads = _order_reads(postgres_sql)
+    assert reads, "no read of the order was recorded"
+    assert any("FOR UPDATE" in s for s in reads), reads
+
+
+def test_admin_product_update_with_if_match_locks_product_with_for_no_key_update(client, db_session, postgres_sql):
+    from test_admin import (
+        ADMIN_PREFIX,
+        _auth_headers,
+        _create_product,
+        _login_as,
+        _make_admin,
+        _make_category,
+    )
+
+    admin = _make_admin(db_session, email="admin-lock-p@example.com")
+    token = _login_as(client, admin.email, "AdminPass1")
+    cat = _make_category(db_session, name="LockCat")
+    product = _create_product(client, token, cat.id)
+
+    postgres_sql.clear()
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}",
+        json={"price": "29.99"},
+        headers={**_auth_headers(token), "If-Match": "*"},
+    )
+    assert response.status_code == 200
+    product_locks = [s for s in postgres_sql if "FROM products" in s and "FOR NO KEY UPDATE OF products" in s]
+    assert product_locks, f"Expected FOR NO KEY UPDATE OF products, saw: {postgres_sql}"
+
+
+def test_admin_variant_update_with_if_match_locks_product_with_for_no_key_update(client, db_session, postgres_sql):
+    from test_admin import (
+        ADMIN_PREFIX,
+        _auth_headers,
+        _create_product,
+        _login_as,
+        _make_admin,
+        _make_category,
+    )
+
+    admin = _make_admin(db_session, email="admin-lock-v@example.com")
+    token = _login_as(client, admin.email, "AdminPass1")
+    cat = _make_category(db_session, name="LockCatVar")
+    product = _create_product(client, token, cat.id)
+    v_resp = client.post(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants",
+        json={"sku": "LOCK-V1", "stock_quantity": 5},
+        headers=_auth_headers(token),
+    )
+    assert v_resp.status_code in (200, 201)
+    variant = v_resp.json()
+
+    postgres_sql.clear()
+    response = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
+        json={"sku": "LOCK-V1-EDIT"},
+        headers={**_auth_headers(token), "If-Match": "*"},
+    )
+    assert response.status_code in (200, 201)
+    variant_locks = [s for s in postgres_sql if "FROM product_variants" in s and "FOR NO KEY UPDATE" in s]
+    assert variant_locks, f"Expected FOR NO KEY UPDATE on product_variants, saw: {postgres_sql}"

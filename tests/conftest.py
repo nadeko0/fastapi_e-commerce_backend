@@ -160,6 +160,20 @@ _DB_SENSITIVE_FILES = (
     "test_stripe_event*.py",
     "test_reconciliation*.py",
     "test_postgres_*.py",
+    "test_text_input.py",
+    "test_int_bounds.py",
+    "test_catalog_money.py",
+    "test_gdpr_flows.py",
+    "test_data_retention.py",
+    "test_admin.py",
+    "test_cart.py",
+    "test_products.py",
+    "test_merge_patch.py",
+    "test_auth.py",
+    "test_legal.py",
+    "test_stored_rows_read.py",
+    "test_timestamps.py",
+    "test_list_sorting.py",
     "test_cloud_audit.py",
     "test_postgres_cloud_audit.py",
     "test_spec_violations.py",
@@ -517,6 +531,17 @@ def db_session():
         yield db
     finally:
         db.close()
+
+
+@pytest.fixture(autouse=True)
+def _reset_stripe_mock_state():
+    # The mock keeps its intents and refunds on the class: left over, they
+    # would make one test's outcome depend on another's.
+    from app.services.payment.stripe_provider import StripePaymentProvider
+
+    StripePaymentProvider.reset_mock_state()
+    yield
+    StripePaymentProvider.reset_mock_state()
 
 
 @pytest.fixture

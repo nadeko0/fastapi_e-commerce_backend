@@ -584,6 +584,12 @@ def _transition(client, admin_token, order_id, new_status):
     )
 
 
+def _mark_paid(db_session, order_id: int) -> None:
+    order = db_session.get(Order, order_id)
+    order.payment_status = "paid"
+    db_session.commit()
+
+
 def test_cancel_from_new_succeeds_and_restores_stock(client, db_session):
     token, address_id = _checkout_ready_buyer(client, db_session)
     category = _make_category(db_session)
@@ -624,12 +630,17 @@ def test_cancel_from_confirmed_succeeds_and_restores_stock(client, db_session):
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()
 
+    _mark_paid(db_session, order["id"])
+
     admin = _make_admin(db_session, email="admin-confirmed@example.com")
     admin_token = _login(client, admin.email, "AdminPass1")
-    _transition(client, admin_token, order["id"], "confirmed")
-    response = _transition(client, admin_token, order["id"], "cancelled")
+    t1 = _transition(client, admin_token, order["id"], "confirmed")
+    assert t1.status_code == 200
+    assert t1.json()["status"] == "confirmed"
 
+    response = _transition(client, admin_token, order["id"], "cancelled")
     assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
     db_session.refresh(product)
     assert product.stock_quantity == 10
 
@@ -647,13 +658,21 @@ def test_cancel_from_processing_succeeds_and_restores_stock(client, db_session):
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()
 
+    _mark_paid(db_session, order["id"])
+
     admin = _make_admin(db_session, email="admin-processing@example.com")
     admin_token = _login(client, admin.email, "AdminPass1")
-    _transition(client, admin_token, order["id"], "confirmed")
-    _transition(client, admin_token, order["id"], "processing")
-    response = _transition(client, admin_token, order["id"], "cancelled")
+    t1 = _transition(client, admin_token, order["id"], "confirmed")
+    assert t1.status_code == 200
+    assert t1.json()["status"] == "confirmed"
 
+    t2 = _transition(client, admin_token, order["id"], "processing")
+    assert t2.status_code == 200
+    assert t2.json()["status"] == "processing"
+
+    response = _transition(client, admin_token, order["id"], "cancelled")
     assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
     db_session.refresh(product)
     assert product.stock_quantity == 10
 
@@ -671,14 +690,25 @@ def test_cancel_from_sent_succeeds_and_restores_stock(client, db_session):
         ORDERS_PREFIX, json={"shipping_address_id": address_id}, headers=_with_idempotency_key(_auth_headers(token))
     ).json()
 
+    _mark_paid(db_session, order["id"])
+
     admin = _make_admin(db_session, email="admin-sent@example.com")
     admin_token = _login(client, admin.email, "AdminPass1")
-    _transition(client, admin_token, order["id"], "confirmed")
-    _transition(client, admin_token, order["id"], "processing")
-    _transition(client, admin_token, order["id"], "sent")
-    response = _transition(client, admin_token, order["id"], "cancelled")
+    t1 = _transition(client, admin_token, order["id"], "confirmed")
+    assert t1.status_code == 200
+    assert t1.json()["status"] == "confirmed"
 
+    t2 = _transition(client, admin_token, order["id"], "processing")
+    assert t2.status_code == 200
+    assert t2.json()["status"] == "processing"
+
+    t3 = _transition(client, admin_token, order["id"], "sent")
+    assert t3.status_code == 200
+    assert t3.json()["status"] == "sent"
+
+    response = _transition(client, admin_token, order["id"], "cancelled")
     assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
     db_session.refresh(product)
     assert product.stock_quantity == 10
 

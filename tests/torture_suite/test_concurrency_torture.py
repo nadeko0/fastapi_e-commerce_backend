@@ -4,7 +4,6 @@ import asyncio
 import collections
 import contextlib
 import json
-import os
 import random
 import threading
 import time
@@ -23,7 +22,6 @@ from stripe_event_support import run_event
 from torture_support import requires_postgres
 
 import app.api.v1.orders as orders_module
-import app.core.database as database_module
 import app.services.redis_async as redis_async_module
 from app import tasks
 from app.core.clock import utc_now
@@ -61,20 +59,15 @@ from app.services.payment.stripe_provider import StripePaymentProvider
 # defect and its location: it fails today and turns into an XPASS (a failure
 # under strict_xfail) as soon as the backend is fixed - then drop the marker.
 #
-# Known-bug allowances (KNOWN_BUG_ALLOWANCES). The bursts hit some of those
-# defects only some of the time (BUG-3 in most rounds, BUG-5 in ~10 %), so a
-# strict xfail would be flaky there. Instead each burst tolerates exactly the
-# signature of the known defect - and nothing else: oversell, partial orders,
-# 500s, other statuses all stay hard failures - and points to the strict-xfail
-# test_bug_* reproducer that keeps the defect visible. TORTURE_STRICT=1
-# switches every allowance off, which re-reveals the defects in the bursts.
+# Known-bug allowances: bugs 1, 2, 3, and 5 have been fixed and their
+# allowances removed. BUG-4 remains guarded by its dedicated test.
 #
 # Discovered defects:
-#   BUG-1 refresh token rotated while logout runs survives the logout
-#   BUG-2 replay of an in-flight POST /orders key answers 400 "Cart is empty"
-#   BUG-3 variant-line vs plain-line checkout deadlock (40P01) answered 503
-#   BUG-4 Stripe events stored after the GDPR purge keep personal data
-#   BUG-5 mock provider: one refund Idempotency-Key, several refunds
+#   BUG-1 refresh token rotated while logout runs survives the logout (fixed)
+#   BUG-2 replay of an in-flight POST /orders key answers 400 "Cart is empty" (fixed)
+#   BUG-3 variant-line vs plain-line checkout deadlock (40P01) answered 503 (fixed)
+#   BUG-4 Stripe events stored after the GDPR purge keep personal data (remains)
+#   BUG-5 mock provider: one refund Idempotency-Key, several refunds (fixed)
 #
 # CI: db_sensitive (run on PostgreSQL) and timing_sensitive (single process:
 # bursts of up to 50 connections must not compete with xdist workers for a
@@ -94,9 +87,6 @@ ROUNDS = 6
 N = 30
 
 pytestmark = [pytest.mark.db_sensitive, pytest.mark.timing_sensitive]
-
-# TORTURE_STRICT=1: no known-bug allowance (see the header).
-KNOWN_BUG_ALLOWANCES = os.environ.get("TORTURE_STRICT") != "1"
 
 
 # -- Fixtures ------------------------------------------------------------------
@@ -159,14 +149,8 @@ def histogram(responses):
 DB_UNAVAILABLE_DETAIL = "The database is temporarily unavailable, please retry"
 
 
-def check_responses(responses, allowed, deadlocks=None):
-    """No 5xx, nothing outside `allowed`, every error is problem+json.
-
-    `deadlocks` (a _DeadlockWitness): KNOWN-BUG ALLOWANCE for BUG-3 (strict
-    reproducer: test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout).
-    A 503 "database temporarily unavailable" is tolerated only when every
-    error the app classified as "database unavailable" during the burst was
-    a PostgreSQL deadlock (SQLSTATE 40P01). Off under TORTURE_STRICT=1."""
+def check_responses(responses, allowed):
+    """No 5xx, nothing outside `allowed`, every error is problem+json."""
     hist = histogram(responses)
     bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
     assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
@@ -180,37 +164,6 @@ def check_responses(responses, allowed, deadlocks=None):
             assert body["status"] == r.status_code
     print(f"HIST {histogram(responses)}")  # shown with -s; the torture log quotes these
     return histogram(responses)
-
-
-def _sqlstate(exc):
-    while exc is not None:
-        code = getattr(getattr(exc, "orig", None), "sqlstate", None) or getattr(exc, "sqlstate", None)
-        if code:
-            return code
-        exc = exc.__cause__
-    return None
-
-
-class _DeadlockWitness:
-    """Records the SQLSTATE behind every error the app classifies as
-    "database unavailable" (app/core/database.py is_database_unavailable_error,
-    the source of its 503s) - so a burst can tell BUG-3's deadlocks (40P01)
-    from any other 503."""
-
-    def __init__(self, monkeypatch):
-        self.sqlstates = []
-        real = database_module.is_database_unavailable_error
-
-        def classify(exc):
-            unavailable = real(exc)
-            if unavailable:
-                self.sqlstates.append(_sqlstate(exc))
-            return unavailable
-
-        monkeypatch.setattr(database_module, "is_database_unavailable_error", classify)
-
-    def only_deadlocks(self):
-        return bool(self.sqlstates) and all(code == "40P01" for code in self.sqlstates)
 
 
 def problem_type(response):
@@ -640,39 +593,6 @@ def _refunds(order_id):
         ).all()
 
 
-class _RefundKeyWitness:
-    """Records what the mock provider did for every refund Idempotency-Key
-    (refund ids made, or the error raised), to recognise BUG-5's signature."""
-
-    def __init__(self, monkeypatch):
-        self.outcomes = collections.defaultdict(list)
-        real = StripePaymentProvider.create_refund
-
-        def create_refund(provider, **kwargs):
-            key = kwargs.get("idempotency_key")
-            try:
-                refund = real(provider, **kwargs)
-            except Exception as error:
-                self.outcomes[key].append(type(error).__name__)
-                raise
-            self.outcomes[key].append(refund.id)
-            return refund
-
-        monkeypatch.setattr(StripePaymentProvider, "create_refund", create_refund)
-
-    def key_processed_twice(self):
-        """BUG-5: one key made more than one refund, or a same-key replay was
-        refused by the refundable-amount check (CardError) instead of being
-        answered with the refund the key already made."""
-        for outcomes in self.outcomes.values():
-            made = {o for o in outcomes if o.startswith("re_")}
-            if len(made) > 1 or (made and "CardError" in outcomes):
-                return True
-        return False
-
-
-def _bug5_tolerated(witness):
-    return False
 
 
 @requires_postgres
@@ -704,13 +624,12 @@ def test_refund_same_key_twins_refund_once(shop, round_, monkeypatch):
 
 @requires_postgres
 @pytest.mark.parametrize("round_", range(ROUNDS))
-def test_refund_same_key_different_amounts_execute_once(shop, round_, monkeypatch):
+def test_refund_same_key_different_amounts_execute_once(shop, round_):
     """Same key, two partial amounts: one refund; the other amount's requests
     are refused (409 idempotency-key-in-use from the provider's key check)."""
     buyer, order, admin = _paid_order(shop)
     key = new_key()
     amounts = ["1.00", "2.00"]
-    witness = _RefundKeyWitness(monkeypatch)
 
     responses = burst([
         ("POST", f"{ORDERS}/{order['id']}/refund",
@@ -720,21 +639,6 @@ def test_refund_same_key_different_amounts_execute_once(shop, round_, monkeypatc
 
     check_responses(responses, {200, 409})
     refunds = _refunds(order["id"])
-    if _bug5_tolerated(witness):
-        # Both amounts were refunded under the one key. Still required: what
-        # the provider refunded is exactly what is recorded, every 200 names
-        # one of those refunds with its own amount, the rest are 409.
-        provider = StripePaymentProvider._refunds_by_id
-        assert {r.refund_id for r in refunds} == set(provider)
-        payment = _payments(order["id"])[0]
-        assert payment.amount_refunded == sum(r.amount for r in refunds) <= payment.amount
-        for i, r in enumerate(responses):
-            if r.status_code == 200:
-                refund = provider[r.json()["id"]]
-                assert f"{refund.amount / 100:.2f}" == amounts[i % 2], r.text
-            else:
-                assert problem_type(r) == "idempotency-key-in-use", r.text
-        return
     assert len(refunds) == 1
     payment = _payments(order["id"])[0]
     assert payment.amount_refunded == refunds[0].amount
@@ -963,7 +867,7 @@ def _assert_stock_invariants(carts, responses, initial):
 
 @requires_postgres
 @pytest.mark.parametrize("round_", range(8))
-def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_, monkeypatch):
+def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_):
     """40 buyers, overlapping 2-3 line carts over stocks of 1-3 (plain lines
     and variant lines, the same product both ways), each cart filled in a
     random line order (A,B vs B,A), all checking out at once."""
@@ -987,21 +891,18 @@ def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_, monkeyp
             lines.append((product, variant, rng.choice([1, 1, 2]) if stock >= 2 else 1))
         carts.append((shop.buyer(), lines))
 
-    deadlocks = _DeadlockWitness(monkeypatch)
-
     responses = _checkout_burst(shop, carts)
 
     # Stock invariants first, so that they are checked even in a round
     # where a deadlock 503 fails the burst.
     _assert_stock_invariants(carts, responses, initial)
     assert any(r.status_code == 201 for r in responses)
-    # BUG-3 deadlock 503s tolerated, see check_responses.
-    check_responses(responses, {201, 409}, deadlocks=deadlocks)
+    check_responses(responses, {201, 409})
 
 
 @requires_postgres
 @pytest.mark.parametrize("round_", range(ROUNDS))
-def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_, monkeypatch):
+def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_):
     """Plenty of stock, so every checkout must succeed. Half the carts hold
     a variant of P only, half hold P itself AND that variant. lock_stock_rows
     promises consistent lock ordering (products by id, then variants by id)
@@ -1019,12 +920,10 @@ def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_, mo
             lines = [(q, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (q, None, 1)]
         carts.append((shop.buyer(), lines))
 
-    deadlocks = _DeadlockWitness(monkeypatch)
-
     responses = _checkout_burst(shop, carts)
 
     _assert_stock_invariants(carts, responses, initial)
-    hist = check_responses(responses, {201}, deadlocks=deadlocks)
+    hist = check_responses(responses, {201})
     assert hist.get(201, 0) == N, hist
 
 

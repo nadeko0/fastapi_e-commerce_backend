@@ -583,23 +583,17 @@ def test_translate_card_error_missing_decline_code_attr():
     assert str(res) == "declined"
 
 
-def test_construct_webhook_event_enforces_custom_tolerance(provider, monkeypatch):
-    calls = []
-    orig = stripe.WebhookSignature.verify_header
-
-    def fake_verify(*args, **kwargs):
-        calls.append((args, kwargs))
-        return orig(*args, **kwargs)
-
-    monkeypatch.setattr(stripe.WebhookSignature, "verify_header", fake_verify)
+def test_construct_webhook_event_enforces_custom_tolerance(provider):
     payload = _event_payload()
-    sig = _signed(payload)
-    provider.construct_webhook_event(payload, sig, WEBHOOK_SECRET, tolerance_seconds=42)
+    # Signed 50 seconds in the past: exceeds custom tolerance of 42 seconds
+    stale_sig = _signed(payload, timestamp=int(time.time()) - 50)
+    with pytest.raises(SignatureVerificationError):
+        provider.construct_webhook_event(payload, stale_sig, WEBHOOK_SECRET, tolerance_seconds=42)
 
-    assert len(calls) == 1
-    args, kwargs = calls[0]
-    tolerance_passed = args[3] if len(args) > 3 else kwargs.get("tolerance")
-    assert tolerance_passed == 42
+    # Signed 30 seconds in the past: within custom tolerance of 42 seconds
+    fresh_sig = _signed(payload, timestamp=int(time.time()) - 30)
+    event = provider.construct_webhook_event(payload, fresh_sig, WEBHOOK_SECRET, tolerance_seconds=42)
+    assert event.id == "evt_1"
 
 
 def test_construct_webhook_event_signature_error_message(provider, monkeypatch):
