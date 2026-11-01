@@ -18,7 +18,13 @@ import time
 import uuid
 
 import pytest
-from conftest import TEST_DATABASE_URL, TestingSessionLocal, engine, requires_postgres
+from conftest import (
+    TEST_DATABASE_URL,
+    TestingSessionLocal,
+    async_engine,
+    engine,
+    requires_postgres,
+)
 from fastapi.testclient import TestClient
 from payment_support import Shop
 from sqlalchemy import create_engine, event, inspect, text
@@ -91,23 +97,48 @@ def test_pay_waits_while_another_connection_holds_the_order_row(client, db_sessi
 
     # Connection A: the lock another payment, a webhook or an admin holds
     # while it decides what to do with the order.
+    # Holder takes FOR KEY SHARE, which only conflicts with FOR UPDATE:
+    # if with_for_update() were removed from the pay path, the foreign key's
+    # KEY SHARE check on payments INSERT would not conflict with this lock,
+    # so /pay would not block and would write a payment row.
     holder = TestingSessionLocal()
-    holder.execute(text("SELECT id FROM orders WHERE id = :id FOR UPDATE"), {"id": order_id})
+    holder.execute(text("SELECT id FROM orders WHERE id = :id FOR KEY SHARE"), {"id": order_id})
 
     results = {}
-    thread = threading.Thread(target=_pay, args=(client, setup, results, uuid.uuid4().hex))
-    thread.start()
+    hook_fired = threading.Event()
+
+    def hook(conn, cursor, statement, *rest):
+        if "from orders" in statement.lower() and "for update" in statement.lower():
+            hook_fired.set()
+
+    hooked = async_engine.sync_engine
+    event.listen(hooked, "after_cursor_execute", hook)
     try:
-        assert _wait_until(lambda: _blocked_on_a_lock() >= 1), "/pay never waited for the lock"
-        time.sleep(0.5)
-        assert thread.is_alive(), "/pay answered while another connection held the order row"
-        assert _get_order(db_session, order_id).payment_status != "paid"
+        thread = threading.Thread(target=_pay, args=(client, setup, results, uuid.uuid4().hex))
+        thread.start()
+        try:
+            assert _wait_until(lambda: _blocked_on_a_lock() >= 1), "/pay never waited for the lock"
+            time.sleep(0.5)
+            assert thread.is_alive(), "/pay answered while another connection held the order row"
+            db_session.expire_all()
+            assert not _get_payments(
+                db_session, order_id
+            ), "/pay wrote a payment before acquiring the order lock"
+            assert _get_order(db_session, order_id).payment_status != "paid"
+            with engine.connect() as conn:
+                ungranted = conn.execute(
+                    text("SELECT count(*) FROM pg_locks WHERE NOT granted")
+                ).scalar_one()
+                assert ungranted >= 1, "no ungranted lock found in pg_locks"
+        finally:
+            holder.commit()
+            holder.close()
+        thread.join(timeout=30)
     finally:
-        holder.commit()
-        holder.close()
-    thread.join(timeout=30)
+        event.remove(hooked, "after_cursor_execute", hook)
 
     assert not thread.is_alive()
+    assert hook_fired.is_set(), "the SELECT ... FOR UPDATE hook never fired"
     (response,) = results.values()
     assert response.status_code == 200, response.text
     db_session.expire_all()
@@ -119,18 +150,45 @@ def test_two_concurrent_payments_for_one_order_charge_it_once(client, db_session
     order_id = setup["order"]["id"]
 
     results = {}
-    start = threading.Barrier(2)
+    hook_fired = threading.Event()
+    held = threading.Event()
+    errors = []
+
+    def hold(conn, cursor, statement, *rest):
+        if "from orders" in statement.lower() and "for update" in statement.lower():
+            hook_fired.set()
+            if not held.is_set():
+                held.set()
+                assert _wait_until(
+                    lambda: _blocked_on_a_lock() >= 1
+                ), "second payment never blocked on the order lock"
 
     def attempt(key):
-        start.wait()
-        _pay(client, setup, results, key)
+        try:
+            with TestClient(app) as own_client:
+                _pay(own_client, setup, results, key)
+        except BaseException as exc:
+            errors.append(exc)
 
-    threads = [threading.Thread(target=attempt, args=(uuid.uuid4().hex,)) for _ in range(2)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=60)
-    assert not any(thread.is_alive() for thread in threads)
+    hooked = async_engine.sync_engine
+    event.listen(hooked, "after_cursor_execute", hold)
+    try:
+        t1 = threading.Thread(target=attempt, args=(uuid.uuid4().hex,))
+        t1.start()
+        assert hook_fired.wait(timeout=15), "the SELECT ... FOR UPDATE hook never fired"
+        t2 = threading.Thread(target=attempt, args=(uuid.uuid4().hex,))
+        t2.start()
+        t1.join(timeout=60)
+        t2.join(timeout=60)
+    finally:
+        event.remove(hooked, "after_cursor_execute", hold)
+
+    if errors:
+        raise errors[0]
+    assert not any(thread.is_alive() for thread in (t1, t2))
+    assert hook_fired.is_set(), (
+        "the SELECT ... FOR UPDATE hook never fired: the interleaving was not forced"
+    )
 
     codes = sorted(response.status_code for response in results.values())
     # One wins; the other is a 409: the order is paid, or a payment is in flight.
@@ -163,13 +221,16 @@ def _run_holding_after_first_stock_update(actions):
                 meeting.wait(timeout=3)
 
     def run(index):
-        # A client of its own per request: the routes are async defs on a
-        # synchronous session, so requests through one client run one after
-        # the other on its event loop and could never overlap.
+        # A client of its own per request: requests through one client run
+        # one after the other on its event loop and could never overlap.
         with TestClient(app) as own_client:
             results[index] = actions[index](own_client)
 
-    event.listen(engine, "after_cursor_execute", hold)
+    # The routes run on the AsyncSession: their statements go through
+    # async_engine's sync engine, not `engine` (a hook there never fired, and
+    # the tests depended on thread timing instead of this barrier).
+    hooked = async_engine.sync_engine
+    event.listen(hooked, "after_cursor_execute", hold)
     try:
         threads = [threading.Thread(target=run, args=(i,)) for i in range(len(actions))]
         for thread in threads:
@@ -177,8 +238,11 @@ def _run_holding_after_first_stock_update(actions):
         for thread in threads:
             thread.join(timeout=60)
     finally:
-        event.remove(engine, "after_cursor_execute", hold)
+        event.remove(hooked, "after_cursor_execute", hold)
     assert not any(thread.is_alive() for thread in threads)
+    assert len(seen) == len(actions), (
+        "the hold never fired: the interleaving was not forced"
+    )
     return results
 
 

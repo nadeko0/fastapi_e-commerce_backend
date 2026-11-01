@@ -50,7 +50,7 @@ _INTEGRATION = Path(__file__).resolve().parents[1] / "integration"
 if str(_INTEGRATION) not in sys.path:
     sys.path.insert(0, str(_INTEGRATION))
 
-from conftest import TestingSessionLocal, async_engine, engine  # noqa: E402
+from conftest import TestingSessionLocal  # noqa: E402
 from payment_support import PAY_3DS, PAY_OK, Shop, order_state, reset_provider  # noqa: E402
 from test_admin import (  # noqa: E402
     ADMIN_PREFIX,
@@ -504,32 +504,6 @@ def test_2A07_orphaned_processing_attempt_can_be_retried(client, db_session, mon
 
     again = shop.pay(buyer, order["id"], key="stuck-key-0001")
     assert again.status_code != 409
-
-
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2B-02 sync engine hook never sees route stock updates")
-def test_2B02_sync_engine_sees_route_stock_updates(client, db_session):
-    """2B-02, Low. Correct behaviour: listeners on sync engine see route stock updates."""
-    shop = Shop(client, db_session)
-    product = shop.product(stock=5)
-    buyer = shop.buyer()
-    assert shop.add_to_cart(buyer, product).status_code == 200
-    seen = {"sync": 0, "async": 0}
-
-    def spy(name):
-        def _spy(conn, cursor, statement, *rest):
-            if statement.startswith("UPDATE products SET stock_quantity"):
-                seen[name] += 1
-        return _spy
-
-    sync_spy, async_spy = spy("sync"), spy("async")
-    event.listen(engine, "after_cursor_execute", sync_spy)
-    event.listen(async_engine.sync_engine, "after_cursor_execute", async_spy)
-    try:
-        assert shop.place_order(buyer).status_code == 201
-    finally:
-        event.remove(engine, "after_cursor_execute", sync_spy)
-        event.remove(async_engine.sync_engine, "after_cursor_execute", async_spy)
-    assert seen["sync"] > 0
 
 
 def _admin_headers(client, db_session):
