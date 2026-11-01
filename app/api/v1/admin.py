@@ -659,10 +659,11 @@ async def create_product_variant(
     response: Response,
     current_user: AdminUser,
     db: DbSession,
+    redis: Cache,
 ):
     """Create a new variant (e.g. a size/color combination) under a product."""
 
-    await _get_product_or_404(db, product_id)
+    db_product = await _get_product_or_404(db, product_id)
 
     if await _variant_sku_exists(db, variant.sku):
         raise HTTPException(
@@ -678,6 +679,8 @@ async def create_product_variant(
     # ProductVariant.sku, not the pre-check. _flush_variant turns the
     # loser's IntegrityError into the same 409 the pre-check path returns
     # for the sequential case, instead of a generic 500.
+    # The product's ETag covers its variants through updated_at.
+    db_product.updated_at = utc_now()
     await _flush_variant(db, variant.sku)
     await db.refresh(db_variant)
     result = ProductVariantResponse.model_validate(db_variant)
@@ -687,6 +690,7 @@ async def create_product_variant(
     )
 
     await db.commit()
+    await redis.invalidate_product_cache(product_id)
     return result
 
 @router.get(
@@ -796,6 +800,7 @@ async def update_product_variant(
     variant: ProductVariantUpdate,
     current_user: AdminUser,
     db: DbSession,
+    redis: Cache,
     response: Response,
     if_match: IfMatch = None,
 ):
@@ -805,7 +810,7 @@ async def update_product_variant(
     *), applied only if the variant is unchanged since (412 otherwise).
     """
 
-    await _get_product_or_404(db, product_id)
+    db_product = await _get_product_or_404(db, product_id)
 
     stmt = (
         select(ProductVariant)
@@ -841,6 +846,9 @@ async def update_product_variant(
         setattr(db_variant, field, value)
 
     db_variant.updated_at = utc_now()
+    # The product's ETag covers its variants through updated_at; the cached
+    # product detail is dropped after the commit.
+    db_product.updated_at = db_variant.updated_at
     # Same read-then-write race as create_product_variant above: the
     # "sku" != db_variant.sku pre-check can be stale by the time this
     # commits if a concurrent request claimed the same SKU in between.
@@ -851,6 +859,7 @@ async def update_product_variant(
     response.headers["ETag"] = etag_for(result)
 
     await db.commit()
+    await redis.invalidate_product_cache(product_id)
     return result
 
 

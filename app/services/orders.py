@@ -56,6 +56,10 @@ def products_with_cached_stock(lines) -> list[int]:
     variant id, or None) moves: the plain lines. A variant line changes the
     variant's own stock, which the product detail does not show. Callers drop
     these cache entries after the transaction that changed the stock commits.
+
+    Stock moved by checkout does not change the product ETag on purpose:
+    inventory changes invalidate Redis cache so the next GET shows current
+    counts, but do not bump updated_at.
     """
     return sorted({product_id for product_id, variant_id in lines if variant_id is None})
 

@@ -108,7 +108,6 @@ def test_create_order_rejects_bare_line_when_product_has_active_variants(client,
 # -- SPEC-CAT-03: the product ETag covers variant state ----------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC-CAT-03: GET /products/{id} ETag does not change when a variant is mutated")
 @pytest.mark.parametrize(
     "change",
     [
