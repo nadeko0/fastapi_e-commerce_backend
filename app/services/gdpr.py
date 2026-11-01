@@ -164,7 +164,7 @@ class GDPRService:
             # this method runs on the event loop. Called inline, as they were,
             # each one stopped the whole worker for that long; this was the
             # only route still sending mail from inside a handler (found by
-            # tracing an end-to-end run, scripts/loadtest/FINDINGS.md).
+            # tracing an end-to-end run, docs/reports/load-testing-3x.md).
             from app.services.email import send_gdpr_request_received
             await run_in_threadpool(send_gdpr_request_received, user.email, "export", request_id)
 

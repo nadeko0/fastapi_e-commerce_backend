@@ -5,7 +5,7 @@ thread it runs on until Redis answers. That is fine in Celery tasks and in
 scripts, but the rate limiter runs on every request and the auth dependency
 on every authenticated one, both directly on the event loop, so each of
 their round trips stopped the whole worker for its duration. This module is
-the non-blocking path for those two callers. Both clients talk to the same
+the path for every caller on the event loop. Both clients talk to the same
 Redis database and use the same key formats, so a value written through one
 is visible through the other.
 
@@ -52,9 +52,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Key formats written by the sync side: RedisService.add_to_blacklist in
-# app/services/redis.py and invalidate_tokens_issued_before_now in
-# app/core/security.py. The readers below must stay in step with them.
+# Key formats written by AsyncRedisService.add_to_blacklist and .setex
+# (invalidate_tokens_issued_before_now). The readers below must stay in step with them.
 BLACKLIST_KEY_PREFIX = "blacklist:"
 PASSWORD_CHANGED_KEY_PREFIX = "pwd_changed:"
 
@@ -166,7 +165,7 @@ async def is_token_superseded(user_id: str | int, issued_at: Any | None) -> bool
     if not data:
         return False
     try:
-        # Stored by RedisService.setex, which JSON-encodes every value.
+        # Stored by AsyncRedisService.setex, which JSON-encodes every value.
         changed_at = json.loads(data)
     except (json.JSONDecodeError, TypeError) as e:
         logger.error(f"Unreadable password-change watermark, token refused: {str(e)}")

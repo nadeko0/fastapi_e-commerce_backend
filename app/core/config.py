@@ -410,8 +410,8 @@ class Settings(BaseSettings):
     # slash. A Checkout Session sends the customer back here after Stripe's
     # hosted page; success_url/cancel_url from a client are accepted only
     # on this origin, and built on it when omitted (app/schemas/order.py,
-    # create_checkout_session). The default is a local frontend; production
-    # requires https (check_payment_settings_for_production).
+    # create_checkout_session). The default is a local frontend; every deployed
+    # environment requires https (check_deployment_settings).
     FRONTEND_URL: str = "http://localhost:3000"
     # How long an order may stay unpaid before the cancel_expired_unpaid_orders
     # task (app/tasks.py, every 5 minutes) cancels it and returns its stock.

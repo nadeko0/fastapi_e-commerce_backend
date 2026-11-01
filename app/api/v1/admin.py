@@ -422,10 +422,8 @@ async def list_orders(
     pagination: Annotated[AdminOrderListParams, Depends()],
     current_user: AdminUser,
     db: DbSession,
-    # Named "status" for the public API/query param; see the identical note
-    # in orders.update_order_status - this shadows the fastapi.status
-    # module within this function body, so error responses below must use
-    # the http_status alias instead.
+    # Named "status" for the query param; it shadows fastapi.status here,
+    # hence the http_status alias.
     status: OrderStatusFilter = None,
     payment_status: PaymentStatusFilter = None,
     start_date: AwareDatetime | None = None,

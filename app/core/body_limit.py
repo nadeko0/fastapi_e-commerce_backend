@@ -26,8 +26,8 @@ class BodySizeLimitMiddleware:
       tries to send is dropped; the 413 is the only response.
 
     Plain ASGI rather than BaseHTTPMiddleware for the same reason as
-    app/core/overload.py: it must wrap `receive` itself. It is registered
-    innermost, see app/main.py.
+    app/core/overload.py: it must wrap `receive` itself. Registered right
+    after HeadMiddleware, so it sits just outside it (see app/main.py).
     """
 
     def __init__(self, app: ASGIApp, limit: int) -> None:

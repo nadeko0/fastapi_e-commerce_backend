@@ -1263,7 +1263,7 @@ async def process_payment(
         # parameters they were first used with". With one shared key, as
         # this used to be, every /pay against real Stripe failed with 409 -
         # found by an end-to-end run against Stripe's test mode
-        # (scripts/loadtest, FINDINGS.md); the in-process mock accepted it,
+        # (docs/reports/load-testing-3x.md); the in-process mock accepted it,
         # so the test suite never saw it. The mock now rejects it too.
         #
         # return_url is where 3D Secure sends the customer back after

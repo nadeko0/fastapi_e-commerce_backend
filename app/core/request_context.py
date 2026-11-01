@@ -11,10 +11,10 @@ buffering) that
   anyio's worker threads (run_in_threadpool, sync routes) run in a copy of the
   caller's context, so they see the same values.
 
-Not done on purpose: no traceparent is sent on outgoing calls or echoed back
-(the spec requires neither; there is no tracing SDK in the app), and the
-`traceresponse` header is a separate W3C draft, not implemented. Celery tasks
-receive the context through message headers (app/core/celery_context.py).
+Not done on purpose: With tracing off no traceparent is sent; with OTEL_* set,
+app/core/telemetry.py propagates it (requests, Celery). It is never echoed back,
+and the `traceresponse` header is a separate W3C draft, not implemented. Celery
+tasks receive the context through message headers (app/core/celery_context.py).
 """
 
 import re

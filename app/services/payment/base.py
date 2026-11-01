@@ -1,9 +1,8 @@
 """
 PaymentProvider abstraction. Structurally close to the real `stripe` Python
 SDK's top-level resource methods (PaymentIntent.create/confirm/retrieve,
-Refund.create, Webhook.construct_event) so that swapping the mock provider
-for the real `stripe` SDK later is mostly a matter of writing a thin adapter,
-not redesigning the call sites in app/api/v1/orders.py.
+Refund.create, Webhook.construct_event). Provider-neutral exceptions;
+live_stripe_provider.py maps the SDK's errors onto them.
 """
 import json
 import uuid

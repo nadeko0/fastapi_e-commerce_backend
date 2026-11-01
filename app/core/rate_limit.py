@@ -40,7 +40,7 @@ Known trade-offs, chosen for simplicity:
   login answers 503 until it can count again.
 
 Why this and not a library, and what real services publish:
-scripts/loadtest/results/rate-limiting-research.md, "What was implemented".
+docs/reports/research.md, "What was implemented".
 """
 
 import hashlib

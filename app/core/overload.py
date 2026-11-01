@@ -11,15 +11,16 @@ class InFlightLimitMiddleware:
     request in progress holds pooled database connections until its
     dependencies are torn down, and once more requests are in flight than the
     pool has connections, the event loop blocks waiting for one that only the
-    loop itself could release (measured under locust - see README, "Load
-    testing"). Nothing is answered until pool_timeout, 30 seconds later.
+    loop itself could release (measured under locust - see
+    docs/PERFORMANCE.md and docs/reports/load-testing-3x.md). Nothing is
+    answered until pool_timeout, 30 seconds later.
 
     Capping in-flight requests below what the pool can serve keeps that from
     ever happening: the request that would have tipped the worker over gets
     an immediate 503 with Retry-After instead, and everyone already inside
-    is served at normal speed. An authenticated request can hold two sync
-    connections at once (get_current_user's session and the route's own), so
-    the safe ceiling is (DB_POOL_SIZE + DB_MAX_OVERFLOW) / 2.
+    is served at normal speed. A request holds at most one async connection
+    (get_current_user and the route share the request's DbSession), so the
+    ceiling is DB_POOL_SIZE + DB_MAX_OVERFLOW of the async pool.
 
     The count is per worker process, and it covers a request for as long as
     its ASGI call lasts, which includes dependency teardown - the phase the

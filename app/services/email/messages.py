@@ -68,9 +68,8 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
     # for the same reason: a freshly-queried Order's .status is a plain str.
     # Fixed there first and missed here, so every order confirmation sent
     # from a Celery task, as they were then, raised AttributeError - found by running a real worker against
-    # real orders (scripts/loadtest/traced_celery.py), which the unit test
-    # could not catch because its fake order always carried an enum-like
-    # status.
+    # real orders, which the unit test could not catch because its fake order
+    # always carried an enum-like status.
     status_value = order.status.value if hasattr(order.status, "value") else order.status
     html_content = f"""
     <html>

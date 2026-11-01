@@ -88,7 +88,7 @@ install_problem_media_type(app)
 # HEAD runs as GET without a body (RFC 9110 9.3.2); innermost (app/core/head.py).
 app.add_middleware(HeadMiddleware)
 
-# Registered before everything else, so it is the innermost middleware: the
+# Registered right after HeadMiddleware, so it sits just outside it: the
 # 413 then passes back out through the security-headers and CORS layers like
 # any other response. Nothing outside it reads the body (the rate limiter is
 # a route dependency, not a middleware), and the in-flight limiter sits
@@ -113,8 +113,8 @@ app.add_middleware(
 # however the server was started (app/core/forwarded.py).
 app.add_middleware(ForwardedClientMiddleware)
 
-# Outside everything but the security headers: a request that is going to be
-# shed should cost nothing - no rate-limit Redis call, no CORS handling.
+# Outside everything but request-id, security headers (and OTel): a request that
+# is going to be shed should cost nothing - no rate-limit Redis call, no CORS handling.
 if settings.MAX_IN_FLIGHT_REQUESTS:
     logger.info(f"Limiting in-flight requests to {settings.MAX_IN_FLIGHT_REQUESTS} per worker")
     app.add_middleware(InFlightLimitMiddleware, limit=settings.MAX_IN_FLIGHT_REQUESTS)

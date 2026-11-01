@@ -1,11 +1,5 @@
 """
-Exception hierarchy mirroring the shape of the real `stripe` Python SDK's
-error classes (StripeError -> CardError / APIConnectionError / ...).
-
-We deliberately do not depend on the real `stripe` package (see
-app/services/payment/README notes in stripe_provider.py) - these are small,
-dependency-free stand-ins with the same names/semantics so the rest of the
-codebase (and anyone who has used the real SDK) reads naturally.
+Provider-neutral exceptions; live_stripe_provider.py maps the SDK's errors onto them.
 """
 
 

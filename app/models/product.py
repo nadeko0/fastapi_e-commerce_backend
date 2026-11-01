@@ -25,14 +25,8 @@ if TYPE_CHECKING:
 # equivalent for a Python-side list of strings either way.
 _string_array = ARRAY(String).with_variant(JSON(), "sqlite")
 
-# The generic sqlalchemy.JSON type's [key] indexing comparator has no
-# .astext accessor - only the Postgres-specific JSON/JSONB types do. Since
-# list_products (app/api/v1/products.py) filters on
-# Product.characteristics[key].astext, plain JSON here would raise
-# AttributeError on every request using the characteristics filter against
-# real Postgres (never caught by the SQLite-backed test suite, which
-# doesn't exercise this path). JSONB is also the idiomatic/indexable choice
-# for Postgres; SQLite keeps generic JSON, matching the pattern above.
+# JSONB on Postgres for storage/indexing; list_products uses the cross-dialect
+# .as_string(). SQLite keeps generic JSON, matching the pattern above.
 _characteristics_json = JSON().with_variant(JSONB(), "postgresql")
 
 class Product(Base):

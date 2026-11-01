@@ -1,14 +1,13 @@
 """
 StripePaymentProvider - a mock Stripe integration.
 
-This project has no real Stripe account and never will (portfolio project).
+The in-process mock of Stripe (the live provider is live_stripe_provider.py).
 This class mirrors the real `stripe` Python SDK's call shapes as closely as
 reasonable (PaymentIntent.create/confirm/retrieve, Refund.create,
 Webhook.construct_event) so it demonstrates how a real integration would be
 structured, but the outbound "network call" (`_simulate_network_call`) is a
-no-op stub - no HTTP request is ever made, and no `stripe` PyPI package is
-required. Tests monkeypatch `_simulate_network_call` to inject a transport
-failure (see tests/test_payment.py's timeout test).
+no-op stub - no HTTP request is ever made. Tests monkeypatch `_simulate_network_call`
+to inject a transport failure (see tests/integration/test_payment.py's timeout test).
 
 Deterministic mock outcomes are selected by a small set of sentinel
 `payment_method` tokens, deliberately named after Stripe's own published
