@@ -5,8 +5,8 @@ from payment_support import Shop, reset_provider
 
 from app.models.order import Order
 from app.models.payment import Payment
-from app.models.payment_ledger import PaymentRefund
-from app.services.payment.exceptions import PaymentProviderTimeoutError
+from app.models.payment_ledger import PaymentDispute, PaymentRefund
+from app.services.payment.exceptions import CardError, PaymentProviderTimeoutError
 from app.services.payment.stripe_provider import StripePaymentProvider
 
 API = "/api/v1"
@@ -178,3 +178,61 @@ def test_refund_flagged_payment_provider_failure(client, db_session, monkeypatch
     p = shop.db.get(Payment, payment.id)
     assert p.requires_manual_review is True
     assert p.amount_refunded == 0
+
+
+def test_a_flagged_payment_under_an_open_dispute_is_not_sent_to_the_provider(
+    client, db_session, monkeypatch
+):
+    shop = Shop(client, db_session)
+    admin = shop.admin()
+    _, payment = _setup_cancelled_order_with_flagged_payment(shop, amount=2500, flagged=True)
+    shop.db.add(PaymentDispute(
+        dispute_id=f"dp_{uuid.uuid4().hex}", payment_id=payment.id, amount=2500,
+        currency=payment.currency, reason="fraudulent", status="needs_response",
+    ))
+    shop.db.commit()
+
+    def no_call(*args, **kwargs):
+        raise AssertionError("a disputed charge must not reach the provider")
+
+    monkeypatch.setattr(StripePaymentProvider, "create_refund", no_call)
+    response = client.post(
+        f"{ADMIN}/payments/{payment.id}/refund",
+        headers={**admin, "Idempotency-Key": "disputed-key-1"},
+    )
+    assert response.status_code == 409, response.text
+    shop.db.expire_all()
+    assert shop.db.get(Payment, payment.id).requires_manual_review is True
+
+
+@pytest.mark.parametrize("code", ["charge_disputed", "refund_disputed_payment"])
+def test_a_dispute_only_stripe_knows_about_is_a_409(client, db_session, monkeypatch, code):
+    shop = Shop(client, db_session)
+    admin = shop.admin()
+    _, payment = _setup_cancelled_order_with_flagged_payment(shop, amount=2500, flagged=True)
+
+    def refused(self, **kwargs):
+        raise CardError("Charge has been charged back; cannot issue a refund.", code=code)
+
+    monkeypatch.setattr(StripePaymentProvider, "create_refund", refused)
+    response = client.post(
+        f"{ADMIN}/payments/{payment.id}/refund",
+        headers={**admin, "Idempotency-Key": f"disputed-{code}"},
+    )
+    assert response.status_code == 409, response.text
+
+
+def test_another_provider_refusal_stays_a_400(client, db_session, monkeypatch):
+    shop = Shop(client, db_session)
+    admin = shop.admin()
+    _, payment = _setup_cancelled_order_with_flagged_payment(shop, amount=2500, flagged=True)
+
+    def refused(self, **kwargs):
+        raise CardError("Refused.", code="charge_already_refunded")
+
+    monkeypatch.setattr(StripePaymentProvider, "create_refund", refused)
+    response = client.post(
+        f"{ADMIN}/payments/{payment.id}/refund",
+        headers={**admin, "Idempotency-Key": "refused-key-1"},
+    )
+    assert response.status_code == 400, response.text

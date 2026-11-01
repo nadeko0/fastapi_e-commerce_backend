@@ -15,8 +15,10 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.merge_patch import PATCH_DESCRIPTION, merge_patch_body
 from app.api.v1.orders import (
+    DISPUTED_CHARGE_CODES,
     REFUND_KEY_HEADER_DESCRIPTION,
     _cents_to_decimal,
+    _has_open_dispute,
     _provider_idempotency_key,
     _record_refund,
 )
@@ -1221,6 +1223,14 @@ async def refund_flagged_payment(
             detail="Only a succeeded payment flagged for manual review can be refunded",
         )
 
+    # Under dispute the money is already held back by the card network: a refund
+    # would return it twice, and Stripe refuses it anyway.
+    if await db.run_sync(_has_open_dispute, order.id, payment.id):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="This payment is disputed; it cannot be refunded while the dispute is open",
+        )
+
     remaining_cents = payment.amount - payment.amount_refunded
     if remaining_cents <= 0:
         raise HTTPException(
@@ -1251,6 +1261,11 @@ async def refund_flagged_payment(
             detail="Idempotency key already used with different refund parameters",
         ) from None
     except (CardError, InvalidRequestError) as e:
+        if getattr(e, "code", None) in DISPUTED_CHARGE_CODES:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail="This payment is disputed; it cannot be refunded while the dispute is open",
+            ) from e
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message
         ) from e
