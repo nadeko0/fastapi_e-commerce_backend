@@ -47,6 +47,8 @@ def test_public_operations_do_not_document_a_token_401(spec):
 
 def test_admin_operations_document_403(spec):
     assert _ref(_op(spec, "get", "/admin/stats")["responses"]["403"]) == "Problem"
+    assert _ref(_op(spec, "get", "/admin/payments")["responses"]["403"]) == "Problem"
+    assert _ref(_op(spec, "post", "/admin/payments/{payment_id}/refund")["responses"]["403"]) == "Problem"
 
 
 def test_error_bodies_are_problem_models(spec):

@@ -3,7 +3,7 @@ from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
@@ -14,10 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.merge_patch import PATCH_DESCRIPTION, merge_patch_body
+from app.api.v1.orders import (
+    REFUND_KEY_HEADER_DESCRIPTION,
+    _cents_to_decimal,
+    _provider_idempotency_key,
+    _record_refund,
+)
 from app.core import database
 from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, DbSession, Provider
+from app.core.errors import Problem, ProblemType
 from app.core.etag import IfMatch, IfNoneMatch, etag_for, if_none_match_hits, require_if_match
 from app.core.location import set_location
 from app.core.openapi import FORBIDDEN, LOCATION_HEADER, UNAUTHORIZED, DocumentedRoute
@@ -29,11 +36,14 @@ from app.models.payment import (
     WEBHOOK_EVENT_FAILED,
     WEBHOOK_EVENT_RECEIVED,
     WEBHOOK_EVENT_STATUSES,
+    Payment,
     WebhookEvent,
 )
 from app.models.payment_discrepancy import PaymentDiscrepancy
 from app.models.product import Product, ProductVariant
 from app.schemas.admin import (
+    AdminPaymentListResponse,
+    AdminPaymentResponse,
     DiscrepancyListResponse,
     DiscrepancyResponse,
     OrderStatistics,
@@ -50,6 +60,7 @@ from app.schemas.order import (
     OrderResponse,
     OrderStatus,
     PaymentStatus,
+    RefundResponse,
 )
 from app.schemas.product import (
     ProductCreate,
@@ -62,6 +73,12 @@ from app.schemas.product import (
     ProductVariantUpdate,
 )
 from app.schemas.webhook_event import WebhookEventListResponse, WebhookEventResponse
+from app.services.payment.exceptions import (
+    CardError,
+    IdempotencyError,
+    InvalidRequestError,
+    PaymentProviderTimeoutError,
+)
 from app.services.reconciliation import open_discrepancies, reconcile_payments
 from app.services.stripe_events import enqueue_event
 from app.tasks import check_payment_reconciliation
@@ -380,6 +397,17 @@ class AdminOrderListParams(PaginationParams):
     sort_by: str | None = Field(
         None, pattern=f"^({'|'.join(ORDER_SORT_COLUMNS)})_(asc|desc)$"
     )
+
+
+PAYMENT_SORT_COLUMNS = {
+    "id": Payment.id,
+    "created_at": Payment.created_at,
+    "amount": Payment.amount,
+}
+
+AdminPaymentListParams = sortable_pagination(
+    "AdminPaymentListParams", list(PAYMENT_SORT_COLUMNS)
+)
 
 
 @router.get(
@@ -1087,3 +1115,174 @@ async def replay_webhook_event(
     await db.commit()
     await run_in_threadpool(enqueue_event, event.event_id)
     return WebhookEventResponse.model_validate(event)
+
+
+@router.get(
+    "/payments",
+    response_model=AdminPaymentListResponse,
+    responses={
+        403: {"description": "Admin privileges required"},
+        422: {"description": "Invalid query parameters"},
+    },
+)
+async def list_payments(
+    pagination: Annotated[AdminPaymentListParams, Depends()],
+    current_user: AdminUser,
+    db: DbSession,
+    requires_manual_review: bool | None = None,
+    order_id: Int32 | None = None,
+):
+    """List payment attempts across orders, optionally filtering by
+    requires_manual_review or order_id, with sorting and pagination."""
+    filters = []
+    if requires_manual_review is not None:
+        filters.append(Payment.requires_manual_review == requires_manual_review)
+    if order_id is not None:
+        filters.append(Payment.order_id == order_id)
+
+    total = await db.scalar(select(func.count()).select_from(Payment).where(*filters))
+    payments = (
+        await db.execute(
+            select(Payment)
+            .where(*filters)
+            .order_by(
+                *order_clauses(
+                    pagination.sort_by,
+                    pagination.sort_order,
+                    PAYMENT_SORT_COLUMNS,
+                    Payment.id,
+                    [Payment.created_at.desc(), Payment.id.desc()],
+                )
+            )
+            .offset((pagination.page - 1) * pagination.size)
+            .limit(pagination.size)
+        )
+    ).scalars().all()
+
+    return AdminPaymentListResponse(
+        items=[AdminPaymentResponse.model_validate(p) for p in payments],
+        total=total,
+        page=pagination.page,
+        size=pagination.size,
+        has_more=total > pagination.page * pagination.size,
+    )
+
+
+@router.post(
+    "/payments/{payment_id}/refund",
+    response_model=RefundResponse,
+    responses={
+        400: {"description": "The provider refused the refund as invalid, or the Idempotency-Key header is missing or malformed"},
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Payment not found"},
+        409: {"description": "Only a succeeded payment flagged for manual review can be refunded"},
+        503: {"description": "Payment provider unavailable, retry the request"},
+    },
+)
+async def refund_flagged_payment(
+    payment_id: Int32,
+    current_user: AdminUser,
+    db: DbSession,
+    provider: Provider,
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=8,
+            max_length=255,
+            description=REFUND_KEY_HEADER_DESCRIPTION,
+        ),
+    ],
+):
+    """Issue a full refund for a payment attempt flagged for manual review."""
+    payment = (
+        await db.execute(select(Payment).where(Payment.id == payment_id).limit(1))
+    ).scalars().first()
+    if not payment:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Payment not found",
+        )
+
+    order = (
+        await db.execute(select(Order).where(Order.id == payment.order_id).limit(1))
+    ).scalars().first()
+    if not order:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
+    provider_key = _provider_idempotency_key("refund", order, idempotency_key)
+
+    # A resolved payment is no longer flagged, so a retry of a refund that went
+    # through ends here, with no call to the provider: nothing can move twice.
+    if not (payment.status == "succeeded" and payment.requires_manual_review):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Only a succeeded payment flagged for manual review can be refunded",
+        )
+
+    remaining_cents = payment.amount - payment.amount_refunded
+    if remaining_cents <= 0:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="This payment has already been fully refunded",
+        )
+
+    payment_intent_id = payment.payment_intent_id
+    await db.commit()
+
+    try:
+        refund = await run_in_threadpool(
+            provider.create_refund,
+            payment_intent_id=payment_intent_id,
+            amount=remaining_cents,
+            idempotency_key=provider_key,
+        )
+    except PaymentProviderTimeoutError as e:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Payment provider unavailable, please retry",
+            headers={"Retry-After": "5"},
+        ) from e
+    except IdempotencyError:
+        raise Problem(
+            http_status.HTTP_409_CONFLICT,
+            type=ProblemType.IDEMPOTENCY_KEY_IN_USE,
+            detail="Idempotency key already used with different refund parameters",
+        ) from None
+    except (CardError, InvalidRequestError) as e:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message
+        ) from e
+
+    # Re-read and update payment under lock
+    payment = (
+        await db.execute(
+            select(Payment).where(Payment.id == payment_id).with_for_update().limit(1)
+        )
+    ).scalars().first()
+
+    refund_row = await db.run_sync(
+        _record_refund,
+        payment,
+        refund.id,
+        refund.amount,
+        refund.status.value,
+        source="admin",
+    )
+
+    if payment.amount_refunded >= payment.amount:
+        payment.requires_manual_review = False
+    payment.updated_at = utc_now()
+    await db.commit()
+
+    return RefundResponse(
+        id=refund.id,
+        order_id=order.id,
+        amount=_cents_to_decimal(refund_row.amount),
+        currency=payment.currency,
+        status=refund_row.status,
+        payment_status=order.payment_status,
+    )

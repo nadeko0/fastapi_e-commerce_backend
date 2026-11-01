@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.schemas.order import OutputMoney
 
@@ -57,6 +57,31 @@ class ReconciliationRunResult(BaseModel):
     resolved: int
     truncated: bool
     aborted: bool
+
+
+class AdminPaymentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    order_id: int
+    provider: str
+    payment_intent_id: str
+    amount: int
+    amount_refunded: int
+    currency: str
+    status: str
+    checkout_session_id: str | None = None
+    requires_manual_review: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminPaymentListResponse(BaseModel):
+    items: list[AdminPaymentResponse]
+    total: int
+    page: int
+    size: int
+    has_more: bool
 
 
 class ReconciliationQueued(BaseModel):
