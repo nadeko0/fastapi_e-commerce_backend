@@ -522,7 +522,6 @@ def test_fixed_window_ends_after_its_length(client, limits, clock, offset, expec
         assert client.get(f"{API}/categories").status_code == expected
 
 
-@bug(BUG_D2)
 def test_bug_rate_limit_client_waiting_exactly_retry_after_is_refused_again(
     client, limits, clock
 ):

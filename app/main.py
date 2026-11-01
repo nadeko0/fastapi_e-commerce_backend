@@ -10,7 +10,7 @@ from app.core import probes, telemetry
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.database import async_engine, engine
-from app.core.errors import register_error_handlers
+from app.core.errors import check_patch_media_type, register_error_handlers
 from app.core.forwarded import ForwardedClientMiddleware
 from app.core.head import HeadMiddleware
 from app.core.logging_config import setup_logging
@@ -73,8 +73,13 @@ app = FastAPI(
     # a response by hand; before that was noticed, every 429 came out as a
     # 500.)
     # Then the path, query and form parameters are checked for text the
-    # database cannot store (app/core/text_input.py).
-    dependencies=[Depends(rate_limit), Depends(reject_unusable_text)],
+    # database cannot store (app/core/text_input.py), followed by media-type
+    # validation for PATCH requests (RFC 5789, app/core/errors.py).
+    dependencies=[
+        Depends(rate_limit),
+        Depends(reject_unusable_text),
+        Depends(check_patch_media_type),
+    ],
 )
 
 register_error_handlers(app)

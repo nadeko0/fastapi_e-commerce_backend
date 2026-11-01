@@ -216,6 +216,10 @@ def user_id_from_token(request: Request) -> str | None:
 # because INCR and PEXPIRE must not be separable: a key that got its INCR
 # but never its expiry would count, and block, forever.
 _COUNT_LUA = """
+-- Redis keeps a key alive AT its expiry instant (PTTL 0); the window is over.
+if redis.call('PTTL', KEYS[1]) == 0 then
+    redis.call('DEL', KEYS[1])
+end
 local count = redis.call('INCR', KEYS[1])
 local ttl = redis.call('PTTL', KEYS[1])
 if ttl < 0 then

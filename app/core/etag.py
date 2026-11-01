@@ -18,7 +18,8 @@ from pydantic import BaseModel
 IfMatch = Annotated[str | None, Header(description="Entity tag(s) the current resource must match, or *")]
 IfNoneMatch = Annotated[str | None, Header(description="Entity tag(s) the client already holds, or *")]
 
-_TAG = re.compile(r'(W/)?"([^"]*)"|\*')
+_ENTITY = re.compile(r'(W/)?"([^"]*)"')
+_LIST = re.compile(r'[ \t,]*(?:W/)?"[^"]*"(?:[ \t]*,[ \t,]*(?:W/)?"[^"]*")*[ \t,]*')
 
 
 def etag_for(model: BaseModel) -> str:
@@ -28,7 +29,12 @@ def etag_for(model: BaseModel) -> str:
 
 def _parse(header: str) -> list[tuple[bool, str | None]]:
     """(is_weak, opaque_tag) pairs; a bare '*' is (False, None)."""
-    return [(bool(m.group(1)), m.group(2)) for m in _TAG.finditer(header)]
+    value = header.strip(" \t")
+    if value == "*":
+        return [(False, None)]
+    if not _LIST.fullmatch(value):  # RFC 9110: "*" or a comma-separated list of entity-tags
+        return []
+    return [(bool(m.group(1)), m.group(2)) for m in _ENTITY.finditer(value)]
 
 
 def if_match_passes(header: str | None, current: str) -> bool:

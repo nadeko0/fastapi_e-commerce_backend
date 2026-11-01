@@ -630,7 +630,6 @@ def test_patch_media_types(world, target, content_type, status):
         assert MERGE_PATCH in response.headers.get("accept", ""), response.headers
 
 
-@bug(BUG_B7)
 @pytest.mark.parametrize("target", PATCH_TARGETS, ids=[t[0] for t in PATCH_TARGETS])
 def test_bug_json_patch_media_type_is_applied_as_a_merge_patch(world, target):
     """RFC 5789 section 2.2: a patch format the server does not support is a 415.
@@ -800,8 +799,7 @@ def _strict_if_match(header: str, current: str):
 
 
 @pytest.mark.parametrize("which", ["product", "variant"])
-@pytest.mark.parametrize("index", [
-    pytest.param(i, marks=bug(BUG_B4) if i >= 15 else ()) for i in range(19)])
+@pytest.mark.parametrize("index", list(range(19)))
 def test_if_match_table(world, which, index):
     """RFC 9110 13.1.1: If-Match passes for "*" or a strongly matching tag of the
     list; a weak tag never matches; otherwise 412 (with the current ETag) and the
@@ -853,7 +851,6 @@ def test_if_match_only_passes_for_star_or_the_current_strong_tag(world, parts, s
         pytest.fail(f"If-Match {header!r} names the current tag yet got 412")
 
 
-@bug(BUG_B4)
 def test_bug_if_match_wildcard_inside_a_malformed_field_is_honoured(world):
     """app/core/etag.py:_TAG finds a "*" anywhere in the field, so a stale tag
     followed by garbage containing "*" (`"stale", *`, `bogus*`, `W/*`) is read as

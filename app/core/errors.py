@@ -244,6 +244,13 @@ def _unsupported_media_type(request: Request) -> Problem:
     )
 
 
+def check_patch_media_type(request: Request) -> None:
+    """RFC 5789 section 2.2: a patch format the server does not support is 415."""
+    media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if request.method == "PATCH" and media_type.endswith("+json") and media_type != "application/merge-patch+json":
+        raise _unsupported_media_type(request)
+
+
 async def request_validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> Response:
