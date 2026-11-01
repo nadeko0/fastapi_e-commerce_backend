@@ -537,9 +537,9 @@ def test_one_mailbox_one_account_and_no_false_merges(api, db_session, local, dom
 
 
 @pytest.mark.parametrize("email", [
-    pytest.param("jane@xn--mnchen-3ya.de", id="idna-ace-domain", marks=bug(BUG_B1)),
-    pytest.param("jane@ｅｘａｍｐｌｅ.com", id="fullwidth-domain", marks=bug(BUG_B1)),
-    pytest.param("jane@example。com", id="ideographic-full-stop", marks=bug(BUG_B1)),
+    pytest.param("jane@xn--mnchen-3ya.de", id="idna-ace-domain"),
+    pytest.param("jane@ｅｘａｍｐｌｅ.com", id="fullwidth-domain"),
+    pytest.param("jane@example。com", id="ideographic-full-stop"),
 ])
 def test_bug_login_does_not_normalise_email_like_registration(api, email):
     """Registration stores email-validator's normalised address (IDNA/UTS #46

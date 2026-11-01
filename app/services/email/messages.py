@@ -194,7 +194,7 @@ def send_low_stock_alert_email(to_email: str, products: list[Product]) -> bool:
         html_content
     )
 
-def send_welcome_email(to_email: str, full_name: str, verification_token: str) -> bool:
+def send_welcome_email(to_email: str, full_name: str | None, verification_token: str) -> bool:
     verification_link = _frontend_link(VERIFY_EMAIL_PAGE_PATH, verification_token)
     # full_name is attacker-controlled (the caller-supplied name at
     # registration, app/api/v1/users.py) and was previously interpolated
@@ -203,8 +203,10 @@ def send_welcome_email(to_email: str, full_name: str, verification_token: str) -
     # body an email client renders. Escaped here at the point of use,
     # matching how every other f-string-built HTML email in this module
     # only ever interpolates server-controlled values (settings, IDs,
-    # enum .value, formatted dates).
-    safe_full_name = html.escape(full_name)
+    # enum .value, formatted dates). full_name is optional at registration
+    # (UserCreate): html.escape(None) raised, the background task died and
+    # the verification link - required for checkout - was never sent.
+    safe_full_name = html.escape(full_name or "customer")
 
     html_content = f"""
     <html>

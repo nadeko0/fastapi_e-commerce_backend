@@ -502,8 +502,7 @@ def async_session_factory():
 
 
 @pytest.fixture
-def client(monkeypatch, fake_redis):
-    monkeypatch.setattr("app.api.v1.users.send_welcome_email", lambda *a, **k: True)
+def client(fake_redis):
     with TestClient(app) as test_client:
         yield test_client
 

@@ -68,9 +68,11 @@ def _registration_mail(monkeypatch):
     return sent
 
 
-def test_register_creates_the_account(client, valid_registration_payload, db_session):
+@pytest.mark.parametrize("full_name", ["Jane Doe", None])
+def test_register_creates_the_account(client, valid_registration_payload, db_session, full_name):
     from app.models.user import User as UserModel
 
+    valid_registration_payload["full_name"] = full_name
     response = client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
 
     assert response.status_code == 202
@@ -78,7 +80,7 @@ def test_register_creates_the_account(client, valid_registration_payload, db_ses
     user = db_session.query(UserModel).filter(
         UserModel.email == valid_registration_payload["email"]
     ).one()
-    assert user.full_name == valid_registration_payload["full_name"]
+    assert user.full_name == full_name
 
 
 def test_registering_an_existing_email_answers_exactly_like_a_new_one(

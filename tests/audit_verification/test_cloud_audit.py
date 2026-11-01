@@ -404,7 +404,6 @@ def test_AUTH02_deletion_reauth_is_rate_limited_and_locks_out(client, db_session
     assert hit.status_code in (423, 429)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: REG-01 registration without full name fails to send verification mail")
 def test_REG01_registration_without_full_name_sends_verification_mail(
     client, db_session, monkeypatch, mailbox
 ):
