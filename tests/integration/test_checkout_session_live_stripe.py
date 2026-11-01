@@ -37,13 +37,14 @@ NOT (and per Stripe's own API surface, cannot) prove:
     never against a truly-completed real session here.
 """
 import os
+import time
 import uuid
 from pathlib import Path
 
 import pytest
 import stripe
 
-from app.services.payment.exceptions import CardError
+from app.services.payment.exceptions import CardError, InvalidRequestError
 from app.services.payment.live_stripe_provider import LiveStripePaymentProvider
 from app.services.payment.types import CheckoutSessionStatus
 
@@ -117,6 +118,31 @@ class TestCreateCheckoutSession:
                 idempotency_key=_idem_key(),
                 success_url="",
                 cancel_url=CANCEL_URL,
+            )
+
+    def test_expires_at_one_hour_ahead_is_accepted(self, provider):
+        expires_at = int(time.time()) + 3600
+        session = provider.create_checkout_session(
+            amount=1099,
+            currency="usd",
+            idempotency_key=_idem_key(),
+            success_url=SUCCESS_URL,
+            cancel_url=CANCEL_URL,
+            expires_at=expires_at,
+        )
+        assert session.id.startswith("cs_test_")
+        assert session.status == CheckoutSessionStatus.OPEN
+
+    def test_expires_at_ten_minutes_ahead_is_refused_with_invalid_request_error(self, provider):
+        expires_at = int(time.time()) + 600
+        with pytest.raises(InvalidRequestError):
+            provider.create_checkout_session(
+                amount=1099,
+                currency="usd",
+                idempotency_key=_idem_key(),
+                success_url=SUCCESS_URL,
+                cancel_url=CANCEL_URL,
+                expires_at=expires_at,
             )
 
 

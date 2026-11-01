@@ -157,6 +157,53 @@ class TestThreeDSecureRequired:
         assert confirmed.next_action.get("type") == "redirect_to_url"
 
 
+class TestDisputedCharge:
+    def test_a_refund_of_a_disputed_charge_is_refused_with_its_code(self, provider):
+        pi = provider.create_payment_intent(
+            amount=1500,
+            currency="usd",
+            idempotency_key=_idem_key(),
+            payment_method="pm_card_createDispute",
+        )
+        confirmed = provider.confirm_payment_intent(pi.id, return_url=RETURN_URL)
+        assert confirmed.status == PaymentIntentStatus.SUCCEEDED
+
+        with pytest.raises(CardError) as refused:
+            provider.create_refund(payment_intent_id=confirmed.id, idempotency_key=_idem_key())
+        assert refused.value.code == "charge_disputed"
+
+
+class TestCancelPaymentIntent:
+    def test_cancel_payment_intent_in_requires_action_gives_canceled(self, provider):
+        pi = provider.create_payment_intent(
+            amount=700,
+            currency="usd",
+            idempotency_key=_idem_key(),
+            payment_method=PM_3DS_REQUIRED,
+        )
+        confirmed = provider.confirm_payment_intent(pi.id, return_url=RETURN_URL)
+        assert confirmed.status == PaymentIntentStatus.REQUIRES_ACTION
+
+        canceled = provider.cancel_payment_intent(confirmed.id)
+        assert canceled.status == PaymentIntentStatus.CANCELED
+
+        retrieved = provider.retrieve_payment_intent(confirmed.id)
+        assert retrieved.status == PaymentIntentStatus.CANCELED
+
+    def test_cancel_succeeded_payment_intent_raises_card_error(self, provider):
+        pi = provider.create_payment_intent(
+            amount=1000,
+            currency="usd",
+            idempotency_key=_idem_key(),
+            payment_method=PM_SUCCESS,
+        )
+        confirmed = provider.confirm_payment_intent(pi.id, return_url=RETURN_URL)
+        assert confirmed.status == PaymentIntentStatus.SUCCEEDED
+
+        with pytest.raises(CardError):
+            provider.cancel_payment_intent(confirmed.id)
+
+
 class TestRefund:
     def test_refund_of_captured_payment(self, provider):
         pi = provider.create_payment_intent(
