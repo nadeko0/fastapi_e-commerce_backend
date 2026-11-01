@@ -197,7 +197,6 @@ def test_PAY02_checkout_session_without_webhook_is_reconciled(client, db_session
     assert (result.checked, result.skipped) == (1, 0)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: PAY-03 stale pending refund event regresses refunded order to paid")
 def test_PAY03_stale_pending_refund_event_does_not_regress_refunded_order_to_paid(client, db_session):
     """PAY-03 (2A-03), Medium. Correct behaviour: payment_status stays 'refunded'
     and setting status to processing answers 409.

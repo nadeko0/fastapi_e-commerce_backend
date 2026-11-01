@@ -252,6 +252,12 @@ def _apply_refund_object(db: Session, payment_row: Payment, refund_object: dict)
         return False
     if refund_row.status in _REFUND_STATUSES_NOT_RETURNED:
         return False
+    # Stripe does not guarantee event delivery order: a stale snapshot
+    # (pending, requires_action) delivered after succeeded must not move
+    # the refund back, which would revert a refunded order to paid. A later
+    # failed or canceled status (e.g. bank return) is final and must apply.
+    if refund_row.status == "succeeded" and status not in _REFUND_STATUSES_NOT_RETURNED:
+        return False
     refund_row.status = status
     if status not in _REFUND_STATUSES_NOT_RETURNED:
         return False

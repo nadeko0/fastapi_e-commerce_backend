@@ -1631,12 +1631,6 @@ def _paid_order(shop, token, price="10.00"):
     return order["id"], shop.payments(order["id"])[-1].payment_intent_id
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG DISCOVERED (bug 1): a stale refund.created/charge.refunded snapshot (status pending) "
-    "delivered after refund.updated (succeeded) rewinds the refund succeeded->pending and the "
-    "order refunded->paid - _apply_refund_object treats only failed/canceled as final "
-    "(app/services/stripe_events.py:253-255), _settle_refunds recomputes the order "
-    "(app/api/v1/orders.py:1771)"))
 def test_bug_stale_refund_event_reverts_a_settled_refund(client, db_session, tasks_db):
     """Found by test_refund_events_in_any_order_converge_to_the_providers_state
     (token=pm_card_pendingRefund, one refund, settled, events shuffled).

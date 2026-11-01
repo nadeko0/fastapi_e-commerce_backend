@@ -375,3 +375,33 @@ def test_a_replay_of_the_refund_that_took_the_rest_answers_that_refund(shop, pai
     assert (first.status_code, replay.status_code) == (200, 200), replay.text
     assert replay.json()["id"] == first.json()["id"]
     assert payment_rows(shop, order_id) == [("succeeded", 1999, 1999, "USD", False)]
+
+
+def test_a_succeeded_refund_ignores_stale_non_final_status_and_applies_later_failure(shop, paid):
+    order_id = paid["order"]["id"]
+    refund = shop.refund(paid["admin"], order_id).json()
+    assert order_state(shop, order_id) == ("confirmed", "refunded")
+
+    # Stripe sends out-of-order non-final statuses (requires_action, pending)
+    # after succeeded: they must be ignored, leaving order refunded.
+    req_act = _refund_object(paid["payment"], refund["id"], 1999, "requires_action")
+    shop.webhook("refund.updated", req_act)
+    assert order_state(shop, order_id) == ("confirmed", "refunded")
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 1999, "USD", False)]
+
+    # A subsequent failure (e.g. bank return) is final and must apply:
+    failed = _refund_object(paid["payment"], refund["id"], 1999, "failed", failure_reason="return")
+    shop.webhook("refund.updated", failed)
+    assert order_state(shop, order_id) == ("confirmed", "paid")
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 0, "USD", False)]
+
+
+def test_stale_pending_event_after_succeeded_leaves_order_refunded(shop, paid):
+    order_id = paid["order"]["id"]
+    refund = shop.refund(paid["admin"], order_id).json()
+    assert order_state(shop, order_id) == ("confirmed", "refunded")
+
+    stale_pending = _refund_object(paid["payment"], refund["id"], 1999, "pending")
+    shop.webhook("refund.created", stale_pending)
+    assert order_state(shop, order_id) == ("confirmed", "refunded")
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, 1999, "USD", False)]
