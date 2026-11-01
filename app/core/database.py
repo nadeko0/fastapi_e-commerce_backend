@@ -59,7 +59,8 @@ def _build_connect_args(database_uri: str) -> dict:
             "options": (
                 "-c idle_in_transaction_session_timeout=30000 "
                 "-c statement_timeout=60000"
-            )
+            ),
+            "connect_timeout": 5,
         }
     return {}
 
@@ -75,7 +76,8 @@ _engine_kwargs = dict(
     connect_args=_connect_args,
     echo=settings.SQL_DEBUG,
     echo_pool=False,
-    logging_name=None
+    logging_name=None,
+    hide_parameters=not settings.SQL_DEBUG,
 )
 
 engine = create_engine(settings.DATABASE_URI.get_secret_value(), **_engine_kwargs)

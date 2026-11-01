@@ -205,7 +205,15 @@ class Settings(BaseSettings):
             return v
         password = info.data.get("POSTGRES_PASSWORD")
         password = password.get_secret_value() if password is not None else None
-        return f"postgresql+psycopg://{info.data.get('POSTGRES_USER')}:{password}@{info.data.get('POSTGRES_SERVER')}/{info.data.get('POSTGRES_DB')}"
+        from sqlalchemy.engine import URL
+
+        return URL.create(
+            "postgresql+psycopg",
+            username=info.data.get("POSTGRES_USER"),
+            password=password,
+            host=info.data.get("POSTGRES_SERVER"),
+            database=info.data.get("POSTGRES_DB"),
+        ).render_as_string(hide_password=False)
 
     REDIS_HOST: str
     REDIS_PORT: int = 6379

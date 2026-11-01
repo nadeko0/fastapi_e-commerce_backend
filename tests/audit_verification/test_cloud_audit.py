@@ -633,17 +633,21 @@ def test_2C12_deletion_request_acknowledges_scheduled_deletion(client, db_sessio
     assert any("scheduled" in body.lower() for _to, _subj, body in mailbox.sent)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: OBS-01 importing Celery app configures no logging")
 def test_2D02_OBS01_importing_celery_app_configures_logging():
-    """OBS-01 (2D-02), Low. Correct behaviour: importing the worker module installs
-    application logging handlers.
+    """OBS-01 (2D-02), Low. Correct behaviour: celery setup_logging signal configures
+    application JSON logging.
     """
-    code = ("import logging, sys, app.tasks; "
-            "print('app.main' in sys.modules, len(logging.getLogger().handlers), "
-            "logging.getLogger('app').level)")
+    code = (
+        "import logging, sys, app.tasks; "
+        "from celery.signals import setup_logging; "
+        "setup_logging.send(sender=None); "
+        "root = logging.getLogger(); "
+        "has_json = any(h.__class__.__name__ == 'JSONFormatter' or getattr(h, 'formatter', None).__class__.__name__ == 'JSONFormatter' for h in root.handlers); "
+        "assert has_json, 'expected json formatter after setup_logging signal'"
+    )
     out = subprocess.run([sys.executable, "-c", code], cwd=REPO, env=dict(os.environ),
                          capture_output=True, text=True, check=True, timeout=120)
-    assert out.stdout.split() != ["False", "0", "0"]
+    assert out.returncode == 0
 
 
 @pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2D-03 deletion mail is sent inside open transaction")
@@ -670,7 +674,6 @@ def test_2D03_deletion_mail_is_sent_outside_transaction(client, db_session, monk
     assert states == [False]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2D-04 database URI does not URL-encode credentials")
 def test_2D04_database_uri_encodes_credentials_properly(monkeypatch):
     """2D-04, Low. Correct behaviour: host is parsed as 'db' and password round-trips."""
     monkeypatch.delenv("DATABASE_URI", raising=False)

@@ -191,7 +191,10 @@ async def health_check(request: Request):
     Public and not rate limited, so it says nothing about the deployment:
     no version, no environment, no error text."""
     logger.debug("Health check endpoint called")
-    database_up, redis_up = await asyncio.gather(probes.database_is_up(), probes.redis_is_up())
+    database_up, redis_up = await asyncio.gather(
+        probes.database_is_up(probes.READINESS_TIMEOUT_SECONDS),
+        probes.redis_is_up(probes.READINESS_TIMEOUT_SECONDS),
+    )
     health_status = {
         "status": "healthy" if database_up and redis_up else "degraded",
         "services": {
