@@ -169,15 +169,6 @@ def check_responses(responses, allowed, deadlocks=None):
     a PostgreSQL deadlock (SQLSTATE 40P01). Off under TORTURE_STRICT=1."""
     hist = histogram(responses)
     bodies = {r.status_code: r.text[:300] for r in responses if r.status_code >= 500}
-    if deadlocks is not None and KNOWN_BUG_ALLOWANCES and hist.get(503):
-        assert deadlocks.only_deadlocks(), (
-            f"503s that are not the known BUG-3 deadlock: {deadlocks.sqlstates} {bodies}")
-        for r in responses:
-            if r.status_code == 503:
-                assert r.json()["detail"] == DB_UNAVAILABLE_DETAIL, r.text
-        print(f"KNOWN BUG-3 (deadlock -> 503) tolerated: {hist[503]} of {len(responses)}")
-        allowed = set(allowed) | {503}
-        hist = {code: n for code, n in hist.items() if code != 503}
     assert not any(code >= 500 for code in hist), f"5xx in burst: {hist} {bodies}"
     assert set(hist) <= set(allowed), f"unexpected statuses {hist}, allowed {allowed}: " + str(
         {r.status_code: r.text[:200] for r in responses if r.status_code not in allowed}
@@ -1090,20 +1081,11 @@ def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_, mo
     responses = _checkout_burst(shop, carts)
 
     _assert_stock_invariants(carts, responses, initial)
-    # BUG-3 deadlock 503s tolerated, see check_responses; every other
-    # checkout must succeed.
     hist = check_responses(responses, {201}, deadlocks=deadlocks)
-    assert hist.get(201, 0) + hist.get(503, 0) == N, hist
-    assert hist.get(201, 0) >= 1, hist
+    assert hist.get(201, 0) == N, hist
 
 
 @requires_postgres
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG DISCOVERED (BUG-3): checkouts deadlock (40P01, answered 503) when a variant line and a "
-    "plain line of the same product meet - lock_stock_rows takes FOR UPDATE "
-    "(app/services/orders.py:84-91), which conflicts with the FOR KEY SHARE the order_items -> "
-    "products foreign key takes on a variant line's product; 40P01 is classified as "
-    "'database unavailable' (app/core/database.py:131-147)"))
 def test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout(shop, monkeypatch):
     """Deterministic two-transaction version of the deadlock above.
 

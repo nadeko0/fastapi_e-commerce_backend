@@ -77,17 +77,28 @@ def lock_stock_rows(db: Session, lines) -> None:
     product's. Call it before the first stock UPDATE of the transaction;
     the UPDATEs themselves may then run in any order. SQLite ignores the
     lock, and with it the order.
+
+    FOR NO KEY UPDATE (key_share=True), not FOR UPDATE: it still serialises
+    the stock writers, but does not conflict with the FOR KEY SHARE that the
+    order_items foreign-key check takes on a variant line's product at
+    commit. With FOR UPDATE that implicit lock came after the variant locks
+    (products -> variants -> products) and deadlocked a checkout of a
+    variant against a cart or cancel holding the same product as a plain
+    line. The stock UPDATEs never change a key column.
     """
     product_ids = sorted({product_id for product_id, variant_id in lines if variant_id is None})
     variant_ids = sorted({variant_id for _, variant_id in lines if variant_id is not None})
     db.execute(
-        select(Product.id).where(Product.id.in_(product_ids)).order_by(Product.id).with_for_update()
+        select(Product.id)
+        .where(Product.id.in_(product_ids))
+        .order_by(Product.id)
+        .with_for_update(key_share=True)
     ).all()
     db.execute(
         select(ProductVariant.id)
         .where(ProductVariant.id.in_(variant_ids))
         .order_by(ProductVariant.id)
-        .with_for_update()
+        .with_for_update(key_share=True)
     ).all()
 
 

@@ -254,7 +254,7 @@ async def update_product(
     if if_match is not None:
         # Hold the row until commit so the check and the write are atomic
         # (a no-op on SQLite).
-        stmt = stmt.with_for_update(of=Product)
+        stmt = stmt.with_for_update(of=Product, key_share=True)
     db_product = (await db.execute(stmt)).scalars().first()
     if not db_product:
         raise HTTPException(
@@ -807,7 +807,7 @@ async def update_product_variant(
         .limit(1)
     )
     if if_match is not None:
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update(key_share=True)
     db_variant = (await db.execute(stmt)).scalars().first()
     if not db_variant:
         raise HTTPException(

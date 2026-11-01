@@ -98,7 +98,6 @@ def _race(first, second, hold_after):
     return results["first"], results["second"]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: DB-01 variant checkout deadlocks concurrent checkout")
 def test_DB01_variant_checkout_does_not_deadlock_concurrent_checkout(client, db_session):
     """DB-01 (2B-01), Medium. app/services/orders.py:81-91 (lock_stock_rows
     takes FOR UPDATE on products/variants) vs the FK `FOR KEY SHARE` that the
@@ -124,7 +123,6 @@ def test_DB01_variant_checkout_does_not_deadlock_concurrent_checkout(client, db_
         first.text, second.text)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: DB-01 variant checkout deadlocks cancel of plain plus variant order")
 def test_DB01_variant_checkout_does_not_deadlock_order_cancel(client, db_session):
     """DB-01 (2B-01), Medium. Same lock order defect, checkout vs the
     customer's cancel (cancel_order_and_restock locks P then V,
