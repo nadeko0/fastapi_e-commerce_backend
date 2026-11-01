@@ -442,9 +442,6 @@ def test_erasure_is_accepted_once_orders_are_delivered_and_undisputed(shop):
     assert _is_active(shop, buyer.email) is False
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "SPEC-GDPR-01(b): a Stripe event stored after the purge keeps the erased "
-    "customer's raw personal data"))
 def test_event_stored_after_the_purge_is_redacted(shop):
     buyer, order, _, payment = _paid_order(shop)
     user = shop.db.get(User, buyer.user_id)

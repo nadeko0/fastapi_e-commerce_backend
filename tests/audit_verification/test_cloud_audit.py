@@ -216,7 +216,6 @@ def test_PAY03_stale_pending_refund_event_does_not_regress_refunded_order_to_pai
     assert shop.set_status(admin, order["id"], "processing").status_code == 409
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: GDPR-01 webhook event for erased user retains PII")
 def test_GDPR01_webhook_event_for_erased_user_is_redacted_on_processing(db_session):
     """GDPR-01 (2C-01 + 2D-06 last_error), Medium. Correct behaviour: events
     about a customer whose erasure was requested get redacted when processed.

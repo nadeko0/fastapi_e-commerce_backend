@@ -41,6 +41,7 @@ from app.models.payment import (
     WebhookEvent,
 )
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -518,6 +519,7 @@ def process_stored_event(db: Session, event_id: str) -> EventOutcome:
     after_commit = _AfterCommit()
     try:
         data = json.loads(row.payload).get("data")
+        _redact_if_owner_erased(db, row)
         row.status = WEBHOOK_EVENT_PROCESSED
         row.processed_at = utc_now()
         result = apply_event(db, row.event_type, data, after_commit)
@@ -657,6 +659,48 @@ def _event_references(payload: dict) -> set[str]:
     if isinstance(metadata, dict):
         refs.add(f"order:{metadata.get('order_id')}")
     return {ref for ref in refs if isinstance(ref, str)}
+
+
+def _redact_if_owner_erased(db: Session, row: WebhookEvent) -> None:
+    """
+    Redact the stored payload of an event about a payment of an account
+    whose erasure was requested (committed with the event's processing).
+    The anonymisation task redacts the events stored before it ran, once
+    (redact_users_events), and then skips the account for good: an event
+    stored later - a redelivery, a refund or dispute months later, or one
+    that raced the task - kept the customer's personal data forever.
+    """
+    try:
+        payload = json.loads(row.payload)
+    except (TypeError, ValueError):
+        return
+    if not isinstance(payload, dict) or payload.get("redacted"):
+        return
+    refs = _event_references(payload)
+    # An order id outside the column's range names no order of ours (and
+    # would overflow the query parameter), as in _order_from_metadata.
+    order_ids = [
+        int(r[6:]) for r in refs
+        if r.startswith("order:") and r[6:].isdigit() and 0 < int(r[6:]) <= 2**31 - 1
+    ]
+    provider_ids = [r for r in refs if not r.startswith("order:")]
+    about = []
+    if order_ids:
+        about.append(Order.id.in_(order_ids))
+    if provider_ids:
+        about.append(Payment.payment_intent_id.in_(provider_ids))
+        about.append(Payment.checkout_session_id.in_(provider_ids))
+    if not about:
+        return
+    erased = db.scalars(
+        select(User.id)
+        .join(Order, Order.user_id == User.id)
+        .outerjoin(Payment, Payment.order_id == Order.id)
+        .where(User.data_deletion_requested, or_(*about))
+        .limit(1)
+    ).first()
+    if erased is not None:
+        row.payload = redact_event_payload(row.payload)
 
 
 def redact_users_events(db: Session, user_ids: list[int]) -> int:

@@ -1289,11 +1289,6 @@ def test_erasure_racing_the_accounts_activity(shop, fake_redis, round_):
     assert _pii_left(buyer.email) == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG DISCOVERED (BUG-4): a Stripe event about an erased customer's payment stored after the "
-    "anonymisation run keeps their personal data forever - the purge skips anonymised accounts "
-    "(app/tasks.py:341) and redacts events once (:363); store_event "
-    "(app/services/stripe_events.py:438) and process_stored_event (:544) never redact"))
 def test_bug_webhook_stored_after_erasure_keeps_personal_data(shop):
     """The anonymisation task redacts the stored webhook events about the
     erased account's payments (redact_users_events), once: the account is
