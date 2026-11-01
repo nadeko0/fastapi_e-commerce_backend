@@ -198,7 +198,6 @@ def _cart_with(quantity):
     return cart
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC-CART-02: Cart.merge adds quantities with no upper bound (exceeds INT32_MAX)")
 def test_cart_merge_never_exceeds_the_quantity_bound():
     mine = _cart_with(2_000_000_000)
     theirs = _cart_with(2_000_000_000)
@@ -208,7 +207,6 @@ def test_cart_merge_never_exceeds_the_quantity_bound():
     assert all(item.quantity <= INT32_MAX for item in mine.items.values())
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC-CART-02: login merge can push a line over INT32_MAX and POST /orders then answers 500")
 def test_checkout_after_an_overflowing_guest_merge_is_not_a_server_error(client, db_session):
     token, address_id = _checkout_ready_buyer(client, db_session)
     product = _make_product(db_session, _make_category(db_session).id, stock=2_000_000_000)

@@ -9,12 +9,13 @@ cancellation, a customer cancelling their own unpaid order, and the expiry
 of unpaid orders all go through cancel_order_and_restock.
 """
 
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now
 from app.models.order import Order
 from app.models.product import Product, ProductVariant
+from app.schemas.common import INT32_MAX
 from app.schemas.order import OrderStatus, PaymentStatus
 
 ORDER_STATUS_TRANSITIONS = {
@@ -102,6 +103,16 @@ def lock_stock_rows(db: Session, lines) -> None:
     ).all()
 
 
+def _restocked(column, quantity: int):
+    """`column + quantity`, capped at the largest stock the API accepts
+    (Int32Max). An admin may set a stock to 2147483647 while orders still
+    hold units of it; adding them back unchecked overflowed the INTEGER
+    column on PostgreSQL (NumericValueOutOfRange: the cancel answered 500 and
+    the expiry sweep stopped) and left an unreadable value on SQLite. The
+    comparison is written so that nothing overflows while it is computed."""
+    return case((column > INT32_MAX - quantity, INT32_MAX), else_=column + quantity)
+
+
 def cancel_order_and_restock(db: Session, order: Order) -> bool:
     """
     Move `order` to cancelled and put every line's quantity back into the
@@ -131,14 +142,14 @@ def cancel_order_and_restock(db: Session, order: Order) -> bool:
             db.execute(
                 update(ProductVariant)
                 .where(ProductVariant.id == item.variant_id)
-                .values({ProductVariant.stock_quantity: ProductVariant.stock_quantity + item.quantity})
+                .values({ProductVariant.stock_quantity: _restocked(ProductVariant.stock_quantity, item.quantity)})
                 .execution_options(synchronize_session=False)
             )
         else:
             db.execute(
                 update(Product)
                 .where(Product.id == item.product_id)
-                .values({Product.stock_quantity: Product.stock_quantity + item.quantity})
+                .values({Product.stock_quantity: _restocked(Product.stock_quantity, item.quantity)})
                 .execution_options(synchronize_session=False)
             )
     return True

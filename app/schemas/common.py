@@ -488,7 +488,7 @@ class Cart(BaseModel):
             str_id = cart_item_key(theirs.product_id, theirs.variant_id)
             mine = self.items.get(str_id)
             if mine is not None:
-                mine.quantity += theirs.quantity
+                mine.quantity = min(mine.quantity + theirs.quantity, INT32_MAX)
                 mine.price_snapshot = theirs.price_snapshot
                 mine.name_snapshot = theirs.name_snapshot
                 mine.image_snapshot = theirs.image_snapshot

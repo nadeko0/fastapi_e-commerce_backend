@@ -49,7 +49,7 @@ from decimal import Decimal
 
 import pytest
 import torture_support  # noqa: F401  (puts tests/integration on sys.path)
-from conftest import IS_POSTGRES, scaled_examples
+from conftest import scaled_examples
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given
 from hypothesis import settings as hyp_settings
@@ -484,15 +484,6 @@ class CartWorld(RuleBasedStateMachine):
         order_id, lines = self.placed[index % len(self.placed)]
         overflowing = [key for key, quantity in lines.items()
                        if self._stock(key) + quantity > INT32_MAX]
-        if overflowing and KNOWN_BUG_ALLOWANCES:
-            # KNOWN-BUG ALLOWANCE, bug 3 (strict reproducers:
-            # test_bug_restock_past_int32_max_is_a_500_on_cancel and
-            # ..._aborts_the_expiry_sweep): restocking this order would carry
-            # a stock that an admin set to Int32Max past it - a 500 on
-            # PostgreSQL, a stock above the API's maximum on SQLite. This
-            # one cancellation is not attempted; TORTURE_STRICT=1 attempts it.
-            SEEN["known bug 3: overflowing cancel skipped"] += 1
-            return
         self.placed.remove((order_id, lines))
         check(self.shop.client.post(f"{ORDERS}/{order_id}/cancel", headers=self.user_headers), 200)
         for key, quantity in lines.items():
@@ -1706,11 +1697,6 @@ def _order_at_int32_max_stock(shop, admin):
     return product, buyer, order["id"]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG DISCOVERED (bug 3): restocking a cancelled order onto a stock an admin set to Int32Max "
-    "(accepted by app/schemas/product.py:83,193) overflows - unchecked stock + qty in "
-    "cancel_order_and_restock (app/services/orders.py:123,130): 500 NumericValueOutOfRange on "
-    "PostgreSQL, stock 2147483648 (above the API's maximum) on SQLite"))
 def test_bug_restock_past_int32_max_is_a_500_on_cancel(client, db_session, tasks_db):
     """Found by test_cart_world_matches_its_model on PostgreSQL:
     setup(stocks=[2,...]), add 1, login, checkout, admin_sets_stock(INT32_MAX),
@@ -1734,10 +1720,6 @@ def test_bug_restock_past_int32_max_is_a_500_on_cancel(client, db_session, tasks
     assert 0 <= shop.stock(product) <= INT32_MAX
 
 
-@pytest.mark.xfail(IS_POSTGRES, strict=True, reason=(
-    "BUG DISCOVERED (bug 3, PostgreSQL): the unpaid-order expiry sweep (app/tasks.py:499 -> "
-    "cancel_order_and_restock, app/services/orders.py:123,130) raises NumericValueOutOfRange "
-    "on an order whose restock passes Int32Max, aborting the sweep for every other order"))
 def test_bug_restock_past_int32_max_aborts_the_expiry_sweep(client, db_session, tasks_db):
     """Same overflow in the unpaid-order expiry (app/tasks.py:499 ->
     cancel_order_and_restock): on PostgreSQL the task raises, so the sweep
