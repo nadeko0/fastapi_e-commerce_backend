@@ -11,6 +11,8 @@ import logging
 from datetime import timedelta
 from decimal import Decimal
 
+from payment_support import PAY_3DS, Shop
+
 from app import tasks
 from app.core.clock import utc_now
 from app.core.config import settings
@@ -482,3 +484,23 @@ def test_expire_unpaid_orders_anonymised_recipient_skips_email_and_cancels(
     assert order.status == OrderStatus.CANCELLED
     db_session.refresh(product)
     assert product.stock_quantity == 10  # stock restored
+
+
+def test_a_payment_completing_after_erasure_sends_no_mail(client, db_session, monkeypatch):
+    shop = Shop(client, db_session)
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, shop.product(price="10.00", stock=5))
+    assert shop.pay(buyer, order["id"], token=PAY_3DS).status_code == 200
+    attempt = shop.payments(order["id"])[0]
+    owner = shop.db.get(User, buyer.user_id)
+    owner.email = f"deleted-user-{owner.id}@deleted.invalid"
+    shop.db.commit()
+    sent = []
+    monkeypatch.setattr(
+        "app.api.v1.orders.send_order_status_update_email", lambda *a, **k: sent.append(a)
+    )
+
+    assert shop.intent_event("payment_intent.succeeded", attempt).status_code == 200
+
+    assert shop.order(order["id"]).payment_status == "paid"
+    assert sent == []

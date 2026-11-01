@@ -805,6 +805,11 @@ def _replay_checkout_session(payment_row: Payment, order: Order):
     )
 
 
+# What Stripe answers for a refund of a charge under dispute (charge_disputed
+# seen in its test mode; its error list also names refund_disputed_payment).
+DISPUTED_CHARGE_CODES = ("charge_disputed", "refund_disputed_payment")
+
+
 def _apply_payment_success(
     db: Session,
     order: Order,
@@ -851,11 +856,12 @@ def _apply_payment_success(
     order.updated_at = utc_now()
     db.commit()
 
-    background_tasks.add_task(
-        send_order_status_update_email,
-        notify_email,
-        OrderResponse.model_validate(order)
-    )
+    if not is_anonymised_email(notify_email):
+        background_tasks.add_task(
+            send_order_status_update_email,
+            notify_email,
+            OrderResponse.model_validate(order)
+        )
     # The order's other attempts could still charge. Closed at the provider
     # after the response (or, in the worker, after the event's commit): no
     # request or transaction waits on those calls.
@@ -1704,9 +1710,7 @@ async def refund_payment(
             detail="Idempotency key already used with different refund parameters",
         ) from None
     except (CardError, InvalidRequestError) as e:
-        # What Stripe answers for a charge under dispute (seen in its test mode;
-        # its error list also names refund_disputed_payment).
-        if getattr(e, "code", None) in ("charge_disputed", "refund_disputed_payment"):
+        if getattr(e, "code", None) in DISPUTED_CHARGE_CODES:
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=e.message or "This payment is disputed; it cannot be refunded while the dispute is open",
