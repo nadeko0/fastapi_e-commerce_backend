@@ -159,6 +159,11 @@ _DB_SENSITIVE_FILES = (
     "test_stripe_event*.py",
     "test_reconciliation*.py",
     "test_postgres_*.py",
+    "test_cloud_audit.py",
+    "test_postgres_cloud_audit.py",
+    "test_spec_violations.py",
+    "test_boundary_mutants.py",
+    "test_protocol_rfc_torture.py",
 )
 
 
