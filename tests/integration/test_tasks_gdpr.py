@@ -241,7 +241,7 @@ def test_purge_commits_each_batch_so_a_failure_keeps_earlier_batches(
 
     def hash_until_the_time_limit(password):
         calls.append(1)
-        if len(calls) == 3:
+        if len(calls) == 2:
             raise SoftTimeLimitExceeded()
         return "hashed"
 

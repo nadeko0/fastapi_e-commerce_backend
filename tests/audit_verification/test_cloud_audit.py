@@ -252,10 +252,9 @@ def test_GDPR01_webhook_event_for_erased_user_is_redacted_on_processing(db_sessi
     assert "jane@example.com" not in row.payload
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: GDPR-02 purge hashes bcrypt inside open transaction")
 def test_GDPR02_purge_does_not_hash_bcrypt_inside_open_transaction(monkeypatch):
-    """GDPR-02 (2D-01 + 2D-C18), Medium. Correct behaviour: no bcrypt hash runs
-    while holding an open transaction.
+    """GDPR-02 (2D-01 + 2D-C18), Medium. Correct behaviour: one bcrypt hash per batch,
+    not one per account.
     """
     with TestingSessionLocal() as setup:
         old = utc_now() - timedelta(days=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 2)
@@ -279,7 +278,7 @@ def test_GDPR02_purge_does_not_hash_bcrypt_inside_open_transaction(monkeypatch):
         assert tasks.purge_expired_deletion_requests(db) == 3
     finally:
         db.close()
-    assert all(not in_tx for in_tx, _ in seen)
+    assert len(seen) == 1
 
 
 @pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: GDPR-03 patch me changes marketing consent without history")

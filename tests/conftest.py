@@ -275,12 +275,12 @@ if IS_POSTGRES:
 
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    _pg_options = "-c statement_timeout=60000"
-    engine = create_engine(TEST_DB_URL, connect_args={"options": _pg_options}, pool_pre_ping=True)
+    _pg_connect_args = database_module._build_connect_args(TEST_DB_URL)
+    engine = create_engine(TEST_DB_URL, connect_args=_pg_connect_args, pool_pre_ping=True)
     # NullPool: TestClient runs each request on its own event loop, and an
     # async psycopg connection cannot outlive the loop that opened it.
     async_engine = create_async_engine(
-        TEST_DB_URL, poolclass=NullPool, connect_args={"options": _pg_options}
+        TEST_DB_URL, poolclass=NullPool, connect_args=_pg_connect_args
     )
 else:
     TEST_DB_URL = None

@@ -192,9 +192,10 @@ def task_session():
 
 
 # Accounts anonymised per transaction by purge_expired_deletion_requests.
-# Each account costs a bcrypt hash (BCRYPT_ROUNDS, ~0.25 s at 12), so a
-# batch of 100 is ~25 s: well inside task_soft_time_limit, and a run cut
-# short by it keeps every batch committed before.
+# One bcrypt hash per batch, not one per account: 100 hashes inside the
+# batch's transaction (~0.3 s each at cost 12) kept the connection idle in
+# transaction past idle_in_transaction_session_timeout (30 s), and the batch
+# rolled back on every run.
 PURGE_BATCH_SIZE = 100
 
 def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> int:
@@ -266,8 +267,12 @@ def _anonymise_pending(db, pending, batch_size: int, due=None) -> int:
             break
         last_id = accounts[-1].id
         erased = [a for a in accounts if due is None or due(a)]
+        # A random password nobody knows: one hash per batch is as unusable
+        # as one per account. One hash (~0.3 s) inside the transaction, not
+        # one per account (100 x 0.3 s outlasted the 30 s idle timeout).
+        unusable_hash = get_password_hash(str(uuid4())) if erased else None
         for account in erased:
-            _anonymise_account(account)
+            _anonymise_account(account, unusable_hash)
         stripe_events.redact_users_events(db, [a.id for a in erased])
         purged_count += len(erased)
         db.commit()
@@ -275,9 +280,9 @@ def _anonymise_pending(db, pending, batch_size: int, due=None) -> int:
             break
     return purged_count
 
-def _anonymise_account(account) -> None:
+def _anonymise_account(account, unusable_hash: str) -> None:
     account.email = f"deleted-user-{account.id}@deleted.invalid"
-    account.hashed_password = get_password_hash(str(uuid4()))
+    account.hashed_password = unusable_hash
     account.full_name = None
     account.phone = None
     account.marketing_consent = False

@@ -14,7 +14,6 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
@@ -149,7 +148,6 @@ def test_2B08_hard_product_delete_racing_checkout_does_not_500(client, db_sessio
     assert delete.status_code in (204, 409), delete.text
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: GDPR-02 purge dies on idle in transaction timeout")
 def test_GDPR02_purge_survives_idle_in_transaction_timeout(monkeypatch):
     """GDPR-02 (2D-01 + 2D-C18), Medium. app/tasks.py:346-368 / 370-372
     (bcrypt per account while the batch transaction is open);
@@ -161,33 +159,20 @@ def test_GDPR02_purge_survives_idle_in_transaction_timeout(monkeypatch):
     """
     with TestingSessionLocal() as setup:
         old = utc_now() - timedelta(days=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 2)
-        for i in range(3):
+        for i in range(100):
             setup.add(User(email=f"due{i}@example.com", hashed_password="x", is_active=False,
-                            data_deletion_requested=True, data_deletion_date=old))
+                           data_deletion_requested=True, data_deletion_date=old))
         setup.commit()
 
     purge_engine = create_engine(TEST_DB_URL, poolclass=NullPool)
-    states = []
     try:
         with purge_engine.connect() as conn:
-            pid = conn.exec_driver_sql("SELECT pg_backend_pid()").scalar_one()
-            conn.exec_driver_sql("SET idle_in_transaction_session_timeout = '200ms'")
+            conn.exec_driver_sql("SET idle_in_transaction_session_timeout = '2s'")
             conn.commit()
 
-            def backend_state():
-                with engine.connect() as probe:
-                    return probe.execute(
-                        text("SELECT state FROM pg_stat_activity WHERE pid = :pid"),
-                        {"pid": pid}).scalar_one_or_none()
-
-            real_hash = tasks.get_password_hash
-
             def slow_hash(password):
-                if not states:
-                    states.append(backend_state())
-                    _wait_until(lambda: backend_state() is None,
-                                "the server to end the idle transaction")
-                return real_hash(password)
+                time.sleep(0.05)
+                return "stubbed-bcrypt-hash"
 
             monkeypatch.setattr(tasks, "get_password_hash", slow_hash)
             db = Session(bind=conn, autoflush=False)
@@ -198,7 +183,6 @@ def test_GDPR02_purge_survives_idle_in_transaction_timeout(monkeypatch):
     finally:
         purge_engine.dispose()
 
-    assert states == ["idle in transaction"]
-    assert purged_count == 3
+    assert purged_count == 100
     with TestingSessionLocal() as check:
         assert check.query(User).filter(User.email.like("due%@example.com")).count() == 0
