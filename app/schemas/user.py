@@ -238,6 +238,9 @@ class GDPRExport(BaseModel):
     request_date: datetime = Field(..., description="When the export was requested")
     expires_at: datetime = Field(..., description="When the export data will be deleted")
     status: str = Field(default="processing", description="Current status of the export")
+    data: dict | None = Field(
+        default=None, description="The user's records (Art. 15/20), as JSON-ready values"
+    )
 
     model_config = ConfigDict(json_schema_extra={
             "examples": [{

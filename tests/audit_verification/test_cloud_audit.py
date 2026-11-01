@@ -280,7 +280,6 @@ def test_GDPR02_purge_does_not_hash_bcrypt_inside_open_transaction(monkeypatch):
     assert len(seen) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: GDPR-03 patch me changes marketing consent without history")
 def test_GDPR03_patch_me_changes_marketing_consent_records_history(client, db_session):
     """GDPR-03 (2C-07), Medium. Correct behaviour: marketing_consent_date is set
     and consent_history records the update.
@@ -315,7 +314,6 @@ def test_GDPR04_order_retains_shipping_address_snapshot_after_erasure_purge(clie
     assert getattr(stored, "ship_to_street", None) or db_session.get(Address, stored.shipping_address_id).street != "REDACTED"
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: GDPR-05 data export contains no personal data")
 def test_GDPR05_data_export_contains_personal_data(client, db_session, mailbox):
     """GDPR-05 (2C-11), Medium. Correct behaviour: export contains personal data
     and data_export_requests records the request.

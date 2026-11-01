@@ -1129,7 +1129,6 @@ def test_data_retention_status_inside_the_period(client, db_session, clock, age,
     assert body["within_retention_period"] is within
 
 
-@bug(BUG_D4)
 @pytest.mark.parametrize("past", [US, timedelta(hours=1), timedelta(hours=23, minutes=59)],
                          ids=["1us", "1h", "23h59m"])
 def test_bug_data_retention_status_truncates_age_to_whole_days(client, db_session, clock,

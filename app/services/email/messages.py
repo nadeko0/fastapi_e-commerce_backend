@@ -1,4 +1,5 @@
 import html
+import json
 from datetime import datetime
 from typing import TYPE_CHECKING
 from urllib.parse import quote
@@ -336,6 +337,8 @@ def send_gdpr_export_email(to_email: str, export_data: "GDPRExport") -> bool:
                 <li>Expires at: {export_data.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
                 <li>Request ID: {export_data.request_id}</li>
             </ul>
+            <h3>Your data (JSON):</h3>
+            <pre>{html.escape(json.dumps(export_data.data or {}, indent=2))}</pre>
 
             <p>For your privacy and security:</p>
             <ul>

@@ -12,6 +12,36 @@ from app.schemas.legal import ConsentUpdate
 from app.schemas.user import GDPRExport
 
 
+def _row(obj, fields: tuple[str, ...]) -> dict:
+    """The named columns of `obj`, as JSON-ready values."""
+    out = {}
+    for name in fields:
+        value = getattr(obj, name)
+        out[name] = value.isoformat() if hasattr(value, "isoformat") else (
+            str(value) if value is not None and not isinstance(value, (bool, int, str, list, dict))
+            else value
+        )
+    return out
+
+
+_USER_FIELDS = (
+    "id", "email", "full_name", "phone", "created_at", "last_login", "is_email_verified",
+    "marketing_consent", "marketing_consent_date", "privacy_policy_accepted",
+    "privacy_policy_accepted_date", "consent_history",
+)
+_ADDRESS_FIELDS = (
+    "id", "street", "city", "state", "postal_code", "country", "address_type",
+    "delivery_phone", "delivery_instructions", "is_active", "created_at",
+)
+_ORDER_FIELDS = (
+    "id", "status", "payment_status", "total_amount", "currency", "shipping_address_id",
+    "created_at",
+)
+_ITEM_FIELDS = ("product_id", "variant_id", "quantity", "price_at_time")
+_PAYMENT_FIELDS = ("id", "order_id", "amount", "currency", "status", "created_at")
+_REFUND_FIELDS = ("payment_id", "amount", "currency", "status", "created_at")
+
+
 class GDPRService:
     # `db` is only needed by the two methods that write (update_user_consent,
     # process_data_deletion); the pure ones (get_consent_status,
@@ -79,6 +109,46 @@ class GDPRService:
                 detail="Failed to update consent preferences"
             ) from e
 
+    async def collect_export(self, user_id: int) -> dict:
+        """Art. 15/20: the user's account, addresses, orders with their
+        lines, payments and refunds. Bounded queries, eager-loaded lines."""
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        from app.models.address import Address
+        from app.models.order import Order
+        from app.models.payment import Payment
+        from app.models.payment_ledger import PaymentRefund
+
+        user = await self.db.get(User, user_id)
+        addresses = (await self.db.scalars(
+            select(Address).where(Address.user_id == user_id).order_by(Address.id)
+        )).all()
+        orders = (await self.db.scalars(
+            select(Order).options(selectinload(Order.items))
+            .where(Order.user_id == user_id).order_by(Order.id)
+        )).all()
+        payments = (await self.db.scalars(
+            select(Payment).join(Order, Order.id == Payment.order_id)
+            .where(Order.user_id == user_id).order_by(Payment.id)
+        )).all()
+        refunds = (await self.db.scalars(
+            select(PaymentRefund).join(Payment, Payment.id == PaymentRefund.payment_id)
+            .join(Order, Order.id == Payment.order_id)
+            .where(Order.user_id == user_id).order_by(PaymentRefund.id)
+        )).all()
+        await self.db.commit()  # no transaction stays open across the SMTP sends
+        return {
+            "user": _row(user, _USER_FIELDS),
+            "addresses": [_row(a, _ADDRESS_FIELDS) for a in addresses],
+            "orders": [
+                {**_row(o, _ORDER_FIELDS), "items": [_row(i, _ITEM_FIELDS) for i in o.items]}
+                for o in orders
+            ],
+            "payments": [_row(p, _PAYMENT_FIELDS) for p in payments],
+            "refunds": [_row(r, _REFUND_FIELDS) for r in refunds],
+        }
+
     async def process_data_export(self, user: User) -> str:
         """
         Process a GDPR data export request
@@ -98,14 +168,23 @@ class GDPRService:
             from app.services.email import send_gdpr_request_received
             await run_in_threadpool(send_gdpr_request_received, user.email, "export", request_id)
 
-            # In production, the export payload would be assembled here and
-            # stored in a secure location with a signed, expiring download
-            # link.
+            # `user` may be the request's detached snapshot: the row is written
+            # through this session.
+            row = await self.db.get(User, user.id)
+            requests = list(row.data_export_requests or [])
+            requests.append({"request_id": request_id, "requested_at": utc_now().isoformat()})
+            row.data_export_requests = requests
+            await self.db.commit()
+
+            # The export goes to the account's own address, inline. A large
+            # account would rather get a signed, expiring download link.
             from app.services.email import send_gdpr_export_email
             export_data = GDPRExport(
                 request_id=request_id,
                 request_date=utc_now(),
-                expires_at=utc_now() + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS)
+                expires_at=utc_now() + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS),
+                status="completed",
+                data=await self.collect_export(user.id),
             )
             await run_in_threadpool(send_gdpr_export_email, user.email, export_data)
 
@@ -190,5 +269,4 @@ class GDPRService:
             return True
 
         retention_days = user.data_retention_period or settings.USER_DATA_RETENTION_DAYS
-        age_in_days = (utc_now() - user.created_at).days
-        return age_in_days <= retention_days
+        return utc_now() - user.created_at <= timedelta(days=retention_days)

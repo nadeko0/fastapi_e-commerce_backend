@@ -530,6 +530,7 @@ async def get_current_user_data(
 )
 async def update_current_user(
     user_in: UserUpdate,
+    request: Request,
     current_user: CurrentUser,
     db: DbSession,
 ):
@@ -557,7 +558,20 @@ async def update_current_user(
         )
 
     try:
-
+        consent = update_data.pop("marketing_consent", None)
+        if consent is not None and consent != user.marketing_consent:
+            # Art. 7(1): a consent change must be demonstrable. Same entry
+            # shape as register_user and GDPRService.update_user_consent.
+            now = utc_now()
+            user.consent_history = (user.consent_history or []) + [{
+                "type": "marketing",
+                "granted": consent,
+                "timestamp": now.isoformat(),
+                "ip_address": request.client.host if request.client else None,
+                "user_agent": request.headers.get("user-agent"),
+            }]
+            user.marketing_consent = consent
+            user.marketing_consent_date = now
         for field, new_value in update_data.items():
             setattr(user, field, new_value)
 
