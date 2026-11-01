@@ -137,10 +137,16 @@ class ProductListResponse(BaseModel):
 class ProductFilter(BaseModel):
     """Schema for product filtering"""
     category_id: Int32 | None = None
-    min_price: Decimal | None = Field(None, ge=0)
-    max_price: Decimal | None = Field(None, ge=0)
+    min_price: Decimal | None = Field(None, ge=0, le=Decimal("99999999.99"), decimal_places=6)
+    max_price: Decimal | None = Field(None, ge=0, le=Decimal("99999999.99"), decimal_places=6)
     in_stock: bool | None = None
     characteristics: dict[str, Any] | None = None
+
+    @field_validator("min_price", "max_price")
+    @classmethod
+    def _zero_has_no_exponent(cls, v):
+        return Decimal(0) if v == 0 else v
+
     # Bounded like ProductSearch.query: a search term, not a document.
     search_query: str | None = Field(None, max_length=100)
     sort_by: str | None = Field(None, pattern="^(name|price|created_at)_(asc|desc)$")

@@ -28,6 +28,7 @@ It is applied once per kind of input, not per field:
   where that JSON is parsed.
 """
 
+import math
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -41,6 +42,7 @@ NUL_MESSAGE = "String must not contain NUL characters"
 SURROGATE_TYPE = "invalid_unicode"
 SURROGATE_MESSAGE = "String must be valid Unicode"
 
+MAX_JSON_DEPTH = 64
 _NUL = re.compile("\x00")
 _SURROGATE = re.compile("[\ud800-\udfff]")
 
@@ -69,6 +71,10 @@ def first_unusable_text(value: Any, loc: tuple[str | int, ...] = ()) -> dict | N
     pending = [(value, loc)]
     while pending:
         item, where = pending.pop()
+        if isinstance(item, float) and not math.isfinite(item):
+            return {"type": "finite_number", "loc": where, "msg": "Number must be finite"}
+        if isinstance(item, (dict, list, tuple)) and len(where) - len(loc) > MAX_JSON_DEPTH:
+            return {"type": "too_deep", "loc": where, "msg": "Value is nested too deeply"}
         if isinstance(item, str):
             found = _problem(item)
             if found:

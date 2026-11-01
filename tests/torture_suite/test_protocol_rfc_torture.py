@@ -722,8 +722,7 @@ def test_deeply_nested_free_form_json_is_never_a_500(world, depth, kind):
     no_5xx(world.api.get(f"{world.variant_url.rsplit('/', 1)[0]}", headers=world.admin))
 
 
-@bug(BUG_B2)
-@pytest.mark.parametrize("depth", [100, 255])
+@pytest.mark.parametrize("depth", [65, 99, 100, 255])
 def test_bug_deeply_nested_characteristic_is_a_500_and_breaks_the_public_catalog(world, depth):
     """An admin creating a product whose characteristic value is nested deep
     gets a 500 (pydantic: 'Circular reference detected (depth exceeded)' when
@@ -736,14 +735,13 @@ def test_bug_deeply_nested_characteristic_is_a_500_and_breaks_the_public_catalog
             + deep + "}}}")
     created = no_5xx(world.api.post(f"{API}/admin/products", content=body.encode(),
                                      headers={**world.admin, "content-type": "application/json"}))
-    assert created.status_code in (201, 400, 422), created.text
+    assert created.status_code == 422, created.text
     listing = no_5xx(world.api.get(f"{API}/products"))
     assert listing.status_code == 200, listing.text
     search = no_5xx(world.api.get(f"{API}/products/search", params={"query": f"deep {depth}"}))
     assert search.status_code == 200, search.text
 
 
-@bug(BUG_B3)
 @pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity", "1e400", "-1e400"])
 @pytest.mark.parametrize("where", ["variant-attributes", "product-characteristics"])
 def test_bug_non_finite_numbers_in_free_form_json(world, literal, where):
@@ -954,7 +952,7 @@ MONEY_TABLE = [
 
 @pytest.mark.parametrize("where", ["product-patch", "product-create", "variant-patch", "variant-create"])
 @pytest.mark.parametrize("sent", [
-    pytest.param(v, id=repr(v)[:24], marks=bug(BUG_B5) if isinstance(v, str) and v in _B5_INPUTS else ())
+    pytest.param(v, id=repr(v)[:24])
     for v in MONEY_TABLE])
 def test_money_input_matches_the_documented_contract(world, where, sent):
     """A price is accepted exactly when it is a decimal string the published
@@ -1016,7 +1014,6 @@ def test_money_fuzz(world, sent):
         assert response.json()["price"] == expected
 
 
-@bug(BUG_B5)
 @pytest.mark.parametrize("sent", ["１０.５０", "١٠", "\U0001d7cf\U0001d7ce"])
 def test_bug_money_accepts_non_ascii_digits(world, sent):
     """app/schemas/order.py:_MONEY_INPUT uses \\d on str, which matches every
@@ -1048,7 +1045,6 @@ def test_price_filters_never_500(world, value, param):
     assert response.status_code in (200, 422), response.text
 
 
-@bug(BUG_B9, IS_POSTGRES)
 @pytest.mark.parametrize("value", ["1e131072", "1e-16384", "0E-1000000", "1e999999"])
 def test_bug_price_filter_beyond_postgres_numeric_is_500(world, value):
     """GET /products?min_price=1e-16384: ProductFilter.min_price/max_price are

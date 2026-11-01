@@ -46,14 +46,14 @@ def _to_cents(value: Decimal) -> Decimal:
 # digits after a point (trailing zeros do not count: 10.500 is 10.50, as
 # ORDER_AMOUNT_DECIMAL_PLACES says). A sign is let through so that a negative
 # amount is refused by its bound (with the message of the bound).
-_MONEY_UNSIGNED = r"\d+(\.\d{1,2}0*)?"
+_MONEY_UNSIGNED = r"[0-9]+(\.[0-9]{1,2}0*)?"
 _MONEY_PATTERN = "-?" + _MONEY_UNSIGNED
 _MONEY_INPUT = re.compile(_MONEY_PATTERN)
 # The same, for the OpenAPI document only, with the whole-part budget of the
 # field spelled out: max_digits=10 less decimal_places=2 leaves 8 digits before
 # the point (leading zeros are not digits). Not used to check a value: the
 # field does that, and its message must not change.
-_MONEY_SCHEMA_UNSIGNED = r"0*\d{1,8}(?:\.\d{1,2}0*)?"
+_MONEY_SCHEMA_UNSIGNED = r"0*[0-9]{1,8}(?:\.[0-9]{1,2}0*)?"
 # For an amount that must be greater than zero: some digit other than 0.
 _NOT_ZERO = r"(?=[0.]*[1-9])"
 
