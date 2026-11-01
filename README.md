@@ -14,7 +14,7 @@
 
 A backend for an online shop: catalog, carts, orders, Stripe payments, refunds and disputes, an admin API and GDPR tooling. It is a **foundation to build a store on**, not a demo: the catalog is product-neutral, and there is deliberately no frontend.
 
-What makes it worth a look is less the feature list than how it was checked. The test suite runs 6,444 cases from about 2,500 test functions on SQLite and PostgreSQL, and the final 4.0 line went through a full release campaign: fuzzing from the OpenAPI schema, end-to-end runs against Stripe's test mode, load and soak tests, chaos experiments (pull the plug on Redis, freeze PostgreSQL, kill a worker mid-payment), a DAST scan, mutation testing and a deployment on a real server. Everything that broke was fixed, and every report is in this repository.
+What makes it worth a look is less the feature list than how it was checked. The test suite runs 6,568 cases from about 2,500 test functions on SQLite and PostgreSQL, and the final 4.0 line went through a full release campaign: fuzzing from the OpenAPI schema, end-to-end runs against Stripe's test mode, load and soak tests, chaos experiments (pull the plug on Redis, freeze PostgreSQL, kill a worker mid-payment), a DAST scan, mutation testing and a deployment on a real server. Everything that broke was fixed, and every report is in this repository.
 
 ## ✨ Features
 
@@ -80,12 +80,12 @@ uv run pytest tests/ -n 2 -m "not timing_sensitive"   # the fast local run
 | [docs/reports/](docs/reports/README.md) | The full test reports: every stage, every number, every fix |
 | [docs/HOW-THIS-WAS-BUILT.md](docs/HOW-THIS-WAS-BUILT.md) | Who did what, where the decisions came from, what went wrong |
 
-## 📊 At a glance (v4.0.3)
+## 📊 At a glance (v4.1.0)
 
 | | |
 |---|---|
-| Tests | 6,444 cases from about 2,500 test functions on SQLite and PostgreSQL, 54 live Stripe tests, 0 warnings |
-| Coverage | 98.8 % overall, 100 % lines and branches on the payment layer (enforced in CI) |
+| Tests | 6,568 cases from about 2,500 test functions on SQLite and PostgreSQL, 54 live Stripe tests, 0 warnings |
+| Coverage | 99 % overall, 100 % lines and branches on the payment layer (enforced in CI) |
 | Mutation testing | 98.4 % of 3,165 mutants killed; every survivor reviewed as equivalent |
 | CI | lint, tests, 7 time zones, PostgreSQL 15/16/18, real Redis, pip-audit, gitleaks, Trivy |
 | Load (4 CPUs, 200 users) | p95 57 to 68 ms; overload answers fast 503s instead of stalling |

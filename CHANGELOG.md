@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-11-02
+
+Three independent audits of 4.0.3 reviewed the code, ran it under load and fuzzing, and checked it against written specifications. This release closes what they found. MINOR, because it adds endpoints and settings; no response field was removed.
+
+### Added
+- `GET /api/v1/admin/payments` and `POST /api/v1/admin/payments/{payment_id}/refund`: a charge flagged for manual review, such as a late payment on a cancelled order, can be listed and refunded. A retry after success answers 409 without calling the provider.
+- `CHECKOUT_SESSION_EXPIRE_MINUTES` (default 60), sent to Stripe as `expires_at`; `MAX_PENDING_ORDERS_PER_USER` (default 10).
+- Orders keep what they were placed with: product name, variant SKU and attributes on lines, the shipping address on the order. One migration, backfilling existing orders.
+- The data export is assembled and mailed to the account's own address as JSON. Marketing consent changes through `PATCH /users/me` are recorded in the consent history.
+- Regression suites `tests/torture_suite`, `tests/strict_domain_audit` and `tests/audit_verification`.
+
+### Changed
+- An order with a payment attempt that can still be paid is neither expired nor cancellable by its customer (409 with Retry-After). Older attempts are closed at Stripe before the order is cancelled, and after a success the order's other attempts are closed.
+- A product with active variants is bought through a variant: a line without one answers 409, in the cart and at checkout.
+- Erasure is accepted while an order or dispute is open. The account's data goes on schedule; the order's address snapshot stays until the order is finished and no dispute is open, at most 30 days for an unfinished order. The last active administrator cannot request erasure (409).
+- Reconciliation also compares Checkout attempts whose webhook was lost; `skipped` stays 0.
+- The deletion mail says the deletion is scheduled, and a second mail confirms it after the purge.
+- An order total above 21,474,836.47, what a payment can record, answers 422.
+
+### Fixed
+- Payments:
+  - A stale refund event no longer rewinds a settled refund and returns a refunded order to paid.
+  - `/refund` no longer answers 500 after the provider refunded, when an earlier failure was not yet processed.
+  - A refund of a disputed charge answers 409. A dispute landing during the call is recorded and flagged.
+  - `/pay` answers 409 when the success could not be applied.
+  - A crashed attempt no longer answers 409 for good.
+- Checkout and stock:
+  - A variant checkout no longer deadlocks against a plain line of the same product, answered 503 before.
+  - A restock or cart merge past the integer range no longer fails.
+  - A retry racing its first request gets its order, not "Cart is empty".
+  - A product delete racing a checkout falls back to a soft delete.
+  - One failing order no longer stops the expiry sweep.
+- Accounts:
+  - A password reset evicts logins and refresh rotations in flight, and logout evicts a racing rotation.
+  - A logged-out token is no longer accepted again up to a second before it expires.
+  - Registration without a name now sends the verification mail.
+  - Login normalises the email as registration does.
+- GDPR:
+  - Purges at volume no longer die on the idle-in-transaction timeout.
+  - Webhook events about an erased customer are redacted when processed.
+  - No mail goes to an anonymised address.
+  - The retention status compares exact age.
+- Protocol:
+  - JSON nested deeper than 64 levels or holding NaN or Infinity is 422, where deep JSON could break the public catalog with 500s.
+  - Price filters are bounded, and money takes ASCII digits only.
+  - `*` in `If-Match` counts only alone.
+  - PATCH with a foreign `+json` type is 415.
+  - A client waiting exactly Retry-After is admitted.
+  - A product's ETag follows its variants.
+- Operations:
+  - A Redis outage on a cart read is 503, not an empty cart, and a guest merge past the line cap keeps the remainder.
+  - Passwords with URL characters work in the database URI.
+  - `/health` and database connects have time limits.
+  - SQL parameters stay out of logs and errors.
+  - Celery logs as JSON.
+
+### Removed
+- Order-email Celery tasks nothing enqueued. Those mails go through BackgroundTasks, as they did.
+
+### Documentation and tests
+- Documents corrected against the code, including the Compose quick start and the backup commands.
+- Stale code comments corrected.
+- Lock tests now fail when the lock is removed.
+- Test runs killed hard no longer leave their temp database behind.
+- Dependabot waits 14 days and proposes no major PostgreSQL or Python image.
+
 ## [4.0.3] - 2026-10-26
 
 ### Added

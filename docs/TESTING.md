@@ -127,17 +127,17 @@ uv run coverage report --fail-under=100 \
   --include="app/api/v1/orders.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py,app/services/stripe_events.py,app/services/reconciliation.py,app/models/payment_discrepancy.py,app/schemas/webhook_event.py"
 ```
 
-## Verified Metrics for Release v4.0.3
+## Verified Metrics for Release v4.1.0
 
-Verification results on release v4.0.3:
+Verification results on release v4.1.0:
 
 | Metric | Measured Value | Standard / Target |
 |---|---|---|
-| SQLite Test Suite | 6,376 passed, 68 skipped without their services | 0 failures, 0 warnings |
-| PostgreSQL Test Suite | 5,259 passed (+ 21 timing) | Full migration and constraint parity |
+| SQLite Test Suite | 6,382 passed, 68 skipped without their services (+ 24 timing) | 0 failures, 0 warnings |
+| PostgreSQL Test Suite | 6,362 passed on 15 (+ 103 timing); 4,061 database-sensitive on 16 and 18 | Full migration and constraint parity |
 | Live Stripe Test Suite | 52 passed, 2 skipped | api.stripe.com sandbox |
 | Payment Layer Coverage | 100.0% line and branch | Zero uncovered branches in financial path |
-| Overall Branch Coverage | 98.9% (source: `app`) | Fail-under gate set to 85% |
+| Overall Branch Coverage | 99% (source: `app`) | Fail-under gate set to 85% |
 | Mutation Score (mutmut 3.8.0, measured on v4.0.3) | 98.4% (3,113 killed / 3,165) | 100% of 52 survivors proven equivalent |
 | CI Execution Time | ~5 minutes across 16 jobs | Fully automated GitHub Actions workflow |
 
