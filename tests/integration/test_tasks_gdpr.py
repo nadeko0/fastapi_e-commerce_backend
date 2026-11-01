@@ -115,7 +115,8 @@ def test_purge_scrubs_addresses_without_an_n_plus_1_query_per_account(db_session
     # (selectinload issues a single second query, not one per account) -
     # strictly less than one-per-account (5), which is what an N+1 would
     # produce.
-    assert len(queries) <= 3, queries
+    # The account batch and its addresses, the events, and the order snapshots to scrub.
+    assert len(queries) <= 4, queries
     for account in accounts:
         scrubbed_address = (
             db_session.query(Address).filter(Address.user_id == account.id).first()
@@ -402,3 +403,124 @@ def test_purge_ignores_active_accounts(db_session):
 
     assert purged_count == 0
     assert db_session.query(User).filter(User.id == active.id).first() is not None
+
+
+def test_order_in_fulfilment_keeps_snapshot_and_loses_it_when_finished(db_session):
+    from app.models.order import Order
+    from app.schemas.order import OrderStatus, PaymentStatus
+
+    user = _make_deletion_requested_user(
+        db_session, "fulfil@example.com", days_since_request=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 1
+    )
+    address = Address(
+        user_id=user.id, street="42 Port St", city="Port", state="CA",
+        postal_code="90001", country="US", is_active=True, address_type="home",
+    )
+    db_session.add(address)
+    db_session.commit()
+
+    order = Order(
+        user_id=user.id, shipping_address_id=address.id, total_amount=100,
+        currency="USD", status=OrderStatus.PROCESSING, payment_status=PaymentStatus.PAID,
+        ship_to_street="42 Port St", ship_to_city="Port", ship_to_state="CA",
+        ship_to_postal_code="90001", ship_to_country="US", ship_to_address_type="home",
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    assert purge_expired_deletion_requests(db_session) == 1
+    db_session.expire_all()
+    reloaded_order = db_session.get(Order, order.id)
+    assert reloaded_order.ship_to_street == "42 Port St"
+    reloaded_user = db_session.get(User, user.id)
+    assert reloaded_user.email.startswith("deleted-user-")
+
+    reloaded_order.status = OrderStatus.DELIVERED
+    db_session.commit()
+    purge_expired_deletion_requests(db_session)
+    db_session.expire_all()
+    assert db_session.get(Order, order.id).ship_to_street == "REDACTED"
+
+
+def test_order_with_open_dispute_preserves_snapshot_until_closed(db_session):
+    from app.models.order import Order
+    from app.models.payment import Payment
+    from app.models.payment_ledger import PaymentDispute
+    from app.schemas.order import OrderStatus, PaymentStatus
+
+    user = _make_deletion_requested_user(
+        db_session, "dispute@example.com", days_since_request=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 1
+    )
+    address = Address(
+        user_id=user.id, street="10 Claim Way", city="Town", state="NY",
+        postal_code="10001", country="US", is_active=True, address_type="home",
+    )
+    db_session.add(address)
+    db_session.commit()
+
+    order = Order(
+        user_id=user.id, shipping_address_id=address.id, total_amount=50,
+        currency="USD", status=OrderStatus.DELIVERED, payment_status=PaymentStatus.PAID,
+        ship_to_street="10 Claim Way", ship_to_city="Town", ship_to_state="NY",
+        ship_to_postal_code="10001", ship_to_country="US", ship_to_address_type="home",
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    payment = Payment(order_id=order.id, amount=5000, currency="usd", status="succeeded", payment_intent_id="pi_disp")
+    db_session.add(payment)
+    db_session.commit()
+
+    dispute = PaymentDispute(payment_id=payment.id, dispute_id="dp_test", amount=5000, currency="usd", status="needs_response")
+    db_session.add(dispute)
+    db_session.commit()
+
+    purge_expired_deletion_requests(db_session)
+    db_session.expire_all()
+    assert db_session.get(Order, order.id).ship_to_street == "10 Claim Way"
+
+    dispute.status = "won"
+    db_session.commit()
+    purge_expired_deletion_requests(db_session)
+    db_session.expire_all()
+    assert db_session.get(Order, order.id).ship_to_street == "REDACTED"
+
+
+def test_unfinished_order_snapshot_scrubbed_after_30_day_cap(db_session):
+    from app.models.order import Order
+    from app.schemas.order import OrderStatus, PaymentStatus
+
+    user = _make_deletion_requested_user(
+        db_session, "stale@example.com", days_since_request=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 1
+    )
+    address = Address(
+        user_id=user.id, street="5 Old Rd", city="Oldville", state="TX",
+        postal_code="75001", country="US", is_active=True, address_type="home",
+    )
+    db_session.add(address)
+    db_session.commit()
+
+    order = Order(
+        user_id=user.id, shipping_address_id=address.id, total_amount=20,
+        currency="USD", status=OrderStatus.PROCESSING, payment_status=PaymentStatus.PAID,
+        ship_to_street="5 Old Rd", ship_to_city="Oldville", ship_to_state="TX",
+        ship_to_postal_code="75001", ship_to_country="US", ship_to_address_type="home",
+        created_at=utc_now() - timedelta(days=31),
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    purge_expired_deletion_requests(db_session)
+    db_session.expire_all()
+    assert db_session.get(Order, order.id).ship_to_street == "REDACTED"
+
+
+def test_is_anonymised_email_filters_dummy_addresses():
+    from app.services.orders import is_anonymised_email
+
+    assert is_anonymised_email("deleted-user-123@deleted.invalid") is True
+    # A customer may really be called that; only the reserved domain counts.
+    assert is_anonymised_email("deleted-user-999@example.com") is False
+    assert is_anonymised_email("alice@deleted.invalid") is True
+    assert is_anonymised_email("normal@example.com") is False
+    assert is_anonymised_email(None) is False

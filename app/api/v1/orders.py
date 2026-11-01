@@ -73,6 +73,7 @@ from app.services.orders import (
     cancel_order_and_restock,
     close_attempts_at_provider,
     has_live_payment_attempt,
+    is_anonymised_email,
     is_unpaid_and_new,
     is_valid_status_transition,
     lock_stock_rows,
@@ -571,11 +572,12 @@ async def update_order_status(
 
     # The transition was validated above and no status moves to itself, so
     # the status always changed: the customer is always told.
-    background_tasks.add_task(
-        send_order_status_update_email,
-        order.user.email,
-        OrderResponse.model_validate(order)
-    )
+    if not is_anonymised_email(order.user.email):
+        background_tasks.add_task(
+            send_order_status_update_email,
+            order.user.email,
+            OrderResponse.model_validate(order)
+        )
 
     return OrderResponse.model_validate(order)
 
@@ -637,9 +639,10 @@ async def cancel_own_order(
     await db.commit()
     await _drop_product_details(redis, restocked)
 
-    background_tasks.add_task(
-        send_order_cancellation_email, current_user.email, OrderResponse.model_validate(order)
-    )
+    if not is_anonymised_email(current_user.email):
+        background_tasks.add_task(
+            send_order_cancellation_email, current_user.email, OrderResponse.model_validate(order)
+        )
 
     return OrderResponse.model_validate(order)
 

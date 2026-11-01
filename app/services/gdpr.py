@@ -135,24 +135,26 @@ class GDPRService:
             )
 
         try:
-            # Send initial confirmation email
-            from app.services.email import send_gdpr_request_received
-            await run_in_threadpool(
-                send_gdpr_request_received, user.email, "deletion", request_id
-            )
-
             # Mark user for deletion and deactivate immediately, as
             # an erasure request always does. The scheduled cleanup_inactive_accounts
-            # Celery task (app/tasks.py) performs the actual hard delete once
-            # DATA_DELETION_GRACE_PERIOD_DAYS has passed.
+            # Celery task (app/tasks.py) anonymises the account once
+            # DATA_DELETION_GRACE_PERIOD_DAYS has passed. Committed before any
+            # mail is sent: SMTP inside the open transaction (2D-03) could
+            # outlast idle_in_transaction_session_timeout.
             user.is_active = False
             user.data_deletion_requested = True
             user.data_deletion_date = utc_now()
 
             await self.db.commit()
 
-            # Send deletion confirmation email
-            from app.services.email import send_gdpr_deletion_confirmation
+            # Send emails after commit (2D-03)
+            from app.services.email import (
+                send_gdpr_deletion_confirmation,
+                send_gdpr_request_received,
+            )
+            await run_in_threadpool(
+                send_gdpr_request_received, user.email, "deletion", request_id
+            )
             await run_in_threadpool(send_gdpr_deletion_confirmation, user.email, request_id)
 
             return request_id

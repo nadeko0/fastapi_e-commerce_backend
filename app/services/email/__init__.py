@@ -22,6 +22,7 @@ def get_email_provider() -> EmailProvider:
 from app.services.email.messages import (  # noqa: E402
     send_account_exists_email,
     send_email_verification,
+    send_gdpr_deletion_completed,
     send_gdpr_deletion_confirmation,
     send_gdpr_export_email,
     send_gdpr_request_received,
@@ -40,6 +41,7 @@ __all__ = [
     "get_email_provider",
     "send_account_exists_email",
     "send_email_verification",
+    "send_gdpr_deletion_completed",
     "send_gdpr_deletion_confirmation",
     "send_gdpr_export_email",
     "send_gdpr_request_received",

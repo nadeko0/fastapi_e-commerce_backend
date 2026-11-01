@@ -14,7 +14,7 @@ from celery.signals import (
     worker_process_init,
     worker_process_shutdown,
 )
-from sqlalchemy import String, cast, create_engine, func, literal, select, update
+from sqlalchemy import String, cast, create_engine, exists, func, literal, or_, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import selectinload, sessionmaker
 
@@ -26,11 +26,14 @@ from app.core.logging_config import setup_logging
 from app.core.security import get_password_hash
 from app.models.order import Order
 from app.models.order_items import OrderItem
+from app.models.payment import Payment
+from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.order import OrderStatus, PaymentStatus
 from app.services import stripe_events
 from app.services.email import (
+    send_gdpr_deletion_completed,
     send_low_stock_alert_email,
     send_order_cancellation_email,
 )
@@ -39,6 +42,7 @@ from app.services.orders import (
     cancel_order_and_restock,
     close_attempts_at_provider,
     has_live_payment_attempt,
+    is_anonymised_email,
     is_unpaid_and_new,
     open_payment_attempts,
     products_with_cached_stock,
@@ -250,7 +254,68 @@ def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> i
         User.email != anonymised_email,
     ).order_by(User.id)
 
-    return _anonymise_pending(db, pending, batch_size)
+    purged = _anonymise_pending(db, pending, batch_size)
+    _scrub_retained_order_snapshots(db, batch_size)
+    return purged
+
+
+ORDER_SNAPSHOT_MAX_HOLD_DAYS = 30
+
+
+def _scrub_retained_order_snapshots(db, batch_size: int = PURGE_BATCH_SIZE) -> int:
+    """Scrubs ship_to_* address snapshots on finished orders of erased accounts,
+    and unfinished orders older than ORDER_SNAPSHOT_MAX_HOLD_DAYS, unless a
+    payment dispute is open (Art. 17(3)(b)/(e))."""
+    cutoff_30d = utc_now() - timedelta(days=ORDER_SNAPSHOT_MAX_HOLD_DAYS)
+    open_dispute = exists(
+        select(PaymentDispute.id)
+        .join(Payment, Payment.id == PaymentDispute.payment_id)
+        .where(
+            Payment.order_id == Order.id,
+            PaymentDispute.status.notin_(DISPUTE_CLOSED_STATUSES),
+        )
+    )
+    eligible = (
+        select(Order.id)
+        .join(User, User.id == Order.user_id)
+        .where(
+            # Anonymised already, whichever purge did it: a request still in
+            # its grace period keeps the order as it is.
+            User.email.like("%@deleted.invalid"),
+            Order.ship_to_street.isnot(None),
+            Order.ship_to_street != "REDACTED",
+            ~open_dispute,
+            or_(
+                Order.status.notin_([OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.SENT]),
+                Order.created_at <= cutoff_30d,
+            ),
+        )
+        .order_by(Order.id)
+    )
+    scrubbed = 0
+    last_id = 0
+    while True:
+        ids = db.scalars(eligible.where(Order.id > last_id).limit(batch_size)).all()
+        if not ids:
+            break
+        last_id = ids[-1]
+        db.execute(
+            update(Order)
+            .where(Order.id.in_(ids))
+            .values(
+                ship_to_street="REDACTED",
+                ship_to_city="REDACTED",
+                ship_to_state="REDACTED",
+                ship_to_postal_code="REDACTED",
+                ship_to_delivery_phone=None,
+                ship_to_delivery_instructions=None,
+            )
+        )
+        scrubbed += len(ids)
+        db.commit()
+        if len(ids) < batch_size:
+            break
+    return scrubbed
 
 def _anonymise_pending(db, pending, batch_size: int, due=None) -> int:
     """Anonymises, batch by batch, the accounts `pending` selects (ordered by
@@ -267,6 +332,8 @@ def _anonymise_pending(db, pending, batch_size: int, due=None) -> int:
             break
         last_id = accounts[-1].id
         erased = [a for a in accounts if due is None or due(a)]
+        # Read before the rows are anonymised; told only once it is committed.
+        recipients = [a.email for a in erased if not is_anonymised_email(a.email)]
         # A random password nobody knows: one hash per batch is as unusable
         # as one per account. One hash (~0.3 s) inside the transaction, not
         # one per account (100 x 0.3 s outlasted the 30 s idle timeout).
@@ -276,6 +343,18 @@ def _anonymise_pending(db, pending, batch_size: int, due=None) -> int:
         stripe_events.redact_users_events(db, [a.id for a in erased])
         purged_count += len(erased)
         db.commit()
+        for recipient in recipients:
+            try:
+                send_gdpr_deletion_completed(
+                    recipient,
+                    [
+                        "Accounting and invoice records required by statutory retention obligations",
+                        "Shipping address snapshots of active orders or open disputes",
+                    ],
+                )
+            except Exception:
+                # Never the address: a log line must not undo the erasure.
+                logger.exception("Could not send a deletion completed email")
         if len(accounts) < batch_size:
             break
     return purged_count
@@ -456,7 +535,8 @@ def expire_unpaid_orders(db) -> int:
             cache = RedisService()
             for product_id in restocked:
                 cache.invalidate_product_cache(product_id)
-            send_order_cancellation_email(recipient, notice)
+            if not is_anonymised_email(recipient):
+                send_order_cancellation_email(recipient, notice)
         except OperationalError as exc:
             db.rollback()
             logger.warning(

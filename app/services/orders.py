@@ -54,6 +54,13 @@ PAID_ONLY_STATUSES = frozenset({
 UNPAID_PAYMENT_STATUSES = frozenset({PaymentStatus.PENDING, PaymentStatus.FAILED})
 
 
+def is_anonymised_email(email: str | None) -> bool:
+    """True if email is an anonymised placeholder created by GDPR erasure."""
+    if not email:
+        return False
+    return email.endswith("@deleted.invalid")
+
+
 def product_has_active_variants(product_id: int):
     """A scalar select: true when the product has an active variant. Such a
     product is sold by its variants only (a line without variant_id is

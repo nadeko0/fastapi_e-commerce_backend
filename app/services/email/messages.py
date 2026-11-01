@@ -369,19 +369,19 @@ def send_gdpr_deletion_confirmation(to_email: str, request_id: str) -> bool:
     html_content = f"""
     <html>
         <body>
-            <h2>Data Deletion Confirmation (GDPR Article 17)</h2>
-            <p>We confirm that your personal data has been deleted as requested.</p>
+            <h2>Data Deletion Scheduled (GDPR Article 17)</h2>
+            <p>Your data deletion request has been scheduled.</p>
 
             <h3>Deletion Details:</h3>
             <ul>
                 <li>Request ID: {request_id}</li>
-                <li>Completed at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
+                <li>Scheduled at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
             </ul>
 
-            <p>What was deleted:</p>
+            <p>What will be deleted once the grace period passes:</p>
             <ul>
                 <li>Account information</li>
-                <li>Order history</li>
+                <li>Order history personal details</li>
                 <li>Communication preferences</li>
                 <li>Addresses</li>
                 <li>Usage data</li>
@@ -389,7 +389,7 @@ def send_gdpr_deletion_confirmation(to_email: str, request_id: str) -> bool:
 
             <p>Please note:</p>
             <ul>
-                <li>Some data may be retained for legal requirements (e.g., tax records)</li>
+                <li>Some data may be retained for legal requirements (e.g., tax records, active fulfilment or disputes under GDPR Art. 17(3))</li>
                 <li>Anonymized data may be kept for analytics</li>
                 <li>You can create a new account at any time</li>
             </ul>
@@ -406,7 +406,50 @@ def send_gdpr_deletion_confirmation(to_email: str, request_id: str) -> bool:
 
     return email.get_email_provider().send(
         to_email,
-        "Data Deletion Confirmation (GDPR Request)",
+        "Your Data Deletion Request Has Been Scheduled",
+        html_content
+    )
+
+
+def send_gdpr_deletion_completed(to_email: str, retained_records: list[str] | None = None) -> bool:
+    retained_html = ""
+    if retained_records:
+        items = "".join(f"<li>{html.escape(r)}</li>" for r in retained_records)
+        retained_html = f"<h3>Retained records (Art. 17(3)):</h3><ul>{items}</ul>"
+
+    html_content = f"""
+    <html>
+        <body>
+            <h2>Data Deletion Completed (GDPR Article 17)</h2>
+            <p>We confirm that your personal data has been deleted as requested.</p>
+
+            <h3>Deletion Details:</h3>
+            <ul>
+                <li>Completed at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
+            </ul>
+
+            {retained_html}
+
+            <p>Please note:</p>
+            <ul>
+                <li>Some transaction and tax records may be retained for statutory periods under GDPR Art. 17(3)(b)</li>
+                <li>Order shipping snapshots are retained during active fulfilment or dispute defense under Art. 17(3)(b)/(e)</li>
+                <li>Anonymized data may be kept for analytics</li>
+            </ul>
+
+            <p>Questions?</p>
+            <p>Contact our DPO at {settings.DPO_EMAIL}</p>
+
+            <p>Best regards,<br>{settings.PROJECT_NAME}</p>
+            <p>Data Protection Officer: {settings.DPO_NAME}</p>
+            <p>{settings.COMPANY_ADDRESS}</p>
+        </body>
+    </html>
+    """
+
+    return email.get_email_provider().send(
+        to_email,
+        "Your Personal Data Has Been Deleted",
         html_content
     )
 

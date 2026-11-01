@@ -210,7 +210,7 @@ def test_send_gdpr_deletion_confirmation(monkeypatch):
     result = email_module.send_gdpr_deletion_confirmation("user@example.com", "deletion_1_123")
 
     assert result is True
-    assert "Deletion Confirmation" in calls[0][1]
+    assert "Scheduled" in calls[0][1]
     assert "deletion_1_123" in calls[0][2]
 
 

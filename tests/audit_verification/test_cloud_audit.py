@@ -633,7 +633,6 @@ def test_2B11_expiry_sweep_continues_past_single_order_error(client, db_session,
     assert "cancelled" in [order_state(shop, order_id)[0] for order_id in order_ids]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2C-12 deletion confirmation claims data already deleted at request time")
 def test_2C12_deletion_request_acknowledges_scheduled_deletion(client, db_session, mailbox):
     """2C-12, Low. Correct behaviour: request-time email states deletion is scheduled,
     not already completed.
@@ -664,7 +663,6 @@ def test_2D02_OBS01_importing_celery_app_configures_logging():
     assert out.returncode == 0
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2D-03 deletion mail is sent inside open transaction")
 def test_2D03_deletion_mail_is_sent_outside_transaction(client, db_session, monkeypatch):
     """2D-03, Low. Correct behaviour: in_transaction() is False at email send time."""
     sessions, states = [], []
