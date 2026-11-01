@@ -184,7 +184,6 @@ def test_PAY01_second_checkout_session_refused_or_first_session_expired(client, 
 # == Medium ====================================================================
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: PAY-02 checkout session without webhook is skipped by reconciliation")
 def test_PAY02_checkout_session_without_webhook_is_reconciled(client, db_session):
     """PAY-02 (2A-02), Medium. Correct behaviour: reconciliation checks
     sessions with pending intent IDs against the provider.
@@ -470,7 +469,6 @@ def test_DATA01_address_edit_preserves_id_and_historical_order_snapshot(client, 
 # == Low =======================================================================
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2A-05 pending rows consume the reconciliation cap")
 def test_2A05_pending_rows_do_not_consume_reconciliation_cap(client, db_session, monkeypatch):
     """2A-05, Low. Correct behaviour: reconciliation cap is not consumed by
     abandoned pending rows.

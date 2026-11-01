@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -56,7 +57,12 @@ from app.models.payment_discrepancy import (
 )
 from app.services.payment.base import PaymentProvider
 from app.services.payment.exceptions import CardError, PaymentProviderError
-from app.services.payment.types import PaymentIntent, PaymentIntentStatus, Refund
+from app.services.payment.types import (
+    CheckoutSessionStatus,
+    PaymentIntent,
+    PaymentIntentStatus,
+    Refund,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +125,7 @@ class PaymentSnapshot:
 @dataclass
 class ReconciliationResult:
     checked: int = 0          # payments compared with the provider
-    skipped: int = 0          # nothing to ask the provider about (no PaymentIntent yet)
+    skipped: int = 0          # stays 0: the query leaves out what has nothing to ask about
     errors: int = 0           # payments the provider could not answer for
     opened: int = 0           # differences newly found or found again
     resolved: int = 0         # differences that are gone
@@ -254,6 +260,24 @@ def _ask_provider(
     return intent, provider.list_refunds(payment_intent_id)
 
 
+def _compare_session(
+    provider: PaymentProvider, session_id: str, ours_status: str
+) -> list[Difference]:
+    """A KIND_STATUS difference when Stripe says the Checkout Session was paid
+    but our attempt never learnt it (its completion webhook was lost)."""
+    try:
+        session = provider.retrieve_checkout_session(session_id)
+    except CardError as e:
+        if e.code != "resource_missing":
+            raise
+        return [Difference(KIND_PAYMENT_MISSING, "", session_id, None)]
+    if session.status == CheckoutSessionStatus.COMPLETE or session.payment_status == "paid":
+        return [Difference(
+            KIND_STATUS, "", ours_status, f"session {session.status.value}/{session.payment_status}"
+        )]
+    return []
+
+
 def reconcile_payments(
     db: Session,
     provider: PaymentProvider,
@@ -273,6 +297,9 @@ def reconcile_payments(
             Payment.created_at >= now - timedelta(days=settings.RECONCILIATION_WINDOW_DAYS),
             Payment.created_at <= now - timedelta(minutes=settings.RECONCILIATION_MIN_AGE_MINUTES),
         )
+    query = query.where(
+        ~(Payment.payment_intent_id.startswith(PENDING_INTENT_ID_PREFIX) & Payment.checkout_session_id.is_(None))
+    )
     # One more than the cap, to know whether the cap cut anything off.
     limit = settings.RECONCILIATION_MAX_PAYMENTS
     ids = list(db.scalars(query.order_by(Payment.id.desc()).limit(limit + 1)))
@@ -286,14 +313,25 @@ def reconcile_payments(
     consecutive_errors = 0
     for payment_id in ids[:limit]:
         payment = db.get(Payment, payment_id)
+        session_id = None
         if payment.payment_intent_id.startswith(PENDING_INTENT_ID_PREFIX):
-            result.skipped += 1
-            continue
+            # A Checkout attempt whose checkout.session.completed never arrived
+            # still looks pending: the session is the only place that shows it.
+            # (A pending row with no session is left out by the query above.)
+            session_id, ours_status = payment.checkout_session_id, payment.status
         snapshot = snapshot_payment(payment)
         # End the read transaction: no connection waits on the provider.
         db.commit()
         try:
-            intent, refunds = _ask_provider(provider, snapshot.payment_intent_id)
+            if session_id is not None:
+                found = _compare_session(provider, session_id, ours_status)
+            else:
+                intent, refunds = _ask_provider(provider, snapshot.payment_intent_id)
+                found = compare(snapshot, intent, refunds)
+        except SoftTimeLimitExceeded:
+            logger.warning("Reconciliation task exceeded soft time limit; stopping cleanly")
+            result.aborted = True
+            break
         except PaymentProviderError as e:
             logger.warning(
                 "Reconciliation: payment %s (%s) could not be compared: %s",
@@ -307,7 +345,7 @@ def reconcile_payments(
                 break
             continue
         consecutive_errors = 0
-        opened, resolved = record(db, payment_id, compare(snapshot, intent, refunds), now)
+        opened, resolved = record(db, payment_id, found, now)
         result.checked += 1
         result.opened += opened
         result.resolved += resolved

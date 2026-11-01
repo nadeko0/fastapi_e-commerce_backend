@@ -562,3 +562,47 @@ def test_an_idempotent_replay_after_the_intent_moved_on(stripe):
     expected = {"mock": PaymentIntentStatus.SUCCEEDED,
                 "live": PaymentIntentStatus.REQUIRES_CONFIRMATION}
     assert replay.status == expected[stripe.name]
+
+
+def test_every_provider_method_has_a_caller_or_an_allowed_reason():
+    """3B-13: Assert that each method declared on PaymentProvider has at least one
+    non-test caller in the app codebase, or is explicitly allowlisted with a reason."""
+    import ast
+    import inspect
+    from pathlib import Path
+
+    from app.services.payment.base import PaymentProvider
+
+    allowed_without_caller = {
+        "expire_checkout_session": "reserved for 2A-04 session expiry",
+    }
+
+    app_root = Path(__file__).resolve().parents[2] / "app"
+    caller_files = [
+        f for f in app_root.rglob("*.py")
+        if "app/services/payment" not in f.as_posix() and "app\\services\\payment" not in f.as_posix()
+    ]
+
+    all_attrs = set()
+    for file_path in caller_files:
+        try:
+            tree = ast.parse(file_path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Attribute):
+                    all_attrs.add(node.attr)
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    all_attrs.add(node.func.id)
+        except Exception:
+            pass
+
+    methods = [
+        name for name, val in inspect.getmembers(PaymentProvider, predicate=inspect.isfunction)
+        if not name.startswith("_") and getattr(val, "__isabstractmethod__", False)
+    ]
+
+    for method in methods:
+        if method in allowed_without_caller:
+            continue
+        assert method in all_attrs, (
+            f"PaymentProvider method '{method}' has no caller in app/ and is not allowlisted with a reason"
+        )

@@ -476,7 +476,7 @@ def test_a_checkout_attempt_without_a_payment_intent_yet_is_skipped(shop, provid
 
     result = run(shop.db, provider)
 
-    assert (result.checked, result.skipped, result.errors) == (0, 1, 0)
+    assert (result.checked, result.skipped, result.errors) == (1, 0, 0)
 
 
 def test_the_run_is_capped_newest_first(shop, provider, monkeypatch):
@@ -684,8 +684,8 @@ def test_pending_checkout_sessions_skipped_and_loop_continues(shop, provider):
     assert shop.checkout_session(buyer, order2["id"]).status_code == 200
 
     result = run(shop.db, provider)
-    assert result.skipped == 2
-    assert result.checked == 1
+    assert result.skipped == 0
+    assert result.checked == 3
 
 
 def test_multiple_payments_opening_discrepancies_accumulate(shop, provider):
