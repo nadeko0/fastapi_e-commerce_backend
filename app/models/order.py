@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
@@ -37,6 +38,14 @@ class Order(Base):
     # currency; a client never chooses it.
     currency: Mapped[str] = mapped_column(String(3), default=lambda: settings.STORE_CURRENCY)
     shipping_address_id: Mapped[int] = mapped_column(ForeignKey("addresses.id"))
+    ship_to_street: Mapped[str | None]
+    ship_to_city: Mapped[str | None]
+    ship_to_state: Mapped[str | None]
+    ship_to_postal_code: Mapped[str | None]
+    ship_to_country: Mapped[str | None]
+    ship_to_address_type: Mapped[str | None]
+    ship_to_delivery_phone: Mapped[str | None]
+    ship_to_delivery_instructions: Mapped[str | None]
     # Client-supplied key (Idempotency-Key header) for safe checkout retries.
     # Unique per user: the same key from two different users is not a clash.
     idempotency_key: Mapped[str | None]
@@ -50,6 +59,29 @@ class Order(Base):
     shipping_address: Mapped["Address"] = relationship()
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
     payments: Mapped[list["Payment"]] = relationship(back_populates="order")
+
+    @property
+    def shipping_address_shown(self):
+        """The address the order was placed with, copied at checkout: editing or
+        erasing the customer's address must not rewrite a past order. An order
+        older than these columns shows its live address row."""
+        live = self.shipping_address
+        if self.ship_to_street is None:
+            return live
+        return SimpleNamespace(
+            id=self.shipping_address_id,
+            street=self.ship_to_street,
+            city=self.ship_to_city,
+            state=self.ship_to_state,
+            postal_code=self.ship_to_postal_code,
+            country=self.ship_to_country,
+            address_type=self.ship_to_address_type or live.address_type,
+            delivery_phone=self.ship_to_delivery_phone,
+            delivery_instructions=self.ship_to_delivery_instructions,
+            is_default=live.is_default,
+            created_at=live.created_at,
+            updated_at=live.updated_at,
+        )
 
     __table_args__ = (
         # See Product.__table_args__. Zero is allowed: a product can be free.

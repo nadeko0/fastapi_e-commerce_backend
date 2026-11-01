@@ -153,7 +153,6 @@ def _order_with_variant_line(client, db_session):
     return token, created.json()["id"], product, variant
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC-CAT-04: renaming a product changes product_name of historical orders")
 def test_order_keeps_the_product_name_it_was_placed_with(client, db_session):
     token, order_id, product, _ = _order_with_variant_line(client, db_session)
     admin = _make_admin(db_session)
@@ -168,7 +167,6 @@ def test_order_keeps_the_product_name_it_was_placed_with(client, db_session):
     assert line["product_name"] == "Widget"
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC-CAT-04: changing a variant SKU changes variant_sku of historical orders")
 def test_order_keeps_the_variant_sku_it_was_placed_with(client, db_session):
     token, order_id, product, variant = _order_with_variant_line(client, db_session)
     admin = _make_admin(db_session)
@@ -392,9 +390,6 @@ def test_an_admin_may_request_erasure_while_another_admin_is_active(shop):
 # -- SPEC-GDPR-01 ------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "SPEC-GDPR-01(a): erasure must be accepted while an order is in fulfilment, "
-    "and the order must retain a snapshot of its shipping address after purge"))
 def test_erasure_is_accepted_and_preserves_fulfilment_address_snapshot(shop):
     buyer, order, _, _ = _paid_order(shop)
     admin = shop.admin()
@@ -418,9 +413,6 @@ def test_erasure_is_accepted_and_preserves_fulfilment_address_snapshot(shop):
     assert getattr(order_row, "ship_to_street", None) or order_row.shipping_address.street != "REDACTED"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "SPEC-GDPR-01(a): erasure must be accepted while a dispute is open, "
-    "and the order must retain a snapshot of its shipping address after purge"))
 def test_erasure_is_accepted_and_preserves_disputed_order_address_snapshot(shop):
     buyer, order, _, payment = _paid_order(shop)
     admin = shop.admin()

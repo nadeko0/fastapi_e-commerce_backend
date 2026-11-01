@@ -287,7 +287,6 @@ def test_GDPR03_patch_me_changes_marketing_consent_records_history(client, db_se
     assert [e for e in user.consent_history if e["type"] == "marketing"][-1]["granted"] is True
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: GDPR-04 erasure purge redacts shipping address needed for paid unshipped order")
 def test_GDPR04_order_retains_shipping_address_snapshot_after_erasure_purge(client, db_session):
     """GDPR-04 (2C-10), Medium. Correct behaviour: a paid unshipped order retains
     a usable shipping address snapshot after the customer's account is purged.
@@ -430,7 +429,6 @@ def test_REG01_registration_without_full_name_sends_verification_mail(
     db_session.expire_all()
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: DATA-01 address edit rewrites delivered order")
 def test_DATA01_address_edit_preserves_id_and_historical_order_snapshot(client, db_session):
     """DATA-01 (2C-06), Medium. Correct behaviour: editing an address preserves
     its ID, while a previously delivered order retains its original address.
@@ -441,8 +439,12 @@ def test_DATA01_address_edit_preserves_id_and_historical_order_snapshot(client, 
         "street": "Main 1 st", "city": "Berlin", "state": "BE", "postal_code": "10115",
         "country": "DE"}).json()
     user = db_session.query(User).filter_by(email="d@example.com").one()
+    # As create_order writes it at checkout.
     order = Order(user_id=user.id, shipping_address_id=address["id"], total_amount=10,
-                  status="delivered", payment_status="paid")
+                  status="delivered", payment_status="paid", ship_to_street=address["street"],
+                  ship_to_city=address["city"], ship_to_state=address["state"],
+                  ship_to_postal_code=address["postal_code"], ship_to_country=address["country"],
+                  ship_to_address_type=address["address_type"])
     db_session.add(order)
     db_session.commit()
     edited = client.patch(f"{USERS}/addresses/{address['id']}", headers=headers,

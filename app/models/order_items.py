@@ -1,8 +1,9 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index
+from sqlalchemy import JSON, CheckConstraint, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import utc_now
@@ -11,6 +12,10 @@ from app.models.base import Base
 if TYPE_CHECKING:
     from app.models.order import Order
     from app.models.product import Product, ProductVariant
+
+
+# A line without a variant stores SQL NULL, not the JSON value null.
+_nullable_json = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 
 
 class OrderItem(Base):
@@ -27,6 +32,13 @@ class OrderItem(Base):
     variant_id: Mapped[int | None] = mapped_column(ForeignKey("product_variants.id"))
     quantity: Mapped[int]
     price_at_time: Mapped[Decimal]
+    # What the line was bought as, written once at checkout: renaming the
+    # product or changing the variant later must not rewrite an order already
+    # placed. NULL on lines stored before these columns existed; the
+    # properties below then read the live product/variant.
+    product_name_snapshot: Mapped[str | None]
+    variant_sku_snapshot: Mapped[str | None]
+    variant_attributes_snapshot: Mapped[dict[str, Any] | None] = mapped_column(_nullable_json)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
 
     order: Mapped["Order"] = relationship(back_populates="items")
@@ -54,6 +66,8 @@ class OrderItem(Base):
     # exercised order creation end-to-end to catch it).
     @property
     def product_name(self) -> str:
+        if self.product_name_snapshot is not None:
+            return self.product_name_snapshot
         return self.product.name if self.product else ""
 
     @property
@@ -66,4 +80,6 @@ class OrderItem(Base):
     # themselves.
     @property
     def variant_sku(self) -> "str | None":
+        if self.variant_sku_snapshot is not None:
+            return self.variant_sku_snapshot
         return self.variant.sku if self.variant else None

@@ -251,6 +251,14 @@ async def create_order(
         status=OrderStatus.NEW,
         payment_status=PaymentStatus.PENDING,
         shipping_address_id=shipping_address_id,
+        ship_to_street=address.street,
+        ship_to_city=address.city,
+        ship_to_state=address.state,
+        ship_to_postal_code=address.postal_code,
+        ship_to_country=address.country,
+        ship_to_address_type=address.address_type,
+        ship_to_delivery_phone=address.delivery_phone,
+        ship_to_delivery_instructions=address.delivery_instructions,
         idempotency_key=idempotency_key,
         idempotency_fingerprint=fingerprint,
         total_amount=Decimal('0.00'),
@@ -375,7 +383,10 @@ async def create_order(
             product_id=product.id,
             variant_id=variant.id if variant else None,
             quantity=item.quantity,
-            price_at_time=price_at_time
+            price_at_time=price_at_time,
+            product_name_snapshot=product.name,
+            variant_sku_snapshot=variant.sku if variant else None,
+            variant_attributes_snapshot=variant.attributes if variant else None,
         )
         db.add(order_item)
 

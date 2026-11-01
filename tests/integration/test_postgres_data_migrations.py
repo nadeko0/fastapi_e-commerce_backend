@@ -30,6 +30,8 @@ BEFORE_TIMESTAMPS = "d4e9a1c7b265"
 TIMESTAMPS = "ada27dd39537"
 BEFORE_EMAIL_INDEX = "e1959653f4a2"
 EMAIL_INDEX = "3f6c2a9d1b7e"
+BEFORE_ORDER_SNAPSHOTS = "c5e2a8f4b196"
+ORDER_SNAPSHOTS = "d7a3b9e15c28"
 
 # A zone far from UTC with a half-hour offset, set on the database so that a
 # conversion that leaned on the session zone instead of 'UTC' would shift.
@@ -222,3 +224,39 @@ def test_the_offline_script_makes_the_same_refusal_on_a_database_with_duplicates
         assert cursor.fetchone()[0] == EMAIL_INDEX
     finally:
         raw.close()
+
+
+def test_order_snapshots_migration_backfills_shipping_address_on_postgres(migration_db):
+    url, engine = migration_db
+    _alembic(url, "upgrade", BEFORE_ORDER_SNAPSHOTS)
+    with engine.begin() as connection:
+        user_id = _insert_user(connection, "snapshot_buyer@example.com")
+        addr_id = connection.execute(text(
+            f"INSERT INTO addresses (user_id, street, city, state, postal_code, country, address_type, is_default, is_active, created_at, updated_at) "
+            f"VALUES ({user_id}, '123 Market St', 'Springfield', 'IL', '62701', 'US', 'home', true, true, now(), now()) RETURNING id"
+        )).scalar_one()
+        order_id = connection.execute(text(
+            f"INSERT INTO orders (user_id, shipping_address_id, total_amount, currency, status, payment_status, created_at, updated_at) "
+            f"VALUES ({user_id}, {addr_id}, 50.00, 'USD', 'new', 'pending', now(), now()) RETURNING id"
+        )).scalar_one()
+
+    _alembic(url, "upgrade", ORDER_SNAPSHOTS)
+
+    with engine.connect() as connection:
+        row = connection.execute(text(
+            f"SELECT ship_to_street, ship_to_city, ship_to_state, ship_to_postal_code, ship_to_country "
+            f"FROM orders WHERE id = {order_id}"
+        )).one()
+        assert row.ship_to_street == "123 Market St"
+        assert row.ship_to_city == "Springfield"
+        assert row.ship_to_state == "IL"
+        assert row.ship_to_postal_code == "62701"
+        assert row.ship_to_country == "US"
+
+    _alembic(url, "downgrade", BEFORE_ORDER_SNAPSHOTS)
+
+    with engine.connect() as connection:
+        cols = connection.execute(text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'"
+        )).scalars().all()
+        assert "ship_to_street" not in cols

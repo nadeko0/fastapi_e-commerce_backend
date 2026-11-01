@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from pydantic import (
     AfterValidator,
+    AliasChoices,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -190,7 +191,7 @@ class OrderItemResponse(OrderItemInDB):
                 "quantity": values.quantity,
                 "price_at_time": values.price_at_time,
                 "created_at": values.created_at,
-                "product_name": product.name,
+                "product_name": values.product_name,
                 "product_image": product.images[0] if product.images else "",
                 "variant_sku": values.variant_sku,
             }
@@ -214,7 +215,11 @@ class OrderInDB(OrderBase):
     model_config = ConfigDict(from_attributes=True)
 
 class OrderResponse(OrderInDB):
-    shipping_address: "AddressResponse"  # Forward reference
+    # Read from an order through Order.shipping_address_shown, the address it
+    # was placed with; from a dict or JSON by its own name.
+    shipping_address: "AddressResponse" = Field(
+        validation_alias=AliasChoices("shipping_address_shown", "shipping_address")
+    )
     items: list[OrderItemResponse]
 
     model_config = ConfigDict(from_attributes=True)

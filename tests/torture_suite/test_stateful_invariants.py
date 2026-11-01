@@ -447,7 +447,13 @@ class CartWorld(RuleBasedStateMachine):
         stock_before = {k: self._stock(k) for k in self.keys}
         response = check(self.shop.client.post(
             ORDERS, json={"shipping_address_id": self.buyer.address_id},
-            headers={**self.user_headers, "Idempotency-Key": new_key()}), 201, 400, 409)
+            headers={**self.user_headers, "Idempotency-Key": new_key()}), 201, 400, 409, 422)
+        if response.status_code == 422:
+            # An admin raised the stock so far that the total passed Numeric(10, 2):
+            # refused as a whole, nothing sold.
+            assert expected == 201 and "exceeds the maximum" in response.text, response.text
+            assert {k: self._stock(k) for k in self.keys} == stock_before
+            return
         assert response.status_code == expected, (response.text, cart)
         if expected == 409:
             assert f"Product {failing[0]} " in response.json()["detail"]
