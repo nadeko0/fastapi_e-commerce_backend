@@ -32,6 +32,10 @@ ORDER_AMOUNT_MAX_DIGITS = 10
 # 10.50), and a JSON number is read by its shortest form (19.99, not the
 # float's binary expansion).
 ORDER_AMOUNT_DECIMAL_PLACES = 2
+# The largest total an order can have: what its payment can record, as
+# Payment.amount holds cents in an INTEGER column. Order.total_amount, Numeric(10, 2),
+# would take more, and such an order could never be paid (a 500 on /pay).
+ORDER_TOTAL_MAX = Decimal("21474836.47")
 
 
 def _to_cents(value: Decimal) -> Decimal:

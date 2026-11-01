@@ -36,6 +36,7 @@ from app.models.order import Order
 from app.models.order_items import OrderItem
 from app.models.product import Product, ProductVariant
 from app.models.user import User
+from app.schemas.order import ORDER_TOTAL_MAX
 from app.services.payment.stripe_provider import TOKEN_SUCCESS_DEFAULT, StripePaymentProvider
 
 CART = "/api/v1/cart"
@@ -48,7 +49,7 @@ _HYPOTHESIS = dict(
 
 # Prices as the catalog stores them: Numeric(10, 2), positive.
 prices = st.decimals(
-    min_value=Decimal("0.01"), max_value=Decimal("9999.99"), places=2,
+    min_value=Decimal("0.01"), max_value=ORDER_TOTAL_MAX, places=2,
     allow_nan=False, allow_infinity=False,
 )
 
@@ -162,6 +163,16 @@ def test_order_total_is_the_exact_decimal_sum_of_its_lines(client, db_session, l
         stocks.append((product, variant, spec["quantity"]))
 
     response = _checkout(client, headers, address_id)
+
+    if expected_total > ORDER_TOTAL_MAX:
+        assert response.status_code == 422, response.text
+        db_session.expire_all()
+        for product, variant, _quantity in stocks:
+            if variant is None:
+                assert db_session.get(Product, product.id).stock_quantity == 10
+            else:
+                assert db_session.get(ProductVariant, variant.id).stock_quantity == 10
+        return
 
     assert response.status_code == 201, response.text
     body = response.json()

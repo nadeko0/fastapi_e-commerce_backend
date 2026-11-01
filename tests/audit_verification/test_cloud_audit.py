@@ -552,7 +552,6 @@ def test_2B04_merge_patch_removes_null_in_variant_attributes(client, db_session)
     assert patched.json()["attributes"] == {"color": "red"}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2B-07 order total is not bounded by Numeric column")
 def test_2B07_order_total_is_bounded_by_numeric_column(client, db_session):
     """2B-07, Low. Correct behaviour: order total exceeding column bounds is
     refused with a 4xx before committing.

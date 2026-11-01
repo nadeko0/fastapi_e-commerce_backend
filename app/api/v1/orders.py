@@ -43,6 +43,7 @@ from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, P
 from app.models.product import Product, ProductVariant
 from app.schemas.common import Int32
 from app.schemas.order import (
+    ORDER_TOTAL_MAX,
     CheckoutSessionCreate,
     CheckoutSessionResponse,
     OrderCreate,
@@ -365,6 +366,13 @@ async def create_order(
 
         total_amount += price_at_time * item.quantity
 
+    if total_amount > ORDER_TOTAL_MAX:  # Order.total_amount is Numeric(10, 2)
+        await db.rollback()
+        raise Problem(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            type=ProblemType.VALIDATION_ERROR,
+            detail="Order total exceeds the maximum amount",
+        )
     order.total_amount = total_amount
     await db.commit()
     await _drop_product_details(redis, products_with_cached_stock(

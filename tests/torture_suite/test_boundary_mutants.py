@@ -1323,14 +1323,14 @@ def test_cart_ttl_comes_from_the_settings(monkeypatch):
 # --- the order total against Order.total_amount, Numeric(10, 2) -----------------------
 
 ORDER_TOTAL_CASES = [
-    ([("99999999.99", 1)], "99999999.99"),            # the largest total the column holds
-    ([("49999999.99", 2)], "99999999.98"),
-    ([("99999999.98", 1), ("0.01", 1)], "99999999.99"),
+    ([("21474836.47", 1)], "21474836.47"),            # the largest total a payment can record
+    ([("10737418.23", 2)], "21474836.46"),
+    ([("21474836.46", 1), ("0.01", 1)], "21474836.47"),
 ]
 
 
 @pytest.mark.parametrize("lines,total", ORDER_TOTAL_CASES)
-def test_order_total_up_to_the_largest_numeric_10_2(client, db_session, lines, total):
+def test_order_total_up_to_the_largest_payable(client, db_session, lines, total):
     shop = Shop(client, db_session)
     buyer = shop.buyer()
     for price, quantity in lines:
@@ -1340,10 +1340,9 @@ def test_order_total_up_to_the_largest_numeric_10_2(client, db_session, lines, t
     assert response.json()["total_amount"] == total
 
 
-@bug(BUG_D5)
 @pytest.mark.parametrize("lines", [
-    [("50000000.00", 2)],                 # one cent past: 100000000.00
-    [("99999999.99", 1), ("0.01", 1)],
+    [("10737418.24", 2)],                 # one cent past: 21474836.48
+    [("21474836.47", 1), ("0.01", 1)],
     [("99999999.99", 2)],
 ], ids=["qty-x-price", "two-lines", "far-past"])
 def test_bug_order_total_past_numeric_10_2_is_not_refused_cleanly(client, db_session, lines):
