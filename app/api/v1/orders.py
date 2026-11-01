@@ -69,6 +69,7 @@ from app.services.email import (
 )
 from app.services.orders import (
     PAID_ONLY_STATUSES,
+    UNPAID_PAYMENT_STATUSES,
     cancel_order_and_restock,
     is_unpaid_and_new,
     is_valid_status_transition,
@@ -220,11 +221,35 @@ async def create_order(
             headers={"Retry-After": "5"},
         ) from e
     if not cart or not cart.items:
+        # A retry that overtook its first request: the key was not found
+        # above because the first one had not committed yet, and it has since
+        # committed and emptied the cart. The answer is its order, not 400.
+        existing = await _order_by_idempotency_key(db, current_user.id, idempotency_key)
+        if existing:
+            ensure_same_request(existing.idempotency_fingerprint, fingerprint)
+            return _created_order(request, response, existing)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cart is empty"
         )
 
+    # Unpaid orders hold stock until paid, cancelled or expired; one account
+    # cannot hold more than the cap at once.
+    pending_orders = await db.scalar(
+        select(func.count()).select_from(Order).where(
+            Order.user_id == current_user.id,
+            Order.status == OrderStatus.NEW,
+            Order.payment_status.in_([s.value for s in UNPAID_PAYMENT_STATUSES]),
+        )
+    )
+    if pending_orders >= settings.MAX_PENDING_ORDERS_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Too many unpaid orders ({settings.MAX_PENDING_ORDERS_PER_USER} allowed): "
+                "pay for or cancel one before placing another"
+            ),
+        )
 
     # Queried through this route's session, not read off
     # current_user.addresses: current_user is a detached snapshot from the

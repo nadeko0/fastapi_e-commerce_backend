@@ -405,24 +405,6 @@ def _order_count(user_id):
         return db.scalar(select(func.count()).select_from(Order).where(Order.user_id == user_id))
 
 
-def _tolerate_cart_empty_replays(responses):
-    """KNOWN-BUG ALLOWANCE, BUG-2 (strict reproducer:
-    test_bug_order_replay_racing_its_first_request_answers_cart_empty): a twin
-    that looked its key up before the first request committed, then read the
-    cart after that request emptied it, is answered 400 "Cart is empty". Only
-    that exact answer is dropped from the burst (never seen in the Phase 2
-    rounds, possible in principle); everything else is checked as before.
-    Off under TORTURE_STRICT=1."""
-    if not KNOWN_BUG_ALLOWANCES:
-        return responses
-    kept = [r for r in responses
-            if not (r.status_code == 400 and r.json().get("detail") == "Cart is empty")]
-    if len(kept) != len(responses):
-        print(f"KNOWN BUG-2 (400 Cart is empty for a replay) tolerated: "
-              f"{len(responses) - len(kept)}")
-    return kept
-
-
 @requires_postgres
 @pytest.mark.parametrize("round_", range(ROUNDS))
 def test_order_same_key_twins_create_one_order(shop, round_):
@@ -440,7 +422,6 @@ def test_order_same_key_twins_create_one_order(shop, round_):
         for _ in range(N)
     ])
 
-    responses = _tolerate_cart_empty_replays(responses)
     hist = check_responses(responses, {201})
     assert hist == {201: len(responses)}, hist
     ids = {r.json()["id"] for r in responses}
@@ -474,15 +455,12 @@ def test_order_same_key_different_address_executes_once(shop, round_):
         for i in range(N)
     ])
 
-    tolerated = _tolerate_cart_empty_replays(responses)
-    check_responses(tolerated, {201, 422})
+    check_responses(responses, {201, 422})
     assert _order_count(buyer.user_id) == 1
     assert shop.stock(product) == 49
     with fresh() as db:
         order = db.scalars(select(Order).where(Order.user_id == buyer.user_id)).one()
     for i, r in enumerate(responses):
-        if r not in tolerated:
-            continue
         if addresses[i % 2] == order.shipping_address_id:
             assert r.status_code == 201, r.text
             assert r.json()["id"] == order.id
@@ -491,11 +469,6 @@ def test_order_same_key_different_address_executes_once(shop, round_):
             assert problem_type(r) == "idempotency-key-reused"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG DISCOVERED (BUG-2): a retry of POST /orders whose key lookup ran before the first "
-    "request committed reads the cart that request emptied and answers 400 'Cart is empty' "
-    "instead of the order (201) or idempotency-key-in-use (409) - app/api/v1/orders.py:206 "
-    "(key lookup) -> :211-215 (empty cart 400)"))
 def test_bug_order_replay_racing_its_first_request_answers_cart_empty(shop, monkeypatch):
     """A retry of POST /orders with the key of a request still in flight.
     Interleaving (app/api/v1/orders.py create_order):

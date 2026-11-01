@@ -223,7 +223,6 @@ def test_checkout_after_an_overflowing_guest_merge_is_not_a_server_error(client,
 # -- SPEC-OAT-021: concurrent pending orders per user are capped -------------------
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC-OAT-021: no cap on concurrent pending (stock-reserving) orders per user")
 def test_pending_orders_per_user_are_capped(client, db_session):
     token, address_id = _checkout_ready_buyer(client, db_session)
     product = _make_product(db_session, _make_category(db_session).id, stock=1000)

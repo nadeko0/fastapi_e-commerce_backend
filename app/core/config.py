@@ -420,6 +420,11 @@ class Settings(BaseSettings):
     # paying, including 3D Secure; a payment that completes after expiry is
     # flagged for manual review (a refund), not applied.
     UNPAID_ORDER_EXPIRE_MINUTES: int = Field(30, ge=1)
+    # The most unpaid orders (new, payment pending or failed) one user can
+    # hold at once. Each reserves stock until it is paid, cancelled or expired
+    # (above), and only the checkout rate limit otherwise bounds how much a
+    # single account can tie up. A further checkout is refused with 409.
+    MAX_PENDING_ORDERS_PER_USER: int = Field(10, ge=1)
     # How long a payment attempt whose outcome is not known yet (talking to
     # the provider, in 3D Secure, an open Checkout Session) keeps another
     # attempt for the same order from starting (409). Long enough for 3D
