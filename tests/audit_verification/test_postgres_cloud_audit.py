@@ -147,7 +147,6 @@ def test_DB01_variant_checkout_does_not_deadlock_order_cancel(client, db_session
     assert first.status_code == 201 and second.status_code == 200, (first.text, second.text)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2B-08 hard product delete racing checkout returns 500")
 def test_2B08_hard_product_delete_racing_checkout_does_not_500(client, db_session):
     """2B-08, Low. app/api/v1/admin.py:339-349 (count order_items, then
     DELETE; the count is taken before a concurrent checkout's INSERT).

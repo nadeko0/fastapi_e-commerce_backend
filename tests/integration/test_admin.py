@@ -8,6 +8,8 @@ from hypothesis import HealthCheck, given
 from hypothesis import settings as settings_hypothesis
 from hypothesis import strategies as st
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.admin import router as admin_router
 from app.core.config import settings
@@ -385,6 +387,44 @@ def test_admin_deletes_product_with_no_orders(client, db_session):
 
     get_response = client.get(f"{CATALOG_PREFIX}/products/{created['id']}")
     assert get_response.status_code == 404
+
+
+def test_admin_delete_product_falls_back_to_soft_delete_on_racing_checkout(
+    client, db_session, monkeypatch
+):
+    admin = _make_admin(db_session, email="delete_race_admin@example.com")
+    admin_token = _login_as(client, admin.email, "AdminPass1")
+    category = _make_category(db_session, name="DeleteRaceCat")
+    created = client.post(
+        f"{ADMIN_PREFIX}/products",
+        json=_valid_product_payload(category.id),
+        headers=_auth_headers(admin_token),
+    ).json()
+
+    real_commit = AsyncSession.commit
+
+    async def commit_with_fk_race(self):
+        # Only the delete loses the race: the commit of a session deleting the product.
+        if any(isinstance(row, Product) for row in self.deleted):
+            raise IntegrityError(
+                "FOREIGN KEY constraint failed",
+                params={},
+                orig=Exception("FOREIGN KEY constraint failed"),
+            )
+        return await real_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", commit_with_fk_race)
+
+    response = client.delete(
+        f"{ADMIN_PREFIX}/products/{created['id']}",
+        headers=_auth_headers(admin_token),
+    )
+
+    assert response.status_code == 204
+    db_session.expire_all()
+    product = db_session.get(Product, created["id"])
+    assert product is not None
+    assert product.is_active is False
 
 
 def test_admin_delete_nonexistent_product_returns_404(client, db_session):

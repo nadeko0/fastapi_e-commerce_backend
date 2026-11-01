@@ -346,7 +346,16 @@ async def delete_product(
     else:
 
         await db.delete(db_product)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            # A checkout that held the product's lock while the count ran
+            # committed an order line for it: deactivate instead (as above).
+            await db.rollback()
+            db_product = await db.get(Product, product_id)
+            db_product.is_active = False
+            db_product.updated_at = utc_now()
+            await db.commit()
 
 
     await redis.invalidate_product_cache(product_id)
