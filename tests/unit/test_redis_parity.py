@@ -12,6 +12,7 @@ import json
 
 import fakeredis
 import pytest
+from redis.exceptions import RedisError
 
 import app.services.redis_async as redis_async
 import app.services.redis_codec as codec
@@ -367,7 +368,6 @@ def broken(monkeypatch):
 @pytest.mark.parametrize(
     "call, expected",
     [
-        (lambda s: s.get_cart(7), None),
         (lambda s: s.update_cart(s.empty_cart(7)), False),
         (lambda s: s.delete_cart(7), False),
         (lambda s: _add(s, 7), None),
@@ -390,6 +390,16 @@ def broken(monkeypatch):
 )
 def test_a_redis_error_maps_to_the_same_result_on_both(svc, broken, call, expected):
     assert call(svc) == expected
+
+
+def test_get_cart_on_a_redis_error_is_none_for_celery_and_raises_for_routes(svc, broken):
+    # A route must not take an outage for an empty cart (503, not 400 "Cart is
+    # empty"); the sync client, used by Celery, keeps its degraded answer.
+    if svc.is_async:
+        with pytest.raises(RedisError):
+            svc.get_cart(7)
+    else:
+        assert svc.get_cart(7) is None
 
 
 def test_consume_refresh_token_on_a_redis_error_is_none_for_celery_and_cannot_tell_for_routes(

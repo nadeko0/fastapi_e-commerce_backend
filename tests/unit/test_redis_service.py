@@ -855,7 +855,9 @@ def test_merge_respects_the_line_cap_without_failing(monkeypatch):
     _seed_cart(redis, 1, {(7, None): 1, (8, None): 1})
     _seed_cart(redis, guest, {(9, None): 1, (7, None): 2, (10, None): 1})
 
-    assert redis.merge_guest_cart(guest.guest_id, 1) is True
+    # False: the merge is not complete. The line that did not fit stays in the
+    # guest cart, and the caller keeps its cookie, so it is not lost.
+    assert redis.merge_guest_cart(guest.guest_id, 1) is False
 
     assert _lines(redis.get_cart(1)) == {"7": 3, "8": 1, "9": 1}
-    assert redis._redis.exists(guest.key) == 0
+    assert _lines(redis.get_cart(guest)) == {"10": 1}

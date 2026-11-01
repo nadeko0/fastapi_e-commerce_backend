@@ -1087,7 +1087,8 @@ def test_merge_keeps_the_account_cart_within_the_cap(browser, db_session, fake_r
         (account_only.id, None): 1,
         (guest_first.id, None): 1,
     }
-    assert _guest_keys(fake_redis) == []
+    assert len(_guest_keys(fake_redis)) == 1
+    assert _quantities(_cart(visitor)) == {(guest_second.id, None): 1}
 
 
 # ---------------------------------------------------------------------------

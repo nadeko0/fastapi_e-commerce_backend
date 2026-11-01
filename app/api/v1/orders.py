@@ -17,6 +17,7 @@ from fastapi import (
 )
 from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
+from redis.exceptions import RedisError
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -209,7 +210,14 @@ async def create_order(
         ensure_same_request(existing.idempotency_fingerprint, fingerprint)
         return _created_order(request, response, existing)
 
-    cart = await redis.get_cart(current_user.id)
+    try:
+        cart = await redis.get_cart(current_user.id)
+    except RedisError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Cart is temporarily unavailable, please retry",
+            headers={"Retry-After": "5"},
+        ) from e
     if not cart or not cart.items:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

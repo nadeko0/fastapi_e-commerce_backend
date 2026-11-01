@@ -325,6 +325,8 @@ class RedisService:
         account = CartOwner.account(user_id)
         guest_key, account_key = guest.key, account.key
 
+        guest_left = [False]
+
         def _txn(pipe):
             action, guest_cart = codec.plan_guest_merge_read(guest, pipe.get(guest_key))
             if action == "nothing":
@@ -335,14 +337,20 @@ class RedisService:
                 pipe.multi()
                 pipe.delete(guest_key)
                 return
-            write = codec.plan_merge_into_account(account, user_id, guest_cart, pipe.get(account_key))
+            write, guest_write = codec.plan_merge_into_account(
+                account, user_id, guest_cart, pipe.get(account_key), guest=guest
+            )
             pipe.multi()
             pipe.set(account_key, self._serialize(write.cart), ex=write.ttl)
-            pipe.delete(guest_key)
+            guest_left[0] = guest_write is not None
+            if guest_write is not None:
+                pipe.set(guest_key, self._serialize(guest_write.cart), ex=guest_write.ttl)
+            else:
+                pipe.delete(guest_key)
 
         try:
             self._redis.transaction(_txn, guest_key, account_key)
-            return True
+            return not guest_left[0]
         except RedisError as e:
             self._handle_redis_error(f"merge_guest_cart: {str(e)}")
             return False

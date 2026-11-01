@@ -2,6 +2,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -399,7 +400,11 @@ async def get_cart(
     # that merely failed to parse was replaced for good. The first add
     # creates the key (the cart mutations' _load_or_create_cart). For a guest
     # without an identifier there is not even a read.
-    return await redis.get_cart(owner) or redis.empty_cart(owner)
+    try:
+        cart = await redis.get_cart(owner)
+    except RedisError:
+        _cart_or_503(None)
+    return cart or redis.empty_cart(owner)
 
 CurrentCart = Annotated[Cart, Depends(get_cart)]
 

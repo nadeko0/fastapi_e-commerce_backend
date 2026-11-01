@@ -1389,11 +1389,12 @@ def test_payment_world_keeps_its_invariants(client, db_session, tasks_db):
 GIVEN = dict(max_examples=scaled_examples(GIVEN_EXAMPLES), **_HYPOTHESIS)
 
 
-def test_merge_at_login_sums_overlaps_appends_and_drops_beyond_the_cap(client, db_session,
-                                                                        monkeypatch):
+def test_merge_at_login_sums_overlaps_appends_and_keeps_lines_beyond_the_cap(client, db_session,
+                                                                             monkeypatch):
     """Merge semantics over generated carts: overlaps summed (above stock
-    allowed), guest-only lines appended in guest order up to CART_MAX_LINES,
-    the rest dropped; the guest cart and its cookie are gone."""
+    allowed), guest-only lines appended in guest order up to CART_MAX_LINES.
+    Lines beyond the cap stay in the guest cart under its cookie; with none
+    left, the guest cart and its cookie are gone."""
     monkeypatch.setattr(settings, "CART_MAX_LINES", 3)
     shop = Shop(client, db_session)
     products = [make_product(db_session, "1.25", 50) for _ in range(5)]
@@ -1411,18 +1412,22 @@ def test_merge_at_login_sums_overlaps_appends_and_drops_beyond_the_cap(client, d
                                                     "quantity": quantity}), 200)
         login = check(guest.post(LOGIN, data={"username": buyer.email, "password": PASSWORD}), 200)
         expected = {products[i].id: q for i, q in user_lines.items()}
+        left_out = {}
         for index, quantity in guest_lines.items():
             product_id = products[index].id
             if product_id in expected:
                 expected[product_id] += quantity
             elif len(expected) < 3:
                 expected[product_id] = quantity
+            else:
+                left_out[product_id] = quantity
         headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
         cart = check(client.get(CART, headers=headers), 200).json()
         assert [(i["product_id"], i["quantity"]) for i in cart["items"]] == list(expected.items())
         assert money(cart["total_amount"]) == Decimal("1.25") * sum(expected.values())
-        assert guest.cookies.get(GUEST_COOKIE) is None
-        assert check(guest.get(CART), 200).json()["items"] == []
+        assert (guest.cookies.get(GUEST_COOKIE) is None) == (not left_out)
+        kept = check(guest.get(CART), 200).json()["items"]
+        assert {i["product_id"]: i["quantity"] for i in kept} == left_out
 
     merge()
 

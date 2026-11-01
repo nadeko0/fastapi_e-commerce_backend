@@ -574,7 +574,6 @@ def test_2B07_order_total_is_bounded_by_numeric_column(client, db_session):
     assert 400 <= placed.status_code < 500, placed.text
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2B-09 guest cart merge drops lines silently")
 def test_2B09_guest_cart_merge_reports_or_keeps_unmerged_lines(client, db_session, monkeypatch):
     """2B-09, Low. Correct behaviour: unmerged lines are kept or reported."""
     monkeypatch.setattr(settings, "CART_MAX_LINES", 2)
@@ -691,7 +690,6 @@ def test_2D07_dead_order_email_celery_tasks_are_removed():
     assert not hasattr(tasks, "send_order_status_update")
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: BUG-NEW-1 Redis blip on cart read returns 400 instead of 503")
 def test_BUGNEW1_redis_blip_on_cart_read_answers_503_with_retry_after(client, db_session, monkeypatch):
     """BUG-NEW-1, Low. Correct behaviour: transient Redis read errors answer 503
     with Retry-After header.

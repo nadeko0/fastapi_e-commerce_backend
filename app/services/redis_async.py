@@ -219,7 +219,7 @@ class AsyncRedisService:
             return codec.load_cart(owner, await self._redis.get(owner.key))
         except RedisError as e:
             self._handle_redis_error(f"get_cart: {str(e)}")
-            return None
+            raise
 
     async def update_cart(self, cart: Cart) -> bool:
         try:
@@ -323,6 +323,7 @@ class AsyncRedisService:
         guest = CartOwner.guest(guest_id)
         account = CartOwner.account(user_id)
         guest_key, account_key = guest.key, account.key
+        guest_left = [False]
 
         async def _txn(pipe):
             action, guest_cart = codec.plan_guest_merge_read(guest, await pipe.get(guest_key))
@@ -333,16 +334,20 @@ class AsyncRedisService:
                 pipe.multi()
                 pipe.delete(guest_key)
                 return
-            write = codec.plan_merge_into_account(
-                account, user_id, guest_cart, await pipe.get(account_key)
+            write, guest_write = codec.plan_merge_into_account(
+                account, user_id, guest_cart, await pipe.get(account_key), guest=guest
             )
             pipe.multi()
             pipe.set(account_key, codec.serialize(write.cart), ex=write.ttl)
-            pipe.delete(guest_key)
+            guest_left[0] = guest_write is not None
+            if guest_write is not None:
+                pipe.set(guest_key, codec.serialize(guest_write.cart), ex=guest_write.ttl)
+            else:
+                pipe.delete(guest_key)
 
         try:
             await self._redis.transaction(_txn, guest_key, account_key)
-            return True
+            return not guest_left[0]
         except RedisError as e:
             self._handle_redis_error(f"merge_guest_cart: {str(e)}")
             return False

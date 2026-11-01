@@ -390,11 +390,11 @@ def test_merging_a_guest_cart_is_retried_when_the_account_cart_changes_meanwhile
     original = codec.plan_merge_into_account
     calls = []
 
-    def competing(account, user_id, guest_cart, account_data):
+    def competing(account, user_id, guest_cart, account_data, guest=None):
         calls.append(1)
         if len(calls) == 1:
             RedisService().add_to_cart_atomic(7, 1, 4, None, "p1", None, 100)
-        return original(account, user_id, guest_cart, account_data)
+        return original(account, user_id, guest_cart, account_data, guest=guest)
 
     monkeypatch.setattr(codec, "plan_merge_into_account", competing)
 

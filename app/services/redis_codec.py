@@ -282,18 +282,29 @@ def plan_guest_merge_read(guest: CartOwner, guest_data: str | None) -> tuple[str
 
 
 def plan_merge_into_account(
-    account: CartOwner, user_id: int, guest_cart: Cart, account_data: str | None
-) -> CartWrite:
+    account: CartOwner,
+    user_id: int,
+    guest_cart: Cart,
+    account_data: str | None,
+    guest: CartOwner | None = None,
+) -> tuple[CartWrite, CartWrite | None]:
     cart = load_or_create_cart(account, account_data)
     left_out = cart.merge(guest_cart, settings.CART_MAX_LINES)
+    guest_write: CartWrite | None = None
     if left_out:
         logger.warning(
             "Guest cart merge: %d line(s) did not fit in the cart of user %s (limit %d)",
             left_out, user_id, settings.CART_MAX_LINES,
         )
+        remainder = {k: v for k, v in guest_cart.items.items() if k not in cart.items}
+        guest_cart.items = remainder
+        guest_ttl = cart_ttl(guest or CartOwner.guest())
+        guest_cart.updated_at = utc_now()
+        guest_cart.expires_at = guest_cart.updated_at + guest_ttl
+        guest_write = CartWrite(cart=guest_cart, ttl=guest_ttl)
     ttl = cart_ttl(account)
     cart.expires_at = utc_now() + ttl
-    return CartWrite(cart=cart, ttl=ttl)
+    return CartWrite(cart=cart, ttl=ttl), guest_write
 
 
 def plan_remove_ordered(owner: CartOwner, cart_data: str | None, ordered: Cart) -> CartWrite:

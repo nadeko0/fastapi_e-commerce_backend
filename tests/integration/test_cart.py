@@ -6,6 +6,7 @@ from decimal import Decimal
 import fakeredis
 import pytest
 from redis import ConnectionError as RedisConnectionError
+from redis.exceptions import RedisError
 from sqlalchemy import event
 
 import app.core.database as database_module
@@ -1824,3 +1825,18 @@ def test_cart_ttl_default_is_thirty_days():
     """With live prices a long-lived cart can no longer show a stale price,
     which was the reason to keep it at 7."""
     assert Settings.model_fields["REDIS_CART_TTL_DAYS"].default == 30
+
+
+def test_reading_the_cart_during_a_redis_outage_is_503_not_an_empty_cart(
+    client, db_session, monkeypatch
+):
+    token = _register_and_login(client, _valid_registration_payload())
+
+    async def outage(self, owner):
+        raise RedisError("down")
+
+    monkeypatch.setattr("app.services.redis_async.AsyncRedisService.get_cart", outage)
+    response = client.get(CART_PREFIX, headers=_auth_headers(token))
+
+    assert response.status_code == 503, response.text
+    assert response.headers["Retry-After"] == "5"
