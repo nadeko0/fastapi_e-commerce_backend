@@ -31,6 +31,7 @@ Where the two differ by design, the last section says how and why, and
 asserts each side.
 """
 import contextlib
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -411,6 +412,22 @@ def test_a_session_is_idempotent_per_key_and_parameters(stripe):
 def test_a_session_needs_both_redirect_urls(stripe, missing):
     with pytest.raises(InvalidRequestError):
         _session(stripe, **{missing: ""})
+
+
+def test_checkout_session_expires_at_validation(stripe):
+    now = int(time.time())
+    session = stripe.provider.create_checkout_session(
+        amount=2500, currency="EUR", idempotency_key=_key(),
+        success_url=SUCCESS_URL, cancel_url=CANCEL_URL,
+        expires_at=now + 3600,
+    )
+    assert session.id
+    with pytest.raises(InvalidRequestError):
+        stripe.provider.create_checkout_session(
+            amount=2500, currency="EUR", idempotency_key=_key(),
+            success_url=SUCCESS_URL, cancel_url=CANCEL_URL,
+            expires_at=now + 600,
+        )
 
 
 def test_an_open_session_expires_once(stripe):

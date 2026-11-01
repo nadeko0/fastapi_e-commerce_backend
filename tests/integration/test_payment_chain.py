@@ -27,6 +27,7 @@ only a paid order is refunded, and it becomes refunded once its refunds
 cover the charge.
 """
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -47,6 +48,7 @@ from payment_support import (
     reset_provider,
 )
 
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.main import app
 from app.services.payment.stripe_provider import StripePaymentProvider
@@ -429,6 +431,9 @@ def test_expired_unpaid_order_and_a_late_payment(shop, outbox, tasks_db, currenc
     buyer, order = _ready_buyer(shop, catalog)
     shop.pay(buyer, order["id"], token=PAY_3DS)  # the customer is in 3D Secure...
     outbox.take()
+    attempt = shop.payments(order["id"])[0]
+    attempt.created_at = utc_now() - timedelta(minutes=settings.CHECKOUT_SESSION_EXPIRE_MINUTES + 1)
+    shop.db.commit()
 
     assert shop.expire_unpaid(order["id"]) == 1  # ...for longer than the order lives
 

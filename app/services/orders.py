@@ -9,11 +9,15 @@ cancellation, a customer cancelling their own unpaid order, and the expiry
 of unpaid orders all go through cancel_order_and_restock.
 """
 
+from datetime import timedelta
+
 from sqlalchemy import case, exists, select, update
 from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now
+from app.core.config import settings
 from app.models.order import Order
+from app.models.payment import Payment
 from app.models.product import Product, ProductVariant
 from app.schemas.common import INT32_MAX
 from app.schemas.order import OrderStatus, PaymentStatus
@@ -72,6 +76,26 @@ def is_unpaid_and_new(order: Order) -> bool:
     """Placed and not paid for: the only orders a customer may cancel
     themselves, and the only ones that expire."""
     return order.status == OrderStatus.NEW and order.payment_status in UNPAID_PAYMENT_STATUSES
+
+
+# A payment attempt whose outcome is not known yet: it may still charge.
+LIVE_ATTEMPT_STATUSES = ("processing", "requires_action", "unknown")
+
+
+def has_live_payment_attempt(db: Session, order: Order) -> bool:
+    """True while one of the order's payment attempts can still be paid
+    (an open Checkout Session, 3D Secure, a request whose outcome is
+    unknown) and is younger than CHECKOUT_SESSION_EXPIRE_MINUTES, the
+    lifetime given to the Checkout Session at Stripe. Cancelling such an
+    order would let the customer pay for an order already restocked."""
+    started_after = utc_now() - timedelta(minutes=settings.CHECKOUT_SESSION_EXPIRE_MINUTES)
+    return db.scalars(
+        select(Payment.id).where(
+            Payment.order_id == order.id,
+            Payment.status.in_(LIVE_ATTEMPT_STATUSES),
+            Payment.created_at > started_after,
+        ).limit(1)
+    ).first() is not None
 
 
 def lock_stock_rows(db: Session, lines) -> None:

@@ -339,6 +339,9 @@ def test_payment_completing_after_the_order_expired_is_flagged_not_applied(
 
     def _confirm_after_expiry(self, payment_intent_id, **kwargs):
         _age(db_session, order["id"], settings.UNPAID_ORDER_EXPIRE_MINUTES + 1)
+        payment = db_session.query(Payment).filter(Payment.order_id == order["id"]).one()
+        payment.created_at = utc_now() - timedelta(minutes=settings.CHECKOUT_SESSION_EXPIRE_MINUTES + 1)
+        db_session.commit()
         assert tasks.cancel_expired_unpaid_orders() == 1
         return real_confirm(self, payment_intent_id, **kwargs)
 

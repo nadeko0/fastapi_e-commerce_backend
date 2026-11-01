@@ -386,6 +386,7 @@ class StripePaymentProvider(PaymentProvider):
         cancel_url: str,
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
+        expires_at: int | None = None,
     ) -> CheckoutSession:
         # Same validate-before-touching-state ordering as create_payment_intent:
         # a structurally invalid request never "reached Stripe" and must not
@@ -398,6 +399,14 @@ class StripePaymentProvider(PaymentProvider):
                 param="success_url" if not success_url else "cancel_url",
                 code="parameter_missing",
             )
+        if expires_at is not None:
+            now = int(time.time())
+            if not isinstance(expires_at, int) or expires_at < now + 1800 or expires_at > now + 86400:
+                raise InvalidRequestError(
+                    "expires_at must be an integer Unix timestamp between 30 minutes and 24 hours in the future",
+                    param="expires_at",
+                    code="parameter_invalid",
+                )
         currency = currency.upper()  # as in create_payment_intent
 
         self._simulate_network_call()

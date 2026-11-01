@@ -124,7 +124,6 @@ def _mark_intent_succeeded(payment_intent_id):
 # == High ======================================================================
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: PAY-01 late 3DS charge on expired order is unrefundable and unreported")
 def test_PAY01_late_3ds_charge_on_expired_order_is_refundable_or_reported(
     client, db_session, tasks_db
 ):
@@ -136,12 +135,17 @@ def test_PAY01_late_3ds_charge_on_expired_order_is_refundable_or_reported(
     assert shop.pay(buyer, order["id"], token=PAY_3DS).status_code == 200
     assert shop.expire_unpaid(order["id"]) == 0          # in-flight attempt must not be expired
     assert shop.stock(product) == 0                      # stock remains reserved for 3DS attempt
-    late = shop.intent_event("payment_intent.succeeded", shop.payments(order["id"])[0])
+    # The customer finishes 3D Secure: captured at the provider, then the webhook.
+    attempt = shop.payments(order["id"])[0]
+    StripePaymentProvider._intents_by_id[attempt.payment_intent_id] = dataclasses.replace(
+        StripePaymentProvider._intents_by_id[attempt.payment_intent_id],
+        status=PaymentIntentStatus.SUCCEEDED,
+    )
+    late = shop.intent_event("payment_intent.succeeded", attempt)
     assert late.status_code == 200
     assert shop.refund(shop.admin(), order["id"]).status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: PAY-01 customer cancel accepts cancel during in-flight 3DS attempt")
 def test_PAY01_customer_cancel_refuses_in_flight_3ds_attempt(client, db_session):
     """PAY-01 (2B-03), High. Correct behaviour: customer cancel must answer 409
     while an attempt is in flight.
@@ -598,7 +602,6 @@ def test_2B09_guest_cart_merge_reports_or_keeps_unmerged_lines(client, db_sessio
     assert "left_out" in merged_login.text or len(guest.get(CART).json()["items"]) > 0
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2B-11 expiry sweep aborts on first error")
 def test_2B11_expiry_sweep_continues_past_single_order_error(client, db_session, monkeypatch):
     """2B-11, Low. Correct behaviour: the sweep logs the failure, continues,
     and cancels remaining eligible orders.
@@ -611,8 +614,14 @@ def test_2B11_expiry_sweep_continues_past_single_order_error(client, db_session,
             minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES + 1)
     db_session.commit()
 
+    calls = []
+    real_cancel = tasks.cancel_order_and_restock
+
     def failing_cancel(db, order):
-        raise OperationalError("UPDATE products ...", {}, Exception("deadlock detected"))
+        if not calls:
+            calls.append(order.id)
+            raise OperationalError("UPDATE products ...", {}, Exception("deadlock detected"))
+        return real_cancel(db, order)
 
     monkeypatch.setattr(tasks, "cancel_order_and_restock", failing_cancel)
     with TestingSessionLocal() as sweep:

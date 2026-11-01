@@ -420,6 +420,12 @@ class Settings(BaseSettings):
     # paying, including 3D Secure; a payment that completes after expiry is
     # flagged for manual review (a refund), not applied.
     UNPAID_ORDER_EXPIRE_MINUTES: int = Field(30, ge=1)
+    # Lifetime of a Stripe Checkout Session (expires_at; Stripe accepts 30 min
+    # to 24 h, default 24 h) and how long a payment attempt that can still be
+    # paid (processing / requires_action / unknown) keeps its order from
+    # expiring or being cancelled by the customer. Without it an order could
+    # be cancelled and restocked while its customer could still pay for it.
+    CHECKOUT_SESSION_EXPIRE_MINUTES: int = Field(60, ge=30, le=1440)
     # The most unpaid orders (new, payment pending or failed) one user can
     # hold at once. Each reserves stock until it is paid, cancelled or expired
     # (above), and only the checkout rate limit otherwise bounds how much a

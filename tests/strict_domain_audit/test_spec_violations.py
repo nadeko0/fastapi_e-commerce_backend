@@ -320,9 +320,6 @@ def test_dispute_landing_during_the_refund_call_is_recorded_and_flagged_for_revi
 # -- SPEC-ECOM-042 -----------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "SPEC-ECOM-042: expire_unpaid_orders cancels an order whose 3DS attempt "
-    "(requires_action) is still live"))
 def test_expiry_leaves_an_order_with_a_live_3ds_attempt_alone(shop, outbox):
     product = shop.product(price="19.99", stock=4)
     buyer = shop.buyer()
@@ -344,7 +341,7 @@ def test_expiry_still_cancels_when_the_3ds_attempt_is_stale(shop, outbox):
     order = shop.order_of(buyer, product)
     assert shop.pay(buyer, order["id"], token=PAY_3DS).status_code == 200
     attempt = shop.payments(order["id"])[0]
-    stale = utc_now() - timedelta(minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES + 1)
+    stale = utc_now() - timedelta(minutes=settings.CHECKOUT_SESSION_EXPIRE_MINUTES + 1)
     attempt.created_at = attempt.updated_at = stale
     shop.db.commit()
 

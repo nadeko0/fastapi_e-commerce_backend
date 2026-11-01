@@ -15,6 +15,7 @@ from celery.signals import (
     worker_process_shutdown,
 )
 from sqlalchemy import String, cast, create_engine, func, literal, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import selectinload, sessionmaker
 
 from app.core import celery_context, telemetry
@@ -36,6 +37,7 @@ from app.services.email import (
 from app.services.orders import (
     UNPAID_PAYMENT_STATUSES,
     cancel_order_and_restock,
+    has_live_payment_attempt,
     is_unpaid_and_new,
     products_with_cached_stock,
 )
@@ -394,39 +396,51 @@ def expire_unpaid_orders(db) -> int:
 
     cancelled = 0
     for order_id in candidates:
-        order = db.scalars(
-            select(Order).where(Order.id == order_id).with_for_update(skip_locked=True)
-        ).first()
-        if order is None or not is_unpaid_and_new(order) or order.created_at >= cutoff:
+        try:
+            order = db.scalars(
+                select(Order).where(Order.id == order_id).with_for_update(skip_locked=True)
+            ).first()
+            if order is None or not is_unpaid_and_new(order) or order.created_at >= cutoff:
+                db.rollback()
+                continue
+            if has_live_payment_attempt(db, order):
+                # Left for a later run: the attempt settles (webhook) or ages
+                # out together with its Checkout Session.
+                db.rollback()
+                continue
+            cancel_order_and_restock(db, order)
+            # What the email needs is read before the commit: after it the
+            # attributes are expired, and reading order.user would open a new
+            # transaction that stays open through the SMTP call (a slow server
+            # past idle_in_transaction_session_timeout ends the connection and
+            # aborts the sweep).
+            recipient = order.user.email
+            notice = SimpleNamespace(
+                id=order.id,
+                status=order.status,
+                payment_status=order.payment_status,
+                created_at=order.created_at,
+                total_amount=order.total_amount,
+                currency=order.currency,
+            )
+            restocked = products_with_cached_stock(
+                [(item.product_id, item.variant_id) for item in order.items]
+            )
+            db.commit()
+            cancelled += 1
+            # After the commit (a reader in between would cache the old stock
+            # again). A failure is logged by RedisService and not raised: the
+            # entry then lives at most PRODUCT_CACHE_TTL.
+            cache = RedisService()
+            for product_id in restocked:
+                cache.invalidate_product_cache(product_id)
+            send_order_cancellation_email(recipient, notice)
+        except OperationalError as exc:
             db.rollback()
+            logger.warning(
+                "OperationalError while expiring order %s: %s", order_id, exc
+            )
             continue
-        cancel_order_and_restock(db, order)
-        # What the email needs is read before the commit: after it the
-        # attributes are expired, and reading order.user would open a new
-        # transaction that stays open through the SMTP call (a slow server
-        # past idle_in_transaction_session_timeout ends the connection and
-        # aborts the sweep).
-        recipient = order.user.email
-        notice = SimpleNamespace(
-            id=order.id,
-            status=order.status,
-            payment_status=order.payment_status,
-            created_at=order.created_at,
-            total_amount=order.total_amount,
-            currency=order.currency,
-        )
-        restocked = products_with_cached_stock(
-            [(item.product_id, item.variant_id) for item in order.items]
-        )
-        db.commit()
-        cancelled += 1
-        # After the commit (a reader in between would cache the old stock
-        # again). A failure is logged by RedisService and not raised: the
-        # entry then lives at most PRODUCT_CACHE_TTL.
-        cache = RedisService()
-        for product_id in restocked:
-            cache.invalidate_product_cache(product_id)
-        send_order_cancellation_email(recipient, notice)
     return cancelled
 
 @celery.task(

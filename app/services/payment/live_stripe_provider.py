@@ -343,6 +343,7 @@ class LiveStripePaymentProvider(PaymentProvider):
         cancel_url: str,
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
+        expires_at: int | None = None,
     ) -> CheckoutSession:
         params: dict[str, Any] = {
             "mode": "payment",
@@ -367,6 +368,9 @@ class LiveStripePaymentProvider(PaymentProvider):
         }
         if metadata:
             params["metadata"] = metadata
+        if expires_at is not None:
+            # Unix seconds; Stripe accepts 30 min to 24 h from now.
+            params["expires_at"] = expires_at
         try:
             session = self._client.v1.checkout.sessions.create(
                 params=params, options={"idempotency_key": idempotency_key}

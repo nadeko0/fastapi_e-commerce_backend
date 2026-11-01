@@ -1019,6 +1019,9 @@ class PaymentWorld(RuleBasedStateMachine):
         order = self._order(order_id)
         if stranger == 0:
             expected = 404
+        elif any(p.status in ("processing", "requires_action", "unknown")
+                 for p in self._payments(order_id)):
+            expected = 409  # it could still be paid: PAY-01
         elif order.status == "new" and order.payment_status in ("pending", "failed"):
             expected = 200
         else:
@@ -1274,7 +1277,12 @@ class PaymentWorld(RuleBasedStateMachine):
         if not act:
             return
         order = self._order(order_id)
-        expires = order.status == "new" and order.payment_status in ("pending", "failed")
+        window = utc_now() - timedelta(minutes=settings.CHECKOUT_SESSION_EXPIRE_MINUTES)
+        payable = any(p.status in ("processing", "requires_action", "unknown")
+                      and p.created_at.replace(tzinfo=None) > window.replace(tzinfo=None)
+                      for p in self._payments(order_id))  # PAY-01: it could still be paid
+        expires = (order.status == "new" and order.payment_status in ("pending", "failed")
+                   and not payable)
         order.created_at = utc_now() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES + 1)
         self.shop.db.commit()
         tasks.cancel_expired_unpaid_orders()
@@ -1545,17 +1553,6 @@ def test_refund_events_in_any_order_converge_to_the_providers_state(client, db_s
         events = []
         for part, settles in zip(parts, settle, strict=False):
             payment = shop.payments(order["id"])[-1]
-            intent = StripePaymentProvider._intents_by_id[intent_id]
-            if (KNOWN_BUG_ALLOWANCES and part <= intent.amount - intent.amount_refunded
-                    and payment.amount_refunded + part > payment.amount
-                    and shop.order(order["id"]).payment_status == "paid"):
-                # KNOWN-BUG ALLOWANCE, bug 2 (strict reproducer:
-                # test_bug_refund_after_an_unreported_refund_failure_is_a_500):
-                # an earlier refund failed at the provider, its refund.failed
-                # is not delivered yet; the provider would take this refund
-                # and the route answer 500. Not attempted (TORTURE_STRICT=1
-                # attempts it).
-                continue
             response = check(shop.refund(admin, order["id"], amount=Decimal(part) / 100),
                              200, 400, 409)
             if response.status_code != 200:
@@ -1669,11 +1666,6 @@ def test_bug_stale_refund_event_reverts_a_settled_refund(client, db_session, tas
     assert shop.order(order_id).payment_status == "refunded"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG DISCOVERED (bug 2): /refund answers 500 for a refund the provider already made when an "
-    "earlier refund failed at the provider and its refund.failed is not processed yet - "
-    "_record_refund adds to a stale amount_refunded (app/api/v1/orders.py:1767, called at "
-    ":1625) and violates ck_payment_refunded_within_amount"))
 def test_bug_refund_after_an_unreported_refund_failure_is_a_500(client, db_session, tasks_db):
     """Found by test_refund_events_in_any_order_converge_to_the_providers_state
     (token=pm_card_refundFail, parts=[1, 1000], the first refund settled).

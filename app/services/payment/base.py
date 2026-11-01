@@ -120,6 +120,7 @@ class PaymentProvider(ABC):
         cancel_url: str,
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
+        expires_at: int | None = None,
     ) -> CheckoutSession:
         """Mirrors stripe.checkout.Session.create(mode="payment", line_items=[...],
         success_url=..., cancel_url=..., ...). success_url/cancel_url are

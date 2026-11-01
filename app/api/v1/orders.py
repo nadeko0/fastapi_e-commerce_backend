@@ -23,7 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.core.clock import utc_now
+from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.core.dependencies import AdminUser, Cache, CurrentUser, DbSession, Provider
 from app.core.errors import Problem, ProblemType
@@ -71,6 +71,7 @@ from app.services.orders import (
     PAID_ONLY_STATUSES,
     UNPAID_PAYMENT_STATUSES,
     cancel_order_and_restock,
+    has_live_payment_attempt,
     is_unpaid_and_new,
     is_valid_status_transition,
     lock_stock_rows,
@@ -617,6 +618,12 @@ async def cancel_own_order(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only a new, unpaid order can be cancelled; contact support for a paid one"
+        )
+    if await db.run_sync(has_live_payment_attempt, order):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A payment for this order is in progress; finish or abandon it first",
+            headers={"Retry-After": "60"},
         )
 
     await db.run_sync(cancel_order_and_restock, order)
@@ -1508,6 +1515,8 @@ async def create_checkout_session(
             cancel_url=cancel_url,
             description=f"Order #{order.id}",
             metadata={"order_id": str(order.id)},
+            expires_at=int(as_utc(payment_row.created_at).timestamp())
+            + settings.CHECKOUT_SESSION_EXPIRE_MINUTES * 60,
         )
     except PaymentProviderTimeoutError as e:
         # Same reasoning as /pay: unknown whether Stripe actually created

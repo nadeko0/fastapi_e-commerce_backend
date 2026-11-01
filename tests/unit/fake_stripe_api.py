@@ -345,6 +345,10 @@ class FakeStripeAPI:
             if not params.get(url_param):
                 raise _invalid(f"Missing required param: {url_param}.", url_param,
                                "parameter_missing")
+        expires_at = params.get("expires_at")
+        if expires_at is not None and not time.time() + 1800 <= expires_at <= time.time() + 86400:
+            raise _invalid("The `expires_at` timestamp must be between 30 minutes and 24 hours "
+                           "from Checkout Session creation.", "expires_at", "parameter_invalid")
         (line,) = params["line_items"]
         price = line["price_data"]
         self._require_chargeable(price["unit_amount"], price["currency"],
