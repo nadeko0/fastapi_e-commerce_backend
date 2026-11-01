@@ -18,9 +18,11 @@ the provider (no transaction stays open across an HTTP call). One attempt
 retried is a replay (the Idempotency-Key is required), and a second attempt
 with its own key is refused while the first is in flight
 (test_payment_rules.py). Once the first has been in flight for longer than
-PAYMENT_ATTEMPT_STALE_AFTER_MINUTES, a second one may start, and both can
-then be charged: the second success is recorded and flagged for manual
-review (a refund), never applied to the order a second time.
+PAYMENT_ATTEMPT_STALE_AFTER_MINUTES, a second one may start; when one
+succeeds, other open attempts are closed at the provider (sessions expired,
+requires_action intents cancelled). If a double charge still slips through,
+the second success is recorded and flagged for manual review (a refund),
+never applied to the order a second time.
 """
 import uuid
 

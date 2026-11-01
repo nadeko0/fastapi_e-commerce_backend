@@ -316,6 +316,19 @@ class LiveStripePaymentProvider(PaymentProvider):
             raise _provider_unavailable(e) from e
         return _to_payment_intent(pi)
 
+    def cancel_payment_intent(self, payment_intent_id: str) -> PaymentIntent:
+        try:
+            pi = self._client.v1.payment_intents.cancel(payment_intent_id)
+        except stripe.InvalidRequestError as e:
+            if e.code == "resource_missing":
+                raise CardError(
+                    f"No such payment_intent: '{payment_intent_id}'", code="resource_missing"
+                ) from e
+            raise CardError(str(e.user_message or e), code=e.code or "invalid_request") from e
+        except stripe.StripeError as e:
+            raise _provider_unavailable(e) from e
+        return _to_payment_intent(pi)
+
     def retrieve_payment_intent(self, payment_intent_id: str) -> PaymentIntent:
         try:
             pi = self._client.v1.payment_intents.retrieve(payment_intent_id)

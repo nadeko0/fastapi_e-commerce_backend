@@ -40,7 +40,7 @@ from app.services import stripe_events
 from app.services.email import messages as email_messages
 from app.services.payment.exceptions import IdempotencyError
 from app.services.payment.stripe_provider import StripePaymentProvider
-from app.services.payment.types import PaymentIntentStatus
+from app.services.payment.types import CheckoutSessionStatus, PaymentIntentStatus
 from app.services.reconciliation import PENDING_INTENT_ID_PREFIX, reconcile_payments
 
 # The integration helpers (Shop, the webhook delivery) are imported by bare
@@ -155,7 +155,6 @@ def test_PAY01_customer_cancel_refuses_in_flight_3ds_attempt(client, db_session)
     assert shop.cancel(buyer, order["id"]).status_code == 409   # must be refused mid-3DS
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: PAY-01 second checkout session allowed after stale window double charges")
 def test_PAY01_second_checkout_session_refused_or_first_session_expired(client, db_session):
     """PAY-01 (2A-04), High. Correct behaviour: the second checkout-session must
     answer 409 while the first session can still be paid, or the first session must
@@ -169,7 +168,17 @@ def test_PAY01_second_checkout_session_refused_or_first_session_expired(client, 
     db_session.commit()
 
     second_session = shop.checkout_session(buyer, order["id"])
-    assert second_session.status_code == 409, second_session.text
+    assert second_session.status_code == 200
+    second = shop.payments(order["id"])[1]
+    completed = shop.session_event(
+        "checkout.session.completed", second, payment_intent=f"pi_second_{order['id']}"
+    )
+    assert completed.status_code == 200
+    provider = StripePaymentProvider()
+    assert (
+        provider.retrieve_checkout_session(first.checkout_session_id).status
+        == CheckoutSessionStatus.EXPIRED
+    )
 
 
 # == Medium ====================================================================

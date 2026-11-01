@@ -449,8 +449,29 @@ def test_an_unknown_session_is_resource_missing(stripe, call):
 
 # -- Stripe unreachable ---------------------------------------------------------------
 
+def test_an_open_intent_cancels(stripe):
+    intent = _intent(stripe, amount=2000)
+    canceled = stripe.provider.cancel_payment_intent(intent.id)
+    assert canceled.status == PaymentIntentStatus.CANCELED
+    with pytest.raises(CardError):
+        stripe.provider.cancel_payment_intent(intent.id)
+
+
+def test_a_succeeded_intent_cannot_be_canceled(stripe):
+    intent = _paid(stripe)
+    with pytest.raises(CardError):
+        stripe.provider.cancel_payment_intent(intent.id)
+
+
+def test_an_unknown_intent_cancel_is_resource_missing(stripe):
+    with pytest.raises(CardError) as missing:
+        stripe.provider.cancel_payment_intent("pi_unknown_nonexistent")
+    assert missing.value.code == "resource_missing"
+
+
 def test_every_call_reports_an_unreachable_stripe_as_a_timeout(stripe):
     intent = _paid(stripe)
+    open_intent = _intent(stripe)
     session = _session(stripe)
     stripe.go_offline()
     p = stripe.provider
@@ -458,6 +479,7 @@ def test_every_call_reports_an_unreachable_stripe_as_a_timeout(stripe):
         "create": lambda: _intent(stripe),
         "confirm": lambda: p.confirm_payment_intent(intent.id, return_url=RETURN_URL),
         "retrieve": lambda: p.retrieve_payment_intent(intent.id),
+        "cancel": lambda: p.cancel_payment_intent(open_intent.id),
         "refund": lambda: p.create_refund(payment_intent_id=intent.id),
         "create session": lambda: _session(stripe),
         "retrieve session": lambda: p.retrieve_checkout_session(session.id),

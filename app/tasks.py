@@ -37,8 +37,10 @@ from app.services.email import (
 from app.services.orders import (
     UNPAID_PAYMENT_STATUSES,
     cancel_order_and_restock,
+    close_attempts_at_provider,
     has_live_payment_attempt,
     is_unpaid_and_new,
+    open_payment_attempts,
     products_with_cached_stock,
 )
 from app.services.payment import get_payment_provider
@@ -408,6 +410,21 @@ def expire_unpaid_orders(db) -> int:
                 # out together with its Checkout Session.
                 db.rollback()
                 continue
+            attempts = open_payment_attempts(db, order_id)
+            if attempts:
+                # An attempt older than the window can still be paid at the
+                # provider: closed first, so nothing is charged for an order
+                # already restocked. No lock is held across those calls, and
+                # an order whose attempt cannot be closed waits for a later run.
+                db.rollback()
+                if not close_attempts_at_provider(get_payment_provider(), attempts):
+                    continue
+                order = db.scalars(
+                    select(Order).where(Order.id == order_id).with_for_update(skip_locked=True)
+                ).first()
+                if order is None or not is_unpaid_and_new(order) or order.created_at >= cutoff:
+                    db.rollback()
+                    continue
             cancel_order_and_restock(db, order)
             # What the email needs is read before the commit: after it the
             # attributes are expired, and reading order.user would open a new

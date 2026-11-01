@@ -120,6 +120,7 @@ class FakeStripeAPI:
         self.patch(monkeypatch, stripe.PaymentIntentService, "confirm", self.payment_intent_confirm)
         self.patch(monkeypatch, stripe.PaymentIntentService, "retrieve",
                    self.payment_intent_retrieve)
+        self.patch(monkeypatch, stripe.PaymentIntentService, "cancel", self.payment_intent_cancel)
         self.patch(monkeypatch, stripe.RefundService, "create", self.refund_create)
         self.patch(monkeypatch, stripe.checkout.SessionService, "create", self.session_create)
         self.patch(monkeypatch, stripe.checkout.SessionService, "retrieve", self.session_retrieve)
@@ -265,6 +266,17 @@ class FakeStripeAPI:
     def payment_intent_retrieve(self, intent_id, params=None, options=None):
         self._request(params, options)
         return _Obj(self._intent(intent_id))
+
+    def payment_intent_cancel(self, intent_id, params=None, options=None):
+        self._request(params, options)
+        intent = self._intent(intent_id)
+        if intent["status"] in ("succeeded", "canceled"):
+            raise _invalid(
+                f"You cannot cancel this PaymentIntent because it has a status of {intent['status']}.",
+                None, "payment_intent_unexpected_state",
+            )
+        intent["status"] = "canceled"
+        return _Obj(intent)
 
     def authenticate(self, intent_id) -> None:
         """The customer completes 3D Secure on the page next_action sent

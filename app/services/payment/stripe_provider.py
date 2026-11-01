@@ -374,6 +374,22 @@ class StripePaymentProvider(PaymentProvider):
             )
         return intent
 
+    def cancel_payment_intent(self, payment_intent_id: str) -> PaymentIntent:
+        self._simulate_network_call()
+        intent = self._intents_by_id.get(payment_intent_id)
+        if intent is None:
+            raise CardError(
+                f"No such payment_intent: '{payment_intent_id}'", code="resource_missing"
+            )
+        if intent.status in (PaymentIntentStatus.SUCCEEDED, PaymentIntentStatus.CANCELED):
+            raise CardError(
+                f"PaymentIntent '{payment_intent_id}' cannot be canceled from status "
+                f"'{intent.status.value}'",
+                code="payment_intent_cancel_failed",
+            )
+        intent.status = PaymentIntentStatus.CANCELED
+        return intent
+
     # -- Checkout Session ------------------------------------------------
 
     def create_checkout_session(

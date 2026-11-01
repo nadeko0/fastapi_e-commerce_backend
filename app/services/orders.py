@@ -9,6 +9,7 @@ cancellation, a customer cancelling their own unpaid order, and the expiry
 of unpaid orders all go through cancel_order_and_restock.
 """
 
+import logging
 from datetime import timedelta
 
 from sqlalchemy import case, exists, select, update
@@ -21,6 +22,14 @@ from app.models.payment import Payment
 from app.models.product import Product, ProductVariant
 from app.schemas.common import INT32_MAX
 from app.schemas.order import OrderStatus, PaymentStatus
+from app.services.payment.exceptions import (
+    CardError,
+    InvalidRequestError,
+    PaymentProviderError,
+)
+from app.services.reconciliation import PENDING_INTENT_ID_PREFIX
+
+logger = logging.getLogger(__name__)
 
 ORDER_STATUS_TRANSITIONS = {
     OrderStatus.NEW: {OrderStatus.CONFIRMED, OrderStatus.CANCELLED},
@@ -96,6 +105,40 @@ def has_live_payment_attempt(db: Session, order: Order) -> bool:
             Payment.created_at > started_after,
         ).limit(1)
     ).first() is not None
+
+
+def open_payment_attempts(
+    db: Session, order_id: int, except_payment_id: int | None = None
+) -> list[tuple[str | None, str]]:
+    """(checkout_session_id, payment_intent_id) of the order's attempts whose
+    outcome is not known yet, for close_attempts_at_provider."""
+    query = select(Payment.checkout_session_id, Payment.payment_intent_id).where(
+        Payment.order_id == order_id,
+        Payment.status.in_(LIVE_ATTEMPT_STATUSES),
+    )
+    if except_payment_id is not None:
+        query = query.where(Payment.id != except_payment_id)
+    return [tuple(row) for row in db.execute(query)]
+
+
+def close_attempts_at_provider(provider, attempts) -> bool:
+    """Make these attempts unpayable: a Checkout Session is expired, a
+    PaymentIntent cancelled. False when the provider could not be asked. A
+    refusal is an answer (the attempt was paid or closed meanwhile), and a
+    charge that got through is flagged for manual review by its webhook."""
+    closed = True
+    for session_id, intent_id in attempts:
+        try:
+            if session_id:
+                provider.expire_checkout_session(session_id)
+            elif not intent_id.startswith(PENDING_INTENT_ID_PREFIX):
+                provider.cancel_payment_intent(intent_id)
+        except (CardError, InvalidRequestError) as e:
+            logger.info("Attempt %s was not closed: %s", session_id or intent_id, e)
+        except PaymentProviderError as e:
+            logger.warning("Attempt %s could not be closed: %s", session_id or intent_id, e)
+            closed = False
+    return closed
 
 
 def lock_stock_rows(db: Session, lines) -> None:

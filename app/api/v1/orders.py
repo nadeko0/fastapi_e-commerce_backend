@@ -71,13 +71,16 @@ from app.services.orders import (
     PAID_ONLY_STATUSES,
     UNPAID_PAYMENT_STATUSES,
     cancel_order_and_restock,
+    close_attempts_at_provider,
     has_live_payment_attempt,
     is_unpaid_and_new,
     is_valid_status_transition,
     lock_stock_rows,
+    open_payment_attempts,
     product_has_active_variants,
     products_with_cached_stock,
 )
+from app.services.payment import get_payment_provider
 from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
@@ -849,6 +852,12 @@ def _apply_payment_success(
         notify_email,
         OrderResponse.model_validate(order)
     )
+    # The order's other attempts could still charge. Closed at the provider
+    # after the response (or, in the worker, after the event's commit): no
+    # request or transaction waits on those calls.
+    attempts = open_payment_attempts(db, order.id, except_payment_id=payment_row.id)
+    if attempts:
+        background_tasks.add_task(close_attempts_at_provider, get_payment_provider(), attempts)
     return True
 
 
@@ -976,9 +985,10 @@ def _guard_no_attempt_in_flight(
 
     An attempt in flight for longer than PAYMENT_ATTEMPT_STALE_AFTER_MINUTES
     no longer blocks: a request that crashed after recording its attempt
-    would otherwise lock the order until it expires. If such an attempt
-    does succeed after all, the webhook flags the second success for manual
-    review, as before.
+    would otherwise lock the order until it expires. Once an attempt succeeds,
+    other open attempts are closed at the provider (sessions expired,
+    requires_action intents cancelled); if a second charge completes nonetheless,
+    it is flagged for manual review.
 
     `except_payment_id` is the attempt being retried by its own key.
     """

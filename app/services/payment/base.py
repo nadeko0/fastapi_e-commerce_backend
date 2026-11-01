@@ -77,6 +77,12 @@ class PaymentProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def cancel_payment_intent(self, payment_intent_id: str) -> PaymentIntent:
+        """Mirrors stripe.PaymentIntent.cancel(id). Cancels an intent awaiting
+        action or payment method so it cannot be confirmed."""
+        raise NotImplementedError
+
+    @abstractmethod
     def retrieve_payment_intent(self, payment_intent_id: str) -> PaymentIntent:
         """Mirrors stripe.PaymentIntent.retrieve(id)."""
         raise NotImplementedError
