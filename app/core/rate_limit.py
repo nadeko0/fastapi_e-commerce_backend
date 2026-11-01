@@ -81,6 +81,8 @@ _ROUTE_LIMITS = {
     ("POST", "/users/verify-email"): "RATE_LIMIT_AUTH",
     ("POST", "/users/password/reset-token/validate"): "RATE_LIMIT_AUTH",
     ("POST", "/users/verify-email/resend"): "RATE_LIMIT_AUTH",
+    # Checks the account password (deletion) and sends mail (export).
+    ("POST", "/legal/data-request"): "RATE_LIMIT_AUTH",
     ("POST", "/orders"): "RATE_LIMIT_CHECKOUT",
     ("POST", "/orders/{order_id}/pay"): "RATE_LIMIT_CHECKOUT",
     ("POST", "/orders/{order_id}/checkout-session"): "RATE_LIMIT_CHECKOUT",

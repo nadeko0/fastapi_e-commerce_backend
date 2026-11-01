@@ -7,6 +7,7 @@ from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession
 from app.core.openapi import DocumentedRoute
+from app.core.rate_limit import check_login_attempt, clear_login_failures
 from app.core.security import verify_password_async
 from app.models.user import User
 from app.schemas.legal import (
@@ -314,6 +315,7 @@ async def update_user_consent(
 )
 async def request_personal_data(
     request_data: DataRequest,
+    request: Request,
     db: DbSession,
     current_user: CurrentUser
 ):
@@ -334,13 +336,17 @@ async def request_personal_data(
         request_id = await gdpr_service.process_data_export(current_user)
     elif request_data.request_type == "deletion":
         # Re-authentication. The schema has already refused a deletion
-        # request without a password (422).
+        # request without a password (422). Counted against the same
+        # failed-attempt limits as /users/login, or a stolen token would be a
+        # password oracle with no lockout.
+        await check_login_attempt(current_user.email, request)
         if not await verify_password_async(request_data.password, current_user.hashed_password):
             raise HTTPException(
                 status_code=401,
                 detail="Incorrect password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        await clear_login_failures(current_user.email, request)
         # Deactivates the user and commits `db`, so it needs the row loaded
         # through `db` (see _load_user).
         request_id = await gdpr_service.process_data_deletion(

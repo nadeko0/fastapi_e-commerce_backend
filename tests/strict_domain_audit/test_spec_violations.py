@@ -374,9 +374,6 @@ def _admin(db, email):
     return {"Authorization": f"Bearer {create_access_token(user.id)}"}
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "SPEC-AUTH-02: the only active admin can erase (deactivate) their own account, "
-    "leaving no active admin"))
 def test_the_last_active_admin_cannot_request_erasure(shop):
     headers = _admin(shop.db, "only-admin@example.com")
 

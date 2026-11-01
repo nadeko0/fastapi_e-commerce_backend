@@ -385,13 +385,13 @@ def test_AUTH01_refresh_rotation_in_flight_during_reset_is_revoked(client, db_se
         assert rotated.status_code == 401
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: AUTH-02 deletion reauth is not rate-limited")
 def test_AUTH02_deletion_reauth_is_rate_limited_and_locks_out(client, db_session, monkeypatch):
     """AUTH-02 (2C-04), Medium. Correct behaviour: deletion reauth is in
     _ROUTE_LIMITS and repeated failures trigger lockout.
     """
     for name in ("send_gdpr_request_received", "send_gdpr_deletion_confirmation"):
         monkeypatch.setattr(f"app.services.email.{name}", lambda *a, **k: True)
+    monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
     assert ("POST", "/legal/data-request") in _ROUTE_LIMITS
     token = _register_and_login(client, "u@example.com")["access_token"]
     headers = {"Authorization": f"Bearer {token}"}

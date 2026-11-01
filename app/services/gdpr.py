@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import utc_now
@@ -122,6 +123,16 @@ class GDPRService:
         Returns a request ID that can be used to track the deletion status
         """
         request_id = f"deletion_{user.id}_{utc_now().timestamp()}"
+
+        if user.role == "admin" and not await self.db.scalar(
+            select(func.count(User.id)).where(
+                User.role == "admin", User.is_active.is_(True), User.id != user.id
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The only active administrator cannot be erased",
+            )
 
         try:
             # Send initial confirmation email
