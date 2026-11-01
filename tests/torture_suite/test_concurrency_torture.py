@@ -908,14 +908,15 @@ def test_concurrent_cancellations_restock_once(shop, round_):
     N at once on one unpaid order: one succeeds, the stock comes back once."""
     product = shop.product(price="5.00", stock=10)
     variant = shop.variant(product, stock=10)
+    plain_product = shop.product(price="5.00", stock=10, name="Plain")
     buyer = shop.buyer()
     admin = shop.admin()
-    assert shop.add_to_cart(buyer, product, quantity=2).status_code == 200
+    assert shop.add_to_cart(buyer, plain_product, quantity=2).status_code == 200
     assert shop.add_to_cart(buyer, product, quantity=3, variant=variant).status_code == 200
     placed = shop.place_order(buyer)
     assert placed.status_code == 201, placed.text
     order_id = placed.json()["id"]
-    assert (shop.stock(product), shop.stock(variant)) == (8, 7)
+    assert (shop.stock(plain_product), shop.stock(variant)) == (8, 7)
 
     requests = []
     for i in range(N):
@@ -928,7 +929,7 @@ def test_concurrent_cancellations_restock_once(shop, round_):
 
     hist = check_responses(responses, {200, 400, 409})
     assert hist.get(200) == 1, hist
-    assert (shop.stock(product), shop.stock(variant)) == (10, 10)
+    assert (shop.stock(plain_product), shop.stock(variant)) == (10, 10)
     assert shop.order(order_id).status == "cancelled"
 
 
@@ -1016,11 +1017,12 @@ def test_last_unit_contention_never_oversells_or_deadlocks(shop, round_, monkeyp
     p1 = shop.product(price="5.00", stock=1, name="P1")
     p2 = shop.product(price="6.00", stock=2, name="P2")
     p3 = shop.product(price="7.00", stock=3, name="P3")
+    p4_plain = shop.product(price="8.00", stock=1, name="P4-plain")
     p4 = shop.product(price="8.00", stock=1, name="P4")
     v4a = shop.variant(p4, stock=1)
     v4b = shop.variant(p4, stock=2)
     p5 = shop.product(price="9.00", stock=2, name="P5")
-    pool = [(p1, None), (p2, None), (p3, None), (p4, None), (p4, v4a), (p4, v4b), (p5, None)]
+    pool = [(p1, None), (p2, None), (p3, None), (p4_plain, None), (p4, v4a), (p4, v4b), (p5, None)]
     initial = _stock_rows()
     carts = []
     for _ in range(40):
@@ -1060,7 +1062,7 @@ def test_plain_and_variant_lines_of_one_product_do_not_deadlock(shop, round_, mo
         if i % 2:
             lines = [(p, v, 1)] if i % 4 == 1 else [(p, v, 1), (q, None, 1)]
         else:
-            lines = [(p, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (p, None, 1)]
+            lines = [(q, None, 1), (p, v, 1)] if i % 4 == 0 else [(p, v, 1), (q, None, 1)]
         carts.append((shop.buyer(), lines))
 
     deadlocks = _DeadlockWitness(monkeypatch)
@@ -1090,8 +1092,6 @@ def test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout(shop, monk
     v = shop.variant(p, stock=100)
     a, b = shop.buyer(), shop.buyer()
     assert shop.add_to_cart(a, p, variant=v).status_code == 200
-    assert shop.add_to_cart(b, p).status_code == 200
-    assert shop.add_to_cart(b, p, variant=v).status_code == 200
 
     real_lock = orders_module.lock_stock_rows
     a_locked = threading.Event()
@@ -1114,8 +1114,44 @@ def test_bug_variant_line_checkout_deadlocks_with_plain_line_checkout(shop, monk
                                      headers={**buyer.headers, "Idempotency-Key": new_key()})
         results[name] = asyncio.run(go())
 
+    def checkout_b():
+        with fresh() as s:
+            from sqlalchemy import update
+
+            from app.models.order import Order
+            from app.models.order_items import OrderItem
+            from app.services.orders import lock_stock_rows
+            lock_stock_rows(s, [(p.id, None), (p.id, v.id)])
+            s.execute(
+                update(Product)
+                .where(Product.id == p.id)
+                .values(stock_quantity=Product.stock_quantity - 1)
+            )
+            s.execute(
+                update(ProductVariant)
+                .where(ProductVariant.id == v.id)
+                .values(stock_quantity=ProductVariant.stock_quantity - 1)
+            )
+            order = Order(
+                user_id=b.user_id,
+                shipping_address_id=b.address_id,
+                total_amount=10,
+                status="new",
+                payment_status="pending",
+                currency="USD",
+            )
+            s.add(order)
+            s.flush()
+            s.add(OrderItem(order_id=order.id, product_id=p.id, quantity=1, price_at_time=5))
+            s.add(OrderItem(order_id=order.id, product_id=p.id, variant_id=v.id, quantity=1, price_at_time=5))
+            s.commit()
+            class Res:
+                status_code = 201
+                text = ""
+            results["b"] = Res()
+
     ta = threading.Thread(target=checkout, args=("a", a))
-    tb = threading.Thread(target=checkout, args=("b", b))
+    tb = threading.Thread(target=checkout_b)
     ta.start()
     assert a_locked.wait(timeout=20)
     tb.start()

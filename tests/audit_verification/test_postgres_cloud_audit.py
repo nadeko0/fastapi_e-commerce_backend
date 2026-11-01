@@ -24,6 +24,7 @@ from app import tasks
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.main import app
+from app.models.order_items import OrderItem
 from app.models.user import User
 
 _INTEGRATION = Path(__file__).resolve().parents[1] / "integration"
@@ -98,31 +99,6 @@ def _race(first, second, hold_after):
     return results["first"], results["second"]
 
 
-def test_DB01_variant_checkout_does_not_deadlock_concurrent_checkout(client, db_session):
-    """DB-01 (2B-01), Medium. app/services/orders.py:81-91 (lock_stock_rows
-    takes FOR UPDATE on products/variants) vs the FK `FOR KEY SHARE` that the
-    order_items INSERT takes on the variant line's product; the deadlock is
-    answered 503 (app/core/database.py:140).
-
-    Correct behaviour: both checkouts succeed with 201 without deadlocking.
-    """
-    shop = Shop(client, db_session)
-    product = shop.product(stock=5, name="P")
-    variant = shop.variant(product, stock=5)
-    a, b = shop.buyer(), shop.buyer()
-    assert shop.add_to_cart(a, product, variant=variant).status_code == 200
-    assert shop.add_to_cart(b, product).status_code == 200
-    assert shop.add_to_cart(b, product, variant=variant).status_code == 200
-
-    first, second = _race(
-        lambda c: Shop(c, db_session).place_order(a),
-        lambda c: Shop(c, db_session).place_order(b),
-        hold_after="UPDATE product_variants SET stock_quantity",
-    )
-    assert [first.status_code, second.status_code] == [201, 201], (
-        first.text, second.text)
-
-
 def test_DB01_variant_checkout_does_not_deadlock_order_cancel(client, db_session):
     """DB-01 (2B-01), Medium. Same lock order defect, checkout vs the
     customer's cancel (cancel_order_and_restock locks P then V,
@@ -132,11 +108,15 @@ def test_DB01_variant_checkout_does_not_deadlock_order_cancel(client, db_session
     """
     shop = Shop(client, db_session)
     product = shop.product(stock=5, name="P")
-    variant = shop.variant(product, stock=5)
     seller, buyer = shop.buyer(), shop.buyer()
     assert shop.add_to_cart(seller, product).status_code == 200
-    assert shop.add_to_cart(seller, product, variant=variant).status_code == 200
     order_id = shop.place_order(seller).json()["id"]
+    # An order older than the rule that a product with variants is bought
+    # through one: it holds a plain line and a variant line of one product.
+    variant = shop.variant(product, stock=5)
+    db_session.add(OrderItem(order_id=order_id, product_id=product.id, variant_id=variant.id,
+                             quantity=1, price_at_time=product.price))
+    db_session.commit()
     assert shop.add_to_cart(buyer, product, variant=variant).status_code == 200
 
     first, second = _race(

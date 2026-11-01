@@ -9,7 +9,7 @@ cancellation, a customer cancelling their own unpaid order, and the expiry
 of unpaid orders all go through cancel_order_and_restock.
 """
 
-from sqlalchemy import case, select, update
+from sqlalchemy import case, exists, select, update
 from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now
@@ -39,6 +39,14 @@ PAID_ONLY_STATUSES = frozenset({
 # Order.payment_status values of an order nobody has paid for: what a
 # customer may cancel themselves and what expires.
 UNPAID_PAYMENT_STATUSES = frozenset({PaymentStatus.PENDING, PaymentStatus.FAILED})
+
+
+def product_has_active_variants(product_id: int):
+    """A scalar select: true when the product has an active variant. Such a
+    product is sold by its variants only (a line without variant_id is
+    refused, in the cart and at checkout); the parent's own price and stock
+    are for a product without variants."""
+    return select(exists().where(ProductVariant.product_id == product_id, ProductVariant.is_active))
 
 
 def products_with_cached_stock(lines) -> list[int]:

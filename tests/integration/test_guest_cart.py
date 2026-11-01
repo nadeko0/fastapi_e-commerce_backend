@@ -709,17 +709,18 @@ def test_login_merges_the_guest_cart_into_the_account_cart(browser, db_session, 
 
 def test_login_merges_into_an_account_that_had_no_cart(browser, db_session, fake_redis):
     category = _make_category(db_session)
-    product = _make_product(db_session, category.id, price="9.99")
-    variant = _make_variant(db_session, product.id, price_override="14.50")
+    product = _make_product(db_session, category.id, price="9.99")  # sold bare: no variants
+    variant_product = _make_product(db_session, category.id, price="9.99")
+    variant = _make_variant(db_session, variant_product.id, price_override="14.50")
     visitor = browser()
     _register(visitor)
     _add(visitor, product.id, 2)
-    _add(visitor, product.id, 1, variant_id=variant.id)
+    _add(visitor, variant_product.id, 1, variant_id=variant.id)
 
     token = _login(visitor).json()["access_token"]
 
     cart = _cart(visitor, headers=_auth_headers(token))
-    assert _quantities(cart) == {(product.id, None): 2, (product.id, variant.id): 1}
+    assert _quantities(cart) == {(product.id, None): 2, (variant_product.id, variant.id): 1}
     assert cart["total_amount"] == "34.48"
     assert _guest_keys(fake_redis) == []
     assert len(_account_keys(fake_redis)) == 1
@@ -1028,15 +1029,16 @@ def test_guest_cart_refuses_a_line_beyond_the_cap(browser, db_session, fake_redi
     monkeypatch.setattr(settings, "CART_MAX_LINES", 3)
     category = _make_category(db_session)
     products = [_make_product(db_session, category.id) for _ in range(3)]
-    variant = _make_variant(db_session, products[0].id)
+    variant_product = _make_product(db_session, category.id)
+    variant = _make_variant(db_session, variant_product.id)
     guest = browser()
     for product in products:
         assert _add(guest, product.id, 1).status_code == 200
 
     one_more = _make_product(db_session, category.id)
     refused = _add(guest, one_more.id, 1)
-    # A variant of a product already in the cart is a line of its own.
-    refused_variant = _add(guest, products[0].id, 1, variant_id=variant.id)
+    # A variant line is a line like any other.
+    refused_variant = _add(guest, variant_product.id, 1, variant_id=variant.id)
 
     assert refused.status_code == 409
     assert refused.json()["detail"] == "Cart cannot hold more than 3 different items"

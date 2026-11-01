@@ -220,8 +220,8 @@ class CartWorld(RuleBasedStateMachine):
                 overrides=st.lists(st.none() | PRICES, min_size=2, max_size=2))
     def setup(self, prices, stocks, overrides):
         db = self.shop.db
-        products = [make_product(db, prices[i], stocks[i]) for i in range(3)]
-        variants = [make_variant(db, products[2], overrides[i], stocks[3 + i]) for i in range(2)]
+        products = [make_product(db, prices[min(i, 2)], stocks[min(i, 2)]) for i in range(4)]
+        variants = [make_variant(db, products[3], overrides[i], stocks[3 + i]) for i in range(2)]
         # catalog model
         self.products = {p.id: {"price": money(p.price), "stock": p.stock_quantity,
                                 "state": "active"} for p in products}
@@ -229,7 +229,7 @@ class CartWorld(RuleBasedStateMachine):
                                 "override": None if v.price_override is None else money(v.price_override),
                                 "active": True} for v in variants}
         self.keys = [(products[0].id, None), (products[1].id, None), (products[2].id, None),
-                     (products[2].id, variants[0].id), (products[2].id, variants[1].id)]
+                     (products[3].id, variants[0].id), (products[3].id, variants[1].id)]
         self.buyer = self.shop.buyer()
         self.user_headers = self.buyer.headers
         self.admin = self.shop.admin()
@@ -679,11 +679,12 @@ class PaymentWorld(RuleBasedStateMachine):
         db = self.shop.db
         a = make_product(db, price_a, 12)
         b = make_product(db, price_b, 10)
-        bv = make_variant(db, b, override, 6)
-        self.lines = [(a.id, None), (b.id, None), (b.id, bv.id)]
+        c = make_product(db, price_b, 10)
+        cv = make_variant(db, c, override, 6)
+        self.lines = [(a.id, None), (b.id, None), (c.id, cv.id)]
         self.prices = {(a.id, None): money(price_a), (b.id, None): money(price_b),
-                       (b.id, bv.id): money(override if override is not None else price_b)}
-        self.initial = {(a.id, None): 12, (b.id, None): 10, (b.id, bv.id): 6}
+                       (c.id, cv.id): money(override if override is not None else price_b)}
+        self.initial = {(a.id, None): 12, (b.id, None): 10, (c.id, cv.id): 6}
         self.adjust = {line: 0 for line in self.lines}
         self.buyers = [self.shop.buyer(), self.shop.buyer()]
         self.admin = self.shop.admin()
@@ -1439,7 +1440,8 @@ def test_checkout_never_sells_more_than_the_stock(client, db_session):
     shop = Shop(client, db_session)
     product_a = make_product(db_session, "3.10", 0)
     product_b = make_product(db_session, "0.99", 0)
-    variant = make_variant(db_session, product_b, "4.44", 0)
+    product_c = make_product(db_session, "0.99", 0)
+    variant = make_variant(db_session, product_c, "4.44", 0)
     rows = [(Product, product_a.id), (Product, product_b.id), (ProductVariant, variant.id)]
 
     @hyp_settings(**GIVEN)
@@ -1452,7 +1454,7 @@ def test_checkout_never_sells_more_than_the_stock(client, db_session):
         db_session.commit()
         for index, quantity in enumerate(wanted):
             if quantity:
-                check(shop.add_to_cart(buyer, product_b if index else product_a, quantity,
+                check(shop.add_to_cart(buyer, [product_a, product_b, product_c][index], quantity,
                                        variant=variant if index == 2 else None), 200)
         for (model, row_id), value in zip(rows, stock, strict=True):
             db_session.get(model, row_id).stock_quantity = value

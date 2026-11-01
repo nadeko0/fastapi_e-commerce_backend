@@ -69,7 +69,6 @@ REJECTED = (409, 422)
 # -- SPEC-CAT-02: a product with active variants cannot be bought bare --------------
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC-CAT-02: cart add accepts variant_id=None for a product with active variants")
 def test_cart_add_rejects_bare_parent_when_product_has_active_variants(client, db_session):
     token, _ = _checkout_ready_buyer(client, db_session)
     product = _make_product(db_session, _make_category(db_session).id, stock=10)
@@ -80,7 +79,6 @@ def test_cart_add_rejects_bare_parent_when_product_has_active_variants(client, d
     assert response.status_code in REJECTED
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC-CAT-02: cart update accepts variant_id=None for a product with active variants")
 def test_cart_update_rejects_bare_parent_when_product_has_active_variants(client, db_session):
     token, _ = _checkout_ready_buyer(client, db_session)
     product = _make_product(db_session, _make_category(db_session).id, stock=10)
@@ -94,7 +92,6 @@ def test_cart_update_rejects_bare_parent_when_product_has_active_variants(client
     assert response.status_code in REJECTED
 
 
-@pytest.mark.xfail(strict=True, reason="SPEC-CAT-02: create_order prices and decrements the parent for a bare line when variants exist")
 def test_create_order_rejects_bare_line_when_product_has_active_variants(client, db_session):
     token, address_id = _checkout_ready_buyer(client, db_session)
     product = _make_product(db_session, _make_category(db_session).id, stock=10)

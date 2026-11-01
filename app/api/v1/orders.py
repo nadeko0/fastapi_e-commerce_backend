@@ -73,6 +73,7 @@ from app.services.orders import (
     is_unpaid_and_new,
     is_valid_status_transition,
     lock_stock_rows,
+    product_has_active_variants,
     products_with_cached_stock,
 )
 from app.services.payment.exceptions import (
@@ -323,6 +324,12 @@ async def create_order(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"Product {item.product_id} not available in requested quantity"
                 )
+        elif await db.scalar(product_has_active_variants(item.product_id)):
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Product {item.product_id} requires a variant"
+            )
 
         price_at_time = (
             variant.price_override

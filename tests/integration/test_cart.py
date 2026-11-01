@@ -799,10 +799,12 @@ def test_different_variants_of_same_product_are_distinct_cart_lines(client, db_s
         json={"product_id": product.id, "variant_id": variant_blue.id, "quantity": 1},
         headers=_auth_headers(token),
     )
-    # And the plain product itself (no variant) is a third, separate line.
+    # A product without variants is a third, separate line. (The product
+    # itself, bare, is refused once it has active variants: SPEC-CAT-02.)
+    simple = _make_product(db_session, category.id, stock=10, price="9.99")
     response = client.post(
         f"{CART_PREFIX}/items",
-        json={"product_id": product.id, "quantity": 1},
+        json={"product_id": simple.id, "quantity": 1},
         headers=_auth_headers(token),
     )
 
@@ -840,13 +842,13 @@ def test_remove_variant_line_leaves_plain_product_line_untouched(client, db_sess
     token = _register_and_login(client, _valid_registration_payload())
     category = _make_category(db_session)
     product = _make_product(db_session, category.id, stock=10, price="9.99")
-    variant = _make_variant(db_session, product.id, stock=5)
-
     client.post(
         f"{CART_PREFIX}/items",
         json={"product_id": product.id, "quantity": 1},
         headers=_auth_headers(token),
     )
+    # A variant added later: the plain line in the cart predates it.
+    variant = _make_variant(db_session, product.id, stock=5)
     client.post(
         f"{CART_PREFIX}/items",
         json={"product_id": product.id, "variant_id": variant.id, "quantity": 1},
@@ -1554,8 +1556,8 @@ def test_inactive_variant_line_is_marked_and_left_out_of_the_total(client, db_se
     token = _register_and_login(client, _valid_registration_payload())
     category = _make_category(db_session)
     product = _make_product(db_session, category.id, price="9.99")
+    _add(client, token, product.id, 1)  # before the product had variants
     variant = _make_variant(db_session, product.id, price_override="14.50")
-    _add(client, token, product.id, 1)
     _add(client, token, product.id, 1, variant_id=variant.id)
     _deactivate(db_session, ProductVariant, variant.id)
 
@@ -1735,7 +1737,8 @@ def test_cart_query_count_does_not_grow_with_the_number_of_lines(client, db_sess
     def _add_plain_and_variant_line(n):
         product = _make_product(db_session, category.id)
         variant = _make_variant(db_session, product.id, sku=f"SKU-{n}")
-        _add(client, token, product.id, 1)
+        simple = _make_product(db_session, category.id)  # sold bare: it has no variants
+        _add(client, token, simple.id, 1)
         _add(client, token, product.id, 1, variant_id=variant.id)
 
     def _selects(call):

@@ -39,6 +39,7 @@ from app.schemas.common import (
     cart_unit_price,
     resolve_cart_line,
 )
+from app.services.orders import product_has_active_variants
 from app.services.redis import (
     CartFullError,
     CartNotFoundError,
@@ -249,6 +250,16 @@ async def _get_active_product(db: AsyncSession, product_id: int) -> Product:
             detail="Product not found"
         )
     return product
+
+
+async def _require_variant_if_product_has_variants(db: AsyncSession, product_id: int) -> None:
+    """A product with active variants is bought through one of them: a line
+    without variant_id would sell the parent's own price and stock."""
+    if await db.scalar(product_has_active_variants(product_id)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="variant_id is required: this product has variants"
+        )
 
 
 async def _get_active_variant_for_product(
@@ -462,6 +473,8 @@ async def add_to_cart(
     variant = None
     if variant_id is not None:
         variant = await _get_active_variant_for_product(db, product_id, variant_id)
+    else:
+        await _require_variant_if_product_has_variants(db, product_id)
 
     stock_quantity = variant.stock_quantity if variant else product.stock_quantity
 
@@ -544,6 +557,8 @@ async def update_cart_item(
     variant = None
     if variant_id is not None:
         variant = await _get_active_variant_for_product(db, product_id, variant_id)
+    else:
+        await _require_variant_if_product_has_variants(db, product_id)
     stock_quantity = variant.stock_quantity if variant else product.stock_quantity
 
     try:

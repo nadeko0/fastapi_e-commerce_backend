@@ -22,6 +22,9 @@ def shop(client, db_session, monkeypatch):
     shop.product_row.description = "A fine widget for all your widget needs"
     db_session.commit()
     shop.variant_row = shop.variant(shop.product_row, price_override="12.50")
+    # What the cart and order tests buy: a product with active variants is
+    # not sold bare (SPEC-CAT-02), so it is not product_row.
+    shop.simple_row = shop.product()
     return shop
 
 
@@ -71,7 +74,7 @@ def test_admin_product_writes_carry_currency(shop):
 
 def test_cart_lines_and_total_carry_currency(shop):
     buyer = shop.buyer()
-    shop.add_to_cart(buyer, shop.product_row, 2)
+    shop.add_to_cart(buyer, shop.simple_row, 2)
     cart = shop.client.get(f"{API}/cart", headers=buyer.headers).json()
     assert cart["currency"] == "EUR"
     assert cart["items"] and all(i["currency"] == "EUR" for i in cart["items"])
@@ -79,8 +82,8 @@ def test_cart_lines_and_total_carry_currency(shop):
 
 def test_cart_price_changes_carry_currency(shop, db_session):
     buyer = shop.buyer()
-    shop.add_to_cart(buyer, shop.product_row)
-    shop.product_row.price = shop.product_row.price + 1
+    shop.add_to_cart(buyer, shop.simple_row)
+    shop.simple_row.price = shop.simple_row.price + 1
     db_session.commit()
     result = shop.client.post(f"{API}/cart/validate", headers=buyer.headers)
     changes = result.json()["price_changes"]
@@ -89,7 +92,7 @@ def test_cart_price_changes_carry_currency(shop, db_session):
 
 def test_order_and_its_items_sit_under_the_orders_currency(shop):
     buyer = shop.buyer()
-    order = shop.order_of(buyer, shop.product_row)
+    order = shop.order_of(buyer, shop.simple_row)
     assert order["currency"] == "EUR"
     assert order["items"]
 

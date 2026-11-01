@@ -62,10 +62,13 @@ def _place(client, db_session, email="buyer@example.com", quantity=3, variant_qu
         headers=_auth_headers(token),
     )
     if variant_quantity:
-        variant = _make_variant(db_session, product.id, stock=5)
+        # A variant of another product: the product with variants is not
+        # sold bare (SPEC-CAT-02), so it cannot also be the plain line.
+        variant_product = _make_product(db_session, product.category_id, stock=10)
+        variant = _make_variant(db_session, variant_product.id, stock=5)
         client.post(
             f"{CART_PREFIX}/items",
-            json={"product_id": product.id, "quantity": variant_quantity, "variant_id": variant.id},
+            json={"product_id": variant_product.id, "quantity": variant_quantity, "variant_id": variant.id},
             headers=_auth_headers(token),
         )
     response = client.post(

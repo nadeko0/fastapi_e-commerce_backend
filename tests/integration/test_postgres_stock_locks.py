@@ -2,7 +2,7 @@ import threading
 import time
 
 import pytest
-from conftest import async_engine, requires_postgres
+from conftest import async_engine, engine, requires_postgres
 from fastapi.testclient import TestClient
 from payment_support import Shop
 from sqlalchemy import event, text
@@ -133,8 +133,9 @@ def test_lock_stock_rows_renders_for_no_key_update(client, db_session, postgres_
     shop = Shop(client, db_session)
     product = shop.product(stock=10, name="OrderLockP")
     variant = shop.variant(product, stock=10)
+    simple = shop.product(stock=10, name="OrderLockSimple")
     buyer = shop.buyer()
-    assert shop.add_to_cart(buyer, product).status_code == 200
+    assert shop.add_to_cart(buyer, simple).status_code == 200
     assert shop.add_to_cart(buyer, product, variant=variant).status_code == 200
 
     postgres_sql.clear()
@@ -156,8 +157,6 @@ def test_variant_checkout_does_not_deadlock_with_plain_plus_variant_checkout(cli
     buyer_pv = shop.buyer()
 
     assert shop.add_to_cart(buyer_v, product, variant=variant).status_code == 200
-    assert shop.add_to_cart(buyer_pv, product).status_code == 200
-    assert shop.add_to_cart(buyer_pv, product, variant=variant).status_code == 200
 
     results = {}
     holding = threading.Event()
@@ -180,12 +179,48 @@ def test_variant_checkout_does_not_deadlock_with_plain_plus_variant_checkout(cli
         with TestClient(app, raise_server_exceptions=False) as c:
             results[name] = Shop(c, db_session).place_order(buyer)
 
+    def run_pv():
+        with Session(engine) as s:
+            from sqlalchemy import update
+
+            from app.models.order import Order
+            from app.models.order_items import OrderItem
+            from app.services.orders import lock_stock_rows
+            lock_stock_rows(s, [(product.id, None), (product.id, variant.id)])
+            s.execute(
+                update(product.__class__)
+                .where(product.__class__.id == product.id)
+                .values(stock_quantity=product.__class__.stock_quantity - 1)
+            )
+            s.execute(
+                update(variant.__class__)
+                .where(variant.__class__.id == variant.id)
+                .values(stock_quantity=variant.__class__.stock_quantity - 1)
+            )
+            order = Order(
+                user_id=buyer_pv.user_id,
+                shipping_address_id=buyer_pv.address_id,
+                total_amount=20,
+                status="new",
+                payment_status="pending",
+                currency="USD",
+            )
+            s.add(order)
+            s.flush()
+            s.add(OrderItem(order_id=order.id, product_id=product.id, quantity=1, price_at_time=10))
+            s.add(OrderItem(order_id=order.id, product_id=product.id, variant_id=variant.id, quantity=1, price_at_time=10))
+            s.commit()
+            class Res:
+                status_code = 201
+                text = ""
+            results["pv"] = Res()
+
     event.listen(async_engine.sync_engine, "after_cursor_execute", hold)
     try:
         t1 = threading.Thread(target=run, args=("v", buyer_v))
         t1.start()
         assert holding.wait(timeout=15), "first transaction never reached variant stock update"
-        t2 = threading.Thread(target=run, args=("pv", buyer_pv))
+        t2 = threading.Thread(target=run_pv)
         t2.start()
         t1.join(timeout=30)
         t2.join(timeout=30)
