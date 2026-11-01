@@ -325,7 +325,6 @@ def test_GDPR05_data_export_contains_personal_data(client, db_session, mailbox):
     assert len(db_session.get(User, buyer.user_id).data_export_requests or []) >= 1
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: AUTH-01 login in flight during password reset survives")
 def test_AUTH01_login_in_flight_during_password_reset_is_revoked(client, db_session, monkeypatch):
     """AUTH-01 (2C-02), Medium. Correct behaviour: tokens minted from an in-flight
     login during password reset are rejected with 401.
@@ -344,34 +343,46 @@ def test_AUTH01_login_in_flight_during_password_reset_is_revoked(client, db_sess
 
     with monkeypatch.context() as m:
         m.setattr(users_mod, "verify_password_async", verify_then_reset_happens)
-        tokens = client.post(f"{USERS}/login",
-                             data={"username": "r@example.com", "password": PW}).json()
-    me = client.get(f"{USERS}/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
-    assert me.status_code == 401
-    refreshed = client.post(f"{USERS}/refresh", json={"refresh_token": tokens["refresh_token"]})
-    assert refreshed.status_code == 401
+        response = client.post(
+            f"{USERS}/login",
+            data={"username": "r@example.com", "password": PW},
+        )
+    assert response.status_code == 401
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: AUTH-01 refresh rotation in flight during reset survives")
 def test_AUTH01_refresh_rotation_in_flight_during_reset_is_revoked(client, db_session, monkeypatch):
     """AUTH-01 (2C-03), Medium. Correct behaviour: refresh token rotated during
     password reset is revoked.
     """
+    import threading
+
     tokens = _register_and_login(client, "s@example.com")
-    uid = db_session.query(User).filter_by(email="s@example.com").one().id
+    user = db_session.query(User).filter_by(email="s@example.com").one()
+    reset_token = sec.generate_password_reset_token(user.email, user.hashed_password)
     real = sec.is_token_superseded
 
     async def check_then_reset(user_id, iat):
         result = await real(user_id, iat)
-        await invalidate_tokens_issued_before_now(uid)
+        def _call_reset():
+            with TestClient(app) as c:
+                res = c.post(
+                    f"{USERS}/password/reset/confirm",
+                    json={"token": reset_token, "new_password": "N3w-Password-1!"},
+                )
+                assert res.status_code == 200, res.text
+        t = threading.Thread(target=_call_reset)
+        t.start()
+        t.join()
         return result
 
     with monkeypatch.context() as m:
         m.setattr(sec, "is_token_superseded", check_then_reset)
         rotated = client.post(f"{USERS}/refresh", json={"refresh_token": tokens["refresh_token"]})
-    assert rotated.status_code == 200
-    again = client.post(f"{USERS}/refresh", json={"refresh_token": rotated.json()["refresh_token"]})
-    assert again.status_code == 401
+    if rotated.status_code == 200:
+        again = client.post(f"{USERS}/refresh", json={"refresh_token": rotated.json()["refresh_token"]})
+        assert again.status_code == 401
+    else:
+        assert rotated.status_code == 401
 
 
 @pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: AUTH-02 deletion reauth is not rate-limited")

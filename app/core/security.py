@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import math
 import os
 import re
 import time
@@ -622,7 +623,7 @@ async def logout(access_token: str, refresh_token: str | None = None) -> None:
         )
         # time.time(), not a naive UTC datetime's timestamp(): the latter reads a
         # naive UTC value as local time and is off by the host's UTC offset.
-        expires_in = max(int(payload["exp"] - time.time()), 1)
+        expires_in = max(math.ceil(payload["exp"] - time.time()), 1)
     except jwt.PyJWTError:
         expires_in = 1
     # The access token was authenticated by the route a moment ago, so it

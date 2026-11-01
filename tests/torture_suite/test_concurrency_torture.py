@@ -311,14 +311,6 @@ def test_refresh_racing_logout_leaves_no_live_refresh_token(shop, fake_redis, ro
                  if i != N // 2 and r.status_code == 200]
     assert len(refreshed) <= 1
     live = live_refresh_jtis(fake_redis, family)
-    if KNOWN_BUG_ALLOWANCES and refreshed and live == [claims(refreshed[0])["jti"]]:
-        # KNOWN-BUG ALLOWANCE, BUG-1 (strict reproducer:
-        # test_bug_logout_racing_refresh_leaves_a_live_refresh_token): the one
-        # token rotated while logout ran - and only that one - survived it.
-        # Never seen with fakeredis (no network gap between SMEMBERS and DEL),
-        # tolerated so that a lucky interleaving does not flake the burst.
-        print("KNOWN BUG-1 (token rotated during logout survives) tolerated")
-        return
     assert live == [], "a refresh token outlived logout"
     for token in refreshed:
         assert shop.client.post(
@@ -350,11 +342,6 @@ class _SlowSmembersRedis(fakeredis.FakeAsyncRedis):
 
 
 @requires_postgres
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG DISCOVERED (BUG-1): a refresh token rotated while logout revokes its family survives "
-    "the logout - revoke_refresh_family reads the members then deletes them in separate round "
-    "trips (app/services/redis_async.py:424-429) while rotate_refresh_token adds the new jti "
-    "before redeeming the old one (app/core/security.py:537-539)"))
 def test_bug_logout_racing_refresh_leaves_a_live_refresh_token(
     shop, fake_redis, monkeypatch
 ):

@@ -400,9 +400,10 @@ def test_logout_of_a_token_with_an_unreadable_subject_stops_after_the_blacklist(
 
 def test_logout_everywhere_leaves_exactly_these_keys(fake_redis):
     access = create_access_token(7)
-    asyncio.run(issue_refresh_token(7))
+    refresh = asyncio.run(issue_refresh_token(7))
+    family = jwt.decode(refresh, options={"verify_signature": False})["family"]
 
     asyncio.run(logout(access))
 
     keys = {k.replace(_jti(access), "J") for k in fake_redis.keys("*") if not k.startswith("refresh_active")}
-    assert keys == {"blacklist:jti:J", "pwd_changed:7"}
+    assert keys == {"blacklist:jti:J", "pwd_changed:7", f"refresh_revoked:{family}"}

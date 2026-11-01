@@ -32,6 +32,7 @@ from app.core.security import (
     DUMMY_PASSWORD_HASH,
     RefreshTokenError,
     RevocationUnavailable,
+    async_redis_service,
     create_access_token,
     generate_email_verification_token,
     generate_password_reset_token,
@@ -392,6 +393,18 @@ async def login(
         # The password was right and nothing is wrong with the account: a
         # 503 the client retries, as for the failed-attempt count above.
         raise login_unavailable() from e
+    # A password reset that landed while bcrypt ran (the hash was read
+    # before it): these tokens would be newer than the reset's watermark and
+    # outlive the reset. Re-read after minting; a reset that commits later
+    # is caught by its second watermark (reset_password).
+    current_hash = await db.scalar(select(User.hashed_password).where(User.id == user_id))
+    await db.close()
+    if current_hash != hashed_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     logger.info(f"Tokens generated for user {user_id}")
 
     # The cart the visitor filled before logging in becomes part of the
@@ -1072,6 +1085,15 @@ async def reset_password(
     await db.commit()
     if updated != 1:
         raise _invalid_reset_token()
+
+    # Evict sessions that raced the reset: a second watermark after the
+    # commit refuses tokens a login or refresh rotation minted while the
+    # hash was changing, and every refresh family is ended. Best effort:
+    # the password has already changed, the first watermark stands.
+    if not await invalidate_tokens_issued_before_now(user_id):
+        logger.error(f"Password reset of user {user_id}: second watermark not recorded")
+    if not await async_redis_service.revoke_user_refresh_families(user_id):
+        logger.error(f"Password reset of user {user_id}: refresh families not revoked")
 
     # The way out of a login refused for too many failed attempts: the
     # new password starts with a clean record - the email's own count

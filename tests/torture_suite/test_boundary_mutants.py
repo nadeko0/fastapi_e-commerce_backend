@@ -434,9 +434,9 @@ def test_email_verification_link_works_for_exactly_its_lifetime(client, db_sessi
 
 @pytest.mark.parametrize("logout_after", [
     pytest.param(1.0, id="whole-second"),  # exp - now is whole: int() loses nothing
-    pytest.param(0.001, id="1ms", marks=bug(BUG_D1)),
-    pytest.param(0.5, id="500ms", marks=bug(BUG_D1)),
-    pytest.param(0.999, id="999ms", marks=bug(BUG_D1)),
+    pytest.param(0.001, id="1ms"),
+    pytest.param(0.5, id="500ms"),
+    pytest.param(0.999, id="999ms"),
 ])
 def test_bug_logout_blacklist_expires_before_the_access_token(client, db_session, clock,
                                                               logout_after):

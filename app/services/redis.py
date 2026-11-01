@@ -467,7 +467,14 @@ class RedisService:
             data, deleted = pipe.execute()
             if not data or not deleted:
                 return None
-            return json.loads(data)
+            payload = json.loads(data)
+            # A family revoked while this token was being rotated: the
+            # revocation may have read the family's members before the new
+            # jti was added to it (revoke_refresh_family). Refused, so the
+            # caller revokes the family again, new jti included.
+            if self._redis.exists(f"refresh_revoked:{payload.get('family')}"):
+                return None
+            return payload
         except RedisError as e:
             self._handle_redis_error(f"consume_refresh_token: {str(e)}")
             return None
@@ -476,6 +483,13 @@ class RedisService:
         """Revoke every jti ever issued in a rotation chain - used on reuse
         detection (stolen-token signal) and on logout."""
         try:
+            # Marked first: a rotation that adds a jti to the family after
+            # the SMEMBERS below cannot then redeem its old token
+            # (consume_refresh_token), so no token outlives the revocation.
+            self._redis.set(
+                f"refresh_revoked:{family_id}", "1",
+                ex=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+            )
             family_key = f"refresh_family:{family_id}"
             members = self._redis.smembers(family_key)
             if members:
