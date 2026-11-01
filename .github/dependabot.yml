@@ -4,6 +4,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown: {default-days: 14}
     groups:
       actions:
         update-types: ["minor", "patch"]
@@ -11,6 +12,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown: {default-days: 14}
     groups:
       python-minor-patch:
         update-types: ["minor", "patch"]
@@ -18,7 +20,11 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown: {default-days: 14}
+    ignore: [{dependency-name: "python", update-types: ["version-update:semver-major"]}]
   - package-ecosystem: "docker-compose"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown: {default-days: 14}
+    ignore: [{dependency-name: "postgres", update-types: ["version-update:semver-major"]}]
