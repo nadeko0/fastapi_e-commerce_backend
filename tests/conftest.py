@@ -42,6 +42,9 @@ os.environ.setdefault("BCRYPT_ROUNDS", "4")
 # A fixed browser origin for tests/integration/test_cors.py: assigned, not
 # defaulted, so a developer's .env cannot change what that test expects.
 os.environ["BACKEND_CORS_ORIGINS"] = "http://localhost:3000"
+# Assigned for the same reason: the OpenAPI snapshot and the password policy
+# (which refuses the service name) would otherwise follow a developer's .env.
+os.environ["PROJECT_NAME"] = "E-commerce Backend"
 
 import atexit
 import fnmatch
