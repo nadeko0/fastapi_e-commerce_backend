@@ -64,10 +64,9 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
     ])
 
     # Same str-or-enum handling as send_order_status_update_email below, and
-    # for the same reason: app/tasks.py's send_order_confirmation Celery task
-    # passes a freshly-queried Order, whose .status is a plain str. Fixed
-    # there first and missed here, so every order confirmation sent through
-    # Celery raised AttributeError - found by running a real worker against
+    # for the same reason: a freshly-queried Order's .status is a plain str.
+    # Fixed there first and missed here, so every order confirmation sent
+    # from a Celery task, as they were then, raised AttributeError - found by running a real worker against
     # real orders (scripts/loadtest/traced_celery.py), which the unit test
     # could not catch because its fake order always carried an enum-like
     # status.
@@ -111,8 +110,7 @@ def send_order_status_update_email(to_email: str, order: Order) -> bool:
     # the enum) but not for the raw SQLAlchemy Order this function is
     # type-hinted to accept: Order.status is a bare String column (see
     # app/models/order.py), so a caller handing this a
-    # freshly-queried Order (e.g. app/tasks.py's send_order_status_update
-    # Celery task) got a plain str back and `.value` raised AttributeError.
+    # freshly-queried Order got a plain str back and `.value` raised AttributeError.
     status_value = order.status.value if hasattr(order.status, "value") else order.status
     html_content = f"""
     <html>

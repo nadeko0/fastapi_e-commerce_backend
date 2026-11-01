@@ -15,8 +15,7 @@ from celery.signals import (
     worker_process_shutdown,
 )
 from sqlalchemy import String, cast, create_engine, func, literal, select, update
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import joinedload, selectinload, sessionmaker
+from sqlalchemy.orm import selectinload, sessionmaker
 
 from app.core import celery_context, telemetry
 from app.core.clock import utc_now
@@ -33,8 +32,6 @@ from app.services import stripe_events
 from app.services.email import (
     send_low_stock_alert_email,
     send_order_cancellation_email,
-    send_order_confirmation_email,
-    send_order_status_update_email,
 )
 from app.services.orders import (
     UNPAID_PAYMENT_STATUSES,
@@ -112,14 +109,13 @@ celery.conf.update(
         'payments': {},
     },
     # Keyed by the tasks' registered names. Every task below is declared with
-    # an explicit name= ("send_order_confirmation", not
-    # "app.tasks.send_order_confirmation"), and Celery matches routes,
+    # an explicit name= ("process_stripe_event", not
+    # "app.tasks.process_stripe_event"), and Celery matches routes,
     # annotations and beat entries against that name, not the import path.
     # These used to be written with an "app.tasks." prefix and so matched
     # nothing: routing only worked because each task also sets queue= in its
     # decorator, and the rate limits were never applied at all.
     task_routes={
-        'send_*': {'queue': 'emails'},
         'cleanup_*': {'queue': 'cleanup'},
         'update_*': {'queue': 'stats'},
         'check_*': {'queue': 'stats'},
@@ -127,8 +123,6 @@ celery.conf.update(
     # No glob patterns here: task_annotations is looked up by exact task
     # name (or '*' for all tasks), unlike task_routes.
     task_annotations={
-        'send_order_confirmation': {'rate_limit': '100/m'},
-        'send_order_status_update': {'rate_limit': '100/m'},
         'cleanup_inactive_accounts': {'rate_limit': '10/m'},
     },
     broker_transport_options={
@@ -192,105 +186,6 @@ def task_session():
     finally:
         db.close()
 
-# How long a "this email was already sent" marker (below) is kept in Redis.
-# Must comfortably outlive Celery's own redelivery window
-# (broker_transport_options['visibility_timeout'] above, 1 hour) plus the
-# max_retries/retry_backoff schedule on these tasks, so a legitimate retry
-# still sees the marker and skips resending; 7 days is generous slack for
-# both while still expiring rather than growing the keyspace forever.
-EMAIL_SENT_MARKER_TTL_SECONDS = 7 * 24 * 3600
-
-@celery.task(
-    name="send_order_confirmation",
-    queue="emails",
-    retry_backoff=True,
-    max_retries=3,
-    # Without autoretry_for, Celery's own max_retries/retry_backoff options
-    # above do nothing at all: they only configure what happens when the
-    # task body calls self.retry() (which requires bind=True) - a plain,
-    # unbound task that simply raises is marked FAILURE and acked (this task
-    # doesn't set bind=True, so it has no `self` to call .retry() on). That
-    # made this look like it retried transient DB hiccups when it never did.
-    # Scoped to OperationalError (the DB connectivity/timeout exception
-    # class) rather than all exceptions, so a genuine bug in this task still
-    # fails fast instead of being retried 3 times first.
-    autoretry_for=(OperationalError,),
-)
-def send_order_confirmation(order_id: int) -> None:
-    # Celery's at-least-once delivery (task_acks_late=True +
-    # task_reject_on_worker_lost=True, set above) means this task can be
-    # redelivered and re-run for the same order_id - a worker killed after
-    # the email was already sent but before the broker recorded the ack, or
-    # (now that autoretry_for is wired up) a genuine retry after a transient
-    # OperationalError raised partway through. Without a dedup guard, the
-    # customer would receive the same "Order Confirmation" email twice.
-    # mark_once claims the marker atomically in Redis before sending, so a
-    # redelivered/retried task sees its own prior success and skips the
-    # resend instead of sending it again.
-    #
-    # The marker is claimed only after every read the email needs: the
-    # order, its user and its items' products are loaded up front instead
-    # of lazily inside the send. It used to be claimed before the order was
-    # even queried, so a transient OperationalError on any of those reads -
-    # the very error autoretry_for retries - left the marker set, the retry
-    # skipped the send, and the customer never got the email.
-    with task_session() as db:
-        order = db.scalars(
-            select(Order)
-            .options(
-                joinedload(Order.user),
-                selectinload(Order.items).joinedload(OrderItem.product),
-            )
-            .where(Order.id == order_id)
-        ).first()
-        if not order:
-            return
-        if not RedisService().mark_once(
-            f"email_sent:order_confirmation:{order_id}", EMAIL_SENT_MARKER_TTL_SECONDS
-        ):
-            return
-        # Everything the email needs is loaded: end the transaction before
-        # the (possibly slow) SMTP call, not after it.
-        db.expunge_all()
-        db.rollback()
-        send_order_confirmation_email(order.user.email, order)
-
-@celery.task(
-    name="send_order_status_update",
-    queue="emails",
-    retry_backoff=True,
-    max_retries=3,
-    autoretry_for=(OperationalError,),
-)
-def send_order_status_update(order_id: int) -> None:
-    with task_session() as db:
-        # joinedload(Order.user): the recipient's address must be read before
-        # the marker below is claimed, not lazily after it (see
-        # send_order_confirmation above for what a failed read did then).
-        order = db.scalars(
-            select(Order).options(joinedload(Order.user)).where(Order.id == order_id)
-        ).first()
-        if not order:
-            return
-        # Keyed by status (not just order_id): unlike the one-shot confirmation
-        # email above, this task legitimately fires again every time the order's
-        # status changes - only a redelivery/retry of the *same* status update
-        # should be deduped. order.status is a plain str here (Order.status is a
-        # bare String column, not a SQLAlchemy Enum type - see
-        # app/models/order.py) rather than an OrderStatus
-        # member, unlike OrderResponse.status (a Pydantic model, which does
-        # coerce it to the enum) - handle both shapes rather than assuming
-        # `.value` is always present.
-        status_value = order.status.value if hasattr(order.status, "value") else order.status
-        if not RedisService().mark_once(
-            f"email_sent:order_status_update:{order_id}:{status_value}",
-            EMAIL_SENT_MARKER_TTL_SECONDS,
-        ):
-            return
-        # Loaded above: end the transaction before the SMTP call.
-        db.expunge_all()
-        db.rollback()
-        send_order_status_update_email(order.user.email, order)
 
 # Accounts anonymised per transaction by purge_expired_deletion_requests.
 # Each account costs a bcrypt hash (BCRYPT_ROUNDS, ~0.25 s at 12), so a

@@ -102,117 +102,6 @@ def _make_order_with_item(
     return order
 
 
-def test_send_order_confirmation_sends_email_for_existing_order(
-    db_session, tasks_db, monkeypatch
-):
-    sent = []
-    monkeypatch.setattr(
-        "app.tasks.send_order_confirmation_email",
-        lambda to_email, order: sent.append((to_email, order.id)),
-    )
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-
-    tasks.send_order_confirmation(order.id)
-
-    assert sent == [(user.email, order.id)]
-
-
-def test_send_order_confirmation_does_not_resend_on_redelivery(
-    db_session, tasks_db, monkeypatch
-):
-    """Regression test: Celery's at-least-once delivery (task_acks_late +
-    task_reject_on_worker_lost, and now autoretry_for on this task) means
-    send_order_confirmation can legitimately run twice for the same
-    order_id (worker crash after send but before ack, or a retried
-    OperationalError). Without a dedup guard the customer would get the
-    "Order Confirmation" email twice."""
-    sent = []
-    monkeypatch.setattr(
-        "app.tasks.send_order_confirmation_email",
-        lambda to_email, order: sent.append((to_email, order.id)),
-    )
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-
-    tasks.send_order_confirmation(order.id)
-    tasks.send_order_confirmation(order.id)  # simulated redelivery/retry
-
-    assert sent == [(user.email, order.id)]
-
-
-def test_send_order_confirmation_no_op_for_missing_order(db_session, tasks_db, monkeypatch):
-    sent = []
-    monkeypatch.setattr(
-        "app.tasks.send_order_confirmation_email", lambda *a, **k: sent.append(a)
-    )
-
-    tasks.send_order_confirmation(999999)
-
-    assert sent == []
-
-
-def test_send_order_status_update_sends_email_for_existing_order(
-    db_session, tasks_db, monkeypatch
-):
-    sent = []
-    monkeypatch.setattr(
-        "app.tasks.send_order_status_update_email",
-        lambda to_email, order: sent.append((to_email, order.id)),
-    )
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-
-    tasks.send_order_status_update(order.id)
-
-    assert sent == [(user.email, order.id)]
-
-
-def test_send_order_status_update_does_not_resend_for_same_status(
-    db_session, tasks_db, monkeypatch
-):
-    """Same redelivery/retry concern as order confirmation, but keyed on
-    (order_id, status): a redelivered/retried task for the *same* status
-    must not resend, but a genuine later status change must still email."""
-    sent = []
-    monkeypatch.setattr(
-        "app.tasks.send_order_status_update_email",
-        lambda to_email, order: sent.append((to_email, order.id, order.status)),
-    )
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product, status="new")
-
-    tasks.send_order_status_update(order.id)
-    tasks.send_order_status_update(order.id)  # simulated redelivery/retry
-
-    assert sent == [(user.email, order.id, "new")]
-
-    order.status = "confirmed"
-    db_session.commit()
-    tasks.send_order_status_update(order.id)
-
-    assert sent == [
-        (user.email, order.id, "new"),
-        (user.email, order.id, "confirmed"),
-    ]
-
-
-def test_send_order_confirmation_and_status_update_tasks_configure_autoretry():
-    """Regression test: retry_backoff=True/max_retries=3 alone do nothing -
-    Celery only honors them when the task calls self.retry() (requires
-    bind=True) or when autoretry_for is set. Without autoretry_for, any
-    transient DB error (e.g. a dropped connection) permanently failed the
-    task on the first attempt despite looking retry-configured."""
-    from sqlalchemy.exc import OperationalError
-
-    assert tasks.send_order_confirmation.autoretry_for == (OperationalError,)
-    assert tasks.send_order_status_update.autoretry_for == (OperationalError,)
-
-
 def _first_session_fails_on_statement(monkeypatch, fail_at):
     """The first session the task opens raises OperationalError (a dropped
     connection, a statement timeout) on its fail_at-th ORM statement, lazy
@@ -235,55 +124,6 @@ def _first_session_fails_on_statement(monkeypatch, fail_at):
         return session
 
     monkeypatch.setattr("app.tasks.SessionLocal", factory)
-
-
-@pytest.mark.parametrize("fail_at", [1, 2, 3])
-def test_send_order_confirmation_retry_after_a_db_error_still_sends_once(
-    db_session, tasks_db, monkeypatch, fail_at
-):
-    """Regression test: the "already sent" marker was claimed before the
-    order was even read. A transient OperationalError on that read - the
-    very error autoretry_for is there for - triggered the retry, the retry
-    found the marker and returned, and the customer never got the email.
-    Whichever statement fails, the retry must send it, exactly once."""
-    sent = []
-    monkeypatch.setattr(
-        "app.tasks.send_order_confirmation_email",
-        lambda to_email, order: sent.append(
-            (to_email, order.id, [i.product_name for i in order.items])
-        ),
-    )
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-    _first_session_fails_on_statement(monkeypatch, fail_at)
-
-    result = tasks.send_order_confirmation.apply(args=(order.id,))
-
-    assert result.successful(), result.traceback
-    assert sent == [(user.email, order.id, ["Widget"])]
-
-
-@pytest.mark.parametrize("fail_at", [1, 2, 3])
-def test_send_order_status_update_retry_after_a_db_error_still_sends_once(
-    db_session, tasks_db, monkeypatch, fail_at
-):
-    # Same, for the status email: the marker was claimed before
-    # order.user (a lazy load) was read for the recipient's address.
-    sent = []
-    monkeypatch.setattr(
-        "app.tasks.send_order_status_update_email",
-        lambda to_email, order: sent.append((to_email, order.id)),
-    )
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-    _first_session_fails_on_statement(monkeypatch, fail_at)
-
-    result = tasks.send_order_status_update.apply(args=(order.id,))
-
-    assert result.successful(), result.traceback
-    assert sent == [(user.email, order.id)]
 
 
 def test_no_periodic_task_sweeps_the_cart_keyspace():
@@ -433,8 +273,6 @@ def test_routes_and_annotations_match_real_tasks():
 def test_rate_limits_are_actually_applied_to_the_tasks():
     tasks.celery.finalize()
 
-    assert tasks.send_order_confirmation.rate_limit == "100/m"
-    assert tasks.send_order_status_update.rate_limit == "100/m"
     assert tasks.cleanup_inactive_accounts.rate_limit == "10/m"
 
 
@@ -458,17 +296,13 @@ def test_tasks_close_their_database_session(db_session, tasks_db, monkeypatch):
         return session
 
     monkeypatch.setattr("app.tasks.SessionLocal", tracking_factory)
-    monkeypatch.setattr("app.tasks.send_order_confirmation_email", lambda *a, **k: True)
-    monkeypatch.setattr("app.tasks.send_order_status_update_email", lambda *a, **k: True)
     monkeypatch.setattr("app.tasks.send_low_stock_alert_email", lambda *a, **k: True)
 
-    tasks.send_order_confirmation(999_999)
-    tasks.send_order_status_update(999_999)
     tasks.cleanup_inactive_accounts()
     tasks.update_product_stats()
     tasks.check_low_stock()
 
-    assert len(closed) == 5, "each task that opens a session must close it"
+    assert len(closed) == 3, "each task that opens a session must close it"
     for session in closed:
         assert not session.in_transaction()
 
@@ -487,128 +321,6 @@ def test_check_low_stock_sends_nothing_when_all_products_well_stocked(
     assert sent == []
 
 
-# --- Email tasks: what is sent, retries, the "already sent" markers ----------
-
-
-def test_send_order_confirmation_renders_the_real_email(db_session, tasks_db, monkeypatch):
-    """End to end through the real message builder, only the provider
-    replaced: the task hands it a freshly queried Order, not the
-    OrderResponse the API passes, and that difference broke it before."""
-    outbox = []
-
-    class Capture:
-        def send(self, to_email, subject, html_content):
-            outbox.append((to_email, subject, html_content))
-            return True
-
-    monkeypatch.setattr("app.services.email.get_email_provider", lambda: Capture())
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product, quantity=3)
-
-    tasks.send_order_confirmation(order.id)
-
-    [(to_email, subject, body)] = outbox
-    assert to_email == user.email
-    assert subject == f"Order Confirmation #{order.id}"
-    assert "Widget" in body and "<td>3</td>" in body
-    assert f"Total Amount: {order.total_amount} {order.currency}" in body
-
-
-def test_send_order_confirmation_marker_outlives_the_redelivery_window(
-    db_session, tasks_db, monkeypatch, fake_redis
-):
-    monkeypatch.setattr("app.tasks.send_order_confirmation_email", lambda *a: True)
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-
-    tasks.send_order_confirmation(order.id)
-
-    ttl = fake_redis.ttl(f"email_sent:order_confirmation:{order.id}")
-    visibility_timeout = tasks.celery.conf.broker_transport_options["visibility_timeout"]
-    assert visibility_timeout < ttl <= tasks.EMAIL_SENT_MARKER_TTL_SECONDS
-
-
-def test_send_order_confirmation_for_a_missing_order_claims_no_marker(
-    db_session, tasks_db, fake_redis
-):
-    tasks.send_order_confirmation(424242)
-
-    assert fake_redis.exists("email_sent:order_confirmation:424242") == 0
-
-
-def test_email_tasks_still_send_when_redis_is_down(db_session, tasks_db, monkeypatch, fake_redis):
-    # mark_once fails open: one possible duplicate beats a silently lost email.
-    from redis.exceptions import ConnectionError as RedisConnectionError
-
-    def unreachable(*args, **kwargs):
-        raise RedisConnectionError("Redis is down")
-
-    monkeypatch.setattr(fake_redis, "set", unreachable)
-    sent = []
-    monkeypatch.setattr(
-        "app.tasks.send_order_confirmation_email", lambda to, order: sent.append("confirmation")
-    )
-    monkeypatch.setattr(
-        "app.tasks.send_order_status_update_email", lambda to, order: sent.append("status")
-    )
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-
-    tasks.send_order_confirmation(order.id)
-    tasks.send_order_status_update(order.id)
-
-    assert sent == ["confirmation", "status"]
-
-
-def test_email_task_gives_up_after_max_retries(db_session, tasks_db, monkeypatch):
-    """A database that stays down: the first attempt plus max_retries (3)
-    retries, then the task fails with the database error - and the marker
-    was never claimed, so a later manual re-run still sends the email."""
-    attempts = []
-
-    def broken_factory():
-        attempts.append(1)
-        session = TestingSessionLocal()
-
-        @event.listens_for(session, "do_orm_execute")
-        def _fail(orm_execute_state):
-            raise OperationalError("SELECT ...", {}, Exception("connection refused"))
-
-        return session
-
-    monkeypatch.setattr("app.tasks.SessionLocal", broken_factory)
-    sent = []
-    monkeypatch.setattr("app.tasks.send_order_confirmation_email", lambda *a: sent.append(a))
-
-    result = tasks.send_order_confirmation.apply(args=(7,))
-
-    assert result.failed()
-    assert isinstance(result.result, OperationalError)
-    assert len(attempts) == 1 + tasks.send_order_confirmation.max_retries
-    assert sent == []
-    assert RedisService().mark_once("email_sent:order_confirmation:7", 60) is True
-
-
-def test_email_tasks_do_not_retry_a_programming_error(db_session, tasks_db, monkeypatch):
-    # autoretry_for is scoped to OperationalError: a bug fails at once.
-    attempts = []
-
-    def buggy(to_email, order):
-        attempts.append(1)
-        raise ValueError("template bug")
-
-    monkeypatch.setattr("app.tasks.send_order_status_update_email", buggy)
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-
-    result = tasks.send_order_status_update.apply(args=(order.id,))
-
-    assert result.failed()
-    assert attempts == [1]
 
 
 # --- check_low_stock -------------------------------------------------------------
@@ -893,30 +605,6 @@ def test_expire_unpaid_orders_sends_no_email_inside_a_transaction(db_session, mo
     assert currency and created
 
 
-def test_send_order_confirmation_sends_no_email_inside_a_transaction(
-    db_session, tasks_db, monkeypatch
-):
-    in_transaction = _record_session_state(monkeypatch, "send_order_confirmation_email")
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-
-    tasks.send_order_confirmation(order.id)
-
-    assert in_transaction == [False]
-
-
-def test_send_order_status_update_sends_no_email_inside_a_transaction(
-    db_session, tasks_db, monkeypatch
-):
-    in_transaction = _record_session_state(monkeypatch, "send_order_status_update_email")
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-
-    tasks.send_order_status_update(order.id)
-
-    assert in_transaction == [False]
 
 
 def test_check_low_stock_sends_no_email_inside_a_transaction(

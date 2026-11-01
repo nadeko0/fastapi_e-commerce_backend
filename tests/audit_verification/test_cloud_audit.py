@@ -683,7 +683,6 @@ def test_2D04_database_uri_encodes_credentials_properly(monkeypatch):
     assert url.password == "p@ssw0rd-1234567890ab"
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2D-07 dead order email Celery tasks exist")
 def test_2D07_dead_order_email_celery_tasks_are_removed():
     """2D-07, Low. Correct behaviour: dead order email Celery tasks are removed."""
     assert not hasattr(tasks, "send_order_confirmation")

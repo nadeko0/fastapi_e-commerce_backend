@@ -20,11 +20,6 @@ from sqlalchemy import select
 
 from app import tasks
 from app.models.payment import WEBHOOK_EVENT_PROCESSED, WebhookEvent
-from tests.integration.test_tasks import (
-    _make_category_and_product,
-    _make_order_with_item,
-    _make_verified_user,
-)
 
 
 @pytest.fixture
@@ -93,24 +88,6 @@ def embedded_worker(monkeypatch) -> Generator[None]:
         tasks.celery._backend_cache = orig_backend_cache
 
 
-def test_send_order_confirmation_through_worker(
-    db_session, tasks_db, embedded_worker, monkeypatch
-):
-    """Run send_order_confirmation end to end through the embedded worker."""
-    sent: list[tuple[str, int]] = []
-    monkeypatch.setattr(
-        "app.tasks.send_order_confirmation_email",
-        lambda to_email, order: sent.append((to_email, order.id)),
-    )
-
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    order = _make_order_with_item(db_session, user, product)
-
-    async_result = tasks.send_order_confirmation.apply_async(args=[order.id])
-    async_result.get(timeout=10)
-
-    assert sent == [(user.email, order.id)]
 
 
 def test_process_stripe_event_through_worker(db_session, tasks_db, embedded_worker):

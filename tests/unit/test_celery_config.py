@@ -1,10 +1,8 @@
 import json
-from unittest.mock import patch
 
 import pytest
 from celery.exceptions import Retry
 from sqlalchemy import select
-from sqlalchemy.exc import OperationalError
 
 from app import tasks
 from app.core.config import settings
@@ -33,24 +31,9 @@ def test_task_reliability_and_retry_configuration():
     assert conf.task_acks_late is True
     assert conf.task_reject_on_worker_lost is True
 
-    # send_order_confirmation has a Celery-level retry bound:
-    assert tasks.send_order_confirmation.max_retries == 3
-    assert tasks.send_order_confirmation.autoretry_for == (OperationalError,)
-
     # process_stripe_event sets max_retries=None because retry count is bounded
     # at the application layer on WebhookEvent.attempts up to STRIPE_EVENT_MAX_RETRIES.
     assert tasks.process_stripe_event.max_retries is None
-
-
-def test_send_order_confirmation_stops_after_max_retries():
-    """A task that keeps failing stops when its retry limit is reached rather than looping."""
-    with patch(
-        "app.tasks.task_session",
-        side_effect=OperationalError("SELECT 1", {}, Exception("DB down")),
-    ):
-        result = tasks.send_order_confirmation.apply(args=(1,), throw=False)
-        assert result.failed() is True
-        assert isinstance(result.result, OperationalError)
 
 
 def test_stripe_event_retries_are_bounded_and_sweeper_ignores_failed_events(
