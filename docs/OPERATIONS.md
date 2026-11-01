@@ -79,7 +79,7 @@ Background tasks and periodic maintenance are managed by Celery (`app/tasks.py`)
 - **Worker Execution:** `celery -A app.tasks worker --loglevel=info`. Configure container managers with `stop_grace_period: 330s` (SIGTERM initiates warm shutdown; Celery tasks enforce `task_time_limit=300s` and `task_soft_time_limit=240s`).
 - **Scheduler Execution:** `celery -A app.tasks beat --loglevel=info --schedule=/tmp/celerybeat-schedule`.
 - **Reliability Invariants:** Configured with `task_acks_late=True`, `task_reject_on_worker_lost=True`, `worker_cancel_long_running_tasks_on_connection_loss=True`, and `broker_transport_options['visibility_timeout']=3600`.
-- **Deduplication:** Tasks retried after transient database errors (`OperationalError`) verify Redis markers (`email_sent:*`, 7-day TTL) using `RedisService.mark_once` to prevent sending duplicate order confirmation emails.
+- **Order Emails:** Order confirmation emails are dispatched in-process via `BackgroundTasks` after transaction commit. They are not retried; an application process crash after commit loses the email.
 
 ### Celery Beat Schedule (All Times in UTC)
 
@@ -88,9 +88,9 @@ All recurring jobs run strictly on UTC clocks:
 | Task Name | Registered Task | Schedule | Purpose |
 |---|---|---|---|
 | `cleanup-inactive-accounts` | `cleanup_inactive_accounts` | Daily at 02:30 UTC | Executes GDPR Art. 17 erasures past `DATA_DELETION_GRACE_PERIOD_DAYS`. |
-| `update-product-stats` | `update_product_stats` | Every 1 hour | Recalculates product sales velocity and view statistics. |
+| `update-product-stats` | `update_product_stats` | Every 1 hour | Caches the 20 best-selling products of the last 30 days (quantity, revenue) in Redis `product_stats`. |
 | `check-low-stock` | `check_low_stock` | Every 4 hours | Dispatches low-inventory notification emails to `ADMIN_EMAIL`. |
-| `cancel-expired-unpaid-orders` | `cancel_expired_unpaid_orders` | Every 5 minutes | Cancels orders unpaid after `UNPAID_ORDER_EXPIRE_MINUTES` (default 30 min) and returns reserved inventory. |
+| `cancel-expired-unpaid-orders` | `cancel_expired_unpaid_orders` | Every 5 minutes | Cancels orders unpaid after `UNPAID_ORDER_EXPIRE_MINUTES` (default 30 min) whose attempts have aged past `CHECKOUT_SESSION_EXPIRE_MINUTES`, closes older attempts at Stripe, and returns reserved inventory. |
 | `check-payment-reconciliation` | `check_payment_reconciliation` | Daily at 03:15 UTC | Reconciles local payment records against the Stripe API for discrepancy detection. |
 | `sweep-stripe-events` | `sweep_stripe_events` | Every 5 minutes | Re-publishes unhandled webhook events stranded by transient broker outages (`STRIPE_EVENT_SWEEP_AFTER_MINUTES`). |
 | `cleanup-expired-retention` | `cleanup_expired_retention` | Daily at 02:45 UTC | Anonymises deactivated accounts past `USER_DATA_RETENTION_DAYS` (GDPR Art. 5(1)(e)). |
@@ -113,7 +113,9 @@ PostgreSQL enforces strict privilege boundaries via `docker/postgres/initdb/10-a
 Each API worker maintains two connection pools (synchronous and asynchronous):
 - Default pool size: `DB_POOL_SIZE=10`, `DB_MAX_OVERFLOW=5`, `DB_POOL_TIMEOUT=30`.
 - Size PostgreSQL `max_connections` to support peak worker concurrency: `WORKERS * 2 * (DB_POOL_SIZE + DB_MAX_OVERFLOW) + Celery`. With 4 workers, this requires at least 120 connections; `docker-compose.yml` configures `max_connections=200`.
-- Connections enforce `idle_in_transaction_session_timeout=30s` and `statement_timeout=30s` to prevent leaked locks from stalling the database.
+- Connections enforce `idle_in_transaction_session_timeout=30s`, `statement_timeout=60s`, and `connect_timeout=5s` to prevent stalled connections and leaked locks.
+- SQLAlchemy engines configure `hide_parameters=True` outside SQL debugging to prevent sensitive parameters from leaking in logs and statement errors. Database credentials in `DATABASE_URI` are safely encoded via `URL.create`.
+- Celery background workers install structured JSON logging to standard output matching the web tier.
 
 ### Backups, Restores, and Downgrades
 
@@ -121,14 +123,18 @@ Backup and restore fidelity was proven during Stage T5 verification ([reports/T5
 
 ```bash
 # Create custom-format compressed backup
-docker compose exec db pg_dump -U "$POSTGRES_USER" -Fc ecommerce > backup_$(date +%Y%m%d_%H%M%S).dump
+docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > backup_$(date +%Y%m%d_%H%M%S).dump
 
 # Restore into target database
-docker compose exec -T db pg_restore -U "$POSTGRES_USER" -d ecommerce --exit-on-error --no-owner < backup.dump
+docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --exit-on-error --no-owner' < backup.dump
 ```
 
 > [!IMPORTANT]
 > **Mandatory Downgrade Rule:** Always execute a full `pg_dump` backup before performing an Alembic downgrade. Downgrade scripts drop tables and columns by design, resulting in irreversible data loss. Continuous point-in-time recovery (PITR) is not configured (`wal_level=replica`, `archive_mode=off`).
+
+### PostgreSQL Major Upgrades (PostgreSQL 15 to 18)
+
+Official PostgreSQL 18 container images store cluster data under a version-specific path (`/var/lib/postgresql/18/docker`) and define the container volume at `/var/lib/postgresql`, differing from PostgreSQL 15 (`/var/lib/postgresql/data`). Upgrading from PostgreSQL 15 to 18 cannot reuse the existing volume in-place; operators must execute a logical dump and restore (`pg_dump` and `pg_restore`) and update volume mount paths.
 
 ## Redis Configuration and Failure Modes
 
@@ -142,7 +148,8 @@ Redis serves as the Celery message broker, token revocation store, password-chan
 
 - **Universal UTC:** Timestamps in PostgreSQL use `TIMESTAMP WITH TIME ZONE` (`timestamptz`). API payloads format datetimes as ISO-8601 UTC strings ending with `Z`. Celery operates under `timezone="UTC"` and `enable_utc=True`.
 - **Daylight Saving Time (DST):** Because all scheduling and relative deadlines use UTC and monotonic deltas, autumn and spring clock shifts never duplicate or skip scheduled jobs ([reports/daylight-saving-time.md](reports/daylight-saving-time.md)).
-- **GDPR Deletion Grace Periods:** The `cleanup_inactive_accounts` task purges accounts with requested deletion after `DATA_DELETION_GRACE_PERIOD_DAYS` (default 1 day). Personal information is scrubbed and addresses are redacted, while order records are preserved for tax compliance (GDPR Art. 17(3)(b)).
+- **GDPR Deletion Grace Periods:** Erasure requests via `POST /api/v1/legal/data-request` are accepted for all users except the last active administrator (409). Account PII is scrubbed and anonymised by `cleanup_inactive_accounts` after `DATA_DELETION_GRACE_PERIOD_DAYS` (default 1 day), using one bcrypt hash computation per account batch. Order shipping address snapshots (`ship_to_*`) are retained while an order is open or subject to an active dispute, and for at most 30 days for unfinished orders unless disputed (the project's reading of Art. 17(3), not legal advice). Deletion completion emails are sent after commit only to unredacted addresses. Webhook events associated with erased users are redacted when processed.
+- **GDPR Data Portability:** Data export requests assemble user profile data, addresses, orders, and payment records into JSON format and email the file inline to the account address.
 - **Storage Limitation:** The `cleanup_expired_retention` task anonymises deactivated accounts (`is_active=False`) that have been inactive for `USER_DATA_RETENTION_DAYS` (default 365 days). Active customer accounts are never touched.
 
 ## Capacity and Scaling Knobs

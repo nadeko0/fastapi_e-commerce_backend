@@ -8,7 +8,7 @@ Resilience was verified during Stage T8 chaos engineering experiments under a su
 
 | Dependency Failure | Client Impact & Status | Health Probes | Measured Recovery | Data Integrity Guarantees |
 |---|---|---|---|---|
-| **Redis Down** (stopped) | Authenticated requests and login return 503 (`Retry-After: 30`). Cart mutations return 503 (`Retry-After: 5`). Public catalog reads succeed (200 OK). Rate limiter fails open. | `/livez`: 200 OK<br>`/readyz`: 503 (in 5.8 s) | 26.24 s to `/readyz` 200; 69.01 s to full throughput | Webhooks persist to database; broker failure logs a single warning; sweeper queues tasks upon broker recovery. |
+| **Redis Down** (stopped) | Authenticated requests and login return 503 (`Retry-After: 30`). Cart reads and mutations return 503 (`Retry-After: 5`). Public catalog reads succeed (200 OK). Rate limiter fails open. | `/livez`: 200 OK<br>`/readyz`: 503 (in 5.8 s) | 26.24 s to `/readyz` 200; 69.01 s to full throughput | Webhooks persist to database; broker failure logs a single warning; sweeper queues tasks upon broker recovery. |
 | **Redis Frozen** (paused) | Identical to Redis down: 503 with `Retry-After: 30` on auth/token checks, 503 on cart writes. | `/livez`: 200 OK<br>`/readyz`: 503 (in 2.0 s) | 1.20 s to `/readyz` 200; 19.00 s to full throughput | No corrupted Redis state; in-flight limit sheds stalled connections. |
 | **PostgreSQL Down** (stopped) | All database routes return 503 Service Unavailable (`Retry-After: 5`). Stripe webhooks receive 503 so Stripe automatically retries. | `/livez`: 200 OK<br>`/readyz`: 503 (in 4.3 s) | 8.30 s to `/readyz` 200; 20.00 s to full throughput | Connection pool self-heals using `pool_pre_ping`. Zero lost webhooks. |
 | **PostgreSQL Frozen** (paused) | In-flight limiter sheds backlog with 503 (`Retry-After: 1`). Existing in-flight requests wait until socket timeout. | `/livez`: 200 OK<br>`/readyz`: 503 (in 1.6 s) | 0.70 s to `/readyz` 200; 10.00 s to full throughput | Zero transactions committed in half-written state; WAL maintains consistency. |
@@ -51,7 +51,7 @@ sequenceDiagram
         Note over Stripe: Stripe schedules exponential delivery retry
     end
 
-    opt Background Sweeper (Runs every minute)
+    opt Background Sweeper (Runs every 5 minutes)
         Worker->>DB: Query events stuck in 'received' > STRIPE_EVENT_SWEEP_AFTER_MINUTES
         Worker->>Redis: Re-publish unacknowledged event IDs
     end
@@ -64,7 +64,7 @@ sequenceDiagram
 
 ### Guarantees
 - **Storage First:** Webhooks are committed to PostgreSQL before returning an acknowledgment to Stripe.
-- **Worker Crash Safety:** Celery tasks run with `acks_late=True` and `reject_on_worker_lost=True`. If a worker dies mid-task, the broker requeues the task immediately.
+- **Worker Crash Safety:** Celery tasks run with `acks_late=True` and `reject_on_worker_lost=True`. If a pool process dies the task is requeued at once; if the whole worker is killed, the broker redelivers after `visibility_timeout` (1 hour).
 - **Autonomous Recovery (Sweeper):** The periodic `sweep_stripe_events` Celery beat task scans for events remaining in `received` or `retrying` status and re-queues them.
 - **Idempotency:** Replaying identical event payloads returns `200 already_processed` with zero ledger duplicate entries.
 
@@ -77,7 +77,7 @@ When Redis is unavailable, the application cannot inspect the token blacklist or
   - **RFC 9110 §15.5.2 (401 Unauthorized):** Indicates that the request "lacks valid authentication credentials" and invites the client to retry with new credentials.
   - **RFC 6750 §3.1 (invalid_token):** Reserved for tokens that are expired, revoked, malformed, or invalid.
   - **RFC 9110 §15.6.4 (503 Service Unavailable):** Applies when the server is "currently unable to handle the request due to a temporary overload or scheduled maintenance, which will likely be alleviated after some delay".
-  - The client presented a valid, unexpired token. The server cannot verify revocation status due to an infrastructure outage. Therefore, the API returns HTTP 503 with problem details type `service-unavailable` and `Retry-After: 30`, instructing the client to retry without discarding session credentials.
+  - The client presented a valid, unexpired token. The server cannot verify revocation status due to an infrastructure outage. Therefore, the API returns HTTP 503 problem details (`type: "about:blank"`, `title: "Service Unavailable"`) with `Retry-After: 30` and the `retry_after` member, instructing the client to retry without discarding session credentials.
 
 ## Database Error Mapping (503 vs 500)
 

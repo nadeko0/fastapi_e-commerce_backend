@@ -6,9 +6,9 @@ Software that processes money cannot rely on good intentions or manual smoke tes
 
 ```mermaid
 flowchart TD
-    E2E["E2E Tests (Stripe Test Mode, Stripe CLI, 406 tests)"] --> Fuzz["Contract & Fuzz (Schemathesis, Hypothesis State Machines)"]
-    Fuzz --> Integration["Integration Tests (PostgreSQL 15/16/18, SQLite WAL, Real Redis)"]
-    Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, ~4800 tests)"]
+    E2E["E2E Tests (Stripe Test Mode, Stripe CLI, 54 live Stripe tests)"] --> Fuzz["Contract & Fuzz (Schemathesis, Hypothesis State Machines)"]
+    Fuzz --> Integration["Integration Tests (PostgreSQL 15/16/18, SQLite WAL, Real Redis, ~2,700 tests)"]
+    Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, ~2,650 tests)"]
 ```
 
 1. **Unit Tests:** Fast, isolated tests covering models, services, schema serialization, and money calculations. All external I/O (Stripe, Redis, SMTP) is mocked deterministically.
@@ -64,7 +64,8 @@ Configuration in `pyproject.toml` and `tests/conftest.py` ensures hermetic, repr
 - **Redis:** `fakeredis` backs `RedisService` and async clients on a shared `FakeServer`. `REDIS_PORT=1` is set in the test environment so unmocked network calls fail immediately.
 - **Payments and Email:** `PAYMENT_PROVIDER=mock` and `EMAIL_PROVIDER=logging` prevent external network traffic.
 - **Password Hashing:** `BCRYPT_ROUNDS=4` minimizes CPU time during mass user creation.
-- **Database Isolation:** For SQLite, each worker uses a dedicated file database in WAL mode (`PRAGMA journal_mode=WAL`, `synchronous=OFF`). For PostgreSQL, each test session creates a unique database (`ecom_pgtests_<uuid>`), runs `alembic upgrade head`, and drops the database on exit.
+- **Database Isolation:** For SQLite, each worker uses a dedicated file database in WAL mode (`PRAGMA journal_mode=WAL`, `synchronous=OFF`). For PostgreSQL, each test session creates a unique database (`ecom_pgtests_<uuid>`), runs `alembic upgrade head`, and drops the database on exit. Test startup removes stale temporary databases older than one day left by aborted runs on both SQLite (`ecommerce-tests-*`) and PostgreSQL (`ecom_pgtests_*`).
+- **Specialized Test Suites:** The suite includes regression suites in `tests/torture_suite`, `tests/strict_domain_audit`, and `tests/audit_verification`. Setting `TORTURE_FULL=1` enables exhaustive property and concurrency exploration.
 - **Table Cleanup:** An engine hook (`Engine.before_cursor_execute`) tracks dirty tables during each test. The autouse fixture `_reset_database` issues fast SQL deletes and sequence resets only for modified tables before each test.
 
 ## Execution Commands
@@ -132,12 +133,12 @@ Verification results on release v4.0.3:
 
 | Metric | Measured Value | Standard / Target |
 |---|---|---|
-| SQLite Test Suite | 5,214 passed | 0 failures, 0 warnings |
+| SQLite Test Suite | 6,376 passed, 68 skipped without their services | 0 failures, 0 warnings |
 | PostgreSQL Test Suite | 5,259 passed (+ 21 timing) | Full migration and constraint parity |
-| Live Stripe Test Suite | 406 passed | api.stripe.com sandbox |
+| Live Stripe Test Suite | 52 passed, 2 skipped | api.stripe.com sandbox |
 | Payment Layer Coverage | 100.0% line and branch | Zero uncovered branches in financial path |
 | Overall Branch Coverage | 98.9% (source: `app`) | Fail-under gate set to 85% |
-| Mutation Score (mutmut 3.8.0) | 98.4% (3,113 killed / 3,165) | 100% of 52 survivors proven equivalent |
+| Mutation Score (mutmut 3.8.0, measured on v4.0.3) | 98.4% (3,113 killed / 3,165) | 100% of 52 survivors proven equivalent |
 | CI Execution Time | ~5 minutes across 16 jobs | Fully automated GitHub Actions workflow |
 
 ## Campaign Reports

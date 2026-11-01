@@ -14,16 +14,16 @@
 
 A backend for an online shop: catalog, carts, orders, Stripe payments, refunds and disputes, an admin API and GDPR tooling. It is a **foundation to build a store on**, not a demo: the catalog is product-neutral, and there is deliberately no frontend.
 
-What makes it worth a look is less the feature list than how it was checked. Every release went through a test suite of about 5,200 tests on SQLite and PostgreSQL, and the final 4.0 line went through a full release campaign: fuzzing from the OpenAPI schema, end-to-end runs against Stripe's test mode, load and soak tests, chaos experiments (pull the plug on Redis, freeze PostgreSQL, kill a worker mid-payment), a DAST scan, mutation testing and a deployment on a real server. Everything that broke was fixed, and every report is in this repository.
+What makes it worth a look is less the feature list than how it was checked. The test suite runs 6,444 cases from about 2,500 test functions on SQLite and PostgreSQL, and the final 4.0 line went through a full release campaign: fuzzing from the OpenAPI schema, end-to-end runs against Stripe's test mode, load and soak tests, chaos experiments (pull the plug on Redis, freeze PostgreSQL, kill a worker mid-payment), a DAST scan, mutation testing and a deployment on a real server. Everything that broke was fixed, and every report is in this repository.
 
 ## ✨ Features
 
-- **Accounts:** registration with e-mail verification, JWT access tokens with rotating refresh tokens (reuse revokes the whole family), password reset, admin role, login lockout, NIST 800-63B password policy.
-- **Catalog:** nested categories, products with variants (SKU, attributes, own price and stock), search, sorting, ETag and conditional requests, JSON Merge Patch for edits.
-- **Carts and orders:** guest carts that merge on login, stock reserved under row locks, an order state machine, automatic expiry of unpaid orders.
-- **Payments:** Stripe PaymentIntents and Checkout Sessions, 3-D Secure, refunds and disputes. Webhooks are stored first and processed by Celery with retries, and a daily reconciliation checks the books against Stripe. Idempotency-Key on every money-moving request.
+- **Accounts:** registration (name optional) with email verification and normalised email, JWT access tokens with rotating refresh tokens (reuse revokes the whole family), password reset evicting in-flight sessions, admin role, login lockout, NIST 800-63B password policy.
+- **Catalog:** nested categories, products with variants (bought through a variant when active, SKU, attributes, own price and stock), search, sorting, ETag and conditional requests, JSON Merge Patch for edits.
+- **Carts and orders:** guest carts that merge on login, stock reserved under FOR NO KEY UPDATE row locks, order total limit, MAX_PENDING_ORDERS_PER_USER cap, immutable line and shipping snapshots, an order state machine, automatic expiry of unpaid orders bounded by checkout session lifetime.
+- **Payments:** Stripe PaymentIntents and Checkout Sessions, 3-D Secure, refunds and disputes. Admin payment queue and refunds for flagged attempts. Webhooks are stored first and processed by Celery with retries, and a daily reconciliation checks the books against Stripe. Idempotency-Key on every money-moving request.
 - **API hygiene:** problem details (RFC 9457) for every error, correct status codes (201 + Location, 409 for conflicts, 503 with Retry-After), strict input, money as decimal strings, RateLimit headers, request ids and optional OpenTelemetry tracing.
-- **Privacy:** GDPR export and erasure, consent records, retention jobs.
+- **Privacy:** GDPR export assembled and mailed inline as JSON, erasure with active order and dispute protections, consent records, retention jobs.
 
 ## 🧭 Architecture
 
@@ -51,7 +51,7 @@ The full picture, the payment flow, the order state machine and the reasoning be
 ```bash
 git clone https://github.com/nadeko0/fastapi_e-commerce_backend.git
 cd fastapi_e-commerce_backend
-cp .env.example .env          # set ENVIRONMENT, passwords and secrets; see SETUP.md
+cp .env.example .env          # set ENVIRONMENT, POSTGRES_SERVER=db, REDIS_HOST=redis, passwords and secrets; see SETUP.md
 docker compose up -d --build
 docker compose --profile migrate run --rm migrate
 ```
@@ -84,7 +84,7 @@ uv run pytest tests/ -n 2 -m "not timing_sensitive"   # the fast local run
 
 | | |
 |---|---|
-| Tests | about 5,200 on SQLite and PostgreSQL, 400 against Stripe test mode, 0 warnings |
+| Tests | 6,444 cases from about 2,500 test functions on SQLite and PostgreSQL, 54 live Stripe tests, 0 warnings |
 | Coverage | 98.8 % overall, 100 % lines and branches on the payment layer (enforced in CI) |
 | Mutation testing | 98.4 % of 3,165 mutants killed; every survivor reviewed as equivalent |
 | CI | lint, tests, 7 time zones, PostgreSQL 15/16/18, real Redis, pip-audit, gitleaks, Trivy |

@@ -5,7 +5,7 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
 ## Product Limitations
 
 - **Multi-Factor Authentication (MFA / TOTP / WebAuthn):**
-  - *Why not:* MFA requires a dedicated authentication lifecycle, secret vaulting, and account recovery UX. As a documented tradeoff, minimum password length remains 8 characters (NIST 800-63B rev. 4 permits 8 only with MFA, recommending 15 without it).
+  - *Why not:* MFA requires a dedicated authentication lifecycle, secret vaulting, and account recovery UX. NIST SP 800-63B-4 asks 15 characters for single-factor authentication without MFA, but the project maintains an 8-character minimum password length by deliberate project decision.
   - *Where to start:* Implement RFC 6238 TOTP as a mandatory second factor for administrative roles, followed by WebAuthn passkeys for customers.
 - **Multi-Currency Store Operations:**
   - *Why not:* Supporting multiple store currencies introduces foreign exchange volatility, conversion rounding rules, cross-currency refund tracking, and complex accounting reports. The store operates in a single currency (`STORE_CURRENCY`), while orders record their currency at placement. Store analytics sum totals assuming `STORE_CURRENCY`; changing store currency mixes historical totals.
@@ -34,7 +34,7 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
   - *Why not:* The pinned `postgres:15-alpine` image includes `gosu` built with Go 1.24.6 and `moby/sys/user` v0.1.0, flagged in security scans as GO-2026-6686 (DoS parsing `/etc/passwd`). The vulnerability is practically unreachable in our environment because passwd files are root-owned.
   - *Where to start:* Rebase once Docker Library updates the official image, or build a custom PostgreSQL base image executing directly as the `postgres` user.
 - **Dedicated Email Queue and Retries:**
-  - *Why not:* Transactional emails currently rely on Celery tasks and BackgroundTasks without an isolated retry broker.
+  - *Why not:* Order emails are sent in-process via BackgroundTasks after commit without retries; a crash after commit loses the email.
   - *Where to start:* Route email tasks to a dedicated Celery queue with exponential backoff and dead-letter handling.
 
 ## API Contract Boundaries
@@ -52,8 +52,20 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
   - *Why not:* Pydantic's non-strict mode accepts `0`/`1` as booleans and numeric strings as timestamps. Enforcing `StrictBool` and strict dates changes acceptable input contracts, which would represent a breaking API change.
   - *Where to start:* Enable strict schema validation globally.
 - **Pagination and Country Validation:**
-  - *Why not:* Offset pagination (`skip` / `limit`) is simple but scales poorly on deep sets; country fields currently accept 2-letter strings without validating full ISO 3166-1 tables.
+  - *Why not:* Offset pagination (`page` / `size`) is simple but scales poorly on deep sets; country fields currently accept 2-letter strings without validating full ISO 3166-1 tables.
   - *Where to start:* Adopt keyset/cursor pagination using opaque tokens, and enforce strict ISO country validation.
+- **Single-Level JSON Merge Patch:**
+  - *Why not:* Partial resource updates implement RFC 7396 semantics one level deep. Nested object values (`characteristics`, `attributes`) replace the stored object as a whole rather than merging keys recursively. This is a deliberate design difference from RFC 7396.
+  - *Where to start:* Implement recursive dictionary merging for nested JSON attributes.
+- **Admin Flagged Payment Refund Retry (409):**
+  - *Why not:* Retrying `POST /api/v1/admin/payments/{payment_id}/refund` after a successful refund returns HTTP 409 without calling the payment provider because the payment is no longer flagged for manual review (`requires_manual_review=False`).
+  - *Where to start:* Persist a dedicated refund idempotency record to permit idempotent replays of admin refund operations.
+- **Live Product Image References:**
+  - *Why not:* Orders snapshot product names, variant SKUs, and variant attributes at checkout time, but line item image URLs are read dynamically from current catalog records. Modifying or deleting product images changes or clears displayed thumbnails on past order views.
+  - *Where to start:* Snapshot image URLs onto order line item records at checkout.
+- **Checkout Stock Movement and ETags:**
+  - *Why not:* Stock moved by checkout decrements inventory counters and invalidates Redis catalog caches so subsequent queries reflect updated counts, but does not update `updated_at` or regenerate the product ETag.
+  - *Where to start:* Update product timestamps upon checkout stock decrements if strict conditional caching across inventory changes is required.
 
 ## Testing and Verification Limitations
 

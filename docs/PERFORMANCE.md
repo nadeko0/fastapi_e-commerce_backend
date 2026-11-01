@@ -54,7 +54,7 @@ Without concurrency control, overloading this application does not degrade it gr
 `InFlightLimitMiddleware` (`app/core/overload.py`) wraps the ASGI application outside Starlette routing:
 - It tracks active HTTP requests per worker process.
 - When `in_flight >= MAX_IN_FLIGHT_REQUESTS`, it immediately rejects incoming requests with HTTP 503 Service Unavailable, problem details type `service-overloaded`, detail "Server is at capacity, please retry shortly", and header `Retry-After: 1`.
-- Safe ceiling formula: `(DB_POOL_SIZE + DB_MAX_OVERFLOW) / 2` because an authenticated request can hold two database connections simultaneously (auth session and route session).
+- Safe ceiling formula: Keep `MAX_IN_FLIGHT_REQUESTS` at or below `DB_POOL_SIZE + DB_MAX_OVERFLOW` (15 by default); a request uses one session for its auth dependency and its route.
 - Probe endpoints (`/health`, `/livez`, `/readyz`) are exempt so load shedding never causes orchestrators to restart healthy containers.
 
 ### Rate Limiting and Headers

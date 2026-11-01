@@ -84,10 +84,7 @@ Docker Compose provides a complete, isolated environment matching production top
 
 ### 1. Compose Configuration and Roles
 
-Inside `docker-compose.yml`, services connect using internal container hostnames:
-- `POSTGRES_SERVER=db`
-- `REDIS_HOST=redis`
-- `REDIS_PASSWORD` is strictly required (`:?` expansion prevents starting unauthenticated)
+`docker-compose.yml` does not set the service host names. In `.env`, set `POSTGRES_SERVER=db` and `REDIS_HOST=redis` before `docker compose up`; the `localhost` values are for running on the host. `REDIS_PASSWORD` is strictly required (`:?` expansion prevents starting unauthenticated).
 
 PostgreSQL implements role separation via `docker/postgres/initdb/10-app-role.sh`:
 - `POSTGRES_USER`: Superuser and schema owner. Owns the tables and executes schema migrations.
@@ -180,7 +177,7 @@ Standard Stripe test payment method tokens:
 
 ## Running Tests
 
-The test suite includes over 5,200 automated tests covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
+The test suite includes 6,444 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
 
 To run the full suite locally:
 

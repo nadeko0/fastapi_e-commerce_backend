@@ -63,12 +63,12 @@ sequenceDiagram
     participant Stripe as Stripe API
     participant SMTP as SMTP Server
 
-    Customer->>API: POST /api/v1/orders (Idempotency-Key, address_id)
-    API->>DB: Lock stock rows, insert order (status: new, payment: pending)
+    Customer->>API: POST /api/v1/orders (Idempotency-Key, shipping_address_id)
+    API->>DB: Lock stock rows FOR NO KEY UPDATE, insert order (status: new, payment: pending)
     DB-->>API: Commit successful
     API-->>Customer: 201 Created (OrderResponse, Location: /api/v1/orders/{id})
 
-    Customer->>API: POST /api/v1/orders/{id}/pay (Idempotency-Key, payment_method_id)
+    Customer->>API: POST /api/v1/orders/{id}/pay (Idempotency-Key, payment_method, amount, payment_method_token)
     API->>Stripe: Create & confirm PaymentIntent (amount, currency, idempotency_key)
     Stripe-->>API: PaymentIntent (status: requires_action or succeeded)
     API->>DB: Record Payment row (payment_intent_id, status: processing)
@@ -84,11 +84,10 @@ sequenceDiagram
     Worker->>Redis: Consume task (acks_late=True)
     Worker->>DB: SELECT FOR UPDATE order, transition to confirmed, record ledger
     Worker->>DB: UPDATE webhook_events SET status = 'processed'
-    Worker->>Redis: Enqueue send_order_confirmation(order_id)
-    Worker->>SMTP: Send confirmation email
+    Worker->>SMTP: Send confirmation email (after commit)
 
     opt Refund Flow
-        Admin->>API: POST /api/v1/orders/{id}/refund (Idempotency-Key, amount, reason)
+        Admin->>API: POST /api/v1/orders/{id}/refund (Idempotency-Key, optional amount)
         API->>Stripe: Create Refund (payment_intent, amount)
         Stripe-->>API: Refund confirmed
         API->>DB: Record PaymentRefund ledger entry, update order payment status
@@ -104,8 +103,8 @@ Webhooks represent critical financial state updates and cannot rely solely on th
 flowchart TD
     Ingress["POST /orders/webhooks/stripe"] --> Verify["Verify Stripe-Signature HMAC"]
     Verify --> Store["INSERT INTO webhook_events (status: 'received')"]
-    Store --> Ack["Return HTTP 200 OK to Stripe"]
-    Ack --> Enqueue["Enqueue process_stripe_event to Redis"]
+    Store --> Enqueue["Enqueue process_stripe_event to Redis"]
+    Enqueue --> Ack["Return HTTP 200 OK to Stripe"]
 
     Enqueue --> Worker["Celery Worker picks up event (status -> 'processing')"]
     Worker --> Apply{"Apply event to order & payment ledger"}
@@ -117,7 +116,7 @@ flowchart TD
     Retrying --> Worker
     Retry -->|No| Failed["UPDATE status = 'failed' (Terminal State)"]
 
-    Sweeper["Celery Beat: sweep_stripe_events (Every minute)"] -->|Find stuck received/retrying| Enqueue
+    Sweeper["Celery Beat: sweep_stripe_events (Every 5 minutes)"] -->|Find stuck received/retrying| Enqueue
     Admin["Admin Replay: POST /admin/webhook-events/{id}/replay"] -->|Reset attempts = 0, status = 'received'| Enqueue
 ```
 
@@ -194,10 +193,10 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 - **Consequence:** Centralized exception handlers rewrite all exceptions and translate OpenAPI schema responses to `application/problem+json`.
 
 ### 6. Idempotency-Key with Request Fingerprints
-- **Decision:** Mutation endpoints (`POST /orders`, `POST /orders/{id}/pay`, `/checkout-session`, `/refund`) require an `Idempotency-Key` header. Requests are stored with a SHA-256 fingerprint of the user ID, URL, and normalized JSON payload.
+- **Decision:** Mutation endpoints (`POST /orders`, `POST /orders/{id}/pay`, `/checkout-session`, `/refund`) require an `Idempotency-Key` header. Requests are stored with a SHA-256 fingerprint of the operation and the validated request fields, stored next to the key (keys are unique per user).
 - **Alternatives:** Key-only storage without body fingerprinting; client-supplied database nonces; volatile in-memory idempotency caches.
-- **Reason:** Network retries or double-submissions must never duplicate payments or inventory decrements. Payload fingerprinting prevents reuse of identical keys with mutated request bodies (returning HTTP 409 `idempotency-key-reused`).
-- **Consequence:** Concurrent requests with the same key while the first is in flight receive HTTP 409 with `Retry-After: 5` (`idempotency-key-in-use`).
+- **Reason:** Network retries or double-submissions must never duplicate payments or inventory decrements. Payload fingerprinting prevents reuse of identical keys with mutated request bodies (returning HTTP 422 `idempotency-key-reused`).
+- **Consequence:** A request whose key belongs to an attempt still in flight receives HTTP 409 `idempotency-key-in-use`, with `Retry-After: 5` while that attempt is being processed.
 
 ### 7. Store-Then-Process Webhooks with Reconciliation
 - **Decision:** Incoming Stripe webhooks are verified via HMAC signature and persisted to `webhook_events` (`status: received`) before returning HTTP 200 to Stripe. Processing runs asynchronously in Celery (`process_stripe_event`). Daily scheduled jobs reconcile local ledgers against the Stripe API.
@@ -224,10 +223,10 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 - **Consequence:** Client requests must strictly conform to documented schemas. Input and output schemas must be decoupled where request and response structures differ.
 
 ### 11. Hermetic Local Tests with Multi-Service CI Validation
-- **Decision:** Local and unit tests run hermetically without external dependencies (mocked Stripe, isolated SQLite/Redis with `REDIS_PORT=1`). CI matrix workflows validate integration and chaos suites against real container services: PostgreSQL 15, 16, 18, real Redis, and live Stripe test mode across 7 timezones.
+- **Decision:** Local and unit tests run hermetically without external dependencies (mocked Stripe, isolated SQLite/Redis with `REDIS_PORT=1`). CI matrix workflows validate integration against real container services: PostgreSQL 15, 16, 18, real Redis parity across 7 timezones. Live Stripe and chaos runs were manual campaign stages (T4, T8).
 - **Alternatives:** Executing all tests solely against SQLite in CI; mocking database engines universally; relying on shared remote staging environments.
 - **Reason:** SQLite ignores foreign keys by default and does not support PostgreSQL row-level locks (`SELECT ... FOR UPDATE`). Real-service CI jobs identified 13 critical defects undetected by SQLite, including deadlocks and pool recovery behavior. Hermetic local defaults prevent test contamination of developer services.
-- **Consequence:** Rapid local development feedback (sub-minute unit runs) combined with exhaustive multi-environment CI validation (~5 minutes across 16 parallel workflows).
+- **Consequence:** Rapid local development feedback combined with multi-environment CI validation (one workflow, 16 jobs).
 
 ### 12. Dependency Pinning and Two-Week Age Rule
 - **Decision:** All external dependencies, base container image digests, and security tooling must be at least two weeks old prior to adoption. Packages are locked to exact hashes (`uv.lock`, Docker image SHA digests). Urgent zero-day security updates require an explicit, documented security exception.

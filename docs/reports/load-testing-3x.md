@@ -95,14 +95,14 @@ Tracing requests end-to-end against live external services revealed critical fai
 
 To eliminate stalls and guarantee deterministic overload behavior, the backend underwent major architectural changes:
 
-| Component | Technical Change | File Locations | Verification Test |
-|---|---|---|---|
-| **In-Flight Concurrency Bound** | Added `MAX_IN_FLIGHT_REQUESTS` middleware; sheds excess requests with fast 503 and `Retry-After: 1` | `app/core/overload.py` | `test_overload_middleware_rejects_beyond_capacity` |
-| **Off-Loop Payment Dispatch** | Stripe SDK operations executed in worker threads via `anyio.to_thread.run_sync` | `app/api/v1/orders.py` | `test_payment_provider_calls_run_off_the_event_loop` |
-| **Async Authentication Dependency** | `get_current_user` migrated to `AsyncSession` and `AsyncRedisService`; yields detached models | `app/core/security.py` | `test_auth_dependencies.py` (20 tests) |
-| **Live-Priced Cart Redesign** | Cart stores items and quantities; server prices dynamically in `Decimal` via `AsyncSession` | `app/api/v1/cart.py` | `test_cart_pricing_matches_catalog_at_checkout` |
-| **Celery Session Management** | Background tasks wrapped in explicit context managers closing sessions upon completion | `app/tasks.py` | `test_celery_task_leaves_no_idle_transactions` |
-| **Test Coverage Measurement** | Added `concurrency = ["greenlet", "thread"]` in `pyproject.toml` to accurately measure async coverage | `pyproject.toml` | Overall coverage increased from false 65% to 92.6% |
+| Component | Technical Change | File Locations |
+|---|---|---|
+| **In-Flight Concurrency Bound** | Added `MAX_IN_FLIGHT_REQUESTS` middleware; sheds excess requests with fast 503 and `Retry-After: 1` | `app/core/overload.py` |
+| **Off-Loop Payment Dispatch** | Stripe SDK operations executed in worker threads via `anyio.to_thread.run_sync` | `app/api/v1/orders.py` |
+| **Async Authentication Dependency** | `get_current_user` migrated to `AsyncSession` and `AsyncRedisService`; yields detached models | `app/core/security.py` |
+| **Live-Priced Cart Redesign** | Cart stores items and quantities; server prices dynamically in `Decimal` via `AsyncSession` | `app/api/v1/cart.py` |
+| **Celery Session Management** | Background tasks wrapped in explicit context managers closing sessions upon completion | `app/tasks.py` |
+| **Test Coverage Measurement** | Added `concurrency = ["greenlet", "thread"]` in `pyproject.toml` to accurately measure async coverage | `pyproject.toml` |
 
 ---
 

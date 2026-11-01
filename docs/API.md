@@ -10,12 +10,12 @@ The API version prefix is mounted at `/api/v1` (configured via `settings.API_V1_
 
 | Router Tag | Operations | Scope and Primary Responsibilities |
 |---|---|---|
-| `admin` | 16 | Product catalog management, category creation, inventory reconciliation, order review, and webhook event inspection or replay. |
+| `admin` | 18 | Product catalog management, category creation, inventory reconciliation, order review, listing and refunding flagged payments, and webhook event inspection or replay. |
 | `cart` | 6 | Guest and account cart management, item mutations, live pricing checks, and stock validation. |
 | `catalog` | 6 | Public read-only product listings, category trees, product detail retrieval, and full-text catalog search. |
-| `Legal & GDPR` | 7 | Consent state tracking, privacy policies, terms of service, cookie disclosures, data export, and account erasure. |
+| `Legal & GDPR` | 7 | Consent state tracking, privacy policies, terms of service, cookie disclosures, data export delivered inline via email, and account erasure. |
 | `orders` | 9 | Order creation, payment intent confirmation, Stripe Checkout sessions, payment history, cancellations, refunds, and Stripe webhook ingress. |
-| `users` | 20 | Registration, OAuth2 login, token refresh, logout, password reset lifecycles, email verification, profile management, and address book CRUD. |
+| `users` | 20 | Registration (name optional), login with email normalisation, token refresh, logout, password reset lifecycles, email verification, profile management, and address book CRUD. |
 | `health` / probes | 3 | Operational health checks (`/health`), Kubernetes liveness probe (`/livez`), and readiness probe (`/readyz`). |
 
 ## Authentication and Token Lifecycle
@@ -49,7 +49,8 @@ sequenceDiagram
 - **Login (`POST /api/v1/users/login`):** Expects standard application/x-www-form-urlencoded credentials (`username`, `password`). Returns `{access_token, token_type: "bearer", refresh_token}`.
 - **Bearer Authorization:** Protected endpoints require the header `Authorization: Bearer <access_token>`.
 - **Refresh Token Rotation & Reuse Detection:** `POST /api/v1/users/refresh` exchanges a single-use refresh token for a fresh token pair. If an already-rotated token is presented again, the server detects token theft and revokes the entire token family (`family` claim), terminating the compromised session chain.
-- **Logout (`POST /api/v1/users/logout`):** Requires Bearer authentication. When a `refresh_token` is provided in the body, its specific family is revoked and the active access token's `jti` is blacklisted. When called without a body, the user's revocation watermark in Redis is updated to the current millisecond timestamp, immediately invalidating all tokens issued for that account across all devices. If Redis is unreachable during logout, the request fails closed with HTTP 503 (`Retry-After: 5`).
+- **Logout (`POST /api/v1/users/logout`):** Requires Bearer authentication. When a `refresh_token` is provided in the body, its family is marked revoked first and the active access token's `jti` is blacklisted with its TTL rounded up. When called without a body, the user's revocation watermark in Redis is updated and all refresh families are revoked, immediately invalidating all tokens issued for that account across all devices. If Redis is unreachable during logout, the request fails closed with HTTP 503 (`Retry-After: 5`).
+- **Password Reset (`POST /api/v1/users/password/reset/confirm`):** Setting a new password records a watermark, commits the change, sets a second watermark to evict in-flight logins and token rotations, and ends all refresh families for the account.
 
 ## Response Shapes
 
@@ -95,25 +96,25 @@ The complete catalog of typed problems declared in `app/core/errors.py`:
 | `idempotency-key-in-use` | 409 | Identical `Idempotency-Key` currently undergoing active processing by a concurrent worker. |
 | `payment-declined` | 422 | Payment provider refused the transaction (e.g. card declined, insufficient funds, expired card). |
 | `insufficient-stock` | 409 | Requested quantity exceeds available inventory during cart operations or order placement. |
-| `account-inactive` | 403 | Authenticated credentials are valid, but user account is unverified, deactivated, or suspended. |
+| `account-inactive` | 403 | The token is valid but the account is deactivated. (An unverified email blocks `POST /orders` with a plain 403, type `about:blank`.) |
 
 ## HTTP Status Codes
 
 The API strictly adheres to RFC 9110 status code semantics:
 - **201 Created + Location:** Returned by POST endpoints that instantiate persistent resources (`POST /api/v1/orders`, `POST /api/v1/users/addresses`, `POST /api/v1/admin/products`, `POST /api/v1/admin/categories`). The `Location` header points to the newly created resource path.
 - **202 Accepted:** Returned by `POST /api/v1/users/register`. The server accepts the registration request asynchronously regardless of whether the email is already registered, completely preventing account enumeration.
-- **204 No Content:** Returned on successful deletion (`DELETE /api/v1/cart`, `DELETE /api/v1/users/addresses/{id}`). Contains no body. Subsequent deletion of an absent entity returns 404.
+- **204 No Content:** Deleting an address (`DELETE /api/v1/users/addresses/{id}`) or a product (`DELETE /api/v1/admin/products/{id}`). Contains no body. `DELETE /api/v1/cart` and `DELETE /api/v1/cart/items/{product_id}` return 200 with the updated cart.
 - **400 vs 409 vs 422:**
   - `400 Bad Request`: Syntactically invalid payloads (non-JSON body, unreadable text), missing or invalid `Idempotency-Key` format, or invalid Stripe signature HMAC.
-  - `409 Conflict`: Request conflicts with current resource or inventory state (`insufficient-stock`, `idempotency-key-in-use`, deleting a default address, or cancelling an already-shipped order).
-  - `422 Unprocessable Content`: Syntactically well-formed JSON violating domain constraints (unknown properties, negative prices, failed regex, `idempotency-key-reused`, or declined cards).
+  - `409 Conflict`: Request conflicts with current resource or inventory state (`insufficient-stock`, `idempotency-key-in-use`, an invalid order status transition, cancelling an order that is paid or no longer new, replaying a webhook event that has not failed). Also returned for ordering a variant-enabled product without selecting a variant, exceeding `MAX_PENDING_ORDERS_PER_USER`, retrying an admin refund on a settled payment, attempting to refund a disputed payment, when `/pay` cannot apply a payment success, or when the last active administrator requests erasure.
+  - `422 Unprocessable Content`: Syntactically well-formed JSON violating domain constraints (unknown properties, negative prices, order total exceeding 21,474,836.47, non-finite numbers, JSON depth exceeding 64, failed regex, `idempotency-key-reused`, or declined cards).
 - **401 vs 403:**
   - `401 Unauthorized`: Missing, invalid, expired, or revoked Bearer token, or invalid login credentials. Includes `WWW-Authenticate: Bearer` challenge.
   - `403 Forbidden`: Authenticated identity lacks permission (non-admin accessing `/admin`), or account is inactive (`account-inactive`).
 - **413 Content Too Large:** Payload exceeds size ceiling.
-- **415 Unsupported Media Type:** Sent with `Accept` header specifying accepted types (`application/json`, or `application/merge-patch+json, application/json` for PATCH).
+- **415 Unsupported Media Type:** Sent with `Accept` header specifying accepted types (`application/json`, or `application/merge-patch+json, application/json` for PATCH). A PATCH request submitting a `+json` media type other than merge-patch returns 415.
 - **429 Too Many Requests:** Rate limit exhausted. Response includes `Retry-After: <seconds>` and IETF draft `RateLimit` / `RateLimit-Policy` headers.
-- **503 Service Unavailable:** Overload shedding (`Retry-After: 1`), Redis outage during token/login checks (`Retry-After: 30`), or database unavailability (`Retry-After: 5`).
+- **503 Service Unavailable:** Overload shedding (`Retry-After: 1`), Redis outage during token/login checks (`Retry-After: 30`), Redis outage during cart reads or mutations (`Retry-After: 5`), or database unavailability (`Retry-After: 5`).
 
 ## Idempotency Controls (`Idempotency-Key`)
 
@@ -125,13 +126,14 @@ Financial and mutating order endpoints enforce the IETF draft `Idempotency-Key` 
 - **Concurrent In-Flight Locks:** If a request arrives while an identical key is already being processed, the server yields 409 `idempotency-key-in-use`.
 - **Retention and TTL:**
   - Order creation keys are retained in PostgreSQL for `IDEMPOTENCY_KEY_TTL_HOURS` (default 24 hours). Periodic Celery cleanup tasks clear expired keys to allow reuse while preserving order history.
-  - Payment and refund idempotency keys are namespaced (e.g. `pay:{order_id}:{client_key}`) and passed directly to Stripe, where provider-side deduplication guarantees 24-hour protection.
+  - Payment-attempt keys are stored with the attempt and never expire locally; forwarded to Stripe as `pay-order-{order_id}:{key}` / `checkout-order-{order_id}:{key}`. Refund keys are not stored; Stripe honours them for at least 24 hours.
 
 ## Strict Input Validation
 
 The API enforces strict data hygiene on all inputs:
 - **Unknown Field Rejection:** All request models inherit `RequestBody` with Pydantic `extra="forbid"`. Submitting unrecognized JSON keys yields 422 with type `extra_forbidden`.
-- **Monetary Precision:** Monetary amounts are accepted and returned as exact decimal strings (e.g. `"19.99"`), never floating-point numbers. Currencies are validated against ISO 4217 uppercase alpha-3 codes (`settings.STORE_CURRENCY`, e.g. `"USD"`).
+- **Monetary Precision:** Monetary amounts are accepted and returned as exact decimal strings with ASCII digits only (e.g. `"19.99"`), never floating-point numbers. Currencies are validated against ISO 4217 uppercase alpha-3 codes (`settings.STORE_CURRENCY`, e.g. `"USD"`). Order totals are capped at 21,474,836.47 to match payment column limits.
+- **Free-Form JSON Constraints:** Free-form JSON payloads enforce a maximum nesting depth of 64 levels and reject non-finite numbers (NaN, Infinity) with 422. Price filter parameters are bounded.
 - **Timezone Awareness:** Timestamps must be ISO 8601 strings with explicit UTC offsets (`UTCDatetime`). Database records are stored in UTC.
 - **Character Sanitization:** NUL bytes (`\x00`) and lone Unicode surrogates (`\ud800` through `\udfff`) are rejected with 422 across request bodies, URL paths, query parameters, and form fields before touching PostgreSQL.
 
@@ -146,16 +148,18 @@ Collection endpoints consume standardized query parameters:
 ## Caching and Conditional Requests (ETag)
 
 Entity tags provide strong cache validation (SHA-256 digest of response model JSON):
-- **Read Validation (`If-None-Match`):** Supported by `GET /api/v1/products/{product_id}` and `GET /api/v1/admin/products/{product_id}/variants/{variant_id}`. If the client holds a matching tag, the server responds with 304 Not Modified without a response body.
-- **Optimistic Concurrency (`If-Match`):** Supported by `PUT` and `PATCH` endpoints for products and variants. If the submitted `If-Match` tag does not match the current database state, the mutation is refused with 412 Precondition Failed, returning the latest ETag.
+- **Read Validation (`If-None-Match`):** Supported by `GET /api/v1/products/{product_id}` and `GET /api/v1/admin/products/{product_id}/variants/{variant_id}`. If the client holds a matching tag, the server responds with 304 Not Modified without a response body. Product ETags follow variant creation and updates; stock moved by checkout does not change product ETags.
+- **Optimistic Concurrency (`If-Match`):** Supported by `PUT` and `PATCH` endpoints for products and variants. If the submitted `If-Match` tag does not match the current database state, the mutation is refused with 412 Precondition Failed, returning the latest ETag. The header matches `*` only alone; a malformed field matches nothing and returns 412.
 
 ## JSON Merge Patch (RFC 7396)
 
 Partial updates on `PATCH /api/v1/users/me`, `PATCH /api/v1/users/addresses/{id}`, `PATCH /api/v1/admin/products/{id}`, and `PATCH /api/v1/admin/products/{id}/variants/{id}` implement RFC 7396 semantics:
-- Request headers must declare `Content-Type: application/merge-patch+json` or `application/json`.
+- Request headers must declare `Content-Type: application/merge-patch+json` or `application/json`. Submitting any other `+json` media type returns 415.
 - Properties included in the patch replace stored values.
+- Merging is one level deep: an object value (`characteristics`, `attributes`) replaces the stored one whole; send the complete object. This is a deliberate difference from RFC 7396's recursive merge.
 - Explicit `null` clears nullable fields (attempting to set a required, non-nullable field to `null` yields 422).
 - Properties omitted from the payload remain completely unmodified.
+- `PATCH /api/v1/users/me` records timestamped consent audit entries when marketing consent changes.
 
 ## HEAD Method Semantics
 
@@ -196,14 +200,14 @@ sequenceDiagram
     API->>DB: Deduct inventory & persist Order (PENDING)
     API-->>Customer: 201 Created (Location: /orders/42)
     Customer->>API: POST /orders/42/pay (Idempotency-Key: k2)
-    API->>Stripe: Create & Confirm PaymentIntent (pay:42:k2)
+    API->>Stripe: Create & Confirm PaymentIntent (pay-order-42:k2)
     Stripe-->>API: Status: requires_action or succeeded
     API-->>Customer: 200 OK: Payment details & client_secret
     Stripe->>API: POST /orders/webhooks/stripe (HMAC Signature)
     Note over API: Verify signature & store event
     API->>DB: INSERT INTO webhook_events (event_id)
-    API-->>Stripe: 200 OK: {"status": "received"}
     API->>Worker: Enqueue process_stripe_event
+    API-->>Stripe: 200 OK: {"status": "received"}
     Worker->>DB: Transition Order to PAID & insert ledger record
 ```
 

@@ -23,10 +23,10 @@ Tokens require explicit claims on decode via PyJWT `require` options. PyJWT vali
 
 | Token Type | Lifetime | Required Claims (`options={"require": ...}`) | Revocation Mechanism |
 |---|---|---|---|
-| Access Token | 15 minutes | `["exp", "sub", "type", "jti"]` | Blacklisted in Redis by unique `jti` upon logout. |
+| Access Token | 15 minutes | `["exp", "sub", "type", "jti"]` | Blacklisted in Redis by unique `jti` upon logout (TTL rounded up). |
 | Refresh Token | 7 days | `["exp", "sub"]` (`type`, `jti`, `family` checked during rotation) | Consumed atomically; family revocation on reuse. |
-| Password Reset | 60 minutes | `["exp", "sub", "type", "pwd"]` | Bound to password fingerprint (`pwd`); single-use. |
-| Email Verification | 24 hours | `["exp", "sub", "type"]` | Single-use; idempotent upon repeated verification. |
+| Password Reset | 60 minutes | `["exp", "sub", "type", "pwd"]` | Bound to password fingerprint (`pwd`); single-use; evicts in-flight sessions and ends all families. |
+| Email Verification | 48 hours | `["exp", "sub", "type"]` | Single-use; idempotent upon repeated verification (EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS). |
 
 The signature algorithm is strictly constrained by a Pydantic literal to `HS256`, `HS384`, or `HS512` (`settings.JWT_ALGORITHM`). Algorithms such as `none` or asymmetric confusion attacks are rejected at schema validation time.
 
@@ -44,6 +44,7 @@ When a client presents an access token, `get_current_user` checks whether its `j
 ### NIST SP 800-63B-4 Password Policy
 
 Password validation complies with NIST SP 800-63B-4 Section 3.1.1.2:
+- Minimum password length is 8 characters by project decision; NIST SP 800-63B-4 asks 15 characters for single-factor authentication.
 - No arbitrary composition rules (no mandatory special characters, digits, or mixed casing).
 - Unicode characters are accepted; passwords undergo Unicode NFC normalization before hashing and verification.
 - Passwords are checked against the SecLists 10,000 most common passwords blocklist.
@@ -55,6 +56,7 @@ Failed login attempts are counted atomically in Redis using Lua scripts:
 - **Per-(Email, IP) Limit:** Configured via `settings.RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS` (default 10 per 15 minutes). An attacker guessing passwords from a single IP is locked out at that IP only, leaving the legitimate account owner unaffected from other networks.
 - **Global Per-Email Backstop:** Configured via `settings.RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL` (default 100 per hour). Prevents distributed brute-force attacks across botnets.
 - **Fail-Closed Boundary:** If Redis is down, login attempts return HTTP 503 (`Retry-After: 30`) to prevent unlimited password guessing during cache outages.
+- **Erasure Re-authentication Lockout:** Password verification on `POST /api/v1/legal/data-request` for account deletion falls under `RATE_LIMIT_AUTH` and counts against the per-email failed-login limits to block password oracle attacks.
 
 ## Authorization and Access Boundaries
 
@@ -75,7 +77,9 @@ Access boundaries are enforced strictly at the database query layer:
 - **Text Filtering:** Application-wide middleware rejects NUL bytes (`\x00`) and lone Unicode surrogates (`\ud800` through `\udfff`) with 422 across JSON bodies, query strings, URL paths, and form inputs before values reach PostgreSQL drivers or log formatters.
 - **SQL Injection Defense:** All database queries utilize SQLAlchemy 2.0 parameterized expressions and ORM mapping exclusively. Raw string concatenation in queries is prohibited. Catalog search parameters escape SQL wildcard characters (`%`, `_`) to ensure literal matching.
 - **Cross-Site Scripting (XSS):** The API serves raw JSON data with proper MIME types. Outbound transactional HTML emails escape product titles and customer names using `html.escape` to eliminate stored email XSS vectors.
-- **Monetary Precision:** Prices and order totals are represented as exact decimal strings (never floating-point numbers) with ISO 4217 currency checks. Datetimes enforce explicit UTC timezone offsets (`UTCDatetime`).
+- **Monetary Precision:** Prices and order totals are represented as exact decimal strings with ASCII digits only (never floating-point numbers) with ISO 4217 currency checks. Order totals are capped at 21,474,836.47 to match payment column limits. Datetimes enforce explicit UTC timezone offsets (`UTCDatetime`).
+- **Free-Form JSON and Depth Limits:** Free-form JSON payloads enforce a maximum nesting depth of 64 levels and reject non-finite numbers (NaN, Infinity) with 422. Price filter parameters are bounded.
+- **Conditionals and Content Types:** `If-Match` accepts `*` only alone; malformed headers match nothing. `PATCH` with any `+json` media type other than `application/merge-patch+json` is rejected with 415.
 
 ## HTTP Security Headers and CORS Policy
 
@@ -100,9 +104,9 @@ The ASGI middleware stack injects OWASP Secure Headers on every response (includ
 
 - **Request Body Limits:** `BodySizeLimitMiddleware` terminates requests exceeding `settings.MAX_REQUEST_BODY_BYTES` (default 1 MiB) with HTTP 413 `body-too-large`.
 - **In-Flight Concurrency Caps:** `InFlightLimitMiddleware` caps active requests per Uvicorn worker to `settings.MAX_IN_FLIGHT_REQUESTS` (configured to 15 under benchmarks), shedding excess traffic with HTTP 503 `service-overloaded` (`Retry-After: 1`).
-- **Safe Worker Capacity Formula:** The safe in-flight ceiling is derived as `(DB_POOL_SIZE + DB_MAX_OVERFLOW) / 2` because an authenticated request can briefly checkout two database connections simultaneously during dependency resolution and route execution.
+- **Safe Worker Capacity Formula:** Keep `MAX_IN_FLIGHT_REQUESTS` at or below `DB_POOL_SIZE + DB_MAX_OVERFLOW` (15 by default); a request uses one session for its auth dependency and its route.
 - **Rate Limits:** Evaluated via atomic Redis Lua scripts per route template and caller. Keyed by authenticated user ID, or client IP accounting for `TRUSTED_PROXIES` (evaluated right-to-left) and `/64` IPv6 subnet grouping. Responses carry draft IETF `RateLimit` and `RateLimit-Policy` headers.
-- **Fail-Open vs. Fail-Closed Boundaries:** General rate limiting fails open on Redis outages to maintain store availability; authentication and failed-login limits fail closed (503) to prevent brute-force attacks during cache degradation.
+- **Fail-Open vs. Fail-Closed Boundaries:** General rate limiting and per-route limits (auth routes included) fail open on Redis outages to maintain store availability; the failed-login counter and token revocation checks fail closed (503, Retry-After: 30).
 
 ## Secrets Handling and Deployment Configuration
 
@@ -111,9 +115,9 @@ The ASGI middleware stack injects OWASP Secure Headers on every response (includ
 
 ## GDPR Privacy Controls
 
-- **Article 17 Erasure and Anonymization:** Deletion requests via `POST /api/v1/legal/data-request` require verification of `current_password`. The service anonymizes personal details, purges physical addresses, scrubs IP logs, and revokes all active tokens, while retaining immutable financial transaction rows required by statutory tax laws.
-- **Article 15 and 20 Portability:** Bounded, eager-loaded queries export user account records, addresses, order histories, and consent audits in JSON format.
-- **Consent Tracking:** Granular user consent state is recorded and audited across terms of service, privacy policies, and optional marketing preferences.
+- **Article 17 Erasure and Anonymization:** Deletion requests via `POST /api/v1/legal/data-request` require the account's current password in the `password` field. Erasure is accepted for all accounts except the last active administrator (409). Account PII is anonymised after the grace period. An order's shipping address snapshot is kept until the order is finished and no dispute is open, at most 30 days for an unfinished order unless a dispute is open (the project's reading of Art. 17(3), not legal advice). Deletion completion emails are sent only to non-anonymised addresses. Webhook events about an erased customer are redacted when processed. Purge jobs compute one bcrypt hash per account batch.
+- **Article 15 and 20 Portability:** Data export requests assemble account records, addresses, order histories, and payments, and email the JSON document inline to the account's verified address.
+- **Consent Tracking:** Granular user consent state is recorded and audited across terms of service, privacy policies, and marketing preferences. Profile updates via `PATCH /api/v1/users/me` record timestamped consent history entries.
 
 ## Supply Chain Security and CI Gates
 
