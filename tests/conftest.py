@@ -47,9 +47,11 @@ import atexit
 import fnmatch
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import uuid
 
@@ -176,13 +178,61 @@ def pytest_collection_modifyitems(items):
         if any(fnmatch.fnmatch(item.path.name, pattern) for pattern in _DB_SENSITIVE_FILES):
             item.add_marker(pytest.mark.db_sensitive)
 
+
+# The atexit handlers below do not run when a run is killed (SIGKILL, default
+# SIGTERM, os._exit, as mutmut's children end), which left directories and
+# databases behind for good. So each run removes those older than a day: a run
+# lasts minutes, so that age cannot belong to a live one.
+_STALE_MAX_AGE_SECONDS = 24 * 60 * 60
+_PG_TEST_DB_RE = re.compile(r"^ecom_pgtests_(\d+)_[0-9a-f]{12}$")
+
+
+def _stale_test_database_names(names, now, max_age_seconds):
+    stale = []
+    for name in names:
+        match = _PG_TEST_DB_RE.match(name)
+        if not match:
+            continue
+        created_at = int(match.group(1))
+        if now - created_at > max_age_seconds:
+            stale.append(name)
+    return stale
+
+
+def _remove_stale_test_dirs(root, now, max_age_seconds):
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith("ecommerce-tests-"):
+            continue
+        path = os.path.join(root, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if not stat.S_ISDIR(st.st_mode):
+            continue
+        if now - st.st_mtime > max_age_seconds:
+            shutil.rmtree(path, ignore_errors=True)
+
+
 if IS_POSTGRES:
     _admin_url = make_url(TEST_DATABASE_URL)
     if _admin_url.drivername != "postgresql+psycopg":
         raise RuntimeError("TEST_DATABASE_URL must be a postgresql+psycopg:// URL")
-    _pg_name = f"ecom_pgtests_{uuid.uuid4().hex[:12]}"
+    _pg_name = f"ecom_pgtests_{int(time.time())}_{uuid.uuid4().hex[:12]}"
     _admin_engine = create_engine(_admin_url, isolation_level="AUTOCOMMIT")
     with _admin_engine.connect() as _admin_conn:
+        _existing_dbs = [
+            row[0]
+            for row in _admin_conn.execute(
+                text("SELECT datname FROM pg_database WHERE datname LIKE 'ecom_pgtests_%'")
+            )
+        ]
+        for _stale_db in _stale_test_database_names(_existing_dbs, time.time(), _STALE_MAX_AGE_SECONDS):
+            _admin_conn.execute(text(f'DROP DATABASE IF EXISTS "{_stale_db}" WITH (FORCE)'))
         _admin_conn.execute(text(f'CREATE DATABASE "{_pg_name}"'))
 
     @atexit.register
@@ -230,6 +280,7 @@ else:
     # drivers (pysqlite and aiosqlite) that must see the same data - and an
     # in-memory SQLite database belongs to the one connection that created it.
     # A temp file is the one thing both can open.
+    _remove_stale_test_dirs(tempfile.gettempdir(), time.time(), _STALE_MAX_AGE_SECONDS)
     _db_dir = tempfile.mkdtemp(prefix="ecommerce-tests-")
     _db_url_path = os.path.join(_db_dir, "test.db").replace("\\", "/")
 
