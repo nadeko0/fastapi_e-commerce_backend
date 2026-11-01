@@ -189,11 +189,11 @@ def test_a_charge_refunded_event_listing_no_refund_applies_nothing(shop, paid, r
 def test_a_refund_event_log_line_names_the_refund_the_payment_and_the_order(shop, paid, caplog):
     refund_id = shop.refund(paid["admin"], paid["order"]["id"]).json()["id"]
 
-    with caplog.at_level(logging.WARNING, logger=ORDERS_LOGGER):
+    with caplog.at_level(logging.WARNING, logger="app.api.v1.orders"):
         shop.webhook("refund.failed", _refund_object(
             paid["payment"], refund_id, 1999, "failed", failure_reason="lost_or_stolen_card"))
 
-    assert _messages(caplog) == [
+    assert [r.getMessage() for r in caplog.records if r.name == "app.api.v1.orders"] == [
         f"Refund {refund_id} of payment {paid['payment'].id} (order {paid['order']['id']}) is "
         "failed after it was recorded (lost_or_stolen_card): the customer was not refunded, "
         "needs manual review"

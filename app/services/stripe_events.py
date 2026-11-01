@@ -22,11 +22,10 @@ from sqlalchemy.orm import Session
 from app.api.v1.orders import (
     _MANUAL_REVIEW_RESPONSE,
     _PENDING_INTENT_ID_PREFIX,
-    _REFUND_STATUSES_NOT_RETURNED,
     _apply_payment_failure,
     _apply_payment_success,
+    _apply_refund_object,
     _flag_payment_for_manual_review,
-    _record_refund,
     _reported_charge_matches_order,
     _settle_refunds,
 )
@@ -41,7 +40,7 @@ from app.models.payment import (
     Payment,
     WebhookEvent,
 )
-from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, PaymentRefund
+from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute
 
 logger = logging.getLogger(__name__)
 
@@ -218,59 +217,6 @@ def _apply_refund_event(db: Session, event_type: str, object_data: dict) -> dict
     if flagged:
         return {"status": "processed", "applied": True, "requires_manual_review": True}
     return {"status": "processed", "applied": True}
-
-
-def _apply_refund_object(db: Session, payment_row: Payment, refund_object: dict) -> bool:
-    """
-    Bring one recorded refund up to date with the provider's report of it.
-    Returns True when the refund turned out not to return the money - it
-    failed or was canceled after it had been recorded (Stripe: card
-    refunds can fail days later, refund.failed): its amount is taken back
-    out of amount_refunded, so the order is no longer refunded by it, and
-    it is flagged for manual review, since the customer has to be refunded
-    some other way. This used to go unnoticed: the order stayed refunded.
-    A failed or canceled refund is final and stays as it is.
-    """
-    refund_id = refund_object.get("id")
-    # Refund.status is nullable in Stripe's API reference.
-    status = refund_object.get("status")
-    if not isinstance(refund_id, str) or not isinstance(status, str):
-        return False
-    refund_row = db.scalars(
-        select(PaymentRefund).where(PaymentRefund.refund_id == refund_id).limit(1)
-    ).first()
-    if refund_row is None:
-        # A refund this app has not recorded: made in the Stripe Dashboard
-        # (or by another integration), or one of ours whose event overtook
-        # the /refund request still waiting for the provider's answer -
-        # that request then finds it recorded and does not count it again.
-        # Refunds made outside the app used to be ignored altogether: the
-        # order stayed paid for money already returned.
-        amount = refund_object.get("amount")
-        if isinstance(amount, int) and not isinstance(amount, bool) and amount > 0:
-            _record_refund(db, payment_row, refund_id, amount, status, source="provider")
-        return False
-    if refund_row.status in _REFUND_STATUSES_NOT_RETURNED:
-        return False
-    # Stripe does not guarantee event delivery order: a stale snapshot
-    # (pending, requires_action) delivered after succeeded must not move
-    # the refund back, which would revert a refunded order to paid. A later
-    # failed or canceled status (e.g. bank return) is final and must apply.
-    if refund_row.status == "succeeded" and status not in _REFUND_STATUSES_NOT_RETURNED:
-        return False
-    refund_row.status = status
-    if status not in _REFUND_STATUSES_NOT_RETURNED:
-        return False
-    payment_row.amount_refunded -= refund_row.amount
-    failure_reason = refund_object.get("failure_reason")
-    refund_row.failure_reason = failure_reason if isinstance(failure_reason, str) else None
-    refund_row.requires_manual_review = True
-    logger.warning(
-        "Refund %s of payment %s (order %s) is %s after it was recorded (%s): "
-        "the customer was not refunded, needs manual review",
-        refund_id, payment_row.id, payment_row.order_id, status, refund_row.failure_reason,
-    )
-    return True
 
 
 def apply_event(db: Session, event_type: str, event_data: Any, background_tasks) -> dict:

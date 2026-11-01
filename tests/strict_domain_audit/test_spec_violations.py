@@ -293,9 +293,6 @@ def _is_active(shop, email):
 # -- SPEC-LEDGER-02 ----------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "SPEC-LEDGER-02: a dispute that lands during the provider refund call is not "
-    "re-checked; the refund is answered 200 with no manual review flag"))
 def test_dispute_landing_during_the_refund_call_is_recorded_and_flagged_for_review(shop, monkeypatch):
     _, order, _, payment = _paid_order(shop)
     admin = shop.admin()

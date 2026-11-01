@@ -218,6 +218,7 @@ class StripePaymentProvider(PaymentProvider):
     _sessions_by_id: ClassVar[dict[str, CheckoutSession]] = {}
     _refunds_by_key: ClassVar[dict[str, Refund]] = {}
     _refunds_by_id: ClassVar[dict[str, Refund]] = {}
+    _disputed_intents: ClassVar[set[str]] = set()
 
     @classmethod
     def reset_mock_state(cls) -> None:
@@ -227,6 +228,15 @@ class StripePaymentProvider(PaymentProvider):
         cls._sessions_by_id.clear()
         cls._refunds_by_key.clear()
         cls._refunds_by_id.clear()
+        cls._disputed_intents.clear()
+
+    @classmethod
+    def open_dispute(cls, payment_intent_id: str) -> None:
+        cls._disputed_intents.add(payment_intent_id)
+
+    @classmethod
+    def close_dispute(cls, payment_intent_id: str) -> None:
+        cls._disputed_intents.discard(payment_intent_id)
 
     def _simulate_network_call(self) -> None:
         """No-op hook standing in for the real HTTP call to api.stripe.com.
@@ -518,6 +528,12 @@ class StripePaymentProvider(PaymentProvider):
                         "with different request parameters"
                     )
                 return cached
+
+        if payment_intent_id in self._disputed_intents:
+            raise CardError(
+                f"Charge '{payment_intent_id}' has an open dispute; it cannot be refunded",
+                code="charge_disputed",
+            )
 
         intent = self._intents_by_id.get(payment_intent_id)
         if intent is None:

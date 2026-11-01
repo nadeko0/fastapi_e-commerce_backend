@@ -197,3 +197,17 @@ def test_a_dispute_event_without_an_id_or_status_changes_nothing(shop, paid):
     assert response.json() == {"status": "processed", "applied": False}
     assert _disputes(shop) == []
     assert shop.refund(paid["admin"], paid["order"]["id"], amount="1.00").status_code == 200
+
+
+def test_disputed_payment_refused_by_provider_returns_409(shop, paid):
+    order_id = paid["order"]["id"]
+    payment_intent_id = paid["payment"].payment_intent_id
+    from app.services.payment.stripe_provider import StripePaymentProvider
+
+    StripePaymentProvider.open_dispute(payment_intent_id)
+    try:
+        refund = shop.refund(paid["admin"], order_id)
+        assert refund.status_code == 409
+        assert "disput" in refund.json()["detail"].lower()
+    finally:
+        StripePaymentProvider.close_dispute(payment_intent_id)

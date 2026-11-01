@@ -85,6 +85,7 @@ from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
     InvalidRequestError,
+    PaymentProviderError,
     PaymentProviderTimeoutError,
     SignatureVerificationError,
 )
@@ -1685,7 +1686,23 @@ async def refund_payment(
             detail="Idempotency key already used with different refund parameters",
         ) from None
     except (CardError, InvalidRequestError) as e:
+        # What Stripe answers for a charge under dispute (seen in its test mode;
+        # its error list also names refund_disputed_payment).
+        if getattr(e, "code", None) in ("charge_disputed", "refund_disputed_payment"):
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=e.message or "This payment is disputed; it cannot be refunded while the dispute is open",
+            ) from e
         raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message) from e
+
+    # The provider's word on this charge's other refunds, read before taking
+    # the lock. A refund that failed at the provider after being recorded
+    # still counts in amount_refunded until refund.failed is processed;
+    # reconciling here avoids violating ck_payment_refunded_within_amount.
+    try:
+        provider_refunds = await run_in_threadpool(provider.list_refunds, payment_intent_id)
+    except PaymentProviderError:
+        provider_refunds = []
 
     # Re-read under the order's lock before adding to it: payment_row was
     # read before the provider call, and another refund of this charge may
@@ -1693,23 +1710,28 @@ async def refund_payment(
     # refunds taken by the provider, one recorded, and an order whose
     # refunds covered the charge left "paid".
     await db.run_sync(_lock_order_and_reload, order, payment_row)
-    # provider.create_refund's own idempotency cache means a retried request
-    # with the same Idempotency-Key returns the *same* refund.id instead of
-    # creating a new one; recording it by that id (unique) keeps the replay
-    # from being counted a second time. This used to be a Redis SETNX
-    # marker that failed open: with Redis down, a retried refund was added
-    # to amount_refunded again, and two retries of more than half the
-    # charge broke the refunded <= amount constraint and answered 500.
-    refund_row = await db.run_sync(
-        _record_refund, payment_row, refund.id, refund.amount, refund.status.value,
-        source="admin",
-    )
-    # Refunded once the refunds that have succeeded cover the charge. A
-    # partial refund leaves the order PAID (it was fulfilled - only part of
-    # the charge was returned), and so does a pending one: it used to be
-    # reported as completed, and the order marked refunded, as soon as the
-    # provider accepted it.
-    await db.run_sync(_settle_refunds, order, payment_row)
+
+    def _sync_and_settle(db_session: Session) -> PaymentRefund:
+        for other in provider_refunds:
+            if other.id != refund.id and other.status.value in _REFUND_STATUSES_NOT_RETURNED:
+                _apply_refund_object(db_session, payment_row, {
+                    "id": other.id, "status": other.status.value, "amount": other.amount,
+                })
+        row = _record_refund(
+            db_session, payment_row, refund.id, refund.amount, refund.status.value,
+            source="admin",
+        )
+        _settle_refunds(db_session, order, payment_row)
+        if _has_open_dispute(db_session, order.id, payment_row.id):
+            row.requires_manual_review = True
+            logger.warning(
+                "Payment %s has an open dispute after refund %s was issued; "
+                "money has moved, flagging refund for manual review",
+                payment_row.id, refund.id,
+            )
+        return row
+
+    refund_row = await db.run_sync(_sync_and_settle)
     order.updated_at = utc_now()
     await db.commit()
 
@@ -1815,6 +1837,49 @@ async def list_order_payments(
 # canceled) of a refund whose money is not going back to the customer.
 # Final: a refund in one of them never changes again.
 _REFUND_STATUSES_NOT_RETURNED = ("failed", "canceled")
+
+
+def _apply_refund_object(db: Session, payment_row: Payment, refund_object: dict) -> bool:
+    """
+    Bring one recorded refund up to date with the provider's report of it.
+    Returns True when the refund turned out not to return the money - it
+    failed or was canceled after it had been recorded (Stripe: card
+    refunds can fail days later, refund.failed): its amount is taken back
+    out of amount_refunded, so the order is no longer refunded by it, and
+    it is flagged for manual review, since the customer has to be refunded
+    some other way. This used to go unnoticed: the order stayed refunded.
+    A failed or canceled refund is final and stays as it is.
+    """
+    refund_id = refund_object.get("id")
+    # Refund.status is nullable in Stripe's API reference.
+    status = refund_object.get("status")
+    if not isinstance(refund_id, str) or not isinstance(status, str):
+        return False
+    refund_row = db.scalars(
+        select(PaymentRefund).where(PaymentRefund.refund_id == refund_id).limit(1)
+    ).first()
+    if refund_row is None:
+        amount = refund_object.get("amount")
+        if isinstance(amount, int) and not isinstance(amount, bool) and amount > 0:
+            _record_refund(db, payment_row, refund_id, amount, status, source="provider")
+        return False
+    if refund_row.status in _REFUND_STATUSES_NOT_RETURNED:
+        return False
+    if refund_row.status == "succeeded" and status not in _REFUND_STATUSES_NOT_RETURNED:
+        return False
+    refund_row.status = status
+    if status not in _REFUND_STATUSES_NOT_RETURNED:
+        return False
+    payment_row.amount_refunded -= refund_row.amount
+    failure_reason = refund_object.get("failure_reason")
+    refund_row.failure_reason = failure_reason if isinstance(failure_reason, str) else None
+    refund_row.requires_manual_review = True
+    logger.warning(
+        "Refund %s of payment %s (order %s) is %s after it was recorded (%s): "
+        "the customer was not refunded, needs manual review",
+        refund_id, payment_row.id, payment_row.order_id, status, refund_row.failure_reason,
+    )
+    return True
 
 
 def _record_refund(
