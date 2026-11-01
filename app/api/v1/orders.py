@@ -1158,6 +1158,13 @@ async def process_payment(
     # PaymentIntent for the same order.
     retried_attempt = None
     if existing_payment:
+        is_stale_processing = (
+            existing_payment.status == "processing"
+            and existing_payment.created_at
+            <= utc_now() - timedelta(minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES)
+        )
+        if is_stale_processing:
+            existing_payment.status = "unknown"
         if existing_payment.status != "unknown":
             return _replay_payment(existing_payment, order)
         if _is_checkout_attempt(existing_payment):
@@ -1284,13 +1291,13 @@ async def process_payment(
         ) from e
     except IdempotencyError:
         await db.rollback()
-        if retried_attempt is not None:
-            # Refused before it was carried out: still not settled. The
-            # rollback expired the attempt's row; it is reloaded before it
-            # is written.
-            await db.refresh(payment_row)
-            payment_row.status = "unknown"
-            await db.commit()
+        # Refused before it was carried out: still not settled. The
+        # rollback expired the attempt's row; it is reloaded before it
+        # is written. Fresh attempts as well as retried attempts must
+        # be marked unknown so they do not get stuck as processing.
+        await db.refresh(payment_row)
+        payment_row.status = "unknown"
+        await db.commit()
         raise Problem(
             status.HTTP_409_CONFLICT,
             type=ProblemType.IDEMPOTENCY_KEY_IN_USE,
@@ -1366,9 +1373,17 @@ async def process_payment(
             detail="The payment was not completed; please try again or use another payment method",
         )
 
-    await db.run_sync(
+    applied = await db.run_sync(
         _apply_payment_success, order, payment_row, background_tasks, current_user.email
     )
+    if not applied:
+        raise Problem(
+            status.HTTP_409_CONFLICT,
+            detail=(
+                "The payment was taken but the order could not be completed "
+                "(cancelled or already paid); it has been flagged for a refund"
+            ),
+        )
 
     return PaymentResponse(
         order_id=order.id,
@@ -1712,8 +1727,14 @@ async def refund_payment(
     await db.run_sync(_lock_order_and_reload, order, payment_row)
 
     def _sync_and_settle(db_session: Session) -> PaymentRefund:
+        recorded = set(db_session.scalars(
+            select(PaymentRefund.refund_id).where(PaymentRefund.payment_id == payment_row.id)
+        ))
         for other in provider_refunds:
-            if other.id != refund.id and other.status.value in _REFUND_STATUSES_NOT_RETURNED:
+            # Only what this app counted can be overstated; a failed refund it
+            # never recorded took nothing from amount_refunded.
+            if (other.id != refund.id and other.id in recorded
+                    and other.status.value in _REFUND_STATUSES_NOT_RETURNED):
                 _apply_refund_object(db_session, payment_row, {
                     "id": other.id, "status": other.status.value, "amount": other.amount,
                 })

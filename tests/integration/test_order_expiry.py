@@ -349,7 +349,8 @@ def test_payment_completing_after_the_order_expired_is_flagged_not_applied(
 
     response = _pay(client, token, order)
 
-    assert response.status_code == 200, response.text
+    # 2A-06: the client is told the truth, not "paid".
+    assert response.status_code == 409, response.text
     db_order = _order(db_session, order["id"])
     assert db_order.status == "cancelled"
     assert db_order.payment_status == "pending"

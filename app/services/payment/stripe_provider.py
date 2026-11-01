@@ -18,6 +18,7 @@ usage: https://docs.stripe.com/testing
 """
 import hashlib
 import hmac
+import threading
 import time
 import uuid
 from typing import Any, ClassVar
@@ -218,6 +219,9 @@ class StripePaymentProvider(PaymentProvider):
     _sessions_by_id: ClassVar[dict[str, CheckoutSession]] = {}
     _refunds_by_key: ClassVar[dict[str, Refund]] = {}
     _refunds_by_id: ClassVar[dict[str, Refund]] = {}
+    # Real Stripe checks an Idempotency-Key and records its result as one step;
+    # the routes call this mock from a thread pool.
+    _refund_lock: ClassVar[threading.Lock] = threading.Lock()
     _disputed_intents: ClassVar[set[str]] = set()
 
     @classmethod
@@ -493,6 +497,20 @@ class StripePaymentProvider(PaymentProvider):
     # -- Refund --------------------------------------------------------
 
     def create_refund(
+        self,
+        *,
+        payment_intent_id: str,
+        amount: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> Refund:
+        with self._refund_lock:
+            return self._create_refund(
+                payment_intent_id=payment_intent_id,
+                amount=amount,
+                idempotency_key=idempotency_key,
+            )
+
+    def _create_refund(
         self,
         *,
         payment_intent_id: str,

@@ -490,7 +490,6 @@ def test_2A05_pending_rows_do_not_consume_reconciliation_cap(client, db_session,
     assert result.checked == 1
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2A-06 pay answers paid when success was not applied")
 def test_2A06_pay_does_not_answer_paid_when_success_not_applied(client, db_session, monkeypatch):
     """2A-06, Low. Correct behaviour: /pay answers 409 or non-paid status when
     payment success was not applied.
@@ -510,7 +509,6 @@ def test_2A06_pay_does_not_answer_paid_when_success_not_applied(client, db_sessi
     assert paid.status_code in (400, 409) or paid.json()["status"] != "paid"
 
 
-@pytest.mark.xfail(strict=True, reason="BUG DISCOVERED: 2A-07 orphaned processing attempt returns 409 forever")
 def test_2A07_orphaned_processing_attempt_can_be_retried(client, db_session, monkeypatch):
     """2A-07, Low. Correct behaviour: a stale processing attempt can be retried."""
     shop, _product, buyer, order = _placed_order(client, db_session)
@@ -522,7 +520,8 @@ def test_2A07_orphaned_processing_attempt_can_be_retried(client, db_session, mon
         m.setattr(StripePaymentProvider, "create_payment_intent", refuse)
         assert shop.pay(buyer, order["id"], key="stuck-key-0001").status_code == 409
     [attempt] = shop.payments(order["id"])
-    assert attempt.status == "processing"
+    assert attempt.status == "unknown"
+    attempt.status = "processing"
     attempt.created_at = utc_now() - timedelta(days=1)
     db_session.commit()
 

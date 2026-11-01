@@ -288,8 +288,8 @@ def test_pay_whose_order_is_paid_while_the_provider_call_is_in_flight_is_flagged
         f"{ORDERS_PREFIX}/{order['id']}/pay", json=_payment_payload(order), headers=_with_idempotency_key(setup["headers"])
     )
 
-    assert response.status_code == 200, response.text
-    assert response.json()["status"] == "paid"
+    assert response.status_code == 409, response.text
+    assert "flagged for a refund" in response.json()["detail"]
     payments = _get_payments(db_session, order["id"])
     assert [(p.status, p.requires_manual_review) for p in payments] == [("succeeded", True)]
     assert status_emails == []

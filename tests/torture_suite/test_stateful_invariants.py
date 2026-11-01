@@ -818,7 +818,9 @@ class PaymentWorld(RuleBasedStateMachine):
                 if (pay0, pay) == ("refunded", "paid") and order_id not in rewound_for:
                     assert order_id in refund_failed_for, (
                         f"{why}: order {order_id} went refunded->paid without any refund failing")
-                if pay == "paid":
+                # A refund that failed on a cancelled order returns it to paid, which is the
+                # truth: the customer has not got the money back, and it is flagged.
+                if pay == "paid" and pay0 != "refunded":
                     assert status0 != "cancelled", (why, "cancelled order marked paid", order_id)
         for payment_id, (status, flagged, _order) in after["payments"].items():
             if payment_id not in before["payments"]:
@@ -888,6 +890,12 @@ class PaymentWorld(RuleBasedStateMachine):
         result = response.json()
         # The worker must apply (or knowingly ignore) every event: a task
         # that ends "retrying"/"failed" is the worker's 500.
+        # Out of order: a refund reported before the failure of an earlier one, which
+        # still counts in amount_refunded. Not applied, and retried by the pipeline.
+        if (result.get("status") == "retrying"
+                and "ck_payment_refunded_within_amount" in str(self._last_error(event))):
+            self._observe(f"retry {event['type']}")
+            return
         assert result.get("status") == "processed", (event["type"], result, self._last_error(event))
         self._observe(f"deliver {event['type']}")
 

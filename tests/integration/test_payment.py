@@ -1208,6 +1208,9 @@ class _IncompleteProvider(PaymentProvider):
     def retrieve_payment_intent(self, payment_intent_id):
         return super().retrieve_payment_intent(payment_intent_id)
 
+    def cancel_payment_intent(self, payment_intent_id):
+        return super().cancel_payment_intent(payment_intent_id)
+
     def create_refund(self, **kwargs):
         return super().create_refund(**kwargs)
 
@@ -1241,6 +1244,8 @@ def test_base_provider_abstract_methods_all_raise_not_implemented():
         provider.confirm_payment_intent("pi_x", return_url=RETURN_URL)
     with pytest.raises(NotImplementedError):
         provider.retrieve_payment_intent("pi_x")
+    with pytest.raises(NotImplementedError):
+        provider.cancel_payment_intent("pi_x")
     with pytest.raises(NotImplementedError):
         provider.create_refund(payment_intent_id="pi_x")
     with pytest.raises(NotImplementedError):

@@ -672,12 +672,6 @@ class _RefundKeyWitness:
 
 
 def _bug5_tolerated(witness):
-    """KNOWN-BUG ALLOWANCE, BUG-5 (strict reproducer:
-    test_bug_mock_provider_refund_key_is_not_atomic): the in-process mock
-    provider processed one Idempotency-Key twice. Off under TORTURE_STRICT=1."""
-    if KNOWN_BUG_ALLOWANCES and witness.key_processed_twice():
-        print(f"KNOWN BUG-5 (mock refund key not atomic) tolerated: {dict(witness.outcomes)}")
-        return True
     return False
 
 
@@ -689,7 +683,6 @@ def test_refund_same_key_twins_refund_once(shop, round_, monkeypatch):
     every answer names the same refund (or is a 409 in-use)."""
     buyer, order, admin = _paid_order(shop)
     key = new_key()
-    witness = _RefundKeyWitness(monkeypatch)
 
     responses = burst([
         ("POST", f"{ORDERS}/{order['id']}/refund",
@@ -698,13 +691,6 @@ def test_refund_same_key_twins_refund_once(shop, round_, monkeypatch):
     ])
 
     allowed = {200, 409}
-    if _bug5_tolerated(witness):
-        # The twin that missed the mock's key cache found nothing left to
-        # refund: 400 "Refund amount (0) exceeds the refundable amount (0)".
-        allowed.add(400)
-        for r in responses:
-            if r.status_code == 400:
-                assert "exceeds the refundable amount" in r.json()["detail"], r.text
     check_responses(responses, allowed)
     ok = [r.json() for r in responses if r.status_code == 200]
     assert ok and len({r["id"] for r in ok}) == 1, histogram(responses)
@@ -806,11 +792,6 @@ class _RendezvousDict(dict):
 
 
 @requires_postgres
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG DISCOVERED (BUG-5, mock provider, dev/CI only): concurrent same-key refunds both pass "
-    "the mock's Idempotency-Key check and both refund - check at "
-    "app/services/payment/stripe_provider.py:486, insert at :532, no lock, called from a thread "
-    "pool (app/api/v1/orders.py:1591)"))
 def test_bug_mock_provider_refund_key_is_not_atomic(shop, monkeypatch):
     """POST /refund relies on the provider alone for the Idempotency-Key
     (the key is not stored locally). The in-process mock
