@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The `celery-worker` healthcheck in `docker-compose.yml` runs under `timeout 9`. Each check starts a whole Celery process (70-120 MB); one that outlived the 10 s healthcheck timeout was counted as failed but left running, so on a CPU-starved host the checks piled up, about 30 MB more every 10 s, until the kernel killed the worker for memory. Found by a load test on a 2 vCPU server.
+
 ### Changed
-- The `benchmark` CI job times the base commit and HEAD one after the other on the same runner (`.github/scripts/benchmark_ab.sh`) and fails when a median on HEAD is more than 35% slower. It used to compare with a baseline saved by an earlier run on `main`, which came from another runner: six reruns of the 4.1.1 commit landed on three CPU models whose medians differed by up to 2.26 times, and three of the six failed the 80% gate with no change to the code.
+- The `benchmark` CI job times the base commit and HEAD one after the other on the same runner (`.github/scripts/benchmark_ab.sh`) and fails when a median on HEAD is more than 35% slower. It used to compare with a baseline saved by an earlier run on `main`, which came from another runner: six reruns of the 4.1.1 commit landed on three CPU models whose medians differed by up to 2.26 times, and three of the six failed the 80% gate with no change to the code. On one runner, six runs of unchanged code put HEAD within 6% of the base on the CPU benchmarks and within 22% on the request benchmarks.
 
 ## [4.1.1] - 2026-11-02
 

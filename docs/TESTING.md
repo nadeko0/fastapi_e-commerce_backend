@@ -49,7 +49,7 @@ flowchart TD
 
 - **lint:** Runs Ruff across `app` and `tests`, and static type checking with `mypy`.
 - **sast:** Runs Bandit offline (`-r app --severity-level medium`) for static application security testing.
-- **benchmark:** Times hot execution paths with `pytest-benchmark` on the base commit (the pull request's base, or the previous head of `main`) and on HEAD, one after the other on the same runner, and fails when a median on HEAD is more than 35% slower (`.github/scripts/benchmark_ab.sh`). Both sides share one machine because runners differ: six runs of one commit landed on three AMD EPYC models (7763, 9V74, 9V45) whose medians differed by up to 2.26 times, while runs on the same model stayed within 19%.
+- **benchmark:** Times hot execution paths with `pytest-benchmark` on the base commit (the pull request's base, or the previous head of `main`) and on HEAD, one after the other on the same runner, and fails when a median on HEAD is more than 35% slower (`.github/scripts/benchmark_ab.sh`). Both sides share one machine because runners differ: six runs of one commit landed on three AMD EPYC models (7763, 9V74, 9V45) whose medians differed by up to 2.26 times. On one runner, six runs of unchanged code put HEAD within 6% of the base on the CPU benchmarks and within 22% on the request benchmarks, which the 35% leaves room for.
 - **audit:** Exports locked dependencies to check against the PyPI Advisory Database using `pip-audit`, producing a CycloneDX SBOM.
 - **secrets:** Scans git history for exposed credentials using `gitleaks`.
 - **test:** Executes the primary suite in parallel on SQLite, runs timing-sensitive tests sequentially, and enforces coverage gates.
