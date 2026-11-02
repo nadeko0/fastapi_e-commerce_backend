@@ -111,7 +111,9 @@ class Settings(BaseSettings):
     # unset, or empty, writes no file.
     LOG_FILE: str | None = None
 
-    HOST: str = "0.0.0.0"
+    # Every interface of the container: Docker's port mapping and the host's
+    # firewall decide what is reachable from outside, not this bind.
+    HOST: str = "0.0.0.0"  # nosec B104
     PORT: int = 8000
     WORKERS: int = 4
     RELOAD: bool = False

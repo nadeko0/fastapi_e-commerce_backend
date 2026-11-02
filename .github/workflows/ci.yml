@@ -30,6 +30,25 @@ jobs:
         run: uv sync --locked --group dev
       - name: Ruff lint
         run: uv run ruff check app tests
+      - name: Type check (mypy, configured in pyproject.toml)
+        run: uv run mypy
+
+  sast:
+    # Static security analysis of the application code. Bandit runs offline
+    # with its built-in rules at a pinned version, so the result changes only
+    # when the code does. Medium severity and up fails the build; the one
+    # accepted finding is marked in place with its reason (# nosec B104).
+    # CodeQL runs separately through GitHub's default setup and reports to the
+    # repository's Security tab.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Bandit
+        run: uvx bandit==1.9.4 -r app --severity-level medium --quiet
 
   test:
     runs-on: ubuntu-latest
@@ -285,6 +304,60 @@ jobs:
           JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
         run: uv run pytest tests/ -m real_redis -q -p no:cacheprovider -rs
 
+  benchmark:
+    # tests/benchmarks: the hot paths (entity tags, JWT, serialization, cart
+    # totals, three requests through the app on SQLite) timed with
+    # pytest-benchmark. Each push to main keeps its results in the Actions
+    # cache; every run compares with the newest of those and fails when a
+    # median is more than 80% slower. 80% because shared runners are noisy:
+    # four local runs under load spread up to 58% on the request benchmarks.
+    # It catches a regression of that size, such as a blocking call or a
+    # quadratic loop, not a few percent. The first run has nothing to compare
+    # with and only records.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Set up Python
+        run: uv python install
+      - name: Install dependencies
+        run: uv sync --locked --group dev
+      - name: Restore the newest baseline from main
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: .benchmarks
+          key: benchmarks-${{ github.sha }}
+          restore-keys: benchmarks-
+      - name: Run the benchmarks
+        env:
+          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
+          POSTGRES_SERVER: localhost
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+          REDIS_HOST: localhost
+          SMTP_HOST: localhost
+          SMTP_USER: ci@example.com
+          SMTP_PASSWORD: ci
+          EMAILS_FROM_EMAIL: ci@example.com
+          EMAILS_FROM_NAME: CI
+        run: |
+          compare=""
+          if [ -n "$(find .benchmarks -name '*.json' 2>/dev/null)" ]; then
+            compare="--benchmark-compare --benchmark-compare-fail=median:80%"
+          fi
+          uv run pytest tests/benchmarks -p no:cacheprovider -p no:randomly \
+            --benchmark-enable --benchmark-only --benchmark-autosave $compare
+      - name: Save the results as the new baseline
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: .benchmarks
+          key: benchmarks-${{ github.sha }}
+
   audit:
     # Fails the build when a package pinned in uv.lock has a known
     # vulnerability (PyPI Advisory Database, via pip-audit). The requirements
@@ -344,7 +417,7 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
-    needs: [lint, audit, secrets, test, test-timezones, test-postgres, test-redis]
+    needs: [lint, sast, audit, secrets, test, test-timezones, test-postgres, test-redis]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build metadata for the OCI labels
