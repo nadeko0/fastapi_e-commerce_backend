@@ -195,6 +195,15 @@ _TIMING_SENSITIVE_TESTS = (
 )
 
 
+def pytest_terminal_summary(terminalreporter, config):
+    # pytest-randomly prints its seed in the header, which -q (as CI runs)
+    # hides. Repeated at the end, so a failure that depends on the order can
+    # be rerun in the same order from the log.
+    seed = getattr(config.option, "randomly_seed", None)
+    if config.pluginmanager.hasplugin("randomly") and isinstance(seed, int):
+        terminalreporter.write_line(f"random order seed: rerun with --randomly-seed={seed}")
+
+
 def pytest_collection_modifyitems(items):
     for item in items:
         if item.path.name in _TIMING_SENSITIVE_FILES or item.originalname in _TIMING_SENSITIVE_TESTS:

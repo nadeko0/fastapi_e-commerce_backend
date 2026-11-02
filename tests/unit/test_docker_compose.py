@@ -174,8 +174,7 @@ def test_ci_tests_against_the_postgres_image_production_runs():
     # here. The other majors are pinned by digest as well.
     compose_image = re.search(r"^\s*image: (postgres:\S+)", service_block("db"), re.M).group(1)
     ci = _read(".github/workflows/ci.yml")
-    job = ci[ci.index("\n  test-postgres:"):]
-    job = job[: job.index("\n  audit:")]
+    job = _ci_job(ci, "test-postgres")
     assert re.search(r"^\s*image: \$\{\{ matrix\.image \}\}\s*$", job, re.M), job
     matrix_images = re.findall(r"^\s+image: (postgres:\S+)\s*$", job, re.M)
     assert compose_image in matrix_images
@@ -186,11 +185,26 @@ def test_ci_tests_against_the_postgres_image_production_runs():
     assert "test-postgres" in needs
 
 
+def test_ci_checks_migration_compatibility_on_the_deployed_postgres_image():
+    # Old code on new migrations matters on the server that is deployed.
+    compose_image = re.search(r"^\s*image: (postgres:\S+)", service_block("db"), re.M).group(1)
+    ci = _read(".github/workflows/ci.yml")
+    job = _ci_job(ci, "migration-compat")
+    assert re.findall(r"^\s+image: (\S+)\s*$", job, re.M) == [compose_image]
+    assert "migration-compat" in re.search(r"docker-build:.*?needs: \[([^\]]*)\]", ci, re.S).group(1)
+
+
+def _ci_job(ci, name):
+    """One job's block of ci.yml: from its key to the next job's key."""
+    start = ci.index(f"\n  {name}:")
+    following = re.search(r"\n  [\w-]+:\n", ci[start + 1:])
+    return ci[start:start + 1 + following.start()] if following else ci[start:]
+
+
 def test_ci_runs_the_real_redis_tests_on_the_redis_image_production_runs():
     compose_image = re.search(r"^\s*image: (redis:\S+)", service_block("redis"), re.M).group(1)
     ci = _read(".github/workflows/ci.yml")
-    job = ci[ci.index("\n  test-redis:"):]
-    job = job[: job.index("\n  audit:")]
+    job = _ci_job(ci, "test-redis")
     assert re.search(rf"^\s*image: {re.escape(compose_image)}\s*$", job, re.M)
     assert "REAL_REDIS_URL: redis://localhost:6379/0" in job
     assert "-m real_redis" in job
