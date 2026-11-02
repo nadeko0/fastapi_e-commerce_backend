@@ -213,7 +213,7 @@ class DocumentedRoute(APIRoute):
                 _merge(merged, 403, {**FORBIDDEN, "description": ACCOUNT_INACTIVE_NOTE.capitalize()})
             else:
                 own["description"] = f"{own['description']}; {ACCOUNT_INACTIVE_NOTE}"
-        if self.methods & {"POST", "PUT", "PATCH"}:
+        if self.methods and self.methods & {"POST", "PUT", "PATCH"}:
             _merge(merged, 413, PAYLOAD_TOO_LARGE)
         if self.body_field is not None and not isinstance(self.body_field.field_info, params.Form):
             # A JSON body: a text that is not JSON is a 400, another
@@ -258,4 +258,4 @@ def install_problem_media_type(app: FastAPI) -> None:
                         content[PROBLEM_MEDIA_TYPE] = content.pop("application/json")
         return schema
 
-    app.openapi = openapi
+    app.openapi = openapi  # type: ignore[method-assign]  # FastAPI documents overriding the openapi method on the app instance

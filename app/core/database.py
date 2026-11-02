@@ -65,7 +65,10 @@ def _build_connect_args(database_uri: str) -> dict:
     return {}
 
 
-_connect_args = _build_connect_args(settings.DATABASE_URI.get_secret_value())
+assert settings.DATABASE_URI is not None, "assemble_db_connection always produces a database URI"
+_database_uri = settings.DATABASE_URI
+
+_connect_args = _build_connect_args(_database_uri.get_secret_value())
 
 _engine_kwargs = dict(
     pool_size=settings.DB_POOL_SIZE,
@@ -80,7 +83,7 @@ _engine_kwargs = dict(
     hide_parameters=not settings.SQL_DEBUG,
 )
 
-engine = create_engine(settings.DATABASE_URI.get_secret_value(), **_engine_kwargs)
+engine = create_engine(_database_uri.get_secret_value(), **_engine_kwargs)
 
 SessionLocal = sessionmaker(
     autoflush=False,
@@ -104,7 +107,7 @@ SessionLocal = sessionmaker(
 # there is no second driver and no second DATABASE_URI. A DATABASE_URI that
 # names a sync-only driver (e.g. postgresql+psycopg2://) fails right here,
 # at import, rather than on the first request to an async route.
-async_engine = create_async_engine(settings.DATABASE_URI.get_secret_value(), **_engine_kwargs)
+async_engine = create_async_engine(_database_uri.get_secret_value(), **_engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=async_engine,

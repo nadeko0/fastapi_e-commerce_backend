@@ -220,7 +220,9 @@ class OrderResponse(OrderInDB):
     shipping_address: "AddressResponse" = Field(
         validation_alias=AliasChoices("shipping_address_shown", "shipping_address")
     )
-    items: list[OrderItemResponse]
+    # A narrower item type than OrderInDB's: Pydantic validates each class by
+    # its own annotation, mypy sees an incompatible override of a mutable list.
+    items: list[OrderItemResponse]  # type: ignore[assignment]
 
     model_config = ConfigDict(from_attributes=True)
 

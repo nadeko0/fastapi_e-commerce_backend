@@ -197,7 +197,7 @@ def decode_token(token: str, *, options: dict) -> dict:
             token,
             settings.JWT_SECRET_KEY.get_secret_value(),
             algorithms=[settings.JWT_ALGORITHM],
-            options=options,
+            options=options,  # type: ignore[arg-type]  # PyJWT types options as TypedDict Options
         )
     except UnicodeError:
         raise jwt.DecodeError("Token is not valid Unicode") from None
@@ -333,7 +333,7 @@ async def get_current_user(
             options={"require": ACCESS_TOKEN_REQUIRED_CLAIMS},
         )
         user_id = user_id_from_subject(payload.get("sub"))
-        token_type: str = payload.get("type")
+        token_type: str | None = payload.get("type")
         issued_at = payload.get("iat")
 
         if user_id is None or token_type != "access":
@@ -441,6 +441,7 @@ async def get_optional_active_user(
     if "authorization" not in request.headers:
         return None
     token = await oauth2_scheme(request)
+    assert token is not None, "oauth2_scheme with auto_error=True raises on missing token"
     current_user = await get_current_user(db=db, token=token)
     return await get_current_active_user(current_user=current_user)
 
@@ -466,7 +467,7 @@ def _blacklist_id(payload: dict) -> str:
 async_redis_service = AsyncRedisService()
 
 
-async def issue_refresh_token(user_id: str | int, family: str | None = None) -> str:
+async def issue_refresh_token(user_id: int, family: str | None = None) -> str:
     """Create a refresh token and register its jti with Redis so it can
     later be validated, rotated, and reuse-detected. `family` is passed when
     rotating an existing chain (login omits it, which starts a new chain).

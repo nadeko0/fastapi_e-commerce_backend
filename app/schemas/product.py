@@ -63,7 +63,9 @@ class ProductCreate(RequestBody, ProductBase):
     # so an omitted `images` would have skipped the rule below and stored a
     # product without images.
     images: list[ImageUrl]
-    characteristics: dict[str, ProductCharacteristicInput] = Field(default_factory=dict)
+    # The input type of a characteristic, narrower than ProductBase's: Pydantic
+    # validates by this annotation, mypy sees an incompatible override of a dict.
+    characteristics: dict[str, ProductCharacteristicInput] = Field(default_factory=dict)  # type: ignore[assignment]
 
     model_config = ConfigDict(json_schema_extra=input_schema(rules={"images": {"minItems": 1}}))
 

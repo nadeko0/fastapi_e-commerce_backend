@@ -51,6 +51,7 @@ Sheet, "Respond with generic error messages"; FastAPI's default 422 put the
 submitted password in the response).
 """
 
+from collections.abc import Sequence
 from enum import StrEnum
 from http import HTTPStatus
 from typing import Any
@@ -126,7 +127,7 @@ class Problem(HTTPException):
         super().__init__(status_code=status_code, detail=detail, headers=headers)
         # Starlette fills a missing detail with the status phrase; a problem
         # without one (the 500) has no detail member.
-        self.detail = detail
+        self.detail = detail  # type: ignore[assignment]  # Starlette HTTPException types detail as str, but Problem allows None to omit detail on 500
         self.problem_type = type
         self.retry_after = retry_after
         self.errors = errors
@@ -157,10 +158,12 @@ def problem_response(scope: Scope, exc: StarletteHTTPException) -> ProblemRespon
     request_id = scope.get("state", {}).get("request_id")
     if request_id:
         body["request_id"] = request_id
-    if getattr(exc, "errors", None) is not None:
-        body["errors"] = exc.errors
-    if getattr(exc, "retry_after", None) is not None:
-        body["retry_after"] = exc.retry_after
+    errors = getattr(exc, "errors", None)
+    if errors is not None:
+        body["errors"] = errors
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is not None:
+        body["retry_after"] = retry_after
     return ProblemResponse(body, status_code=exc.status_code, headers=exc.headers)
 
 
@@ -180,7 +183,7 @@ def _without_input(error: dict) -> dict:
     return clean
 
 
-def sanitized_errors(errors: list[dict]) -> list[dict]:
+def sanitized_errors(errors: Sequence[Any]) -> list[dict]:
     """`errors()` of a RequestValidationError or a pydantic ValidationError,
     without `input` and with `ctx` cut down to the constraint values."""
     return jsonable_encoder([_without_input(e) for e in errors])
@@ -283,5 +286,5 @@ async def request_validation_error_handler(
 
 
 def register_error_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
-    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]  # starlette types the handler for Exception only
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]  # starlette types the handler for Exception only

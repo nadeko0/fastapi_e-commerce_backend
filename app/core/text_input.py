@@ -81,9 +81,10 @@ def first_unusable_text(value: Any, loc: tuple[str | int, ...] = ()) -> dict | N
                 return {"type": found[0], "loc": where, "msg": found[1]}
         elif isinstance(item, dict):
             for name in item:
-                found = isinstance(name, str) and _problem(name)
-                if found:
-                    return {"type": found[0], "loc": where, "msg": found[1]}
+                if isinstance(name, str):
+                    found = _problem(name)
+                    if found:
+                        return {"type": found[0], "loc": where, "msg": found[1]}
             pending.extend((child, (*where, name)) for name, child in reversed(item.items()))
         elif isinstance(item, (list, tuple)):
             pending.extend((child, (*where, index)) for index, child in reversed(list(enumerate(item))))

@@ -14,6 +14,8 @@ Celery signals (https://docs.celeryq.dev/en/stable/userguide/signals.html):
 """
 
 import uuid
+from contextvars import Token
+from typing import Any
 
 from celery.signals import before_task_publish, task_postrun, task_prerun
 
@@ -30,7 +32,7 @@ HEADER_TRACE_ID = "app_trace_id"
 HEADER_PARENT_SPAN_ID = "app_parent_span_id"
 
 # task_id -> token; prerun and postrun of one run happen in the same thread.
-_tokens: dict[str, object] = {}
+_tokens: dict[str, Token[Any]] = {}
 
 
 def inject_context(headers=None, **_kwargs) -> None:

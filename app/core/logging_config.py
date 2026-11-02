@@ -4,6 +4,7 @@ import sys
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 from app.core.request_context import get_request_context
@@ -29,7 +30,7 @@ class JSONFormatter(logging.Formatter):
         return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
     def format(self, record: logging.LogRecord) -> str:
-        payload = {
+        payload: dict[str, Any] = {
             "timestamp": self.formatTime(record),
             "level": record.levelname,
             "logger": record.name,

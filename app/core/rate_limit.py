@@ -100,7 +100,7 @@ _UNIT_SECONDS = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
 
 
 class Rate(NamedTuple):
-    count: int    # this many requests...
+    count: int  # type: ignore[assignment]  # namedtuple field overrides tuple.count method
     seconds: int  # ...per window of this length
 
 
@@ -336,7 +336,7 @@ class RateLimiter:
         retry_after = _wait(count, ttl_ms, rate)
         if retry_after:
             error = too_many_requests("Rate limit exceeded", retry_after)
-            error.headers.update(headers)
+            error.headers = {**(error.headers or {}), **headers}
             raise error
         if response is not None:
             response.headers.update(headers)

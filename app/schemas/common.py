@@ -160,7 +160,7 @@ class PaginationParams(BaseModel):
     sort_by: str | None = None
     sort_order: str | None = Field(None, pattern="^(asc|desc)$")
 
-def sortable_pagination(name: str, fields: Sequence[str]) -> type[PaginationParams]:
+def sortable_pagination(name: str, fields: Sequence[str]) -> Any:
     """PaginationParams whose sort_by / sort_order document the fields one
     endpoint sorts by (see app.core.sorting). A value outside `fields` is
     ignored and the default order applies; it is not an error."""
@@ -295,7 +295,7 @@ class CartResponseItem(BaseModel):
     unavailable_reason: Literal["product_unavailable", "variant_unavailable"] | None = None
     # Current catalog price; None for an unavailable line.
     unit_price: Decimal | None = None
-    currency: StoreCurrency
+    currency: StoreCurrency = Field(default_factory=store_currency)
     line_total: Decimal | None = None
     # The price shown when the line was added, and whether the current one
     # differs from it. Information for the customer, never an error.
@@ -309,7 +309,7 @@ class CartResponse(BaseModel):
     items: list[CartResponseItem] = Field(default_factory=list)
     # Sum of line_total over the available lines.
     total_amount: Decimal = Field(default=_ZERO)
-    currency: StoreCurrency
+    currency: StoreCurrency = Field(default_factory=store_currency)
     # Number of lines, unavailable ones included.
     items_count: int = Field(default=0)
     last_modified: datetime

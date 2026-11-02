@@ -10,15 +10,18 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from sqlalchemy import ColumnElement
+from sqlalchemy.orm.attributes import InstrumentedAttribute
+
+SortColumn = InstrumentedAttribute[Any] | ColumnElement[Any]
 
 
 def order_clauses(
     sort_by: str | None,
     sort_order: str | None,
-    allowed: Mapping[str, ColumnElement[Any]],
-    tie_breaker: ColumnElement[Any],
-    default: Sequence[ColumnElement[Any]],
-) -> list[ColumnElement[Any]]:
+    allowed: Mapping[str, SortColumn],
+    tie_breaker: SortColumn,
+    default: Sequence[SortColumn],
+) -> list[SortColumn]:
     """The ORDER BY terms of a list.
 
     A sort_by found in `allowed` sorts by that column, ascending unless
@@ -30,7 +33,7 @@ def order_clauses(
     if column is None:
         return list(default)
     descending = sort_order == "desc"
-    terms = [column.desc() if descending else column.asc()]
+    terms: list[SortColumn] = [column.desc() if descending else column.asc()]
     if column is not tie_breaker:
         terms.append(tie_breaker.desc() if descending else tie_breaker.asc())
     return terms
