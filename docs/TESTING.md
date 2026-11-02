@@ -49,7 +49,7 @@ flowchart TD
 
 - **lint:** Runs Ruff across `app` and `tests`, and static type checking with `mypy`.
 - **sast:** Runs Bandit offline (`-r app --severity-level medium`) for static application security testing.
-- **benchmark:** Measures hot execution paths with `pytest-benchmark`, comparing against the latest baseline from `main` and failing on regressions over 80%.
+- **benchmark:** Times hot execution paths with `pytest-benchmark` on the base commit (the pull request's base, or the previous head of `main`) and on HEAD, one after the other on the same runner, and fails when a median on HEAD is more than 35% slower (`.github/scripts/benchmark_ab.sh`). Both sides share one machine because runners differ: six runs of one commit landed on three AMD EPYC models (7763, 9V74, 9V45) whose medians differed by up to 2.26 times, while runs on the same model stayed within 19%.
 - **audit:** Exports locked dependencies to check against the PyPI Advisory Database using `pip-audit`, producing a CycloneDX SBOM.
 - **secrets:** Scans git history for exposed credentials using `gitleaks`.
 - **test:** Executes the primary suite in parallel on SQLite, runs timing-sensitive tests sequentially, and enforces coverage gates.
@@ -148,6 +148,11 @@ uv run mypy
 Run performance benchmarks for hot execution paths:
 ```bash
 uv run pytest tests/benchmarks --benchmark-enable --benchmark-only
+```
+
+The CI comparison, base commit against HEAD on this machine (Linux or WSL):
+```bash
+bash .github/scripts/benchmark_ab.sh origin/main
 ```
 
 ## Verified Metrics for Release v4.1.1

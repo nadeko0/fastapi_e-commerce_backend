@@ -344,56 +344,28 @@ jobs:
   benchmark:
     # tests/benchmarks: the hot paths (entity tags, JWT, serialization, cart
     # totals, three requests through the app on SQLite) timed with
-    # pytest-benchmark. Each push to main keeps its results in the Actions
-    # cache; every run compares with the newest of those and fails when a
-    # median is more than 80% slower. 80% because shared runners are noisy:
-    # four local runs under load spread up to 58% on the request benchmarks.
-    # It catches a regression of that size, such as a blocking call or a
-    # quadratic loop, not a few percent. The first run has nothing to compare
-    # with and only records.
+    # pytest-benchmark. The base commit (the PR's base, or the previous head
+    # of main) and HEAD run one after the other on this runner, and the job
+    # fails when a median on HEAD is more than 35% slower (see
+    # .github/scripts/benchmark_ab.sh). A baseline saved by an earlier run is
+    # not used: it came from another runner, and runner CPU models alone
+    # moved the same commit by more than 2x. It catches a blocking call or a
+    # quadratic loop, not a few percent.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: ${{ env.UV_VERSION }}
       - name: Set up Python
         run: uv python install
-      - name: Install dependencies
-        run: uv sync --locked --group dev
-      - name: Restore the newest baseline from main
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
-        with:
-          path: .benchmarks
-          key: benchmarks-${{ github.sha }}
-          restore-keys: benchmarks-
-      - name: Run the benchmarks
+      - name: Base and HEAD on the same runner
         env:
-          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
-          POSTGRES_SERVER: localhost
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: ci
-          REDIS_HOST: localhost
-          SMTP_HOST: localhost
-          SMTP_USER: ci@example.com
-          SMTP_PASSWORD: ci
-          EMAILS_FROM_EMAIL: ci@example.com
-          EMAILS_FROM_NAME: CI
-        run: |
-          compare=""
-          if [ -n "$(find .benchmarks -name '*.json' 2>/dev/null)" ]; then
-            compare="--benchmark-compare --benchmark-compare-fail=median:80%"
-          fi
-          uv run pytest tests/benchmarks -p no:cacheprovider -p no:randomly \
-            --benchmark-enable --benchmark-only --benchmark-autosave $compare
-      - name: Save the results as the new baseline
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
-        with:
-          path: .benchmarks
-          key: benchmarks-${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash .github/scripts/benchmark_ab.sh "$BASE_SHA"
 
   audit:
     # Fails the build when a package pinned in uv.lock has a known

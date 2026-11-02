@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- The `benchmark` CI job times the base commit and HEAD one after the other on the same runner (`.github/scripts/benchmark_ab.sh`) and fails when a median on HEAD is more than 35% slower. It used to compare with a baseline saved by an earlier run on `main`, which came from another runner: six reruns of the 4.1.1 commit landed on three CPU models whose medians differed by up to 2.26 times, and three of the six failed the 80% gate with no change to the code.
+
 ## [4.1.1] - 2026-11-02
 
 A PATCH release: it fixes the entity-tag header parser and two faults of the migration environment, and adds checks to CI. No API change, no new endpoint or setting.
@@ -441,6 +446,7 @@ Three independent audits of 4.0.3 reviewed the code, ran it under load and fuzzi
 - Structured JSON logging across all application components.
 - Automated CI pipeline with linting, unit/integration testing (85% coverage gate), and Docker container builds.
 
+[Unreleased]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.1...HEAD
 [4.1.1]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.0.3...v4.1.0
 [4.0.3]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.0.2...v4.0.3
