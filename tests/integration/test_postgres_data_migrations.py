@@ -14,6 +14,7 @@ Skipped unless TEST_DATABASE_URL names a server; CI's test-postgres job runs it.
 import os
 import subprocess
 import sys
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -52,7 +53,9 @@ def _alembic(url, *args, check=True):
 @pytest.fixture
 def migration_db():
     admin_url = make_url(TEST_DATABASE_URL)
-    name = f"ecom_pgtests_data_{uuid.uuid4().hex[:12]}"
+    # The name the session database uses, so a run killed halfway leaves a
+    # database the next run's sweep in tests/conftest.py removes.
+    name = f"ecom_pgtests_{int(time.time())}_{uuid.uuid4().hex[:12]}"
     url = admin_url.set(database=name).render_as_string(hide_password=False)
     admin = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     with admin.connect() as connection:

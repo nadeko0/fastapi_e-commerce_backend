@@ -399,7 +399,9 @@ def _alembic(url, *args):
 
 def test_migrations_round_trip_and_agree_with_the_session_schema():
     admin_url = make_url(TEST_DATABASE_URL)
-    name = f"ecom_pgtests_mig_{uuid.uuid4().hex[:12]}"
+    # The name the session database uses, so a run killed halfway leaves a
+    # database the next run's sweep in tests/conftest.py removes.
+    name = f"ecom_pgtests_{int(time.time())}_{uuid.uuid4().hex[:12]}"
     url = admin_url.set(database=name).render_as_string(hide_password=False)
     admin = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     try:
