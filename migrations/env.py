@@ -77,16 +77,22 @@ def run_migrations_online() -> None:
         poolclass=pool.QueuePool,
     )
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,  # Enable column type comparison
-            compare_server_default=True,  # Compare server defaults
-        )
+    # Disposed at the end: the pool would otherwise keep its connection open
+    # until garbage collection, which matters when Alembic runs inside a
+    # longer-lived process (the migration tests call command.upgrade directly).
+    try:
+        with connectable.connect() as connection:
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                compare_type=True,  # Enable column type comparison
+                compare_server_default=True,  # Compare server defaults
+            )
 
-        with context.begin_transaction():
-            context.run_migrations()
+            with context.begin_transaction():
+                context.run_migrations()
+    finally:
+        connectable.dispose()
 
 
 if context.is_offline_mode():
