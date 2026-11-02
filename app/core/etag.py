@@ -19,7 +19,7 @@ IfMatch = Annotated[str | None, Header(description="Entity tag(s) the current re
 IfNoneMatch = Annotated[str | None, Header(description="Entity tag(s) the client already holds, or *")]
 
 _ENTITY = re.compile(r'(W/)?"([^"]*)"')
-_LIST = re.compile(r'[ \t,]*(?:W/)?"[^"]*"(?:[ \t]*,[ \t,]*(?:W/)?"[^"]*")*[ \t,]*')
+_SEPARATOR_CHARS = " \t,"
 
 
 def etag_for(model: BaseModel) -> str:
@@ -32,9 +32,22 @@ def _parse(header: str) -> list[tuple[bool, str | None]]:
     value = header.strip(" \t")
     if value == "*":
         return [(False, None)]
-    if not _LIST.fullmatch(value):  # RFC 9110: "*" or a comma-separated list of entity-tags
+    # RFC 9110: "*" or a comma-separated list of entity-tags. The tags are found
+    # first and only the text between them is checked, in one pass over the
+    # header: anything but separators there, or two tags with no comma between
+    # them, makes the whole header invalid.
+    entities = list(_ENTITY.finditer(value))
+    if not entities:
         return []
-    return [(bool(m.group(1)), m.group(2)) for m in _ENTITY.finditer(value)]
+    position = 0
+    for index, entity in enumerate(entities):
+        gap = value[position:entity.start()]
+        if gap.strip(_SEPARATOR_CHARS) or (index and "," not in gap):
+            return []
+        position = entity.end()
+    if value[position:].strip(_SEPARATOR_CHARS):
+        return []
+    return [(bool(entity.group(1)), entity.group(2)) for entity in entities]
 
 
 def if_match_passes(header: str | None, current: str) -> bool:
