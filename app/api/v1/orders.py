@@ -241,13 +241,13 @@ async def create_order(
 
     # Unpaid orders hold stock until paid, cancelled or expired; one account
     # cannot hold more than the cap at once.
-    pending_orders = await db.scalar(
+    pending_orders = (await db.scalar(
         select(func.count()).select_from(Order).where(
             Order.user_id == current_user.id,
             Order.status == OrderStatus.NEW,
             Order.payment_status.in_([s.value for s in UNPAID_PAYMENT_STATUSES]),
         )
-    )
+    )) or 0
     if pending_orders >= settings.MAX_PENDING_ORDERS_PER_USER:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -401,7 +401,7 @@ async def create_order(
                     stock_quantity=Product.stock_quantity - item.quantity
                 ).execution_options(synchronize_session=False)
             )
-        if stock_update.rowcount == 0:
+        if stock_update.rowcount == 0:  # type: ignore[attr-defined]  # execute() on UPDATE returns CursorResult at runtime
             await db.rollback()
             raise Problem(
                 status.HTTP_409_CONFLICT,
@@ -541,7 +541,7 @@ async def update_order_status(
             detail="Order is on hold: a payment for it is disputed",
         )
 
-    if not _is_valid_status_transition(order.status, new_status):
+    if not _is_valid_status_transition(OrderStatus(order.status), new_status):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Invalid status transition"
@@ -851,7 +851,7 @@ def _apply_payment_success(
 
     payment_row.status = "succeeded"
     order.payment_status = PaymentStatus.PAID
-    if _is_valid_status_transition(order.status, OrderStatus.CONFIRMED):
+    if _is_valid_status_transition(OrderStatus(order.status), OrderStatus.CONFIRMED):
         order.status = OrderStatus.CONFIRMED
     order.updated_at = utc_now()
     db.commit()
@@ -1963,12 +1963,12 @@ def _settle_refunds(db: Session, order: Order, payment_row: Payment) -> None:
     ).first() is not None:
         order.payment_status = PaymentStatus.REFUNDED
         return
-    not_completed = db.scalar(
+    not_completed = (db.scalar(
         select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
             PaymentRefund.payment_id == payment_row.id,
             PaymentRefund.status.notin_(("succeeded", *_REFUND_STATUSES_NOT_RETURNED)),
         )
-    )
+    )) or 0
     returned = payment_row.amount_refunded - not_completed
     order.payment_status = (
         PaymentStatus.REFUNDED if returned >= payment_row.amount else PaymentStatus.PAID

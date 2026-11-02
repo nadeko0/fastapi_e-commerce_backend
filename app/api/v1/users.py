@@ -1,6 +1,6 @@
 import contextlib
 import logging
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from email_validator import EmailNotValidError, validate_email
 from fastapi import (
@@ -65,6 +65,7 @@ from app.schemas.address import (
 from app.schemas.common import (
     Int32,
     Message,
+    PaginationParams,
     sortable_pagination,
 )
 from app.schemas.order import OrderListResponse, OrderResponse
@@ -595,9 +596,13 @@ async def update_current_user(
         ) from e
 
 ADDRESS_SORT_COLUMNS = {"id": Address.id, "created_at": Address.created_at}
-AddressListParams = sortable_pagination("AddressListParams", tuple(ADDRESS_SORT_COLUMNS))
 ORDER_SORT_COLUMNS = {"id": Order.id, "created_at": Order.created_at, "total_amount": Order.total_amount}
-UserOrderListParams = sortable_pagination("UserOrderListParams", tuple(ORDER_SORT_COLUMNS))
+if TYPE_CHECKING:
+    AddressListParams = PaginationParams
+    UserOrderListParams = PaginationParams
+else:
+    AddressListParams = sortable_pagination("AddressListParams", tuple(ADDRESS_SORT_COLUMNS))
+    UserOrderListParams = sortable_pagination("UserOrderListParams", tuple(ORDER_SORT_COLUMNS))
 
 
 @router.get("/addresses", response_model=AddressListResponse)
@@ -614,6 +619,7 @@ async def list_addresses(
             Address.is_active
         )
     )
+    assert total is not None, "SELECT count(*) always returns an integer"
 
     addresses = (await db.execute(
         select(Address)
@@ -930,6 +936,7 @@ async def get_user_orders(
     total = await db.scalar(
         select(func.count()).select_from(Order).where(Order.user_id == current_user.id)
     )
+    assert total is not None, "SELECT count(*) always returns an integer"
 
     # Eager-load shipping_address (many-to-one) and items->product/variant
     # (one-to-many): OrderResponse serializes them for every order in the
@@ -1057,7 +1064,7 @@ async def reset_password(
     # connection until dependency teardown.
     await db.close()
 
-    if user_id is None:
+    if user_id is None or old_hashed_password is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
@@ -1102,7 +1109,7 @@ async def reset_password(
         .values(hashed_password=new_hashed_password)
         .execution_options(synchronize_session=False)
     )
-    updated = result.rowcount
+    updated = result.rowcount  # type: ignore[attr-defined]  # execute() on UPDATE returns CursorResult at runtime
     await db.commit()
     if updated != 1:
         raise _invalid_reset_token()

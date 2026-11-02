@@ -340,6 +340,7 @@ async def request_personal_data(
         # failed-attempt limits as /users/login, or a stolen token would be a
         # password oracle with no lockout.
         await check_login_attempt(current_user.email, request)
+        assert request_data.password is not None, "DataRequest validator enforces password for deletion"
         if not await verify_password_async(request_data.password, current_user.hashed_password):
             raise HTTPException(
                 status_code=401,

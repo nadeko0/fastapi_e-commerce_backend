@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from redis.exceptions import RedisError
@@ -189,6 +189,7 @@ def _sync_guest_cart_cookie(response: Response, owner: CartOwner, cart: Cart) ->
     if not owner.is_guest:
         return
     if cart.items:
+        assert owner.guest_id is not None, "the first write to a guest cart issues its identifier"
         _set_guest_cart_cookie(response, owner.guest_id)
     elif owner.guest_id is not None:
         _clear_guest_cart_cookie(response)
@@ -304,10 +305,10 @@ async def _load_catalog(
 
     variants: dict[int, ProductVariant] = {}
     if variant_ids:
-        rows = await db.scalars(
+        variant_rows = await db.scalars(
             select(ProductVariant).where(ProductVariant.id.in_(sorted(variant_ids)))
         )
-        variants = {variant.id: variant for variant in rows}
+        variants = {variant.id: variant for variant in variant_rows}
 
     return products, variants
 
@@ -478,7 +479,7 @@ async def add_to_cart(
 
     stock_quantity = variant.stock_quantity if variant else product.stock_quantity
 
-    line = dict(
+    line: dict[str, Any] = dict(
         product_id=product.id,
         quantity=quantity,
         # Recorded on the line as what the customer is being shown now,
@@ -668,6 +669,7 @@ async def validate_cart(
             ))
             continue
 
+        assert product is not None, "Product must exist when line is available"
         available = variant.stock_quantity if variant else product.stock_quantity
         if available < item.quantity:
             issues.append(CartValidationIssue(
@@ -687,9 +689,10 @@ async def validate_cart(
             variant_id=line.variant_id,
             price_when_added=line.price_when_added,
             current_price=line.unit_price,
+            currency=line.currency,
         )
         for line in CartResponse.from_cart(cart, products, variants).items
-        if line.price_changed
+        if line.price_changed and line.price_when_added is not None and line.unit_price is not None
     ]
 
     return CartValidationResponse(

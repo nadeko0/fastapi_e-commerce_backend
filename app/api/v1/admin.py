@@ -1,7 +1,7 @@
 import logging
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi import status as http_status
@@ -141,6 +141,7 @@ async def create_category(
 ):
     """Create a new category, optionally nested under a parent category."""
 
+    parent = None
     if category.parent_id:
         parent = (
             await db.execute(select(Category).where(Category.id == category.parent_id).limit(1))
@@ -152,7 +153,7 @@ async def create_category(
             )
 
     db_category = Category(**category.model_dump())
-    if category.parent_id:
+    if parent is not None:
         db_category.level = parent.level + 1
         db_category.path = [*parent.path, parent.id]
     else:
@@ -208,7 +209,7 @@ async def create_product(
 
     # populate_existing: the product is already in the session, and its
     # category must be loaded by this query (no lazy load under asyncio).
-    db_product = (
+    product_row = (
         await db.execute(
             select(Product)
             .options(joinedload(Product.category))
@@ -217,6 +218,8 @@ async def create_product(
             .execution_options(populate_existing=True)
         )
     ).scalars().first()
+    assert product_row is not None, "Just-flushed product must exist in database"
+    db_product = product_row
 
     # ProductResponse requires category_name, which is not a Product column,
     # so from_attributes alone can't populate it. Validate the ORM-mapped
@@ -309,7 +312,7 @@ async def update_product(
     # flush, not commit: see create_product.
     await db.flush()
 
-    db_product = (
+    product_row = (
         await db.execute(
             select(Product)
             .options(joinedload(Product.category))
@@ -318,6 +321,8 @@ async def update_product(
             .execution_options(populate_existing=True)
         )
     ).scalars().first()
+    assert product_row is not None, "Updated product must exist in database"
+    db_product = product_row
 
     base = ProductInDB.model_validate(db_product, from_attributes=True)
     result = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
@@ -372,6 +377,7 @@ async def delete_product(
             # committed an order line for it: deactivate instead (as above).
             await db.rollback()
             db_product = await db.get(Product, product_id)
+            assert db_product is not None, "Product must exist when foreign key IntegrityError occurs"
             db_product.is_active = False
             db_product.updated_at = utc_now()
             await db.commit()
@@ -407,9 +413,12 @@ PAYMENT_SORT_COLUMNS = {
     "amount": Payment.amount,
 }
 
-AdminPaymentListParams = sortable_pagination(
-    "AdminPaymentListParams", list(PAYMENT_SORT_COLUMNS)
-)
+if TYPE_CHECKING:
+    AdminPaymentListParams = PaginationParams
+else:
+    AdminPaymentListParams = sortable_pagination(
+        "AdminPaymentListParams", list(PAYMENT_SORT_COLUMNS)
+    )
 
 
 @router.get(
@@ -492,7 +501,7 @@ async def list_orders(
     else:
         query = query.order_by(Order.created_at.desc(), Order.id.desc())
 
-    total = await db.scalar(select(func.count()).select_from(Order).where(*filters))
+    total = (await db.scalar(select(func.count()).select_from(Order).where(*filters))) or 0
     orders = (
         await db.execute(
             query.where(*filters)
@@ -551,7 +560,7 @@ async def get_statistics(
     )
 
 
-    stats = {
+    stats: dict[str, Any] = {
         "period": period,
         "currency": settings.STORE_CURRENCY,
         "order_count": await db.scalar(select(func.count()).select_from(Order).where(*paid_in_period)),
@@ -899,13 +908,17 @@ DISCREPANCY_SORT_COLUMNS = {
     "last_seen_at": PaymentDiscrepancy.last_seen_at,
     "kind": PaymentDiscrepancy.kind,
 }
-DiscrepancyListParams = sortable_pagination("DiscrepancyListParams", tuple(DISCREPANCY_SORT_COLUMNS))
 WEBHOOK_EVENT_SORT_COLUMNS = {
     "id": WebhookEvent.id,
     "created_at": WebhookEvent.created_at,
     "status": WebhookEvent.status,
 }
-WebhookEventListParams = sortable_pagination("WebhookEventListParams", tuple(WEBHOOK_EVENT_SORT_COLUMNS))
+if TYPE_CHECKING:
+    DiscrepancyListParams = PaginationParams
+    WebhookEventListParams = PaginationParams
+else:
+    DiscrepancyListParams = sortable_pagination("DiscrepancyListParams", tuple(DISCREPANCY_SORT_COLUMNS))
+    WebhookEventListParams = sortable_pagination("WebhookEventListParams", tuple(WEBHOOK_EVENT_SORT_COLUMNS))
 
 
 @router.get(
@@ -1046,6 +1059,7 @@ async def list_webhook_events(
         filters.append(WebhookEvent.status == status)
 
     total = await db.scalar(select(func.count()).select_from(WebhookEvent).where(*filters))
+    assert total is not None, "SELECT count(*) always returns an integer"
     events = (
         await db.execute(
             select(WebhookEvent)
@@ -1141,6 +1155,7 @@ async def list_payments(
         filters.append(Payment.order_id == order_id)
 
     total = await db.scalar(select(func.count()).select_from(Payment).where(*filters))
+    assert total is not None, "SELECT count(*) always returns an integer"
     payments = (
         await db.execute(
             select(Payment)
@@ -1276,6 +1291,7 @@ async def refund_flagged_payment(
             select(Payment).where(Payment.id == payment_id).with_for_update().limit(1)
         )
     ).scalars().first()
+    assert payment is not None, "Payment row must exist for refund that was just created"
 
     refund_row = await db.run_sync(
         _record_refund,

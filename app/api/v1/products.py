@@ -1,6 +1,6 @@
 import inspect
 import json
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -22,7 +22,7 @@ from app.schemas.category import (
     CategoryTreeNode,
     CategoryTreeResponse,
 )
-from app.schemas.common import Int32, sortable_pagination
+from app.schemas.common import Int32, PaginationParams, sortable_pagination
 from app.schemas.product import (
     ProductFilter,
     ProductListResponse,
@@ -48,7 +48,8 @@ async def _count(db: AsyncSession, stmt: Select) -> int:
     # Same SQL the legacy Query.count() produced: SELECT count(*) FROM (<stmt>).
     # order_by(None) because ordering a subquery that is only counted is
     # wasted work for Postgres.
-    return await db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+    total = await db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+    return total or 0
 
 
 def _to_product_response(product: Product) -> ProductResponse:
@@ -122,7 +123,7 @@ def _product_filter(**params) -> ProductFilter:
 # no body to speak of (OpenAPI 3.1.0: "SHOULD be avoided"), so it is a query
 # parameter holding JSON, parsed above.
 _filter_signature = inspect.signature(ProductFilter)
-_product_filter.__signature__ = _filter_signature.replace(parameters=[
+_product_filter.__signature__ = _filter_signature.replace(parameters=[  # type: ignore[attr-defined]  # FastAPI inspects __signature__ for query parameters
     parameter.replace(
         annotation=Annotated[str | None, Query(
             max_length=1000,
@@ -138,7 +139,10 @@ _product_filter.__signature__ = _filter_signature.replace(parameters=[
 
 
 CATEGORY_SORT_COLUMNS = {"id": Category.id, "name": Category.name, "created_at": Category.created_at}
-CategoryListParams = sortable_pagination("CategoryListParams", tuple(CATEGORY_SORT_COLUMNS))
+if TYPE_CHECKING:
+    CategoryListParams = PaginationParams
+else:
+    CategoryListParams = sortable_pagination("CategoryListParams", tuple(CATEGORY_SORT_COLUMNS))
 
 
 @router.get("/categories", response_model=CategoryListResponse)
