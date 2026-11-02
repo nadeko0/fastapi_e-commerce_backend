@@ -64,14 +64,17 @@ if _dotenv_test.exists():
 _SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 _HAS_REAL_KEY = _SECRET_KEY.startswith("sk_test_") and _SECRET_KEY != "sk_test_mock_placeholder"
 
-pytestmark = pytest.mark.skipif(
-    not _HAS_REAL_KEY,
-    reason=(
-        "No real Stripe test-mode STRIPE_SECRET_KEY in the environment "
-        "(set STRIPE_SECRET_KEY or provide .env.test) - skipping the live "
-        "Stripe integration suite."
+pytestmark = [
+    pytest.mark.skipif(
+        not _HAS_REAL_KEY,
+        reason=(
+            "No real Stripe test-mode STRIPE_SECRET_KEY in the environment "
+            "(set STRIPE_SECRET_KEY or provide .env.test) - skipping the live "
+            "Stripe integration suite."
+        ),
     ),
-)
+    pytest.mark.enable_socket,  # these tests talk to api.stripe.com on purpose
+]
 
 # The provider has no return_url fallback of its own. A test-only page: the
 # URL the provider used to fall back to, which Stripe's test mode accepted.

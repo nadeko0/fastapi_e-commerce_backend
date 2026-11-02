@@ -59,14 +59,17 @@ if _dotenv_test.exists():
 _SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 _HAS_REAL_KEY = _SECRET_KEY.startswith("sk_test_") and _SECRET_KEY != "sk_test_mock_placeholder"
 
-pytestmark = pytest.mark.skipif(
-    not _HAS_REAL_KEY,
-    reason=(
-        "No real Stripe test-mode STRIPE_SECRET_KEY in the environment "
-        "(set STRIPE_SECRET_KEY or provide .env.test) - skipping the live "
-        "Checkout Session integration suite."
+pytestmark = [
+    pytest.mark.skipif(
+        not _HAS_REAL_KEY,
+        reason=(
+            "No real Stripe test-mode STRIPE_SECRET_KEY in the environment "
+            "(set STRIPE_SECRET_KEY or provide .env.test) - skipping the live "
+            "Checkout Session integration suite."
+        ),
     ),
-)
+    pytest.mark.enable_socket,  # these tests talk to api.stripe.com on purpose
+]
 
 SUCCESS_URL = "https://example.com/checkout/success?session_id={CHECKOUT_SESSION_ID}"
 CANCEL_URL = "https://example.com/checkout/cancel"

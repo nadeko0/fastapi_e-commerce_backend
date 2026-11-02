@@ -67,7 +67,18 @@ minversion = "9.0"
 strict_config = true
 strict_markers = true
 strict_xfail = true
-addopts = ["-ra", "-p", "no:randomly"]
+addopts = [
+    "-ra",
+    "-p",
+    "no:randomly",
+    # pytest-socket: a test that opens a connection to anything but this machine
+    # fails. It guards socket.connect, so it stops Python's HTTP and SMTP clients,
+    # the ways a test could reach Stripe or a mail server. It does not see libpq
+    # or name lookups, and a TEST_DATABASE_URL on another host needs its own
+    # --allow-hosts. The live Stripe tests are the one exception (enable_socket).
+    "--allow-hosts=127.0.0.1,::1,localhost",
+    "--allow-unix-socket",
+]
 testpaths = ["tests"]
 pythonpath = ["."]
 filterwarnings = [

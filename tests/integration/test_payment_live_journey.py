@@ -47,14 +47,17 @@ if _dotenv_test.exists():
 _SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 _HAS_REAL_KEY = _SECRET_KEY.startswith("sk_test_") and _SECRET_KEY != "sk_test_mock_placeholder"
 
-pytestmark = pytest.mark.skipif(
-    not _HAS_REAL_KEY,
-    reason=(
-        "No real Stripe test-mode STRIPE_SECRET_KEY in the environment "
-        "(set STRIPE_SECRET_KEY or provide .env.test) - skipping the live "
-        "Stripe journey."
+pytestmark = [
+    pytest.mark.skipif(
+        not _HAS_REAL_KEY,
+        reason=(
+            "No real Stripe test-mode STRIPE_SECRET_KEY in the environment "
+            "(set STRIPE_SECRET_KEY or provide .env.test) - skipping the live "
+            "Stripe journey."
+        ),
     ),
-)
+    pytest.mark.enable_socket,  # these tests talk to api.stripe.com on purpose
+]
 
 SUCCEEDING = ["pm_card_visa", "pm_card_mastercard", "pm_card_amex", "pm_card_jcb",
               "pm_card_unionpay", "pm_card_de", "pm_card_gb", "pm_card_jp", "pm_card_br"]
