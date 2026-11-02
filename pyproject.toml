@@ -69,8 +69,6 @@ strict_markers = true
 strict_xfail = true
 addopts = [
     "-ra",
-    "-p",
-    "no:randomly",
     # pytest-socket: a test that opens a connection to anything but this machine
     # fails. It guards socket.connect, so it stops Python's HTTP and SMTP clients,
     # the ways a test could reach Stripe or a mail server. It does not see libpq
