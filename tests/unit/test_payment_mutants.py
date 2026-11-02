@@ -534,3 +534,118 @@ def test_a_redirect_off_the_frontend_origin_is_refused(frontend, url):
         CheckoutSessionCreate(success_url=url)
     with pytest.raises(ValidationError):
         CheckoutSessionCreate(cancel_url=url)
+
+
+def test_a_refused_api_key_critical_log_message(live, monkeypatch, caplog):
+    """Kills:
+    app.services.payment.live_stripe_provider.x__provider_unavailable__mutmut_3
+    """
+    monkeypatch.setattr(
+        stripe.PaymentIntentService,
+        "create",
+        _raising(stripe.AuthenticationError("bad key", headers=HEADERS)),
+    )
+    with (
+        caplog.at_level("CRITICAL", logger=live_module.logger.name),
+        pytest.raises(PaymentProviderTimeoutError),
+    ):
+        _create_intent(live)
+
+    assert len(caplog.records) == 1
+    assert "Stripe refused our API key" in caplog.records[0].getMessage()
+
+
+def test_a_refund_without_a_status_defaults_to_pending(live, monkeypatch):
+    """Kills:
+    app.services.payment.live_stripe_provider.x__to_refund__mutmut_7
+    app.services.payment.live_stripe_provider.x__to_refund__mutmut_8
+    """
+    monkeypatch.setattr(
+        stripe.RefundService,
+        "create",
+        lambda *args, **kwargs: _SdkObject(
+            id="re_test_1",
+            payment_intent="pi_1",
+            amount=500,
+            currency="usd",
+            status=None,
+        ),
+    )
+    refund = live.create_refund(payment_intent_id="pi_1", amount=500)
+    assert refund.status.value == "pending"
+    assert refund.provider_status == "pending"
+
+
+def test_cancel_payment_intent_missing_raises_card_error(live, monkeypatch):
+    """Kills:
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_3
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_4
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_5
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_6
+    """
+    monkeypatch.setattr(
+        stripe.PaymentIntentService,
+        "cancel",
+        _raising(stripe.InvalidRequestError("no such pi", "id", code="resource_missing", headers=HEADERS)),
+    )
+    with pytest.raises(CardError) as caught:
+        live.cancel_payment_intent("pi_target")
+    assert caught.value.code == "resource_missing"
+    assert caught.value.message == "No such payment_intent: 'pi_target'"
+
+
+def test_cancel_payment_intent_refused_keeps_message_and_code(live, monkeypatch):
+    """Kills:
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_12
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_16
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_17
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_18
+    """
+    # The SDK's user_message is the message alone; str() of the error adds the
+    # request id from the headers, which is what mutmut_17 would show instead.
+    err = stripe.InvalidRequestError(
+        "Cannot cancel payment intent", "id", code="payment_intent_cancel_failed", headers=HEADERS
+    )
+    assert str(err) != err.user_message
+    monkeypatch.setattr(stripe.PaymentIntentService, "cancel", _raising(err))
+    with pytest.raises(CardError) as caught:
+        live.cancel_payment_intent("pi_target")
+    assert caught.value.message == "Cannot cancel payment intent"
+    assert caught.value.code == "payment_intent_cancel_failed"
+
+
+def test_cancel_payment_intent_refused_without_code_gets_default(live, monkeypatch):
+    """Kills:
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_13
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_15
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_19
+    app.services.payment.live_stripe_provider.xǁLiveStripePaymentProviderǁcancel_payment_intent__mutmut_20
+    """
+    monkeypatch.setattr(
+        stripe.PaymentIntentService,
+        "cancel",
+        _raising(stripe.InvalidRequestError("bad request", None, code=None, headers=HEADERS)),
+    )
+    with pytest.raises(CardError) as caught:
+        live.cancel_payment_intent("pi_target")
+    assert caught.value.code == "invalid_request"
+
+
+def test_closing_a_dispute_allows_subsequent_refunds(provider):
+    """Kills:
+    app.services.payment.stripe_provider.xǁStripePaymentProviderǁclose_dispute__mutmut_1
+    """
+    intent = provider.create_payment_intent(
+        amount=5000, currency="EUR", idempotency_key="dispute-key", payment_method="pm_card_visa"
+    )
+    provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
+
+    StripePaymentProvider.open_dispute(intent.id)
+    with pytest.raises(CardError) as disputed:
+        provider.create_refund(payment_intent_id=intent.id)
+    assert disputed.value.code == "charge_disputed"
+
+    StripePaymentProvider.close_dispute(intent.id)
+    refund = provider.create_refund(payment_intent_id=intent.id)
+    assert refund.payment_intent == intent.id
+    assert refund.amount == 5000

@@ -715,3 +715,84 @@ def test_multiple_payments_resolving_discrepancies_accumulate(shop, provider):
     result = run(shop.db, provider)
     assert result.checked >= 2
     assert result.resolved == 2
+
+
+def test_reconciliation_cap_warning_log_carries_limit(shop, provider, monkeypatch, caplog):
+    """Kills:
+    app.services.reconciliation.x_reconcile_payments__mutmut_37
+    app.services.reconciliation.x_reconcile_payments__mutmut_38
+    app.services.reconciliation.x_reconcile_payments__mutmut_39
+    """
+    monkeypatch.setattr(settings, "RECONCILIATION_MAX_PAYMENTS", 2)
+    paid(shop)
+    paid(shop)
+    paid(shop)
+    with caplog.at_level("WARNING", logger="app.services.reconciliation"):
+        run(shop.db, provider)
+    record = next(
+        r for r in caplog.records
+        if r.levelname == "WARNING" and "Reconciliation: more than" in r.getMessage()
+    )
+    assert record.args == (2,)
+    assert record.getMessage() == "Reconciliation: more than 2 payments in the window; the oldest are not checked"
+
+
+def test_reconciliation_soft_time_limit_logs_warning_and_aborts(shop, caplog):
+    """Kills:
+    app.services.reconciliation.x_reconcile_payments__mutmut_79
+    """
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    class _TimeLimitProvider:
+        def retrieve_payment_intent(self, pi_id):
+            raise SoftTimeLimitExceeded()
+
+    paid(shop)
+    with caplog.at_level("WARNING", logger="app.services.reconciliation"):
+        result = run(shop.db, _TimeLimitProvider())
+    assert result.aborted is True
+    record = next(
+        r for r in caplog.records
+        if r.levelname == "WARNING" and r.getMessage() == "Reconciliation task exceeded soft time limit; stopping cleanly"
+    )
+    assert record.getMessage() == "Reconciliation task exceeded soft time limit; stopping cleanly"
+
+
+def test_reconciliation_provider_error_logs_payment_and_error_details(shop, caplog):
+    """Kills:
+    app.services.reconciliation.x_reconcile_payments__mutmut_87
+    app.services.reconciliation.x_reconcile_payments__mutmut_88
+    app.services.reconciliation.x_reconcile_payments__mutmut_89
+    """
+    class _FailingProvider:
+        def retrieve_payment_intent(self, pi_id):
+            raise PaymentProviderTimeoutError("network unreachable")
+
+    _, payment = paid(shop)
+    with caplog.at_level("WARNING", logger="app.services.reconciliation"):
+        run(shop.db, _FailingProvider())
+    record = next(
+        r for r in caplog.records
+        if r.levelname == "WARNING" and "could not be compared" in r.getMessage()
+    )
+    expected = f"Reconciliation: payment {payment.id} ({payment.payment_intent_id}) could not be compared: network unreachable"
+    assert record.getMessage() == expected
+
+
+def test_reconciliation_finished_logs_summary_dict(shop, provider, caplog):
+    """Kills:
+    app.services.reconciliation.x_reconcile_payments__mutmut_127
+    app.services.reconciliation.x_reconcile_payments__mutmut_128
+    app.services.reconciliation.x_reconcile_payments__mutmut_129
+    app.services.reconciliation.x_reconcile_payments__mutmut_130
+    """
+    paid(shop)
+    with caplog.at_level("INFO", logger="app.services.reconciliation"):
+        result = run(shop.db, provider)
+    record = next(
+        r for r in caplog.records
+        if r.levelname == "INFO" and "Reconciliation finished:" in str(r.msg)
+    )
+    # logging keeps a lone mapping argument as the mapping itself.
+    assert record.args == result.as_dict()
+    assert record.getMessage() == f"Reconciliation finished: {result.as_dict()}"
