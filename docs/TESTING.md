@@ -139,7 +139,7 @@ Verification results on release v4.1.0:
 | Payment Layer Coverage | 100.0% line and branch | Zero uncovered branches in financial path |
 | Overall Branch Coverage | 99% (source: `app`) | Fail-under gate set to 85% |
 | Mutation Score (mutmut 3.8.0, measured on v4.0.3) | 98.4% (3,113 killed / 3,165) | 100% of 52 survivors proven equivalent |
-| CI Execution Time | ~5 minutes across 16 jobs | Fully automated GitHub Actions workflow |
+| CI Execution Time | ~10 minutes across 16 jobs | Fully automated GitHub Actions workflow |
 
 ## Campaign Reports
 
