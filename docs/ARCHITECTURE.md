@@ -1,6 +1,6 @@
 # Architecture and System Design
 
-Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v4.1.1.
+Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v4.1.2.
 
 ## System Overview and Boundaries
 

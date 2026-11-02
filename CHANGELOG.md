@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.1.2] - 2026-11-02
+
+A PATCH release: it fixes the Celery worker's healthcheck in `docker-compose.yml` and the benchmark check in CI. No change to the application code or the API.
 
 ### Fixed
 - The `celery-worker` healthcheck in `docker-compose.yml` runs under `timeout 9`. Each check starts a whole Celery process (70-120 MB); one that outlived the 10 s healthcheck timeout was counted as failed but left running, so on a CPU-starved host the checks piled up, about 30 MB more every 10 s, until the kernel killed the worker for memory. Found by a load test on a 2 vCPU server.
@@ -449,7 +451,7 @@ Three independent audits of 4.0.3 reviewed the code, ran it under load and fuzzi
 - Structured JSON logging across all application components.
 - Automated CI pipeline with linting, unit/integration testing (85% coverage gate), and Docker container builds.
 
-[Unreleased]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.1...HEAD
+[4.1.2]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.0.3...v4.1.0
 [4.0.3]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.0.2...v4.0.3

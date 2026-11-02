@@ -9,7 +9,7 @@ If you find a vulnerability, please report it privately through GitHub's **Repor
 A useful report includes:
 - what the vulnerability is and what an attacker could do with it;
 - how to reproduce it (an HTTP request or `curl` command is ideal);
-- the affected endpoint, component or configuration, and the version you tested (the latest release is v4.1.1; earlier lines differ substantially).
+- the affected endpoint, component or configuration, and the version you tested (the latest release is v4.1.2; earlier lines differ substantially).
 
 This is a personal project, so there is no response-time commitment.
 

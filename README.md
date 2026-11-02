@@ -7,14 +7,14 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%20%7C%2016%20%7C%2018-4169E1)
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 
-![tests](https://img.shields.io/badge/tests-6%2C622%20cases-brightgreen)
+![tests](https://img.shields.io/badge/tests-6%2C623%20cases-brightgreen)
 ![coverage](https://img.shields.io/badge/coverage-98.7%25-brightgreen)
 ![payment layer](https://img.shields.io/badge/payment%20layer-100%25%20lines%20%2B%20branches-brightgreen)
 ![mutation score](https://img.shields.io/badge/mutation%20score%20(4.1.1)-98.7%25-brightgreen)
 
 A backend for an online shop: catalog, carts, orders, Stripe payments, refunds and disputes, an admin API and GDPR tooling. It is a **foundation to build a store on**, not a demo: the catalog is product-neutral, and there is deliberately no frontend.
 
-What makes it worth a look is less the feature list than how it was checked. The test suite runs 6,622 cases from 2,610 test functions on SQLite and PostgreSQL, and the final 4.0 line went through a full release campaign: fuzzing from the OpenAPI schema, end-to-end runs against Stripe's test mode, load and soak tests, chaos experiments (pull the plug on Redis, freeze PostgreSQL, kill a worker mid-payment), a DAST scan, mutation testing and a deployment on a real server. Defects found were fixed or are listed in docs/LIMITATIONS.md, and the reports are in this repository.
+What makes it worth a look is less the feature list than how it was checked. The test suite runs 6,623 cases from 2,611 test functions on SQLite and PostgreSQL, and the final 4.0 line went through a full release campaign: fuzzing from the OpenAPI schema, end-to-end runs against Stripe's test mode, load and soak tests, chaos experiments (pull the plug on Redis, freeze PostgreSQL, kill a worker mid-payment), a DAST scan, mutation testing and a deployment on a real server. Defects found were fixed or are listed in docs/LIMITATIONS.md, and the reports are in this repository.
 
 ## ✨ Features
 
@@ -80,11 +80,11 @@ uv run pytest tests/ -n 2 -m "not timing_sensitive"   # the fast local run
 | [docs/reports/](docs/reports/README.md) | The test reports: each stage, its numbers and the fixes |
 | [docs/HOW-THIS-WAS-BUILT.md](docs/HOW-THIS-WAS-BUILT.md) | Who did what, where the decisions came from, what went wrong |
 
-## 📊 At a glance (v4.1.1)
+## 📊 At a glance (v4.1.2)
 
 | | |
 |---|---|
-| Tests | 6,622 cases from 2,610 test functions on SQLite and PostgreSQL, 54 live Stripe tests, 0 warnings |
+| Tests | 6,623 cases from 2,611 test functions on SQLite and PostgreSQL, 54 live Stripe tests, 0 warnings |
 | Coverage | 98.7 % overall, lines and branches combined; 100 % on the payment-layer files, the mock provider excluded (enforced in CI) |
 | Mutation testing | 98.7 % of 3,434 mutants detected (3,119 killed, 272 timed out; measured on 4.1.1); the 43 survivors reviewed as equivalent |
 | CI | lint (Ruff, mypy), sast (Bandit), benchmarks, migration-compat, tests, 7 time zones, PostgreSQL 15/16/18 with migration round-trip checks, real Redis, pip-audit, gitleaks, Trivy |

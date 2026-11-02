@@ -178,7 +178,7 @@ Standard Stripe test payment method tokens:
 
 ## Running Tests
 
-The test suite includes 6,622 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
+The test suite includes 6,623 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
 
 To run the full suite locally:
 
