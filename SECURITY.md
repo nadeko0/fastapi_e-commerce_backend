@@ -9,7 +9,7 @@ If you find a vulnerability, please report it privately through GitHub's **Repor
 A useful report includes:
 - what the vulnerability is and what an attacker could do with it;
 - how to reproduce it (an HTTP request or `curl` command is ideal);
-- the affected endpoint, component or configuration, and the version you tested (the latest release is v4.1.0; earlier lines differ substantially).
+- the affected endpoint, component or configuration, and the version you tested (the latest release is v4.1.1; earlier lines differ substantially).
 
 This is a personal project, so there is no response-time commitment.
 
@@ -124,6 +124,7 @@ The ASGI middleware stack injects OWASP Secure Headers on every response (includ
 - **Lockfile Enforcement:** Dependencies are managed via `uv.lock` with deterministic package hashes across production and dev dependency groups.
 - **Automated Dependency Audits:** Dependabot checks GitHub Actions, Python packages, Dockerfiles and compose files weekly, proposes only releases at least 14 days old, and proposes no major PostgreSQL or Python image.
 - **CI Vulnerability Scanning:** Every push to main and every pull request runs `uvx pip-audit==2.10.1 --require-hashes` against the PyPI Advisory Database, and generates a CycloneDX 1.5 Software Bill of Materials (SBOM).
+- **Static Security Analysis (SAST) and CodeQL:** The CI `sast` job runs Bandit 1.9.4 offline (`-r app --severity-level medium`); one accepted finding, the container bind address in `app/core/config.py`, is marked in place with its reason (`# nosec B104`). CodeQL runs through GitHub's default code scanning setup and reports to the Security tab. CodeQL alert 8 flagged the regular expression that validated `If-Match` and `If-None-Match` headers as polynomial ReDoS (`py/polynomial-redos`, rated High). Timing the expression showed linear growth (95 ms for 3.4 MB of input, far exceeding any header limit), so it was not exploitable, but the parser in `app/core/etag.py` was rewritten anyway: it finds the quoted tags with a simple pattern and checks the text between them in one pass, so the expression that validated the whole header is gone.
 - **Secret Scanning:** `gitleaks v8.30.1` scans the full Git history on every push using `.gitleaks.toml` rules.
 - **Container Vulnerability Gating (Trivy):** The CI pipeline scans application and compose images with Trivy v0.75.0, gating builds on zero fixable CRITICAL or HIGH vulnerabilities.
 - **The Gosu Decision:** Official `postgres:15-alpine` images bundle `/usr/local/bin/gosu` built with Go 1.24.6, triggering 26 standard-library CVE alerts. Binary call-graph inspection with `govulncheck v1.9.0` confirmed that none of the 26 waived standard-library findings is called. One MEDIUM finding in moby/sys/user (GO-2026-6686) is reachable in the binary and judged practically harmless, because gosu parses root-owned files once at startup. Waivers were documented in `.trivyignore.yaml` strictly scoped to that binary path.

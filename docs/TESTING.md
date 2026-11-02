@@ -16,38 +16,46 @@ flowchart TD
 3. **Property and State-Machine Tests:** Hypothesis generates pseudo-random inputs to find boundary bugs. Stateful tests (`PaymentChain`) exercise arbitrary sequences of orders, payments, cancellations, and refunds. One property test discovered that normalizing the German letter "ß" expands "0ß" into two characters ("0SS"), quietly invalidating ISO country code length invariants.
 4. **Contract and Fuzz Testing:** Schemathesis was run against the 4.0.0 OpenAPI document (54 paths), outside this suite. It uncovered unhandled 500 errors on NUL bytes (`\x00`) and lone surrogates, prompting global input sanitization.
 5. **E2E Tests (Stripe Test Mode):** Black-box tests driven against real Stripe test-mode endpoints (`api.stripe.com`) with webhook forwarding via the Stripe CLI.
-6. **Mutation Testing:** Automated fault injection with `mutmut 3.8.0` across the payment, webhook, reconciliation, idempotency, order, rate-limit and error modules, run on 4.0.2 and 4.0.3 (see reports/T10-mutation.md).
+6. **Mutation Testing:** Automated fault injection with `mutmut 3.8.0` across the payment, webhook, reconciliation, idempotency, order, rate-limit and error modules, run on 4.0.2 and 4.0.3 (see reports/T10-mutation.md) and again on 4.1.1. On 4.1.1: 3,434 mutants, 3,088 killed and 272 timed out on the first run, 74 survived; 31 of those were gaps in the tests and are now killed by named tests (tests/unit/test_mutants_4_1.py, tests/unit/test_payment_mutants.py, tests/integration/test_reconciliation.py), each proven by rerunning its mutant; the other 43 are equivalent (log wording, messages of assertions that cannot fail, join conditions inferred from the foreign key, defaults every caller overrides). Mutation testing runs by hand, not in CI: one run takes about 90 minutes on four cores.
 
 ## Continuous Integration Pipeline
 
-GitHub Actions runs 16 job instances on ubuntu-latest: 8 jobs, expanded by 7 time zones and 3 PostgreSQL versions.
+GitHub Actions runs 19 job instances on ubuntu-latest: 11 jobs, expanded by 7 time zones and 3 PostgreSQL versions.
 
 ```mermaid
 flowchart TD
     subgraph Parallel Checks
-        lint["lint (Ruff)"]
+        lint["lint (Ruff & mypy)"]
+        sast["sast (Bandit)"]
+        benchmark["benchmark (pytest-benchmark)"]
         audit["audit (pip-audit & CycloneDX)"]
         secrets["secrets (gitleaks)"]
         test["test (SQLite & Coverage Gate)"]
         test_tz["test-timezones (7 Timezones)"]
         test_pg["test-postgres (PG 15, 16, 18)"]
+        migration_compat["migration-compat (Previous Release)"]
         test_redis["test-redis (Real Redis Parity)"]
     end
     lint --> docker_build["docker-build (Image Build & Trivy Scan)"]
+    sast --> docker_build
     audit --> docker_build
     secrets --> docker_build
     test --> docker_build
     test_tz --> docker_build
     test_pg --> docker_build
+    migration_compat --> docker_build
     test_redis --> docker_build
 ```
 
-- **lint:** Runs Ruff across `app` and `tests`.
+- **lint:** Runs Ruff across `app` and `tests`, and static type checking with `mypy`.
+- **sast:** Runs Bandit offline (`-r app --severity-level medium`) for static application security testing.
+- **benchmark:** Measures hot execution paths with `pytest-benchmark`, comparing against the latest baseline from `main` and failing on regressions over 80%.
 - **audit:** Exports locked dependencies to check against the PyPI Advisory Database using `pip-audit`, producing a CycloneDX SBOM.
 - **secrets:** Scans git history for exposed credentials using `gitleaks`.
 - **test:** Executes the primary suite in parallel on SQLite, runs timing-sensitive tests sequentially, and enforces coverage gates.
 - **test-timezones:** Matrix testing payment and order logic across 7 timezones (including UTC, Pacific/Kiritimati, Pacific/Pago_Pago, Asia/Kathmandu, America/St_Johns, Europe/Bratislava, America/New_York).
-- **test-postgres:** Tests database-sensitive suites against PostgreSQL 15, 16, and 18 containers.
+- **test-postgres:** Tests database-sensitive suites against PostgreSQL 15, 16, and 18 containers, including schema round-trip tests (`tests/integration/test_postgres_migration_roundtrip.py`) across every revision.
+- **migration-compat:** Runs the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses against the current migrations on PostgreSQL 15 (`.github/scripts/migration_compat.sh`); that release's tests about the migrations themselves are left out. It ends at once when `migrations/` is unchanged since the tag.
 - **test-redis:** Tests Redis Lua scripts, token revocation, and concurrency on a real Redis 7 container.
 - **docker-build:** Builds the production container image and runs Trivy vulnerability scanning across the app and compose images.
 
@@ -64,7 +72,9 @@ Configuration in `pyproject.toml` and `tests/conftest.py` ensures hermetic, repr
 - **Redis:** `fakeredis` backs `RedisService` and async clients on a shared `FakeServer`. `REDIS_PORT=1` is set in the test environment so unmocked network calls fail immediately.
 - **Payments and Email:** `PAYMENT_PROVIDER=mock` and `EMAIL_PROVIDER=logging` prevent external network traffic.
 - **Password Hashing:** `BCRYPT_ROUNDS=4` minimizes CPU time during mass user creation.
-- **Database Isolation:** For SQLite, each worker uses a dedicated file database in WAL mode (`PRAGMA journal_mode=WAL`, `synchronous=OFF`). For PostgreSQL, each test session creates a unique database (`ecom_pgtests_<uuid>`), runs `alembic upgrade head`, and drops the database on exit. Test startup removes stale temporary databases older than one day left by aborted runs on both SQLite (`ecommerce-tests-*`) and PostgreSQL (`ecom_pgtests_*`).
+- **Database Isolation:** For SQLite, each worker uses a dedicated file database in WAL mode (`PRAGMA journal_mode=WAL`, `synchronous=OFF`). For PostgreSQL, each test session creates a unique database (`ecom_pgtests_<epoch>_<hex>`), runs `alembic upgrade head`, and drops the database on exit. The throwaway databases of the migration tests are named the same way. Test startup removes stale temporary databases older than one day left by aborted runs on both SQLite (`ecommerce-tests-*`) and PostgreSQL (`ecom_pgtests_*`).
+- **Random Test Order:** `pytest-randomly` is enabled by default to run tests in randomized order. Each run prints its seed in the header (`Using --randomly-seed=N`) and, because `-q` hides the header, again at the end (`random order seed: rerun with --randomly-seed=N`). Reproduce an exact execution order with `pytest --randomly-seed=N`, or disable randomization with `-p no:randomly`.
+- **Network Blocking:** `pytest-socket` in addopts blocks outbound socket calls (`--allow-hosts=127.0.0.1,::1,localhost --allow-unix-socket`). It intercepts Python's `socket.connect` (blocking unmocked HTTP and SMTP clients). It does not intercept libpq (PostgreSQL's C client) or DNS lookups. Running against a `TEST_DATABASE_URL` on another host requires adding that host to `--allow-hosts`. Live Stripe integration tests are explicitly marked with `enable_socket`.
 - **Specialized Test Suites:** The suite includes regression suites in `tests/torture_suite`, `tests/strict_domain_audit`, and `tests/audit_verification`. Setting `TORTURE_FULL=1` enables exhaustive property and concurrency exploration.
 - **Table Cleanup:** An engine hook (`Engine.before_cursor_execute`) tracks dirty tables during each test. The autouse fixture `_reset_database` issues fast SQL deletes and sequence resets only for modified tables before each test.
 
@@ -128,19 +138,32 @@ uv run coverage report --fail-under=100 \
   --omit="app/services/payment/stripe_provider.py"
 ```
 
-## Verified Metrics for Release v4.1.0
+### Type Checking
+Run static type verification with mypy across `app/`:
+```bash
+uv run mypy
+```
 
-Verification results on release v4.1.0:
+### Local Benchmarks
+Run performance benchmarks for hot execution paths:
+```bash
+uv run pytest tests/benchmarks --benchmark-enable --benchmark-only
+```
+
+## Verified Metrics for Release v4.1.1
+
+Verification results on release v4.1.1; a row measured on an earlier release says which:
 
 | Metric | Measured Value | Standard / Target |
 |---|---|---|
-| SQLite Test Suite | 6,382 passed, 68 skipped without their services (+ 24 timing) | 0 failures, 0 warnings |
-| PostgreSQL Test Suite | 6,362 passed on 15 (+ 103 timing); 4,061 database-sensitive on 16 and 18 | Full migration and constraint parity |
-| Live Stripe Test Suite | 52 passed, 2 skipped | api.stripe.com sandbox |
+| SQLite Test Suite | 6,416 passed, 68 skipped without their services (+ 30 timing), random order | 0 failures, 0 warnings |
+| PostgreSQL Test Suite (v4.1.0) | 6,362 passed on 15 (+ 103 timing); 4,061 database-sensitive on 16 and 18 | Full migration and constraint parity |
+| Migration Round Trip | every revision on PostgreSQL 15, 16 and 18; v4.0.3 tests on the current migrations: 1,795 passed | Previous release keeps working on the new schema |
+| Live Stripe Test Suite (v4.1.0) | 52 passed, 2 skipped | api.stripe.com sandbox |
 | Payment Layer Coverage | 100.0% line and branch on the listed payment-layer files (the mock provider file is excluded) | Zero uncovered branches in financial path |
 | Overall Coverage (lines and branches combined) | 98.7% (source: `app`) | Fail-under gate set to 85% |
-| Mutation Score (mutmut 3.8.0, measured on v4.0.3) | 98.4% (3,113 killed / 3,165) | 100% of 52 survivors proven equivalent |
-| CI Execution Time | ~10 minutes across 16 jobs | Fully automated GitHub Actions workflow |
+| Mutation Score (mutmut 3.8.0) | 98.7% of 3,434 mutants detected (3,119 killed, 272 timed out) | The 43 survivors reviewed as equivalent |
+| CI Execution Time | ~10 minutes across 19 jobs | Fully automated GitHub Actions workflow |
 
 ## Campaign Reports
 

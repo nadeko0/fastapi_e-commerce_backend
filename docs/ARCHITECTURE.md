@@ -1,6 +1,6 @@
 # Architecture and System Design
 
-Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v4.1.0.
+Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v4.1.1.
 
 ## System Overview and Boundaries
 
@@ -226,7 +226,7 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 - **Decision:** Local and unit tests run hermetically without external dependencies (mocked Stripe, isolated SQLite/Redis with `REDIS_PORT=1`). CI matrix workflows validate integration against real container services: PostgreSQL 15, 16, 18, real Redis parity across 7 timezones. Live Stripe and chaos runs were manual campaign stages (T4, T8).
 - **Alternatives:** Executing all tests solely against SQLite in CI; mocking database engines universally; relying on shared remote staging environments.
 - **Reason:** SQLite ignores foreign keys by default and does not support PostgreSQL row-level locks (`SELECT ... FOR UPDATE`). Real-service CI jobs found defects that SQLite did not, including deadlocks and pool recovery behavior. Hermetic local defaults prevent test contamination of developer services.
-- **Consequence:** Rapid local development feedback combined with multi-environment CI validation (one workflow, 16 jobs).
+- **Consequence:** Rapid local development feedback combined with multi-environment CI validation (one workflow, 19 jobs).
 
 ### 12. Dependency Pinning and Two-Week Age Rule
 - **Decision:** All external dependencies, base container image digests, and security tooling must be at least two weeks old prior to adoption. Packages are locked to exact hashes (`uv.lock`, Docker image SHA digests). Urgent zero-day security updates require an explicit, documented security exception.

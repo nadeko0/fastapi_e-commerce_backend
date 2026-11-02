@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.1] - 2026-11-02
+
+A PATCH release: it fixes the entity-tag header parser and two faults of the migration environment, and adds checks to CI. No API change, no new endpoint or setting.
+
+### Fixed
+- `app/core/etag.py` parses `If-Match` and `If-None-Match` in one pass: it finds the quoted tags with a simple pattern and checks only the text between them. CodeQL alert 8 flagged the expression that validated the whole header as polynomial ReDoS; timing showed linear growth, so it was not exploitable, but that expression is gone. Hypothesis tests check that the parser accepts and rejects exactly what it did.
+- `migrations/env.py` disposes the database engine it creates, avoiding leaked connections when running Alembic in-process.
+- `migrations/env.py` no longer disables the application's loggers. `fileConfig` defaulted to `disable_existing_loggers=True`, so a process that ran migrations itself lost its own logs from then on; random test order exposed it. A caller with its own logging can skip `alembic.ini`'s logging with `config.attributes["configure_logger"] = False`.
+- Throwaway PostgreSQL databases from migration tests use the session naming convention (`ecom_pgtests_<epoch>_<hex>`), allowing the stale database sweep to clean them up.
+
+### Added
+- Static security analysis CI job `sast` running Bandit 1.9.4 offline on `app/`.
+- Migration compatibility CI job `migration-compat`: the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses, run against the current migrations on PostgreSQL 15; it ends at once when `migrations/` is unchanged since that tag. Also a PostgreSQL migration round-trip test (`tests/integration/test_postgres_migration_roundtrip.py`) in `test-postgres`.
+- Benchmark CI job `benchmark` comparing hot path performance against the newest baseline from `main`, failing when a median is more than 80% slower.
+- Dev dependencies `mypy`, `pytest-socket`, `pytest-randomly`, and `pytest-benchmark`.
+- Mutation testing rerun on this release: 3,434 mutants, 98.7% detected. 31 of the 74 first-run survivors were gaps in the tests and are killed by new tests; the other 43 are equivalent.
+
+### Changed
+- The `lint` CI job now includes type checking with `mypy` (0 errors across 80 files); `app/` was annotated for it without a behaviour change.
+- The one Bandit finding, `HOST = "0.0.0.0"` in `app/core/config.py`, is marked `# nosec B104` with the reason: inside a container the port mapping decides what is exposed.
+- Test suite execution runs in randomized order by default via `pytest-randomly`, printing the seed used for reproducibility.
+- Network access in the test suite is blocked by default via `pytest-socket`, allowing only local and loopback connections.
+
 ## [4.1.0] - 2026-11-02
 
 Three independent audits of 4.0.3 reviewed the code, ran it under load and fuzzing, and checked it against written specifications. This release closes what they found. MINOR, because it adds endpoints and settings; no response field was removed.
@@ -418,6 +441,8 @@ Three independent audits of 4.0.3 reviewed the code, ran it under load and fuzzi
 - Structured JSON logging across all application components.
 - Automated CI pipeline with linting, unit/integration testing (85% coverage gate), and Docker container builds.
 
+[4.1.1]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.0...v4.1.1
+[4.1.0]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.0.3...v4.1.0
 [4.0.3]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.0.2...v4.0.3
 [4.0.2]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.0.1...v4.0.2
 [4.0.1]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.0.0...v4.0.1

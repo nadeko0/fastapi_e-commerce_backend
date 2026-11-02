@@ -133,6 +133,8 @@ docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d restored --ex
 > [!IMPORTANT]
 > **Mandatory Downgrade Rule:** Always execute a full `pg_dump` backup before performing an Alembic downgrade. Downgrade scripts drop tables and columns by design, resulting in irreversible data loss. Continuous point-in-time recovery (PITR) is not configured (`wal_level=replica`, `archive_mode=off`).
 
+CI checks every migration's downgrade and upgrade against the PostgreSQL catalogs, and runs the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses on the new migrations. A rolling deploy (migrate first, then roll the app) relies on that old code keeping working on the new schema; those tests are the evidence for it, as far as they reach.
+
 ### PostgreSQL Major Upgrades (PostgreSQL 15 to 18)
 
 Official PostgreSQL 18 container images store cluster data under a version-specific path (`/var/lib/postgresql/18/docker`) and define the container volume at `/var/lib/postgresql`, differing from PostgreSQL 15 (`/var/lib/postgresql/data`). Upgrading from PostgreSQL 15 to 18 cannot reuse the existing volume in-place; operators must execute a logical dump and restore (`pg_dump` and `pg_restore`) and update volume mount paths.

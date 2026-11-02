@@ -178,12 +178,20 @@ Standard Stripe test payment method tokens:
 
 ## Running Tests
 
-The test suite includes 6,568 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
+The test suite includes 6,622 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
 
 To run the full suite locally:
 
 ```bash
 uv run pytest
+```
+
+Tests run in random order by default (via `pytest-randomly`) and print their seed at the end of the run (`random order seed: rerun with --randomly-seed=N`). Network access is blocked by default; a test database on another host needs `--allow-hosts`.
+
+To run type checking:
+
+```bash
+uv run mypy
 ```
 
 See [docs/TESTING.md](docs/TESTING.md) for details on testing against real PostgreSQL engines, and running property tests with Hypothesis. The mutation, fuzz and load runs are described in docs/reports.
