@@ -85,7 +85,7 @@ The automated scan generated one High and several Medium alerts, all of which we
 
 ## Re-run on v4.0.3 (26 October 2026)
 
-The scan was repeated on the latest release with the same pinned ZAP image, the same three API scans (anonymous, customer, admin), the baseline scan and the same manual probes, to confirm the fixes and catch anything new.
+The scan was repeated on v4.0.3, then the latest release, with the same pinned ZAP image, the same three API scans (anonymous, customer, admin), the baseline scan and the same manual probes, to confirm the fixes and catch anything new.
 
 | Check | v4.0.0 | v4.0.3 |
 |---|---|---|

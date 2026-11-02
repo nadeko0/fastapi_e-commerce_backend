@@ -52,7 +52,7 @@ The application uses Pydantic Settings (`app/core/config.py`). The following set
 
 The `ENVIRONMENT` variable dictates security constraints and runtime behavior:
 - `development`: Automatically forces `DEBUG=True`, `RELOAD=True`, and `WORKERS=1`. `DB_POOL_SIZE` and `DB_MAX_OVERFLOW` are halved with a floor of 5 (at the defaults: 5 and 5). Interactive OpenAPI documentation is enabled at `/api/v1/docs` and `/redoc`. Deployment secret strength checks are skipped.
-- `test`: Used by pytest. Allows `LOG_LEVEL=DEBUG`, skips production secret checks, and maintains interactive documentation.
+- `test`: For a non-production environment without the development overrides (pytest itself runs as `development` unless `ENVIRONMENT` is already set). Allows `LOG_LEVEL=DEBUG`, skips production secret checks, and maintains interactive documentation.
 - `staging` and `production`: Enforces strict production deployment gates in `Settings.check_deployment_settings`. Forbids `LOG_LEVEL=DEBUG`, requires `BCRYPT_ROUNDS >= 12`, enforces `PAYMENT_PROVIDER=stripe`, mandates non-placeholder secrets meeting minimum length requirements, and requires `FRONTEND_URL` to start with `https://`. In `production`, interactive documentation (`/api/v1/docs`, `/redoc`, and `/api/v1/openapi.json`) is disabled (returns 404).
 
 ### 3. Running Services Locally

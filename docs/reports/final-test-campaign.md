@@ -1,13 +1,13 @@
 # Final Test Campaign: Release v4.0.0 to v4.0.3
 
-This report documents the final testing campaign conducted from 24 to 26 October 2026 for the FastAPI e-commerce backend. The campaign began against release candidate v4.0.0. Identified defects were remediated across patch releases v4.0.1 and v4.0.2, followed by v4.0.3 which added test cases for mutation coverage gaps without changing application code. The current stable release is **v4.0.3** (commit `76e10e3`), with all 16 CI jobs passing, 0 Dependabot alerts, and 0 CodeQL alerts.
+This report documents the final testing campaign conducted from 24 to 26 October 2026 for the FastAPI e-commerce backend. The campaign began against release candidate v4.0.0. Identified defects were remediated across patch releases v4.0.1 and v4.0.2, followed by v4.0.3 which added test cases for mutation coverage gaps without changing application code. At the end of the campaign the stable release was **v4.0.3** (commit `76e10e3`), with all 16 CI jobs passing, 0 Dependabot alerts, and 0 CodeQL alerts.
 
 All seven exit criteria groups were met. The long-duration soak test met its stability target with a caveat regarding allocator warm-up, and all findings were resolved and released.
 
 ## Campaign Plan and Strategic Foundation
 
 The test campaign was structured based on targeted research into industry testing standards and library documentation:
-- **Test Pyramid:** In line with Martin Fowler's "The Practical Test Pyramid", the repository relies on a large foundation of unit and service tests (~4800 tests, 98.9% branch coverage), complemented by contract tests via Schemathesis and a focused black-box end-to-end suite.
+- **Test Pyramid:** In line with Martin Fowler's "The Practical Test Pyramid", the repository relies on a large foundation of unit and service tests (4782 tests at v4.0.0 and 5259 at v4.0.3, 98.9% branch coverage), complemented by contract tests via Schemathesis and a focused black-box end-to-end suite.
 - **Load Profiles:** Load tests followed k6 performance archetypes (smoke, average, stress, spike, breakpoint, and soak).
 - **Chaos Engineering:** Resilience experiments adhered to Principles of Chaos Engineering (steady-state hypothesis, blast radius containment) and Google SRE overload handling practices.
 - **Security:** Static and dynamic analysis followed OWASP API Security Top 10 2023, OWASP ZAP API scanning, Trivy image scanning, gitleaks, and pip-audit.
@@ -50,7 +50,7 @@ The exit criteria were defined prior to testing in the pre-test plan. The table 
 | # | Criterion | Stage | Outcome |
 |---|---|---|---|
 | 1 | Schemathesis: zero 5xx responses, all responses conform to OpenAPI schema | T3 | PASS after fixes. Initial run failed due to NUL byte and lone surrogate 500 errors. Fixed in v4.0.1 (X4). Schema aligned with business rules. Known lax types deferred to 5.0. |
-| 1 | End-to-end black-box tests with real Stripe test mode and webhooks via Stripe CLI | T4 | PASS. Two consecutive runs: 20 passed, 0 failed, 209 webhooks processed by Celery, zero reconciliation discrepancies. Found 2 bugs (stale cache, unpaid order delivery), fixed in v4.0.1 (X5). |
+| 1 | End-to-end black-box tests with real Stripe test mode and webhooks via Stripe CLI | T4 | PASS. Two consecutive runs: 20 passed, 1 xfailed (known bug F-1), 0 failed, 209 webhooks processed by Celery, zero reconciliation discrepancies. Found 2 bugs (stale cache, unpaid order delivery), fixed in v4.0.1 (X5). |
 | 2 | Database migrations up/down/up, backup and restore data match exactly | T5 | PASS. Schema diff empty, row counts and MD5 hashes match across all 13 tables, application verified healthy on restored database. |
 | 3 | Average load: p95 latency within 25% of 3.x baseline, zero 5xx responses | T7 | PASS. p95 was 68 ms via TLS and 57 ms direct (compared to 66/69 ms in 3.x baseline). Zero 5xx errors. |
 | 3 | Overload protection: rapid 503 with Retry-After, no hangs or 500/502 errors | T7 | PASS. Spike (800 users), stress600, and breakpoint shed excess load with fast 503 `service-overloaded` responses carrying Retry-After; zero 500 or 502 errors. |

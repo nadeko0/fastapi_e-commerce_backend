@@ -12,14 +12,14 @@ Incoming client requests pass through a reverse proxy terminating TLS before rea
 
 ```mermaid
 flowchart TD
-    Client["Client (Browser / Native)"] --> Proxy["Reverse Proxy (Caddy / TLS Termination)"]
+    Client["Client (Browser / Native)"] --> Proxy["Reverse Proxy, not part of docker-compose.yml (TLS Termination)"]
     Proxy --> M1
 
     subgraph ASGI ["FastAPI Application Pipeline"]
         direction TB
         subgraph Middlewares ["Middleware Stack (Execution Order)"]
             direction TB
-            M1["1. OpenTelemetry (Tracing Instrumentation)"]
+            M1["1. OpenTelemetry (only when OTEL_* is set and the telemetry extra is installed)"]
             --> M2["2. SecurityHeadersMiddleware (HSTS, CSP, CORP, COOP)"]
             --> M3["3. RequestContextMiddleware (X-Request-ID, Traceparent)"]
             --> M4["4. InFlightLimitMiddleware (only when MAX_IN_FLIGHT_REQUESTS is set)"]
@@ -43,7 +43,7 @@ flowchart TD
         Worker["Celery Worker (Task Consumer)"] -->|Pulls Queued Jobs| Cache
         Worker --> DB
         Worker --> StripeExt
-        Worker --> SMTPExt[SMTP Server / Mailpit]
+        Worker --> SMTPExt[SMTP Server]
     end
 ```
 
@@ -69,12 +69,13 @@ sequenceDiagram
     API-->>Customer: 201 Created (OrderResponse, Location: /api/v1/orders/{id})
 
     Customer->>API: POST /api/v1/orders/{id}/pay (Idempotency-Key, payment_method, amount, payment_method_token)
-    API->>Stripe: Create & confirm PaymentIntent (amount, currency, idempotency_key)
-    Stripe-->>API: PaymentIntent (status: requires_action or succeeded)
-    API->>DB: Record Payment row (payment_intent_id, status: processing)
+    API->>DB: Commit Payment row (placeholder intent id, status: processing)
+    API->>Stripe: Create & confirm PaymentIntent (amount, currency, idempotency_key), no transaction open
+    Stripe-->>API: PaymentIntent (status: succeeded, requires_action or processing)
+    API->>DB: Store payment_intent_id, and on succeeded mark paid and confirm the order
     API-->>Customer: 200 OK (PaymentResponse)
 
-    Note over Stripe,API: Asynchronous Webhook Notification
+    Note over Stripe,API: Asynchronous Webhook Notification (settles requires_action and processing attempts, a no-op for one already settled)
     Stripe->>API: POST /api/v1/orders/webhooks/stripe (payment_intent.succeeded)
     API->>DB: Verify signature, INSERT INTO webhook_events (status: received)
     DB-->>API: Event persisted
@@ -106,17 +107,17 @@ flowchart TD
     Store --> Enqueue["Enqueue process_stripe_event to Redis"]
     Enqueue --> Ack["Return HTTP 200 OK to Stripe"]
 
-    Enqueue --> Worker["Celery Worker picks up event (status -> 'processing')"]
+    Enqueue --> Worker["Celery Worker claims the event (FOR UPDATE SKIP LOCKED)"]
     Worker --> Apply{"Apply event to order & payment ledger"}
     
     Apply -->|Success| Processed["UPDATE status = 'processed'"]
-    Apply -->|Transient Error / Overtaken Attempt| Retry{"Attempts < STRIPE_EVENT_MAX_RETRIES?"}
+    Apply -->|Transient Error / Overtaken Attempt| Retry{"Attempts <= STRIPE_EVENT_MAX_RETRIES?"}
     
     Retry -->|Yes| Retrying["UPDATE status = 'retrying', schedule Celery backoff"]
     Retrying --> Worker
     Retry -->|No| Failed["UPDATE status = 'failed' (Terminal State)"]
 
-    Sweeper["Celery Beat: sweep_stripe_events (Every 5 minutes)"] -->|Find stuck received/retrying| Enqueue
+    Sweeper["Celery Beat: sweep_stripe_events (Every 5 minutes)"] -->|Find received/retrying untouched for STRIPE_EVENT_SWEEP_AFTER_MINUTES| Enqueue
     Admin["Admin Replay: POST /admin/webhook-events/{id}/replay"] -->|Reset attempts = 0, status = 'received'| Enqueue
 ```
 
@@ -128,7 +129,7 @@ Order statuses transition deterministically according to `ORDER_STATUS_TRANSITIO
 stateDiagram-v2
     [*] --> NEW: Placed from cart (POST /orders)
     
-    NEW --> CONFIRMED: Payment verified via Stripe webhook (Paid only)
+    NEW --> CONFIRMED: Payment succeeded, in /pay or via Stripe webhook (Paid only)
     NEW --> CANCELLED: Customer cancels unpaid order or expiry task restocks
     
     CONFIRMED --> PROCESSING: Admin moves to fulfillment packaging (Paid only)
@@ -137,7 +138,7 @@ stateDiagram-v2
     PROCESSING --> SENT: Admin dispatches shipment (Paid only)
     PROCESSING --> CANCELLED: Admin cancels (restocks inventory)
     
-    SENT --> DELIVERED: Carrier confirms delivery (Paid only)
+    SENT --> DELIVERED: Admin records delivery (Paid only)
     SENT --> CANCELLED: Admin cancels (restocks inventory)
     
     DELIVERED --> [*]
@@ -175,7 +176,7 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 - **Consequence:** Clients submitting naive date strings receive HTTP 422. SQLite test harnesses require custom `TypeDecorator` mappings to enforce consistent UTC semantics.
 
 ### 3. Money as Decimal and Decimal Strings on the Wire
-- **Decision:** Prices and monetary balances are stored as `Numeric(10, 2)`, handled in Python strictly as `decimal.Decimal` (rounded via `ROUND_HALF_UP`), and serialized or deserialized across HTTP boundaries as formatted decimal strings (e.g. `"19.99"`). Raw JSON numbers like `19.99` are rejected.
+- **Decision:** Prices, cart and order amounts are stored as `Numeric(10, 2)` and payment and refund amounts as integer cents, handled in Python strictly as `decimal.Decimal` (input is limited to two fraction digits, so it is never rounded), and serialized or deserialized across HTTP boundaries as formatted decimal strings (e.g. `"19.99"`). Raw JSON numbers like `19.99` are rejected.
 - **Alternatives:** IEEE 754 binary floating-point numbers; raw integer cents across all API schemas; loose string-or-float coercion.
 - **Reason:** Binary floating-point arithmetic introduces precision loss (`0.1 + 0.2 = 0.30000000000000004`) that causes ledger imbalance. String serialization preserves exact decimal representations across disparate client programming languages.
 - **Consequence:** Requests passing numeric JSON literals for monetary fields receive HTTP 422. Schema validation uses custom `BeforeValidator` annotations (`Money`, `NonNegativeMoney`, `PositiveMoney`).
@@ -193,7 +194,7 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 - **Consequence:** Centralized exception handlers rewrite all exceptions and translate OpenAPI schema responses to `application/problem+json`.
 
 ### 6. Idempotency-Key with Request Fingerprints
-- **Decision:** Mutation endpoints (`POST /orders`, `POST /orders/{id}/pay`, `/checkout-session`, `/refund`, `POST /admin/payments/{payment_id}/refund`) require an `Idempotency-Key` header. Requests are stored with a SHA-256 fingerprint of the operation and the validated request fields, stored next to the key (keys are unique per user).
+- **Decision:** Mutation endpoints (`POST /orders`, `POST /orders/{id}/pay`, `/checkout-session`, `/refund`, `POST /admin/payments/{payment_id}/refund`) require an `Idempotency-Key` header. Orders and payment attempts are stored with a SHA-256 fingerprint of the operation and the validated request fields next to the key (order keys are unique per user and expire after `IDEMPOTENCY_KEY_TTL_HOURS`; payment keys are unique per order and do not expire). Refund keys are not stored: they are forwarded to Stripe, which rejects one reused with different parameters (409 `idempotency-key-in-use`).
 - **Alternatives:** Key-only storage without body fingerprinting; client-supplied database nonces; volatile in-memory idempotency caches.
 - **Reason:** Network retries or double-submissions must never duplicate payments or inventory decrements. Payload fingerprinting prevents reuse of identical keys with mutated request bodies (returning HTTP 422 `idempotency-key-reused`).
 - **Consequence:** A request whose key belongs to an attempt still in flight receives HTTP 409 `idempotency-key-in-use`, with `Retry-After: 5` while that attempt is being processed.
@@ -207,7 +208,7 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 ### 8. Fail-Closed Token Revocation in Redis Answering HTTP 503
 - **Decision:** When Redis is unreachable, token blacklist verification cannot complete. The API refuses authenticated requests with HTTP 503 Service Unavailable (`Retry-After: 30`) rather than HTTP 401 Unauthorized or failing open.
 - **Alternatives:** Failing open (trusting the unexpired JWT signature); returning HTTP 401 Unauthorized; returning generic HTTP 500 errors.
-- **Reason:** Failing open permits revoked or logged-out tokens to execute actions (violating security review finding F-06). Returning 401 misleads client applications into purging stored credentials and logging users out during transient cache hiccups (RFC 9110 §15.5.2 vs §15.6.4).
+- **Reason:** Failing open permits revoked or logged-out tokens to execute actions (security review finding F-11). Returning 401 misleads client applications into purging stored credentials and logging users out during transient cache hiccups (RFC 9110 §15.5.2 vs §15.6.4).
 - **Consequence:** Redis outages temporarily degrade authenticated operations while preserving client sessions and public catalog access.
 
 ### 9. In-Flight Concurrency Limiting (`InFlightLimitMiddleware`)
@@ -217,13 +218,13 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 - **Consequence:** Traffic spikes shed cleanly with standard retry guidance without destabilizing the application or exhausting database memory.
 
 ### 10. Strict Input Parsing (`extra = "forbid"`)
-- **Decision:** All 27 request body models inherit from `RequestBody` with `model_config = ConfigDict(extra="forbid")`. Any undeclared field in request payloads triggers an HTTP 422 validation failure with error type `extra_forbidden`.
+- **Decision:** All 26 request body models inherit from `RequestBody` with `model_config = ConfigDict(extra="forbid")`. Any undeclared field in request payloads triggers an HTTP 422 validation failure with error type `extra_forbidden`.
 - **Alternatives:** Permissive parsing (`extra="ignore"`); ad-hoc manual validation in service layers; applying strict configuration to response models.
 - **Reason:** Silently ignoring misspelled fields (e.g. `"pirce": 10.00`) causes clients to assume values were accepted when they were ignored. Strict rejection also prevents mass-assignment vulnerabilities (such as injecting `role: "admin"`). Response models remain permissive to preserve backward compatibility.
 - **Consequence:** Client requests must strictly conform to documented schemas. Input and output schemas must be decoupled where request and response structures differ.
 
 ### 11. Hermetic Local Tests with Multi-Service CI Validation
-- **Decision:** Local and unit tests run hermetically without external dependencies (mocked Stripe, isolated SQLite/Redis with `REDIS_PORT=1`). CI matrix workflows validate integration against real container services: PostgreSQL 15, 16, 18, real Redis parity across 7 timezones. Live Stripe and chaos runs were manual campaign stages (T4, T8).
+- **Decision:** Local and unit tests run hermetically without external dependencies (mocked Stripe, isolated SQLite/Redis with `REDIS_PORT=1`). CI matrix workflows validate integration against real container services: PostgreSQL 15, 16 and 18, real Redis, and 7 time zones (separate jobs). Live Stripe and chaos runs were manual campaign stages (T4, T8).
 - **Alternatives:** Executing all tests solely against SQLite in CI; mocking database engines universally; relying on shared remote staging environments.
 - **Reason:** SQLite ignores foreign keys by default and does not support PostgreSQL row-level locks (`SELECT ... FOR UPDATE`). Real-service CI jobs found defects that SQLite did not, including deadlocks and pool recovery behavior. Hermetic local defaults prevent test contamination of developer services.
 - **Consequence:** Rapid local development feedback combined with multi-environment CI validation (one workflow, 19 jobs).

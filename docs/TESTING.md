@@ -7,8 +7,8 @@ Software that processes money cannot rely on good intentions or manual smoke tes
 ```mermaid
 flowchart TD
     E2E["E2E Tests (Stripe Test Mode, Stripe CLI, 54 live Stripe tests)"] --> Fuzz["Contract & Fuzz (Schemathesis, Hypothesis State Machines)"]
-    Fuzz --> Integration["Integration Tests (PostgreSQL 15/16/18, SQLite WAL, Real Redis, 2,747 cases)"]
-    Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, 2,667 cases)"]
+    Fuzz --> Integration["Integration Tests (PostgreSQL 15/16/18, SQLite WAL, Real Redis, 2,752 cases)"]
+    Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, 2,707 cases)"]
 ```
 
 1. **Unit Tests:** Fast, isolated tests covering models, services, schema serialization, and money calculations. All external I/O (Stripe, Redis, SMTP) is mocked deterministically.

@@ -78,7 +78,7 @@ Configuration parameters in `app/core/config.py`:
 | `DB_POOL_RECYCLE` | `3600` | Connection recycling timeout in seconds |
 | `REDIS_POOL_SIZE` | `50` | Redis client connection pool size |
 | `REDIS_POOL_TIMEOUT` | `20` | Seconds the async client waits for a free pooled connection |
-| `MAX_IN_FLIGHT_REQUESTS` | `None` | Active request ceiling per worker (set to 15 in benchmarks) |
+| `MAX_IN_FLIGHT_REQUESTS` | `None` | Active request ceiling per worker (set to 15 in benchmarks and in `.env.example`) |
 | `RATE_LIMIT_ENABLED` | `True` | Global toggle for rate limiting |
 | `RATE_LIMIT_DEFAULT` | `"300/minute"` | Default route rate limit |
 | `RATE_LIMIT_SEARCH` | `"60/minute"` | Product search endpoint limit |

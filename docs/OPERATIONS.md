@@ -151,13 +151,13 @@ Redis serves as the Celery message broker, token revocation store, password-chan
 
 - **Universal UTC:** Timestamps in PostgreSQL use `TIMESTAMP WITH TIME ZONE` (`timestamptz`). API payloads format datetimes as ISO-8601 UTC strings ending with `Z`. Celery operates under `timezone="UTC"` and `enable_utc=True`.
 - **Daylight Saving Time (DST):** Because all scheduling and relative deadlines use UTC and monotonic deltas, autumn and spring clock shifts never duplicate or skip scheduled jobs ([reports/daylight-saving-time.md](reports/daylight-saving-time.md)).
-- **GDPR Deletion Grace Periods:** Erasure requests via `POST /api/v1/legal/data-request` are accepted for all users except the last active administrator (409). Account PII is scrubbed and anonymised by `cleanup_inactive_accounts` after `DATA_DELETION_GRACE_PERIOD_DAYS` (default 1 day), using one bcrypt hash computation per account batch. Order shipping address snapshots (`ship_to_*`) are retained while an order is open or subject to an active dispute, and for at most 30 days for unfinished orders unless disputed (the project's reading of Art. 17(3), not legal advice). Deletion completion emails are sent after commit only to unredacted addresses. Webhook events associated with erased users are redacted when processed.
+- **GDPR Deletion Grace Periods:** Erasure requests via `POST /api/v1/legal/data-request` are accepted for all users except the last active administrator (409). Account PII is scrubbed and anonymised by `cleanup_inactive_accounts` after `DATA_DELETION_GRACE_PERIOD_DAYS` (default 1 day), using one bcrypt hash computation per account batch. On orders of an erased account, the shipping address snapshot (`ship_to_*`) is kept while a payment dispute is open, or while the order is confirmed, processing or sent and less than 30 days old; any other order (new, delivered or cancelled) has it scrubbed at once (the project's reading of Art. 17(3), not legal advice). Deletion completion emails are sent after commit only to unredacted addresses. Webhook events associated with erased users are redacted when processed.
 - **GDPR Data Portability:** Data export requests assemble user profile data, addresses, orders, and payment records into JSON format and email the file inline to the account address.
 - **Storage Limitation:** The `cleanup_expired_retention` task anonymises deactivated accounts (`is_active=False`) that have been inactive for `USER_DATA_RETENTION_DAYS` (default 365 days). Active customer accounts are never touched.
 
 ## Capacity and Scaling Knobs
 
-Tune the following settings in `.env` based on instance resources:
+Tune the following settings in `.env` based on instance resources. The defaults are the code's; `.env.example` sets `MAX_IN_FLIGHT_REQUESTS=15`, so a `.env` copied from it has that limit. With `ENVIRONMENT=development`, `WORKERS` is forced to 1 and `DB_POOL_SIZE` and `DB_MAX_OVERFLOW` are halved (at least 5 each).
 
 | Configuration Setting | Default Value | Operational Purpose |
 |---|---|---|

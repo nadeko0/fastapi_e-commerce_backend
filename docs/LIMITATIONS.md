@@ -11,7 +11,7 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
   - *Why not:* Supporting multiple store currencies introduces foreign exchange volatility, conversion rounding rules, cross-currency refund tracking, and complex accounting reports. The store operates in a single currency (`STORE_CURRENCY`), while orders record their currency at placement. Store analytics sum totals assuming `STORE_CURRENCY`; changing store currency mixes historical totals.
   - *Where to start:* Add exchange rate snapshot tables and compute sales analytics per presentment currency.
 - **Full-Text Catalog Search:**
-  - *Why not:* The catalog size is adequately served by PostgreSQL `ILIKE` filters; an older btree index on `(name, description)` was removed in v3.2.1 as ineffective for infix queries.
+  - *Why not:* The catalog size is adequately served by case-insensitive substring matching (`lower(column) LIKE`, via SQLAlchemy `icontains`) on name and description; an older btree index on `(name, description)` was removed in v3.2.1 as ineffective for infix queries.
   - *Where to start:* Add PostgreSQL `tsvector` or `pg_trgm` indexes, or integrate an external search engine.
 - **Administrative UI and GraphQL:**
   - *Why not:* This repository provides a backend REST API; an administrative dashboard is a frontend concern. REST with OpenAPI, ETag validation, and JSON merge-patch covers all client integration needs.
@@ -23,7 +23,7 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
 
 - **Container Image Signing and Provenance:**
   - *Why not:* While CycloneDX SBOM generation and OCI labels are built into CI, Cosign/Sigstore signing and SLSA provenance require an external registry and deployment pipeline.
-  - *Where to start:* Integrate Sigstore keyless signing into the GitHub Actions release workflow.
+  - *Where to start:* Add a GitHub Actions release workflow (there is none; images are not published) that pushes to a registry and signs with Sigstore keyless signing.
 - **Kubernetes and Helm Manifests:**
   - *Why not:* The application is Twelve-Factor compliant (environment configuration, `/livez` and `/readyz` probes, graceful SIGTERM shutdown, stdout logging), but deployment manifests belong in infrastructure repositories.
   - *Where to start:* Author Helm charts defining PodDisruptionBudgets, resource quotas, and horizontal pod autoscalers.
@@ -34,7 +34,7 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
   - *Why not:* The pinned `postgres:15-alpine` image includes `gosu` built with Go 1.24.6 and `moby/sys/user` v0.1.0, flagged in security scans as GO-2026-6686 (DoS parsing `/etc/passwd`). The vulnerability is practically unreachable in our environment because passwd files are root-owned.
   - *Where to start:* Rebase once Docker Library updates the official image, or build a custom PostgreSQL base image executing directly as the `postgres` user.
 - **Dedicated Email Queue and Retries:**
-  - *Why not:* Order emails are sent in-process via BackgroundTasks after commit without retries; a crash after commit loses the email.
+  - *Why not:* Emails are sent after commit without retries: from API routes in-process via BackgroundTasks, and from webhook processing and the expiry task inside the Celery task that ran them. A crash after commit loses the email.
   - *Where to start:* Route email tasks to a dedicated Celery queue with exponential backoff and dead-letter handling.
 
 ## API Contract Boundaries
@@ -52,7 +52,7 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
   - *Why not:* Pydantic's non-strict mode accepts `0`/`1` as booleans and numeric strings as timestamps. Enforcing `StrictBool` and strict dates changes acceptable input contracts, which would represent a breaking API change.
   - *Where to start:* Enable strict schema validation globally.
 - **Pagination and Country Validation:**
-  - *Why not:* Offset pagination (`page` / `size`) is simple but scales poorly on deep sets; country fields currently accept 2-letter strings without validating full ISO 3166-1 tables.
+  - *Why not:* Offset pagination (`page` / `size`) is simple but scales poorly on deep sets; country fields accept any string of 2 to 100 characters (a two-letter value is upper-cased, anything else title-cased) without checking it against ISO 3166-1.
   - *Where to start:* Adopt keyset/cursor pagination using opaque tokens, and enforce strict ISO country validation.
 - **Single-Level JSON Merge Patch:**
   - *Why not:* Partial resource updates implement RFC 7396 semantics one level deep. Nested object values (`characteristics`, `attributes`) replace the stored object as a whole rather than merging keys recursively. This is a deliberate design difference from RFC 7396.
@@ -63,9 +63,6 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
 - **Live Product Image References:**
   - *Why not:* Orders snapshot product names, variant SKUs, and variant attributes at checkout time, but line item image URLs are read dynamically from current catalog records. Modifying or deleting product images changes or clears displayed thumbnails on past order views.
   - *Where to start:* Snapshot image URLs onto order line item records at checkout.
-- **Product `updated_at` and Stock:**
-  - *Why not:* Stock moved by checkout does not update a product's `updated_at`. Its ETag still changes, because the ETag covers the stock it shows.
-  - *Where to start:* Update the timestamp with the stock if a client needs to sort by the last stock change.
 
 ## Testing and Verification Limitations
 

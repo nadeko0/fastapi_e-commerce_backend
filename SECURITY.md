@@ -69,7 +69,7 @@ Access boundaries are enforced strictly at the database query layer:
 | Admin Operations | `get_current_admin_user` | Requires authenticated user with `role == UserRole.ADMIN` | 401 (anonymous), 403 (client) |
 | Active Account Gate | `get_current_active_user` | Checks `current_user.is_active` | 403 `account-inactive` |
 
-- **Cart Session Isolation:** Guest shopping carts are anchored to server-generated 256-bit cryptographically secure identifiers stored in `__Host-` prefixed cookies with `HttpOnly`, `SameSite=Lax`, and `Secure` attributes. Upon customer login, guest cart lines are safely merged into the authenticated cart.
+- **Cart Session Isolation:** Guest shopping carts are anchored to server-generated 256-bit cryptographically secure identifiers stored in `__Host-` prefixed cookies with `HttpOnly`, `SameSite=Lax`, and `Secure` attributes (with `GUEST_CART_COOKIE_SECURE=false`, for plain-HTTP local development, the cookie has neither the prefix nor `Secure`). Upon customer login, guest cart lines are safely merged into the authenticated cart.
 
 ## Input Validation and Injection Defense
 
@@ -103,7 +103,7 @@ The ASGI middleware stack injects OWASP Secure Headers on every response (includ
 ## Concurrency, Rate Limiting, and Overload Protection
 
 - **Request Body Limits:** `BodySizeLimitMiddleware` terminates requests exceeding `settings.MAX_REQUEST_BODY_BYTES` (default 1 MiB) with HTTP 413 `body-too-large`.
-- **In-Flight Concurrency Caps:** `InFlightLimitMiddleware` caps active requests per Uvicorn worker to `settings.MAX_IN_FLIGHT_REQUESTS` (configured to 15 under benchmarks), shedding excess traffic with HTTP 503 `service-overloaded` (`Retry-After: 1`).
+- **In-Flight Concurrency Caps:** `InFlightLimitMiddleware` caps active requests per Uvicorn worker to `settings.MAX_IN_FLIGHT_REQUESTS` (no limit by default; `.env.example` and the benchmarks set 15), shedding excess traffic with HTTP 503 `service-overloaded` (`Retry-After: 1`).
 - **Safe Worker Capacity Formula:** Keep `MAX_IN_FLIGHT_REQUESTS` at or below `DB_POOL_SIZE + DB_MAX_OVERFLOW` (15 by default); a request uses one session for its auth dependency and its route.
 - **Rate Limits:** Evaluated via atomic Redis Lua scripts per route template and caller. Keyed by authenticated user ID, or client IP accounting for `TRUSTED_PROXIES` (evaluated right-to-left) and `/64` IPv6 subnet grouping. Responses carry draft IETF `RateLimit` and `RateLimit-Policy` headers.
 - **Fail-Open vs. Fail-Closed Boundaries:** General rate limiting and per-route limits (auth routes included) fail open on Redis outages to maintain store availability; the failed-login counter and token revocation checks fail closed (503, Retry-After: 30).
@@ -111,7 +111,7 @@ The ASGI middleware stack injects OWASP Secure Headers on every response (includ
 ## Secrets Handling and Deployment Configuration
 
 - **Secret Handling:** All credentials (`JWT_SECRET_KEY`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `SMTP_PASSWORD`) are typed as Pydantic `SecretStr` to prevent leakage in debug logs or exception traces.
-- **Deployment Guards:** In staging and production environments, startup validators verify that secrets meet minimum byte lengths (JWT secret >= 32/48/64 bytes, webhook secret >= 32 bytes, database passwords >= 16 bytes), reject placeholder defaults, require `PAYMENT_PROVIDER=stripe`, enforce HTTPS for `FRONTEND_URL`, and fail startup if `LOG_LEVEL=DEBUG`.
+- **Deployment Guards:** In staging and production environments, startup validators verify that secrets meet minimum byte lengths (JWT secret >= 32/48/64 bytes, webhook secret >= 32 bytes, PostgreSQL and Redis passwords >= 16 bytes), reject placeholder defaults, require `PAYMENT_PROVIDER=stripe`, enforce HTTPS for `FRONTEND_URL`, and fail startup if `LOG_LEVEL=DEBUG`.
 
 ## GDPR Privacy Controls
 

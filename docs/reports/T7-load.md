@@ -21,7 +21,7 @@ Exit criteria:
   - Release v4.0.1, 4 Uvicorn workers, `MAX_IN_FLIGHT_REQUESTS=15`, DB connection pool size 10 (overflow 5), `BCRYPT_ROUNDS=12`.
   - `PAYMENT_PROVIDER=mock` (to measure raw stack throughput without external Stripe gateway latency).
   - Rate limits raised to 100000/s for capacity tests; production rate limits restored for the `limiter` profile.
-- **Comparison Baseline (3.x):** Measured on bare-metal Windows 11 with PostgreSQL 18 and Memurai (runs 38/38b in `docs/reports/load-testing-3x.md`: 200 users, 4 workers, in-flight 15: p50 10 ms, p95 66 to 69 ms). The comparison serves as a directional reference due to differing virtualization stacks.
+- **Comparison Baseline (3.x):** Measured on bare-metal Windows 11 with PostgreSQL 18 and Memurai (runs 38 and 38b of the 3.x load-test series, whose raw results are not in this repository: 200 users, 4 workers, in-flight 15: p50 10 ms, p95 66 to 69 ms; `docs/reports/load-testing-3x.md` reports the earlier run 34 of the same setup at p95 43 ms). The comparison serves as a directional reference due to differing virtualization stacks.
 
 ## Method and Commands
 
