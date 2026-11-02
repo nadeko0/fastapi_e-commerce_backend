@@ -88,8 +88,14 @@ services:
       - backend
     restart: unless-stopped
     logging: *default-logging
+    # Each check starts a whole Celery process (70-120 MB: it imports the
+    # app). When one outlives `timeout`, Docker counts the check as failed
+    # but leaves the process running, so on a CPU-starved host they piled
+    # up, about 30 MB more every 10 s, until the kernel killed the worker
+    # for memory (seen in a load test on a 2 vCPU server). `timeout 9` ends
+    # the check before Docker gives up on it.
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app.tasks inspect ping -d celery@$$HOSTNAME"]
+      test: ["CMD-SHELL", "timeout 9 celery -A app.tasks inspect ping -d celery@$$HOSTNAME"]
       interval: 30s
       timeout: 10s
       retries: 3

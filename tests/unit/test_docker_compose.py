@@ -226,6 +226,18 @@ def test_celery_worker_gets_time_to_finish_its_task_on_stop():
     assert "stop_signal" not in worker  # the default, SIGTERM, is the warm shutdown
 
 
+def test_celery_worker_healthcheck_ends_itself_before_docker_gives_up_on_it():
+    # Docker counts a check that outlives its timeout as failed but leaves
+    # the process running. Each check is a whole Celery process, so on a
+    # starved host they piled up until the worker was killed for memory.
+    worker = _without_comments(service_block("celery-worker"))
+    check = re.search(r'"timeout (\d+) celery -A app\.tasks inspect ping', worker)
+    docker_timeout = re.search(r"^\s*timeout: (\d+)s\s*$", worker, re.M)
+    assert check, worker
+    assert docker_timeout, worker
+    assert int(check.group(1)) < int(docker_timeout.group(1))
+
+
 def test_image_carries_oci_labels_filled_from_build_args():
     # image-spec annotations: version, revision and created vary per build and
     # arrive as build ARGs; the rest is fixed. The license is the repo's LICENSE.
