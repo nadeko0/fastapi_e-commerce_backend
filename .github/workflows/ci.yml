@@ -268,6 +268,43 @@ jobs:
           EMAILS_FROM_NAME: CI
         run: uv run pytest tests/ -m "db_sensitive and timing_sensitive" -q -p no:cacheprovider -rs
 
+  migration-compat:
+    # The previous release's database tests on the current migrations: during
+    # a rolling deploy the old code keeps running on the upgraded schema (see
+    # .github/scripts/migration_compat.sh). The base is the newest tag behind
+    # HEAD; when migrations/ has not changed since it, the job ends at once.
+    # tests/integration/test_postgres_migration_roundtrip.py checks the other
+    # direction, every downgrade, in the test-postgres jobs.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Set up Python
+        run: uv python install
+      - name: Previous release on the current migrations
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/ci
+        run: bash .github/scripts/migration_compat.sh "$(git describe --tags --abbrev=0 HEAD)"
+
   test-redis:
     # The suite runs on fakeredis (tests/conftest.py). The tests marked
     # real_redis are the parametrizations of tests/integration/
@@ -417,7 +454,7 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
-    needs: [lint, sast, audit, secrets, test, test-timezones, test-postgres, test-redis]
+    needs: [lint, sast, audit, secrets, test, test-timezones, test-postgres, test-redis, migration-compat]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build metadata for the OCI labels

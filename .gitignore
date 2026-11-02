@@ -78,7 +78,7 @@ dump.rdb
 loadtest-results/
 
 # Local helper scripts (seed data, smoke tests, load tests) - not published
-scripts/
+/scripts/
 
 # pytest-benchmark results (the CI job keeps its baseline in the Actions cache)
 .benchmarks/
