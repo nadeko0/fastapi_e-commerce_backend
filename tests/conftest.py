@@ -160,6 +160,7 @@ _DB_SENSITIVE_FILES = (
     "test_stripe_event*.py",
     "test_reconciliation*.py",
     "test_postgres_*.py",
+    "test_postgres_migration_roundtrip.py",
     "test_text_input.py",
     "test_int_bounds.py",
     "test_catalog_money.py",
