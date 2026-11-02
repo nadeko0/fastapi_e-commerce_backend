@@ -76,6 +76,9 @@ addopts = [
     # --allow-hosts. The live Stripe tests are the one exception (enable_socket).
     "--allow-hosts=127.0.0.1,::1,localhost",
     "--allow-unix-socket",
+    # tests/benchmarks run once each, as plain tests, in every ordinary run;
+    # the benchmark CI job turns timing on with --benchmark-enable.
+    "--benchmark-disable",
 ]
 testpaths = ["tests"]
 pythonpath = ["."]
