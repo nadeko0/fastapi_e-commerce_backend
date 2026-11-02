@@ -261,7 +261,8 @@ class LiveStripePaymentProvider(PaymentProvider):
             params["metadata"] = metadata
         try:
             pi = self._client.v1.payment_intents.create(
-                params=params, options={"idempotency_key": idempotency_key}
+                params=params,  # type: ignore[arg-type]  # Stripe SDK expects PaymentIntentCreateParams; params is dynamically built as dict[str, Any]
+                options={"idempotency_key": idempotency_key},
             )
         except stripe.IdempotencyError as e:
             raise IdempotencyError(str(e.user_message or e)) from None
@@ -386,7 +387,8 @@ class LiveStripePaymentProvider(PaymentProvider):
             params["expires_at"] = expires_at
         try:
             session = self._client.v1.checkout.sessions.create(
-                params=params, options={"idempotency_key": idempotency_key}
+                params=params,  # type: ignore[arg-type]  # Stripe SDK expects SessionCreateParams; params is dynamically built as dict[str, Any]
+                options={"idempotency_key": idempotency_key},
             )
         except stripe.IdempotencyError as e:
             raise IdempotencyError(str(e.user_message or e)) from None
@@ -445,7 +447,10 @@ class LiveStripePaymentProvider(PaymentProvider):
         if idempotency_key is not None:
             options["idempotency_key"] = idempotency_key
         try:
-            refund = self._client.v1.refunds.create(params=params, options=options)
+            refund = self._client.v1.refunds.create(
+                params=params,  # type: ignore[arg-type]  # Stripe SDK expects RefundCreateParams; params is dynamically built as dict[str, Any]
+                options=options,
+            )
         except stripe.IdempotencyError as e:
             raise IdempotencyError(str(e.user_message or e)) from None
         except stripe.InvalidRequestError as e:
@@ -472,7 +477,9 @@ class LiveStripePaymentProvider(PaymentProvider):
         }
         for _ in range(_REFUND_MAX_PAGES):
             try:
-                page = self._client.v1.refunds.list(params=params)
+                page = self._client.v1.refunds.list(
+                    params=params,  # type: ignore[arg-type]  # Stripe SDK expects RefundListParams; params is dynamically built as dict[str, Any]
+                )
             except stripe.InvalidRequestError as e:
                 raise InvalidRequestError(
                     str(e.user_message or e), param=e.param, code=e.code or "parameter_invalid"

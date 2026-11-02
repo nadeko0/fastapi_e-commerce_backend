@@ -69,7 +69,7 @@ def _attempt_still_storing_its_id(db: Session, object_data: dict) -> bool:
     if not isinstance(metadata, dict):
         return False
     try:
-        order_id = int(metadata.get("order_id"))
+        order_id = int(metadata.get("order_id"))  # type: ignore[arg-type]  # None raises TypeError, handled here
     except (TypeError, ValueError):
         return False
     if not 0 < order_id < 2 ** 31:
@@ -130,6 +130,7 @@ def _apply_dispute_event(db: Session, object_data: dict) -> dict:
     order = db.scalars(
         select(Order).where(Order.id == payment_row.order_id).with_for_update().limit(1)
     ).first()
+    assert order is not None, "payments.order_id is a non-null foreign key to orders"
     db.refresh(payment_row)
     dispute = db.scalars(
         select(PaymentDispute).where(PaymentDispute.dispute_id == dispute_id).limit(1)
@@ -208,6 +209,7 @@ def _apply_refund_event(db: Session, event_type: str, object_data: dict) -> dict
     order = db.scalars(
         select(Order).where(Order.id == payment_row.order_id).with_for_update().limit(1)
     ).first()
+    assert order is not None, "payments.order_id is a non-null foreign key to orders"
     db.refresh(payment_row)
     flagged = False
     for refund_object in refund_objects:
@@ -293,6 +295,7 @@ def apply_event(db: Session, event_type: str, event_data: Any, background_tasks)
     order = db.scalars(
         select(Order).where(Order.id == payment_row.order_id).with_for_update().limit(1)
     ).first()
+    assert order is not None, "payments.order_id is a non-null foreign key to orders"
     db.refresh(payment_row)
 
     if event_type == "payment_intent.succeeded":
@@ -518,6 +521,7 @@ def process_stored_event(db: Session, event_id: str) -> EventOutcome:
         return EventOutcome("skipped")
     after_commit = _AfterCommit()
     try:
+        assert row.payload is not None, "unprocessed event always has a payload"
         data = json.loads(row.payload).get("data")
         _redact_if_owner_erased(db, row)
         row.status = WEBHOOK_EVENT_PROCESSED
@@ -671,7 +675,7 @@ def _redact_if_owner_erased(db: Session, row: WebhookEvent) -> None:
     that raced the task - kept the customer's personal data forever.
     """
     try:
-        payload = json.loads(row.payload)
+        payload = json.loads(row.payload)  # type: ignore[arg-type]  # None raises TypeError, handled here
     except (TypeError, ValueError):
         return
     if not isinstance(payload, dict) or payload.get("redacted"):
@@ -700,6 +704,7 @@ def _redact_if_owner_erased(db: Session, row: WebhookEvent) -> None:
         .limit(1)
     ).first()
     if erased is not None:
+        assert row.payload is not None, "json.loads above has parsed it"
         row.payload = redact_event_payload(row.payload)
 
 
@@ -743,6 +748,7 @@ def redact_users_events(db: Session, user_ids: list[int]) -> int:
     ).all()
     redacted = 0
     for row in rows:
+        assert row.payload is not None, "query filtered for non-null payload"
         try:
             payload = json.loads(row.payload)
         except ValueError:

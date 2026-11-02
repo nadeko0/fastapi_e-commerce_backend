@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from app.core.clock import utc_now
 
@@ -65,6 +65,10 @@ class RedisService:
                 password=(
                     settings.REDIS_PASSWORD.get_secret_value() if settings.REDIS_PASSWORD is not None else None
                 ),
+                # redis-py connection pools are configured with decode_responses=True,
+                # so string and set commands return decoded str (or set[str]) at runtime.
+                # Because redis-py stubs declare Redis without type arguments and annotate
+                # outputs as bytes | str, callers narrow reads via typing.cast at read sites.
                 decode_responses=True,
                 max_connections=settings.REDIS_POOL_SIZE
             )
@@ -104,28 +108,32 @@ class RedisService:
             # A guest without an identifier: there is nothing to look up.
             return None
         try:
-            return self._load_cart(owner, self._redis.get(owner.key))
+            return self._load_cart(owner, cast(str | None, self._redis.get(owner.key)))
         except RedisError as e:
             self._handle_redis_error(f"get_cart: {str(e)}")
             return None
 
     def update_cart(self, cart: Cart) -> bool:
         try:
+            assert cart.user_id is not None, "Cart must have an account owner"
             cart_key = self._get_cart_key(cart.user_id)
+            assert cart_key is not None, "Account owner always has a key"
             ttl = self._cart_ttl()
             cart.expires_at = utc_now() + ttl
-            return self._redis.set(
+            return bool(self._redis.set(
                 cart_key,
                 self._serialize(cart),
                 ex=ttl,
-            )
+            ))
         except RedisError as e:
             self._handle_redis_error(f"update_cart: {str(e)}")
             return False
 
     def delete_cart(self, user_id: int) -> bool:
         try:
-            return bool(self._redis.delete(self._get_cart_key(user_id)))
+            cart_key = self._get_cart_key(user_id)
+            assert cart_key is not None, "Account owner always has a key"
+            return bool(self._redis.delete(cart_key))
         except RedisError as e:
             self._handle_redis_error(f"delete_cart: {str(e)}")
             return False
@@ -337,6 +345,7 @@ class RedisService:
                 pipe.multi()
                 pipe.delete(guest_key)
                 return
+            assert guest_cart is not None, "merge action requires a non-empty guest cart"
             write, guest_write = codec.plan_merge_into_account(
                 account, user_id, guest_cart, pipe.get(account_key), guest=guest
             )
@@ -392,7 +401,7 @@ class RedisService:
     def add_to_blacklist(self, token_id: str, expires_in: int) -> bool:
         try:
             key = f"blacklist:{token_id}"
-            return self._redis.set(key, "1", ex=expires_in)
+            return bool(self._redis.set(key, "1", ex=expires_in))
         except RedisError as e:
             self._handle_redis_error(f"add_to_blacklist: {str(e)}")
             return False
@@ -499,7 +508,7 @@ class RedisService:
                 ex=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
             )
             family_key = f"refresh_family:{family_id}"
-            members = self._redis.smembers(family_key)
+            members = cast(set[str], self._redis.smembers(family_key))
             if members:
                 keys = [f"refresh_active:{jti}" for jti in members]
                 self._redis.delete(*keys)
@@ -516,7 +525,7 @@ class RedisService:
         those (invalidate_tokens_issued_before_now)."""
         try:
             user_key = f"refresh_user:{user_id}"
-            for family_id in self._redis.smembers(user_key):
+            for family_id in cast(set[str], self._redis.smembers(user_key)):
                 if not self.revoke_refresh_family(family_id):
                     return False
             self._redis.delete(user_key)
@@ -529,11 +538,11 @@ class RedisService:
     def cache_product(self, product_id: int, data: dict) -> bool:
         try:
             key = f"product:{product_id}"
-            return self._redis.set(
+            return bool(self._redis.set(
                 key,
                 self._serialize(data),
                 ex=codec.PRODUCT_CACHE_TTL,
-            )
+            ))
         except RedisError as e:
             self._handle_redis_error(f"cache_product: {str(e)}")
             return False
@@ -550,7 +559,7 @@ class RedisService:
 
             if not result:
                 self._redis.delete("category:tree")
-            return result
+            return bool(result)
         except RedisError as e:
             self._handle_redis_error(f"cache_category_tree: {str(e)}")
             return False
@@ -558,7 +567,7 @@ class RedisService:
     def get_cached_category_tree(self) -> Optional['CategoryTreeResponse']:
         try:
             from app.schemas.category import CategoryTreeResponse
-            data = self._redis.get("category:tree")
+            data = cast(str | None, self._redis.get("category:tree"))
             if not data:
                 return None
 
@@ -579,7 +588,7 @@ class RedisService:
 
     def get_cached_product(self, product_id: int) -> dict | None:
         try:
-            data = self._redis.get(f"product:{product_id}")
+            data = cast(str | None, self._redis.get(f"product:{product_id}"))
             return self._deserialize(data) if data else None
         except RedisError as e:
             self._handle_redis_error(f"get_cached_product: {str(e)}")
@@ -601,7 +610,7 @@ class RedisService:
 
     def get_session(self, session_id: str) -> dict | None:
         try:
-            data = self._redis.get(session_id)
+            data = cast(str | None, self._redis.get(session_id))
             return self._deserialize(data) if data else None
         except RedisError as e:
             self._handle_redis_error(f"get_session: {str(e)}")
@@ -637,7 +646,7 @@ class RedisService:
 
     def get(self, key: str) -> Any | None:
         try:
-            data = self._redis.get(key)
+            data = cast(str | None, self._redis.get(key))
             return self._deserialize(data) if data else None
         except RedisError as e:
             self._handle_redis_error(f"get: {str(e)}")
@@ -645,7 +654,7 @@ class RedisService:
 
     def setex(self, key: str, seconds: int, value: Any) -> bool:
         try:
-            return self._redis.set(key, self._serialize(value), ex=seconds)
+            return bool(self._redis.set(key, self._serialize(value), ex=seconds))
         except RedisError as e:
             self._handle_redis_error(f"setex: {str(e)}")
             return False

@@ -134,7 +134,7 @@ AUTHENTICATING_TOKENS: dict[str, tuple[str, str | None, str] | None] = {
 
 # Asynchronous refunds: token -> (status a refund starts in, status it ends
 # in "some time later", the event Stripe sends then). "Refunds" table.
-ASYNC_REFUND_TOKENS: dict[str, tuple[RefundStatus, RefundStatus, str]] = {
+ASYNC_REFUND_TOKENS: dict[str | None, tuple[RefundStatus, RefundStatus, str]] = {
     "pm_card_pendingRefund": (RefundStatus.PENDING, RefundStatus.SUCCEEDED, "refund.updated"),
     "pm_card_refundFail": (RefundStatus.SUCCEEDED, RefundStatus.FAILED, "refund.failed"),
 }
@@ -333,6 +333,7 @@ class StripePaymentProvider(PaymentProvider):
             # the payment succeeds, or is declined for a card the guide
             # declines after authentication.
             intent.next_action = None
+            assert intent.payment_method is not None, "REQUIRES_ACTION implies a payment method was set"
             after_authentication = AUTHENTICATING_TOKENS.get(intent.payment_method)
             if after_authentication is not None:
                 self._decline(intent, *after_authentication)
@@ -576,7 +577,7 @@ class StripePaymentProvider(PaymentProvider):
         # status the guide gives (pending for pm_card_pendingRefund); every
         # other refund succeeds at once. settle_refund moves it on.
         first_status = ASYNC_REFUND_TOKENS.get(
-            intent.payment_method, (RefundStatus.SUCCEEDED,)
+            intent.payment_method, (RefundStatus.SUCCEEDED, RefundStatus.SUCCEEDED, "")
         )[0]
         refund = Refund(
             id=f"re_{uuid.uuid4().hex[:24]}",

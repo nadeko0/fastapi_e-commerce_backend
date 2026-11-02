@@ -37,7 +37,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from celery.exceptions import SoftTimeLimitExceeded
-from sqlalchemy import func, select
+from sqlalchemy import Row, func, select
 from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now
@@ -193,6 +193,7 @@ def compare(
     for refund_id in sorted(ours.keys() | theirs.keys()):
         ours_r, theirs_r = ours.get(refund_id), theirs.get(refund_id)
         if theirs_r is None:
+            assert ours_r is not None, "refund_id in union must be in ours when absent from theirs"
             found.append(Difference(
                 KIND_REFUND_UNKNOWN, refund_id, f"{ours_r.status} {ours_r.amount}", None))
         elif ours_r is None:
@@ -313,6 +314,7 @@ def reconcile_payments(
     consecutive_errors = 0
     for payment_id in ids[:limit]:
         payment = db.get(Payment, payment_id)
+        assert payment is not None, "payment_id was selected from Payment table"
         session_id = None
         if payment.payment_intent_id.startswith(PENDING_INTENT_ID_PREFIX):
             # A Checkout attempt whose checkout.session.completed never arrived
@@ -357,7 +359,7 @@ def reconcile_payments(
 def open_discrepancies(
     db: Session, *, page: int, size: int, order_id: int | None = None,
     order_by: Sequence[Any] | None = None,
-) -> tuple[list[tuple[PaymentDiscrepancy, Payment]], int]:
+) -> tuple[Sequence[Row[PaymentDiscrepancy, Payment]], int]:
     """A page of the unresolved discrepancies, oldest first, each with its
     payment, and how many there are in all."""
     query = (
@@ -368,6 +370,7 @@ def open_discrepancies(
     if order_id is not None:
         query = query.where(Payment.order_id == order_id)
     total = db.scalar(select(func.count()).select_from(query.subquery()))
+    assert total is not None, "count() query always returns an integer"
     rows = db.execute(
         query.order_by(*(order_by or (PaymentDiscrepancy.detected_at, PaymentDiscrepancy.id)))
         .offset((page - 1) * size)

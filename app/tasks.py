@@ -158,6 +158,7 @@ celery.conf.update(
 # running this worker locally left 2 Postgres connections stuck permanently
 # idle-in-transaction (still stuck 38+ minutes later) because this engine
 # had no timeout protection at all.
+assert settings.DATABASE_URI is not None, "assemble_db_connection always produces a database URI"
 engine = create_engine(
     settings.DATABASE_URI.get_secret_value(),
     pool_size=settings.DB_POOL_SIZE,
@@ -339,6 +340,7 @@ def _anonymise_pending(db, pending, batch_size: int, due=None) -> int:
         # one per account (100 x 0.3 s outlasted the 30 s idle timeout).
         unusable_hash = get_password_hash(str(uuid4())) if erased else None
         for account in erased:
+            assert unusable_hash is not None, "unusable_hash is computed when erased is non-empty"
             _anonymise_account(account, unusable_hash)
         stripe_events.redact_users_events(db, [a.id for a in erased])
         purged_count += len(erased)

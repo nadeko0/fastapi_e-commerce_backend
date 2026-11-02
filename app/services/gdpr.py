@@ -94,16 +94,18 @@ class GDPRService:
         # Update consent history
         user.consent_history = (user.consent_history or []) + consent_entries
 
+        db = self.db
+        assert db is not None, "Database session required for consent update"
         try:
-            await self.db.commit()
-            await self.db.refresh(user)
+            await db.commit()
+            await db.refresh(user)
             return {
                 "marketing": user.marketing_consent,
                 "privacy_policy": user.privacy_policy_accepted,
 
             }
         except Exception as e:
-            await self.db.rollback()
+            await db.rollback()
             raise HTTPException(
                 status_code=500,
                 detail="Failed to update consent preferences"
@@ -120,24 +122,26 @@ class GDPRService:
         from app.models.payment import Payment
         from app.models.payment_ledger import PaymentRefund
 
-        user = await self.db.get(User, user_id)
-        addresses = (await self.db.scalars(
+        db = self.db
+        assert db is not None, "Database session required for collecting export"
+        user = await db.get(User, user_id)
+        addresses = (await db.scalars(
             select(Address).where(Address.user_id == user_id).order_by(Address.id)
         )).all()
-        orders = (await self.db.scalars(
+        orders = (await db.scalars(
             select(Order).options(selectinload(Order.items))
             .where(Order.user_id == user_id).order_by(Order.id)
         )).all()
-        payments = (await self.db.scalars(
+        payments = (await db.scalars(
             select(Payment).join(Order, Order.id == Payment.order_id)
             .where(Order.user_id == user_id).order_by(Payment.id)
         )).all()
-        refunds = (await self.db.scalars(
+        refunds = (await db.scalars(
             select(PaymentRefund).join(Payment, Payment.id == PaymentRefund.payment_id)
             .join(Order, Order.id == Payment.order_id)
             .where(Order.user_id == user_id).order_by(PaymentRefund.id)
         )).all()
-        await self.db.commit()  # no transaction stays open across the SMTP sends
+        await db.commit()  # no transaction stays open across the SMTP sends
         return {
             "user": _row(user, _USER_FIELDS),
             "addresses": [_row(a, _ADDRESS_FIELDS) for a in addresses],
@@ -170,11 +174,14 @@ class GDPRService:
 
             # `user` may be the request's detached snapshot: the row is written
             # through this session.
-            row = await self.db.get(User, user.id)
+            db = self.db
+            assert db is not None, "Database session required for data export"
+            row = await db.get(User, user.id)
+            assert row is not None, "User must exist in database"
             requests = list(row.data_export_requests or [])
             requests.append({"request_id": request_id, "requested_at": utc_now().isoformat()})
             row.data_export_requests = requests
-            await self.db.commit()
+            await db.commit()
 
             # The export goes to the account's own address, inline. A large
             # account would rather get a signed, expiring download link.
@@ -203,7 +210,9 @@ class GDPRService:
         """
         request_id = f"deletion_{user.id}_{utc_now().timestamp()}"
 
-        if user.role == "admin" and not await self.db.scalar(
+        db = self.db
+        assert db is not None, "Database session required for data deletion"
+        if user.role == "admin" and not await db.scalar(
             select(func.count(User.id)).where(
                 User.role == "admin", User.is_active.is_(True), User.id != user.id
             )
@@ -224,7 +233,7 @@ class GDPRService:
             user.data_deletion_requested = True
             user.data_deletion_date = utc_now()
 
-            await self.db.commit()
+            await db.commit()
 
             # Send emails after commit (2D-03)
             from app.services.email import (
@@ -239,7 +248,7 @@ class GDPRService:
             return request_id
 
         except Exception as e:
-            await self.db.rollback()
+            await db.rollback()
             raise HTTPException(
                 status_code=500,
                 detail="Failed to process deletion request"

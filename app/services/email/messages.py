@@ -1,6 +1,7 @@
 import html
 import json
 from datetime import datetime
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
@@ -103,7 +104,9 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
         html_content
     )
 
-def send_order_status_update_email(to_email: str, order: Order) -> bool:
+def send_order_status_update_email(
+    to_email: str, order: "Order | OrderResponse | SimpleNamespace"
+) -> bool:
     # order.status.value assumed order.status is always an OrderStatus enum
     # member. True for every real call site (app/api/v1/orders.py always
     # passes OrderResponse, whose Pydantic field coerces the DB string into
@@ -111,7 +114,7 @@ def send_order_status_update_email(to_email: str, order: Order) -> bool:
     # type-hinted to accept: Order.status is a bare String column (see
     # app/models/order.py), so a caller handing this a
     # freshly-queried Order got a plain str back and `.value` raised AttributeError.
-    status_value = order.status.value if hasattr(order.status, "value") else order.status
+    status_value = getattr(order.status, "value", order.status)
     html_content = f"""
     <html>
         <body>
@@ -135,7 +138,9 @@ def send_order_status_update_email(to_email: str, order: Order) -> bool:
         html_content
     )
 
-def send_order_cancellation_email(to_email: str, order: Order) -> bool:
+def send_order_cancellation_email(
+    to_email: str, order: "Order | OrderResponse | SimpleNamespace"
+) -> bool:
     html_content = f"""
     <html>
         <body>

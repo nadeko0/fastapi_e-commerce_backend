@@ -31,7 +31,7 @@ from app.services.reconciliation import PENDING_INTENT_ID_PREFIX
 
 logger = logging.getLogger(__name__)
 
-ORDER_STATUS_TRANSITIONS = {
+ORDER_STATUS_TRANSITIONS: dict[str, set[OrderStatus]] = {
     OrderStatus.NEW: {OrderStatus.CONFIRMED, OrderStatus.CANCELLED},
     OrderStatus.CONFIRMED: {OrderStatus.PROCESSING, OrderStatus.CANCELLED},
     OrderStatus.PROCESSING: {OrderStatus.SENT, OrderStatus.CANCELLED},
@@ -84,7 +84,7 @@ def products_with_cached_stock(lines) -> list[int]:
     return sorted({product_id for product_id, variant_id in lines if variant_id is None})
 
 
-def is_valid_status_transition(old_status: OrderStatus, new_status: OrderStatus) -> bool:
+def is_valid_status_transition(old_status: str, new_status: OrderStatus) -> bool:
     return new_status in ORDER_STATUS_TRANSITIONS.get(old_status, set())
 
 
@@ -125,7 +125,7 @@ def open_payment_attempts(
     )
     if except_payment_id is not None:
         query = query.where(Payment.id != except_payment_id)
-    return [tuple(row) for row in db.execute(query)]
+    return [(row[0], row[1]) for row in db.execute(query)]
 
 
 def close_attempts_at_provider(provider, attempts) -> bool:

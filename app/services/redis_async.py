@@ -35,7 +35,7 @@ import logging
 import threading
 from datetime import timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from redis.asyncio import BlockingConnectionPool, Redis
 from redis.exceptions import RedisError
@@ -82,6 +82,10 @@ def _create_client() -> Redis:
     blocking pool makes the request wait (yielding to the loop) for up to
     REDIS_POOL_TIMEOUT seconds instead.
     """
+    # redis-py connection pools are configured with decode_responses=True throughout,
+    # so string and set commands return decoded str (or set[str]) at runtime.
+    # Because redis-py stubs declare Redis without type arguments and annotate outputs
+    # as bytes | str, callers narrow reads via typing.cast at read sites.
     pool = BlockingConnectionPool(
         host=settings.REDIS_HOST,
         port=settings.REDIS_PORT,
@@ -215,24 +219,28 @@ class AsyncRedisService:
             # A guest without an identifier: there is nothing to look up.
             return None
         try:
-            return codec.load_cart(owner, await self._redis.get(owner.key))
+            return codec.load_cart(owner, cast(str | None, await self._redis.get(owner.key)))
         except RedisError as e:
             self._handle_redis_error(f"get_cart: {str(e)}")
             raise
 
     async def update_cart(self, cart: Cart) -> bool:
         try:
+            assert cart.user_id is not None, "Cart must have an account owner"
             cart_key = as_cart_owner(cart.user_id).key
+            assert cart_key is not None, "Account owner always has a key"
             ttl = codec.cart_ttl()
             cart.expires_at = utc_now() + ttl
-            return await self._redis.set(cart_key, codec.serialize(cart), ex=ttl)
+            return bool(await self._redis.set(cart_key, codec.serialize(cart), ex=ttl))
         except RedisError as e:
             self._handle_redis_error(f"update_cart: {str(e)}")
             return False
 
     async def delete_cart(self, user_id: int) -> bool:
         try:
-            return bool(await self._redis.delete(as_cart_owner(user_id).key))
+            cart_key = as_cart_owner(user_id).key
+            assert cart_key is not None, "Account owner always has a key"
+            return bool(await self._redis.delete(cart_key))
         except RedisError as e:
             self._handle_redis_error(f"delete_cart: {str(e)}")
             return False
@@ -322,6 +330,8 @@ class AsyncRedisService:
         guest = CartOwner.guest(guest_id)
         account = CartOwner.account(user_id)
         guest_key, account_key = guest.key, account.key
+        assert guest_key is not None, "guest_id ensures guest_key is not None"
+        assert account_key is not None, "user_id ensures account_key is not None"
         guest_left = [False]
 
         async def _txn(pipe):
@@ -333,6 +343,7 @@ class AsyncRedisService:
                 pipe.multi()
                 pipe.delete(guest_key)
                 return
+            assert guest_cart is not None, "merge action requires a non-empty guest cart"
             write, guest_write = codec.plan_merge_into_account(
                 account, user_id, guest_cart, await pipe.get(account_key), guest=guest
             )
@@ -356,6 +367,7 @@ class AsyncRedisService:
         (stored cart untouched) on a Redis error."""
         owner = as_cart_owner(user_id)
         cart_key = owner.key
+        assert cart_key is not None, "cart owner must have a key"
 
         async def _txn(pipe):
             write = codec.plan_remove_ordered(owner, await pipe.get(cart_key), ordered)
@@ -376,7 +388,7 @@ class AsyncRedisService:
 
     async def add_to_blacklist(self, token_id: str, expires_in: int) -> bool:
         try:
-            return await self._redis.set(f"{BLACKLIST_KEY_PREFIX}{token_id}", "1", ex=expires_in)
+            return bool(await self._redis.set(f"{BLACKLIST_KEY_PREFIX}{token_id}", "1", ex=expires_in))
         except RedisError as e:
             self._handle_redis_error(f"add_to_blacklist: {str(e)}")
             return False
@@ -442,7 +454,7 @@ class AsyncRedisService:
                 ex=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
             )
             family_key = f"refresh_family:{family_id}"
-            members = await self._redis.smembers(family_key)
+            members = cast(set[str], await self._redis.smembers(family_key))
             if members:
                 await self._redis.delete(*[f"refresh_active:{jti}" for jti in members])
             await self._redis.delete(family_key)
@@ -454,7 +466,7 @@ class AsyncRedisService:
     async def revoke_user_refresh_families(self, user_id: int) -> bool:
         try:
             user_key = f"refresh_user:{user_id}"
-            for family_id in await self._redis.smembers(user_key):
+            for family_id in cast(set[str], await self._redis.smembers(user_key)):
                 if not await self.revoke_refresh_family(family_id):
                     return False
             await self._redis.delete(user_key)
@@ -467,9 +479,9 @@ class AsyncRedisService:
 
     async def cache_product(self, product_id: int, data: dict) -> bool:
         try:
-            return await self._redis.set(
+            return bool(await self._redis.set(
                 f"product:{product_id}", codec.serialize(data), ex=codec.PRODUCT_CACHE_TTL
-            )
+            ))
         except RedisError as e:
             self._handle_redis_error(f"cache_product: {str(e)}")
             return False
@@ -483,7 +495,7 @@ class AsyncRedisService:
             )
             if not result:
                 await self._redis.delete(codec.CATEGORY_TREE_KEY)
-            return result
+            return bool(result)
         except RedisError as e:
             self._handle_redis_error(f"cache_category_tree: {str(e)}")
             return False
@@ -492,7 +504,7 @@ class AsyncRedisService:
         try:
             from app.schemas.category import CategoryTreeResponse
 
-            data = await self._redis.get(codec.CATEGORY_TREE_KEY)
+            data = cast(str | None, await self._redis.get(codec.CATEGORY_TREE_KEY))
             if not data:
                 return None
             if not codec.is_category_tree_payload_valid(data):
@@ -505,7 +517,7 @@ class AsyncRedisService:
 
     async def get_cached_product(self, product_id: int) -> dict | None:
         try:
-            data = await self._redis.get(f"product:{product_id}")
+            data = cast(str | None, await self._redis.get(f"product:{product_id}"))
             return codec.deserialize(data) if data else None
         except RedisError as e:
             self._handle_redis_error(f"get_cached_product: {str(e)}")
@@ -526,7 +538,7 @@ class AsyncRedisService:
 
     async def get(self, key: str) -> Any | None:
         try:
-            data = await self._redis.get(key)
+            data = cast(str | None, await self._redis.get(key))
             return codec.deserialize(data) if data else None
         except RedisError as e:
             self._handle_redis_error(f"get: {str(e)}")
@@ -534,7 +546,7 @@ class AsyncRedisService:
 
     async def setex(self, key: str, seconds: int, value: Any) -> bool:
         try:
-            return await self._redis.set(key, codec.serialize(value), ex=seconds)
+            return bool(await self._redis.set(key, codec.serialize(value), ex=seconds))
         except RedisError as e:
             self._handle_redis_error(f"setex: {str(e)}")
             return False
