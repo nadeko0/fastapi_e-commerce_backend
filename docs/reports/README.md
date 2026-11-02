@@ -1,6 +1,6 @@
 # Verification, Security, and Engineering Reports
 
-This directory houses the comprehensive public records of all testing campaigns, security audits, architectural redesigns, and resilience evaluations for the FastAPI e-commerce backend. Every report reflects verified empirical measurements from release v4.0.3 and historical milestones.
+This directory houses the comprehensive public records of all testing campaigns, security audits, architectural redesigns, and resilience evaluations for the FastAPI e-commerce backend. Each report states the release it measured (4.0.0 to 4.0.3); none was repeated on 4.1.0.
 
 ## 📋 Final Test Campaign (v4.0.0 to v4.0.3)
 

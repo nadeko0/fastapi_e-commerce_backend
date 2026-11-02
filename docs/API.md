@@ -6,13 +6,13 @@ Interactive OpenAPI documentation and Swagger UI are accessible at `/api/v1/docs
 
 ## Base Path and Endpoint Overview
 
-The API version prefix is mounted at `/api/v1` (configured via `settings.API_V1_STR`). The test suite validates 54 distinct paths comprising 67 endpoint operations across 7 domain routers.
+The API version prefix is mounted at `/api/v1` (configured via `settings.API_V1_STR`). The test suite validates 56 distinct paths comprising 69 endpoint operations across 6 routers plus the health probes.
 
 | Router Tag | Operations | Scope and Primary Responsibilities |
 |---|---|---|
-| `admin` | 18 | Product catalog management, category creation, inventory reconciliation, order review, listing and refunding flagged payments, and webhook event inspection or replay. |
+| `admin` | 18 | Product catalog management, category creation, payment reconciliation, order review, statistics, listing and refunding flagged payments, and webhook event inspection or replay. |
 | `cart` | 6 | Guest and account cart management, item mutations, live pricing checks, and stock validation. |
-| `catalog` | 6 | Public read-only product listings, category trees, product detail retrieval, and full-text catalog search. |
+| `catalog` | 6 | Public read-only product listings, category trees, product detail retrieval, and catalog search by name and description. |
 | `Legal & GDPR` | 7 | Consent state tracking, privacy policies, terms of service, cookie disclosures, data export delivered inline via email, and account erasure. |
 | `orders` | 9 | Order creation, payment intent confirmation, Stripe Checkout sessions, payment history, cancellations, refunds, and Stripe webhook ingress. |
 | `users` | 20 | Registration (name optional), login with email normalisation, token refresh, logout, password reset lifecycles, email verification, profile management, and address book CRUD. |
@@ -67,7 +67,7 @@ API responses avoid arbitrary wrappers:
   }
   ```
 - **Confirmation Responses:** Operations with no returned resource body return `{"message": "..."}`.
-- **Request Tracking:** Every HTTP response carries the `X-Request-ID` header, generated as an opaque UUID for distributed log tracing.
+- **Request Tracking:** Every HTTP response carries the `X-Request-ID` header for log tracing: a well-formed incoming value is kept, otherwise one is generated (a UUID4 in hex form).
 
 ## Error Handling (RFC 9457 Problem Details)
 
@@ -101,7 +101,7 @@ The complete catalog of typed problems declared in `app/core/errors.py`:
 ## HTTP Status Codes
 
 The API strictly adheres to RFC 9110 status code semantics:
-- **201 Created + Location:** Returned by POST endpoints that instantiate persistent resources (`POST /api/v1/orders`, `POST /api/v1/users/addresses`, `POST /api/v1/admin/products`, `POST /api/v1/admin/categories`). The `Location` header points to the newly created resource path.
+- **201 Created + Location:** Returned by POST endpoints that instantiate persistent resources (`POST /api/v1/orders`, `POST /api/v1/users/addresses`, `POST /api/v1/admin/products`, `POST /api/v1/admin/products/{product_id}/variants`, `POST /api/v1/admin/categories`). The `Location` header points to the newly created resource path.
 - **202 Accepted:** Returned by `POST /api/v1/users/register`. The server accepts the registration request asynchronously regardless of whether the email is already registered, completely preventing account enumeration.
 - **204 No Content:** Deleting an address (`DELETE /api/v1/users/addresses/{id}`) or a product (`DELETE /api/v1/admin/products/{id}`). Contains no body. `DELETE /api/v1/cart` and `DELETE /api/v1/cart/items/{product_id}` return 200 with the updated cart.
 - **400 vs 409 vs 422:**
@@ -114,14 +114,14 @@ The API strictly adheres to RFC 9110 status code semantics:
 - **413 Content Too Large:** Payload exceeds size ceiling.
 - **415 Unsupported Media Type:** Sent with `Accept` header specifying accepted types (`application/json`, or `application/merge-patch+json, application/json` for PATCH). A PATCH request submitting a `+json` media type other than merge-patch returns 415.
 - **429 Too Many Requests:** Rate limit exhausted. Response includes `Retry-After: <seconds>` and IETF draft `RateLimit` / `RateLimit-Policy` headers.
-- **503 Service Unavailable:** Overload shedding (`Retry-After: 1`), Redis outage during token/login checks (`Retry-After: 30`), Redis outage during cart reads or mutations (`Retry-After: 5`), or database unavailability (`Retry-After: 5`).
+- **503 Service Unavailable:** Overload shedding (`Retry-After: 1`), Redis outage during token/login checks (`Retry-After: 30`), Redis outage during cart reads or mutations, logout or password reset (`Retry-After: 5`), a payment provider timeout (`Retry-After: 5`), or database unavailability (`Retry-After: 5`).
 
 ## Idempotency Controls (`Idempotency-Key`)
 
 Financial and mutating order endpoints enforce the IETF draft `Idempotency-Key` specification (`draft-ietf-httpapi-idempotency-key-header`):
 
-- **Enforced Routes:** `POST /api/v1/orders`, `POST /api/v1/orders/{order_id}/pay`, `POST /api/v1/orders/{order_id}/checkout-session`, and `POST /api/v1/orders/{order_id}/refund`.
-- **Format Requirements:** Printable ASCII string between 8 and 255 characters. Missing or out-of-range headers immediately receive 400 `idempotency-key-missing`.
+- **Enforced Routes:** `POST /api/v1/orders`, `POST /api/v1/orders/{order_id}/pay`, `POST /api/v1/orders/{order_id}/checkout-session`, `POST /api/v1/orders/{order_id}/refund`, and `POST /api/v1/admin/payments/{payment_id}/refund`.
+- **Format Requirements:** A string of 8 to 255 characters (a UUID is a good choice). Missing or out-of-range headers immediately receive 400 `idempotency-key-missing`.
 - **Payload Fingerprinting:** A canonical SHA-256 fingerprint is generated from validated payload fields. Replaying the identical key with different payload parameters triggers 422 `idempotency-key-reused`.
 - **Concurrent In-Flight Locks:** If a request arrives while an identical key is already being processed, the server yields 409 `idempotency-key-in-use`.
 - **Retention and TTL:**
@@ -142,13 +142,12 @@ The API enforces strict data hygiene on all inputs:
 Collection endpoints consume standardized query parameters:
 - `page`: Page index (1-based integer, default 1, bounded to 32-bit signed integer).
 - `size`: Items per page (default 20, minimum 1, maximum 100).
-- `sort_by`: Target model attribute allowlisted per endpoint (e.g. `price`, `created_at`, `name`). Submitting an unrecognized sort field falls back safely to default ordering.
-- `sort_order`: Direction string, either `asc` (default) or `desc`.
+- `sort_by`, `sort_order`: on the account lists, categories and the admin lists, `sort_by` is a field name and `sort_order` is `asc` (default) or `desc`; an unknown field falls back to the default order. `GET /api/v1/products` takes one combined `sort_by` (`name_asc`, `name_desc`, `price_asc`, `price_desc`, `created_at_asc`, `created_at_desc`), and any other value is 422. `GET /api/v1/admin/orders` also refuses an unknown `sort_by` with 422.
 
 ## Caching and Conditional Requests (ETag)
 
 Entity tags provide strong cache validation (SHA-256 digest of response model JSON):
-- **Read Validation (`If-None-Match`):** Supported by `GET /api/v1/products/{product_id}` and `GET /api/v1/admin/products/{product_id}/variants/{variant_id}`. If the client holds a matching tag, the server responds with 304 Not Modified without a response body. Product ETags follow variant creation and updates; stock moved by checkout does not change product ETags.
+- **Read Validation (`If-None-Match`):** Supported by `GET /api/v1/products/{product_id}` and `GET /api/v1/admin/products/{product_id}/variants/{variant_id}`. If the client holds a matching tag, the server responds with 304 Not Modified without a response body. A product's ETag covers what its response shows, so it changes with a variant's creation or update, and with stock moved by an order, a cancellation or the expiry task.
 - **Optimistic Concurrency (`If-Match`):** Supported by `PUT` and `PATCH` endpoints for products and variants. If the submitted `If-Match` tag does not match the current database state, the mutation is refused with 412 Precondition Failed, returning the latest ETag. The header matches `*` only alone; a malformed field matches nothing and returns 412.
 
 ## JSON Merge Patch (RFC 7396)

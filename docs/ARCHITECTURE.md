@@ -1,6 +1,6 @@
 # Architecture and System Design
 
-Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v4.0.3.
+Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v4.1.0.
 
 ## System Overview and Boundaries
 
@@ -22,13 +22,13 @@ flowchart TD
             M1["1. OpenTelemetry (Tracing Instrumentation)"]
             --> M2["2. SecurityHeadersMiddleware (HSTS, CSP, CORP, COOP)"]
             --> M3["3. RequestContextMiddleware (X-Request-ID, Traceparent)"]
-            --> M4["4. InFlightLimitMiddleware (MAX_IN_FLIGHT_REQUESTS Shedder)"]
+            --> M4["4. InFlightLimitMiddleware (only when MAX_IN_FLIGHT_REQUESTS is set)"]
             --> M5["5. ForwardedClientMiddleware (TRUSTED_PROXIES Client Extraction)"]
             --> M6["6. CORSMiddleware (Origins, Allowed Headers, Exposed Headers)"]
             --> M7["7. BodySizeLimitMiddleware (MAX_REQUEST_BODY_BYTES, 413)"]
             --> M8["8. HeadMiddleware (RFC 9110 9.3.2 GET Execution)"]
         end
-        Middlewares --> Dependencies["Global Dependencies (rate_limit, reject_unusable_text)"]
+        Middlewares --> Dependencies["Global Dependencies (rate_limit, reject_unusable_text, check_patch_media_type)"]
         Dependencies --> Routers["API Routers (app/api/v1: orders, cart, catalog, users, admin, legal)"]
         Routers --> Services["Domain Services (app/services: orders, payments, webhooks, email)"]
     end
@@ -150,13 +150,13 @@ The project follows a modular layered architecture separating transport, domain 
 
 | Directory | Primary Architectural Scope and Responsibilities |
 |---|---|
-| `app/api/v1` | HTTP transport controllers, route endpoints, dependency injection, and OpenAPI operation schemas across 7 domain modules. |
+| `app/api/v1` | HTTP transport controllers, route endpoints, dependency injection, and OpenAPI operation schemas across 6 domain modules. |
 | `app/core` | Application lifecycle, settings, database engines, security primitives, custom middlewares, and telemetry. |
 | `app/services` | Domain business logic (orders, restock, payment adapters, Stripe webhook handling, reconciliation, and Redis clients). |
 | `app/models` | Declarative SQLAlchemy 2.0 database models defining relational tables, foreign key constraints, and indices. |
 | `app/schemas` | Pydantic v2 schemas for strict input parsing (`RequestBody`), response serialization, and RFC 9457 error details. |
 | `migrations` | Alembic migration scripts supporting sequential forward upgrades, schema rollbacks, and offline SQL generation. |
-| `tests` | Automated test suite covering unit tests, integration suites, property tests (Hypothesis), contract suites, and chaos runs. |
+| `tests` | Automated test suite covering unit tests, integration suites, property tests (Hypothesis) and an OpenAPI snapshot test. Chaos, fuzzing and load runs were done outside this suite and are described in docs/reports. |
 
 ## Key Architectural Decisions
 
@@ -165,7 +165,7 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 ### 1. Asynchronous Routes on AsyncSession with Synchronous Celery Code
 - **Decision:** HTTP endpoints use `async def` with SQLAlchemy `AsyncSession` and `AsyncRedisService`. Core domain logic (stock locking, payment settlement) is authored as synchronous functions and invoked from routes via `db.run_sync()`, while Celery workers invoke them directly.
 - **Alternatives:** Maintaining duplicated async and sync domain services; running async Celery workers; executing all HTTP routes synchronously in Starlette's threadpool.
-- **Reason:** Synchronous database operations in async routes block the event loop (measured in load testing: 5 concurrent requests degraded from 0.30 s to 1.91 s). Dual implementations cause business logic divergence. Reusing synchronous domain functions via `run_sync` provides a single authoritative codebase across HTTP and worker tiers.
+- **Reason:** Synchronous database operations in async routes block the event loop (see reports/load-testing-3x.md). Dual implementations cause business logic divergence. Reusing synchronous domain functions via `run_sync` provides a single authoritative codebase across HTTP and worker tiers.
 - **Consequence:** Async routes must await queries and declare eager loading (`selectinload`/`joinedload`) upfront to prevent `MissingGreenlet` exceptions during serialization.
 
 ### 2. UTC Everywhere (`timestamptz`, RFC 3339 `Z`)
@@ -193,7 +193,7 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 - **Consequence:** Centralized exception handlers rewrite all exceptions and translate OpenAPI schema responses to `application/problem+json`.
 
 ### 6. Idempotency-Key with Request Fingerprints
-- **Decision:** Mutation endpoints (`POST /orders`, `POST /orders/{id}/pay`, `/checkout-session`, `/refund`) require an `Idempotency-Key` header. Requests are stored with a SHA-256 fingerprint of the operation and the validated request fields, stored next to the key (keys are unique per user).
+- **Decision:** Mutation endpoints (`POST /orders`, `POST /orders/{id}/pay`, `/checkout-session`, `/refund`, `POST /admin/payments/{payment_id}/refund`) require an `Idempotency-Key` header. Requests are stored with a SHA-256 fingerprint of the operation and the validated request fields, stored next to the key (keys are unique per user).
 - **Alternatives:** Key-only storage without body fingerprinting; client-supplied database nonces; volatile in-memory idempotency caches.
 - **Reason:** Network retries or double-submissions must never duplicate payments or inventory decrements. Payload fingerprinting prevents reuse of identical keys with mutated request bodies (returning HTTP 422 `idempotency-key-reused`).
 - **Consequence:** A request whose key belongs to an attempt still in flight receives HTTP 409 `idempotency-key-in-use`, with `Retry-After: 5` while that attempt is being processed.
@@ -225,14 +225,14 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 ### 11. Hermetic Local Tests with Multi-Service CI Validation
 - **Decision:** Local and unit tests run hermetically without external dependencies (mocked Stripe, isolated SQLite/Redis with `REDIS_PORT=1`). CI matrix workflows validate integration against real container services: PostgreSQL 15, 16, 18, real Redis parity across 7 timezones. Live Stripe and chaos runs were manual campaign stages (T4, T8).
 - **Alternatives:** Executing all tests solely against SQLite in CI; mocking database engines universally; relying on shared remote staging environments.
-- **Reason:** SQLite ignores foreign keys by default and does not support PostgreSQL row-level locks (`SELECT ... FOR UPDATE`). Real-service CI jobs identified 13 critical defects undetected by SQLite, including deadlocks and pool recovery behavior. Hermetic local defaults prevent test contamination of developer services.
+- **Reason:** SQLite ignores foreign keys by default and does not support PostgreSQL row-level locks (`SELECT ... FOR UPDATE`). Real-service CI jobs found defects that SQLite did not, including deadlocks and pool recovery behavior. Hermetic local defaults prevent test contamination of developer services.
 - **Consequence:** Rapid local development feedback combined with multi-environment CI validation (one workflow, 16 jobs).
 
 ### 12. Dependency Pinning and Two-Week Age Rule
 - **Decision:** All external dependencies, base container image digests, and security tooling must be at least two weeks old prior to adoption. Packages are locked to exact hashes (`uv.lock`, Docker image SHA digests). Urgent zero-day security updates require an explicit, documented security exception.
 - **Alternatives:** Floating version ranges; immediate adoption of latest releases; pinning versions without cryptographic digest verification.
 - **Reason:** Protects against supply chain attacks, poisoned dependencies, and newly published zero-day regressions by providing a buffer for community review and vulnerability disclosure. Digest pinning guarantees reproducible, immutable container builds.
-- **Consequence:** Upgrades require systematic dependency audits and recorded vulnerability justifications (such as `govulncheck` reachability proofs and the Redis 7.4.11 exception in v4.0.1).
+- **Consequence:** Upgrades require systematic dependency audits and recorded vulnerability justifications (such as `govulncheck` reachability proofs and the exception that pinned Redis to the patched 7.4.11 digest in v4.0.1).
 
 ## See Also
 

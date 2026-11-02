@@ -9,7 +9,7 @@ If you find a vulnerability, please report it privately through GitHub's **Repor
 A useful report includes:
 - what the vulnerability is and what an attacker could do with it;
 - how to reproduce it (an HTTP request or `curl` command is ideal);
-- the affected endpoint, component or configuration, and the version you tested (the latest release is v4.0.3; earlier lines differ substantially).
+- the affected endpoint, component or configuration, and the version you tested (the latest release is v4.1.0; earlier lines differ substantially).
 
 This is a personal project, so there is no response-time commitment.
 
@@ -43,7 +43,7 @@ When a client presents an access token, `get_current_user` checks whether its `j
 
 ### NIST SP 800-63B-4 Password Policy
 
-Password validation complies with NIST SP 800-63B-4 Section 3.1.1.2:
+Password validation follows NIST SP 800-63B-4 Section 3.1.1.2, except for the minimum length:
 - Minimum password length is 8 characters by project decision; NIST SP 800-63B-4 asks 15 characters for single-factor authentication.
 - No arbitrary composition rules (no mandatory special characters, digits, or mixed casing).
 - Unicode characters are accepted; passwords undergo Unicode NFC normalization before hashing and verification.
@@ -74,7 +74,7 @@ Access boundaries are enforced strictly at the database query layer:
 ## Input Validation and Injection Defense
 
 - **Forbidden Unknown Fields:** Request bodies extend `RequestBody` with Pydantic `extra="forbid"`, rejecting unexpected keys with 422 `extra_forbidden`.
-- **Text Filtering:** Application-wide middleware rejects NUL bytes (`\x00`) and lone Unicode surrogates (`\ud800` through `\udfff`) with 422 across JSON bodies, query strings, URL paths, and form inputs before values reach PostgreSQL drivers or log formatters.
+- **Text Filtering:** An application-wide dependency rejects NUL bytes (`\x00`) and lone Unicode surrogates (`\ud800` through `\udfff`) with 422 across JSON bodies, query strings, URL paths, and form inputs before values reach PostgreSQL drivers or log formatters.
 - **SQL Injection Defense:** All database queries utilize SQLAlchemy 2.0 parameterized expressions and ORM mapping exclusively. Raw string concatenation in queries is prohibited. Catalog search parameters escape SQL wildcard characters (`%`, `_`) to ensure literal matching.
 - **Cross-Site Scripting (XSS):** The API serves raw JSON data with proper MIME types. Outbound transactional HTML emails escape product titles and customer names using `html.escape` to eliminate stored email XSS vectors.
 - **Monetary Precision:** Prices and order totals are represented as exact decimal strings with ASCII digits only (never floating-point numbers) with ISO 4217 currency checks. Order totals are capped at 21,474,836.47 to match payment column limits. Datetimes enforce explicit UTC timezone offsets (`UTCDatetime`).
@@ -98,7 +98,7 @@ The ASGI middleware stack injects OWASP Secure Headers on every response (includ
 
 - **Content Security Policy (CSP):** API endpoints enforce `default-src 'none'; frame-ancestors 'none'`. Interactive documentation routes (`/api/v1/docs`, `/redoc`) apply a CDN-scoped policy outside production; documentation endpoints are disabled entirely in production (`ENVIRONMENT=production`).
 - **Deprecated Headers Omitted:** `X-XSS-Protection` is deliberately omitted; modern browsers deprecate it, and its heuristic audit mode can introduce client-side security vulnerabilities.
-- **CORS Policy:** Origins are strictly restricted to `settings.BACKEND_CORS_ORIGINS`. Because credentials are enabled (`allow_credentials=True`), wildcard `*` origins are rejected by CORS middleware.
+- **CORS Policy:** Origins are strictly restricted to `settings.BACKEND_CORS_ORIGINS`. Because credentials are enabled (`allow_credentials=True`), a wildcard `*` is refused at startup by settings validation.
 
 ## Concurrency, Rate Limiting, and Overload Protection
 
@@ -122,12 +122,12 @@ The ASGI middleware stack injects OWASP Secure Headers on every response (includ
 ## Supply Chain Security and CI Gates
 
 - **Lockfile Enforcement:** Dependencies are managed via `uv.lock` with deterministic package hashes across production and dev dependency groups.
-- **Automated Dependency Audits:** Dependabot scans weekly for minor and patch updates across GitHub Actions, Python packages, Dockerfiles, and compose files.
-- **CI Vulnerability Scanning:** Every commit triggers `uvx pip-audit==2.10.1 --require-hashes` against PyPI and OSV databases, and generates a CycloneDX 1.5 Software Bill of Materials (SBOM).
+- **Automated Dependency Audits:** Dependabot checks GitHub Actions, Python packages, Dockerfiles and compose files weekly, proposes only releases at least 14 days old, and proposes no major PostgreSQL or Python image.
+- **CI Vulnerability Scanning:** Every push to main and every pull request runs `uvx pip-audit==2.10.1 --require-hashes` against the PyPI Advisory Database, and generates a CycloneDX 1.5 Software Bill of Materials (SBOM).
 - **Secret Scanning:** `gitleaks v8.30.1` scans the full Git history on every push using `.gitleaks.toml` rules.
 - **Container Vulnerability Gating (Trivy):** The CI pipeline scans application and compose images with Trivy v0.75.0, gating builds on zero fixable CRITICAL or HIGH vulnerabilities.
-- **The Gosu Decision:** Official `postgres:15-alpine` images bundle `/usr/local/bin/gosu` built with Go 1.24.6, triggering 26 standard-library CVE alerts. Binary call-graph inspection with `govulncheck v1.9.0` confirmed zero vulnerable symbols are reachable (gosu only drops root privileges at startup). Waivers were documented in `.trivyignore.yaml` strictly scoped to that binary path.
-- **The Two-Week Age Rule:** External tools, base images, and GitHub Actions must be older than two weeks when pinned by immutable digests to protect against supply-chain poisoning. A documented exemption process allows immediate pinning for critical security patches, which was utilized to pin `redis:7.4.11-alpine` for CVE-2026-84782.
+- **The Gosu Decision:** Official `postgres:15-alpine` images bundle `/usr/local/bin/gosu` built with Go 1.24.6, triggering 26 standard-library CVE alerts. Binary call-graph inspection with `govulncheck v1.9.0` confirmed that none of the 26 waived standard-library findings is called. One MEDIUM finding in moby/sys/user (GO-2026-6686) is reachable in the binary and judged practically harmless, because gosu parses root-owned files once at startup. Waivers were documented in `.trivyignore.yaml` strictly scoped to that binary path.
+- **The Two-Week Age Rule:** External tools, base images, and GitHub Actions must be older than two weeks when pinned by immutable digests to protect against supply-chain poisoning. A documented exemption process allows immediate pinning for critical security patches, which was utilized to pin the patched Redis 7.4.11 digest under `redis:7-alpine` for CVE-2026-84782.
 - **SHA Pinning:** All GitHub Actions workflows pin actions by full 40-character commit SHAs.
 
 ## Verification and Security Testing Results
@@ -138,12 +138,12 @@ Security controls were validated across independent testing stages prior to rele
 |---|---|---|---|
 | **Pre-3.0 Security Review** | White-box code audit and black-box probing across OWASP Top 10 (2021). | Remediated 43 specific findings (F-01 to F-43), including payment row locking (`SELECT FOR UPDATE`), case-insensitive email indexes, and single-use reset tokens. | PASS |
 | **Stage T1: Supply Chain** | Gitleaks commit history audit, pip-audit dependency graphs, and Trivy container inspection. | Uninstalled bundled pip from Python base image; validated gosu reachability with govulncheck; granted security exemption for Redis CVE-2026-84782. | PASS |
-| **Stage T3: Contract Fuzzing** | Schemathesis 4.30.1 property-based fuzzing across 54 paths (30,000+ examples). | Identified PostgreSQL crashes on NUL bytes (`\x00`) and surrogate Unicode tokens; implemented unified text sanitization middleware in v4.0.1. | PASS |
+| **Stage T3: Contract Fuzzing** | Schemathesis 4.30.1 property-based fuzzing across 54 paths of the 4.0.0 document (30,000+ examples). | Identified PostgreSQL crashes on NUL bytes (`\x00`) and surrogate Unicode tokens; implemented unified text sanitization, an application-wide dependency, in v4.0.1. | PASS |
 | **Stage T6: DAST & OWASP Top 10** | OWASP ZAP 2.17.0 passive/active scans and 231 manual OWASP API Top 10 (2023) probes, repeated on v4.0.3 (229 probes, same verdict). | Fixed empty images validation in product creation; enforced mandatory access token `jti` claims; 100% pass across all 10 API security categories. | PASS |
 
 ### OWASP API Security Top 10 (2023) Coverage
 
-The 231 manual test probes in Stage T6 confirmed complete compliance across the 10 API security categories:
+All manual probes in the 10 API security categories passed in Stage T6 (231 on 4.0.1, 229 on 4.0.3; not repeated on 4.1.0):
 1. **API1 (BOLA):** Cross-tenant resource access rejected with 404 or 403.
 2. **API2 (Broken Authentication):** Forged JWT signatures, `alg=none`, expired timestamps, and reused refresh tokens rejected.
 3. **API3 (Property Level Authorization):** Mass assignment rejected via `extra="forbid"`; sensitive fields omitted from response models.

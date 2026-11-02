@@ -40,6 +40,7 @@ The application uses Pydantic Settings (`app/core/config.py`). The following set
 | `POSTGRES_USER` | PostgreSQL superuser and schema owner | `postgres` |
 | `POSTGRES_PASSWORD` | PostgreSQL superuser password | Local database password |
 | `POSTGRES_DB` | PostgreSQL database name | `ecommerce` |
+| `APP_DB_USER`, `APP_DB_PASSWORD` | Application's restricted database role, required by Docker Compose | See `.env.example` |
 | `REDIS_HOST` | Redis server hostname or IP | `localhost` (or `redis` inside Docker Compose) |
 | `SMTP_HOST` | Mail transfer agent hostname | `localhost` |
 | `SMTP_USER` | Mail authentication username | Local username or placeholder |
@@ -50,7 +51,7 @@ The application uses Pydantic Settings (`app/core/config.py`). The following set
 #### Environment Modes (`ENVIRONMENT`)
 
 The `ENVIRONMENT` variable dictates security constraints and runtime behavior:
-- `development`: Automatically forces `DEBUG=True`, `RELOAD=True`, and `WORKERS=1`. Connection pool sizes (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`) are halved. Interactive OpenAPI documentation is enabled at `/api/v1/docs` and `/redoc`. Deployment secret strength checks are skipped.
+- `development`: Automatically forces `DEBUG=True`, `RELOAD=True`, and `WORKERS=1`. `DB_POOL_SIZE` and `DB_MAX_OVERFLOW` are halved with a floor of 5 (at the defaults: 5 and 5). Interactive OpenAPI documentation is enabled at `/api/v1/docs` and `/redoc`. Deployment secret strength checks are skipped.
 - `test`: Used by pytest. Allows `LOG_LEVEL=DEBUG`, skips production secret checks, and maintains interactive documentation.
 - `staging` and `production`: Enforces strict production deployment gates in `Settings.check_deployment_settings`. Forbids `LOG_LEVEL=DEBUG`, requires `BCRYPT_ROUNDS >= 12`, enforces `PAYMENT_PROVIDER=stripe`, mandates non-placeholder secrets meeting minimum length requirements, and requires `FRONTEND_URL` to start with `https://`. In `production`, interactive documentation (`/api/v1/docs`, `/redoc`, and `/api/v1/openapi.json`) is disabled (returns 404).
 
@@ -121,7 +122,7 @@ Published host ports:
 
 ## Creating the First Administrator
 
-The system does not provide a command-line account creation utility. To create an administrator:
+There is no command-line tool to create an administrator. To create one:
 
 1. Register a standard user account through the API (`POST /api/v1/users/register`) or interactive documentation:
    ```bash
@@ -185,6 +186,6 @@ To run the full suite locally:
 uv run pytest
 ```
 
-See [docs/TESTING.md](docs/TESTING.md) for details on testing against real PostgreSQL engines, running property fuzzing with Hypothesis, and executing mutation tests.
+See [docs/TESTING.md](docs/TESTING.md) for details on testing against real PostgreSQL engines, and running property tests with Hypothesis. The mutation, fuzz and load runs are described in docs/reports.
 
 See also: [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/TESTING.md](docs/TESTING.md), [docs/LIMITATIONS.md](docs/LIMITATIONS.md).

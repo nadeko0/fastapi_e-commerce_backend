@@ -45,7 +45,7 @@ flowchart LR
 
 ## Health Probes and Container Orchestration
 
-Health probe routes are defined in `app/core/probes.py`. All probes respond to GET and HEAD, include `Cache-Control: no-store`, and are exempt from rate limiting and in-flight request limits:
+`/livez` and `/readyz` are defined in `app/core/probes.py`, `/health` in `app/main.py`. All probes respond to GET and HEAD, include `Cache-Control: no-store`, and are exempt from rate limiting and in-flight request limits:
 
 | Probe Endpoint | Purpose | Checks Performed | HTTP Response |
 |---|---|---|---|
@@ -67,7 +67,7 @@ Logging is configured in `app/core/logging_config.py` following Twelve-Factor Ap
 Distributed tracing is implemented in `app/core/telemetry.py` using standard OpenTelemetry SDK specifications:
 
 - **Packaging:** Tracing dependencies are packaged in the optional `telemetry` extra. In Docker builds, pass `--build-arg INSTALL_TELEMETRY=true` to include them.
-- **Zero Overhead When Inactive:** Tracing is disabled by default. If no exporter endpoint is configured or `OTEL_SDK_DISABLED=true`, no OpenTelemetry libraries are loaded.
+- **Zero Overhead When Inactive:** Tracing is disabled by default. It starts when an exporter endpoint is configured or `OTEL_SDK_DISABLED=false` is set (then with the default endpoint `localhost:4318`). Otherwise no OpenTelemetry libraries are loaded, and `OTEL_SDK_DISABLED=true` always turns it off.
 - **Enabling Tracing:** Set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://otel-collector:4318`) with `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. Only HTTP protobuf transport is supported.
 - **Container Identification:** Assign `OTEL_SERVICE_NAME` per container (e.g. `ecommerce-api` for the web service and `ecommerce-worker` for Celery).
 - **Instrumented Layers:** FastAPI endpoints (excluding health probes), SQLAlchemy synchronous and asynchronous engines, Redis commands, Celery task publication and consumption, and outbound HTTP requests via the Stripe SDK.
@@ -125,8 +125,9 @@ Backup and restore fidelity was proven during Stage T5 verification ([reports/T5
 # Create custom-format compressed backup
 docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > backup_$(date +%Y%m%d_%H%M%S).dump
 
-# Restore into target database
-docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --exit-on-error --no-owner' < backup.dump
+# Restore into a new, empty database: the live one already has its tables
+docker compose exec -T db sh -c 'createdb -U "$POSTGRES_USER" restored'
+docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d restored --exit-on-error --no-owner' < backup.dump
 ```
 
 > [!IMPORTANT]

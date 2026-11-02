@@ -7,20 +7,20 @@ Software that processes money cannot rely on good intentions or manual smoke tes
 ```mermaid
 flowchart TD
     E2E["E2E Tests (Stripe Test Mode, Stripe CLI, 54 live Stripe tests)"] --> Fuzz["Contract & Fuzz (Schemathesis, Hypothesis State Machines)"]
-    Fuzz --> Integration["Integration Tests (PostgreSQL 15/16/18, SQLite WAL, Real Redis, ~2,700 tests)"]
-    Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, ~2,650 tests)"]
+    Fuzz --> Integration["Integration Tests (PostgreSQL 15/16/18, SQLite WAL, Real Redis, 2,747 cases)"]
+    Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, 2,667 cases)"]
 ```
 
 1. **Unit Tests:** Fast, isolated tests covering models, services, schema serialization, and money calculations. All external I/O (Stripe, Redis, SMTP) is mocked deterministically.
 2. **Integration Tests:** Executed across SQLite (local development) and PostgreSQL 15, 16, and 18 (CI). Tests verify row locking in payment paths, database CHECK constraints, lower(email) unique indexes, and Alembic migrations.
 3. **Property and State-Machine Tests:** Hypothesis generates pseudo-random inputs to find boundary bugs. Stateful tests (`PaymentChain`) exercise arbitrary sequences of orders, payments, cancellations, and refunds. One property test discovered that normalizing the German letter "ß" expands "0ß" into two characters ("0SS"), quietly invalidating ISO country code length invariants.
-4. **Contract and Fuzz Testing:** Schemathesis validates all API endpoints against the OpenAPI specification. It uncovered unhandled 500 errors on NUL bytes (`\x00`) and lone surrogates, prompting global input sanitization.
+4. **Contract and Fuzz Testing:** Schemathesis was run against the 4.0.0 OpenAPI document (54 paths), outside this suite. It uncovered unhandled 500 errors on NUL bytes (`\x00`) and lone surrogates, prompting global input sanitization.
 5. **E2E Tests (Stripe Test Mode):** Black-box tests driven against real Stripe test-mode endpoints (`api.stripe.com`) with webhook forwarding via the Stripe CLI.
-6. **Mutation Testing:** Automated fault injection with `mutmut 3.8.0` across all financial and security modules ensures assertions fail when logic is altered.
+6. **Mutation Testing:** Automated fault injection with `mutmut 3.8.0` across the payment, webhook, reconciliation, idempotency, order, rate-limit and error modules, run on 4.0.2 and 4.0.3 (see reports/T10-mutation.md).
 
 ## Continuous Integration Pipeline
 
-GitHub Actions runs 16 jobs across multiple platforms, timezones, and database engines.
+GitHub Actions runs 16 job instances on ubuntu-latest: 8 jobs, expanded by 7 time zones and 3 PostgreSQL versions.
 
 ```mermaid
 flowchart TD
@@ -124,7 +124,8 @@ uv run pytest tests/ -q -m timing_sensitive --cov=app --cov-append --cov-report=
 
 # Enforce 100% payment layer gate:
 uv run coverage report --fail-under=100 \
-  --include="app/api/v1/orders.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py,app/services/stripe_events.py,app/services/reconciliation.py,app/models/payment_discrepancy.py,app/schemas/webhook_event.py"
+  --include="app/api/v1/orders.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py,app/services/stripe_events.py,app/services/reconciliation.py,app/models/payment_discrepancy.py,app/schemas/webhook_event.py" \
+  --omit="app/services/payment/stripe_provider.py"
 ```
 
 ## Verified Metrics for Release v4.1.0
@@ -136,8 +137,8 @@ Verification results on release v4.1.0:
 | SQLite Test Suite | 6,382 passed, 68 skipped without their services (+ 24 timing) | 0 failures, 0 warnings |
 | PostgreSQL Test Suite | 6,362 passed on 15 (+ 103 timing); 4,061 database-sensitive on 16 and 18 | Full migration and constraint parity |
 | Live Stripe Test Suite | 52 passed, 2 skipped | api.stripe.com sandbox |
-| Payment Layer Coverage | 100.0% line and branch | Zero uncovered branches in financial path |
-| Overall Branch Coverage | 99% (source: `app`) | Fail-under gate set to 85% |
+| Payment Layer Coverage | 100.0% line and branch on the listed payment-layer files (the mock provider file is excluded) | Zero uncovered branches in financial path |
+| Overall Coverage (lines and branches combined) | 98.7% (source: `app`) | Fail-under gate set to 85% |
 | Mutation Score (mutmut 3.8.0, measured on v4.0.3) | 98.4% (3,113 killed / 3,165) | 100% of 52 survivors proven equivalent |
 | CI Execution Time | ~10 minutes across 16 jobs | Fully automated GitHub Actions workflow |
 

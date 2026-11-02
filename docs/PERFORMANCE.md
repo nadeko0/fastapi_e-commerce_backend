@@ -7,7 +7,7 @@ An e-commerce backend must remain responsive under standard traffic and degrade 
 Performance was evaluated in Stage T7 using Locust 2.46.7 against release v4.0.1.
 
 - **Benchmark Environment:** WSL2 Ubuntu (4 CPU cores, 8 GB RAM). Core isolation pinned the application stack to CPU cores 0 to 2 and Locust to CPU core 3.
-- **Runtime Configuration:** 4 Uvicorn workers, `MAX_IN_FLIGHT_REQUESTS=15`, PostgreSQL connection pool size 10 (overflow 5), `BCRYPT_ROUNDS=12`, `PAYMENT_PROVIDER=mock`.
+- **Runtime Configuration:** 4 Uvicorn workers, `MAX_IN_FLIGHT_REQUESTS=15`, PostgreSQL connection pool size 10 (overflow 5), `BCRYPT_ROUNDS=12`, `PAYMENT_PROVIDER=mock`. Rate limits raised to 100000/s except in the `limiter` profile.
 - **User Personas:** Visitor (62%), Shopper (25%), NewCustomer (5%), AccountUser (5%), Admin (2%), Health Monitor (1%).
 
 ### Summary of Benchmark Runs
@@ -77,7 +77,7 @@ Configuration parameters in `app/core/config.py`:
 | `DB_POOL_PRE_PING` | `True` | Validates connection liveness before checkout |
 | `DB_POOL_RECYCLE` | `3600` | Connection recycling timeout in seconds |
 | `REDIS_POOL_SIZE` | `50` | Redis client connection pool size |
-| `REDIS_POOL_TIMEOUT` | `20` | Redis connection timeout in seconds |
+| `REDIS_POOL_TIMEOUT` | `20` | Seconds the async client waits for a free pooled connection |
 | `MAX_IN_FLIGHT_REQUESTS` | `None` | Active request ceiling per worker (set to 15 in benchmarks) |
 | `RATE_LIMIT_ENABLED` | `True` | Global toggle for rate limiting |
 | `RATE_LIMIT_DEFAULT` | `"300/minute"` | Default route rate limit |

@@ -63,9 +63,9 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
 - **Live Product Image References:**
   - *Why not:* Orders snapshot product names, variant SKUs, and variant attributes at checkout time, but line item image URLs are read dynamically from current catalog records. Modifying or deleting product images changes or clears displayed thumbnails on past order views.
   - *Where to start:* Snapshot image URLs onto order line item records at checkout.
-- **Checkout Stock Movement and ETags:**
-  - *Why not:* Stock moved by checkout decrements inventory counters and invalidates Redis catalog caches so subsequent queries reflect updated counts, but does not update `updated_at` or regenerate the product ETag.
-  - *Where to start:* Update product timestamps upon checkout stock decrements if strict conditional caching across inventory changes is required.
+- **Product `updated_at` and Stock:**
+  - *Why not:* Stock moved by checkout does not update a product's `updated_at`. Its ETag still changes, because the ETag covers the stock it shows.
+  - *Where to start:* Update the timestamp with the stock if a client needs to sort by the last stock change.
 
 ## Testing and Verification Limitations
 
