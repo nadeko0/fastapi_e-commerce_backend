@@ -27,7 +27,13 @@ export SMTP_USER="${SMTP_USER:-ci@example.com}" SMTP_PASSWORD="${SMTP_PASSWORD:-
 export EMAILS_FROM_EMAIL="${EMAILS_FROM_EMAIL:-ci@example.com}" EMAILS_FROM_NAME="${EMAILS_FROM_NAME:-CI}"
 unset VIRTUAL_ENV || true
 
-STORAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/benchmark-ab-XXXXXX")
+# Inside the checkout (.benchmarks/ is git-ignored): when the machine info of
+# the two runs differs (it includes the CPU clock py-cpuinfo measures, which
+# can change between two runs on one runner), pytest-benchmark 5.3.0 prints
+# the storage path relative to the working directory and fails with
+# ValueError for a path outside it, as it did on GitHub with /tmp.
+mkdir -p .benchmarks
+STORAGE_DIR=$(mktemp -d "$PWD/.benchmarks/ab-XXXXXX")
 WORKTREE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/benchmark-base-XXXXXX")
 cleanup() {
     git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || rm -rf "$WORKTREE_DIR" 2>/dev/null || true
