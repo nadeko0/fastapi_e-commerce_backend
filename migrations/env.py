@@ -15,10 +15,14 @@ config = context.config
 # Set the database URL from settings
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URI.get_secret_value())
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Logging from alembic.ini, for the alembic command. disable_existing_loggers
+# is False because the default disables every logger already created, which
+# in a process that runs migrations itself (a deploy hook, the migration
+# tests) silences the application's own loggers from then on. A caller that
+# keeps its own logging passes config.attributes["configure_logger"] = False
+# (Alembic's cookbook recipe) and is left alone.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Set SQLAlchemy metadata object for 'autogenerate' support
 target_metadata = Base.metadata

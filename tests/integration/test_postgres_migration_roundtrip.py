@@ -202,6 +202,9 @@ def test_every_migration_round_trips_stepwise_on_postgres():
         alembic_cfg = Config(os.path.join(_ROOT, "alembic.ini"))
         alembic_cfg.set_main_option("script_location", os.path.join(_ROOT, "migrations"))
         alembic_cfg.set_main_option("sqlalchemy.url", url)
+        # Leave the suite's logging alone (see migrations/env.py): alembic.ini
+        # would replace the root handlers and level for every later test.
+        alembic_cfg.attributes["configure_logger"] = False
 
         script = ScriptDirectory.from_config(alembic_cfg)
         heads = script.get_heads()
