@@ -108,6 +108,23 @@ concurrency = ["greenlet", "thread"]
 fail_under = 85
 show_missing = true
 
+[tool.mypy]
+files = ["app"]
+python_version = "3.13"
+# Without the plugin mypy reads a Pydantic model as a plain class and rejects
+# every keyword argument of its constructor.
+plugins = ["pydantic.mypy"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+strict_equality = true
+no_implicit_optional = true
+
+# Celery ships neither py.typed nor stubs; its objects are Any here.
+[[tool.mypy.overrides]]
+module = ["celery", "celery.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"
