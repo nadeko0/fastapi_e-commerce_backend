@@ -1,10 +1,8 @@
 """Strict domain audit: reproductions of every confirmed SPEC-* violation.
 
-Each xfail(strict=True) test asserts the SPEC-compliant behaviour: it fails
-today and XPASSes (an error under strict_xfail) once the fix
-is applied, which is the cue to drop the marker. Tests without the marker
-are controls that pass before and after the fix (they keep the fix from
-over-blocking).
+Each test asserts the SPEC-compliant behaviour and passes now that the
+violation is fixed. The controls among them passed before the fix too (they
+keep the fix from over-blocking).
 
   SPEC-CAT-02    parent/variant exclusivity (cart add/update, checkout)
   SPEC-CAT-03    product ETag covers variant state

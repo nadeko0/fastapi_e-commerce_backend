@@ -1544,9 +1544,7 @@ def test_refund_events_in_any_order_converge_to_the_providers_state(client, db_s
 # =============================================================================
 # Deterministic regressions of what the properties above found (minimal
 # counterexamples, replayed without Hypothesis). They assert the CORRECT
-# behaviour and are marked xfail(strict=True) until the backend is fixed:
-# the fix makes them XPASS, which strict_xfail reports as a failure, so the
-# marker has to go with the fix.
+# behaviour; the defects they were written for are fixed.
 # =============================================================================
 
 
@@ -1651,7 +1649,7 @@ def test_bug_restock_past_int32_max_aborts_the_expiry_sweep(client, db_session, 
     cancel_order_and_restock): on PostgreSQL the task raises, so the sweep
     stops and every other expired order in that run is left holding stock.
     (On SQLite the sweep completes - the overflow shows only as the stored
-    value, covered by the test above - so it is xfail on PostgreSQL only.)"""
+    value, covered by the test above - so the sweep is what this test pins on PostgreSQL.)"""
     shop = Shop(client, db_session)
     admin = shop.admin()
     _, _, stuck = _order_at_int32_max_stock(shop, admin)

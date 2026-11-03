@@ -55,18 +55,14 @@ from app.services.payment.stripe_provider import StripePaymentProvider
 # application/problem+json. Tests named test_bug_* are deterministic
 # regressions for a defect the random bursts can only hit by chance; the race
 # window is widened from the test (a hook, a rendezvous or a slow fake I/O
-# call), never by editing app/. Each is marked xfail(strict=True) with the
-# defect and its location: it fails today and turns into an XPASS (a failure
-# under strict_xfail) as soon as the backend is fixed - then drop the marker.
-#
-# Known-bug allowances: bugs 1, 2, 3, and 5 have been fixed and their
-# allowances removed. BUG-4 remains guarded by its dedicated test.
+# call), never by editing app/. Every defect below is fixed and its test
+# asserts the correct behaviour.
 #
 # Discovered defects:
 #   BUG-1 refresh token rotated while logout runs survives the logout (fixed)
 #   BUG-2 replay of an in-flight POST /orders key answers 400 "Cart is empty" (fixed)
 #   BUG-3 variant-line vs plain-line checkout deadlock (40P01) answered 503 (fixed)
-#   BUG-4 Stripe events stored after the GDPR purge keep personal data (remains)
+#   BUG-4 Stripe events stored after the GDPR purge keep personal data (fixed)
 #   BUG-5 mock provider: one refund Idempotency-Key, several refunds (fixed)
 #
 # CI: db_sensitive (run on PostgreSQL) and timing_sensitive (single process:

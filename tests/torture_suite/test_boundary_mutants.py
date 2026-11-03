@@ -68,20 +68,6 @@ UNLIMITED = "1000000/minute"
 PASSWORD = "Str0ngPass1"
 
 
-def bug(reason: str):
-    """Strict xfail for a confirmed backend defect (an XPASS fails the run)."""
-    return pytest.mark.xfail(strict=True, reason=f"BUG DISCOVERED: {reason}")
-
-
-BUG_D1 = ("logout blacklists the access token for int(exp - now) seconds, which floors, so the entry "
-          "lapses up to 1 s before the token expires (app/core/security.py:625)")
-BUG_D2 = ("a client waiting exactly Retry-After is refused again: Redis keeps the counter alive AT "
-          "its expiry instant, 1 ms past the ceiled Retry-After (app/core/rate_limit.py:219-221,251-253)")
-BUG_D4 = ("data-retention status floors the age to whole days ((now - created_at).days <= period), "
-          "so an account up to 23h59m past its period is 'within' (app/services/gdpr.py:180-181)")
-BUG_D5 = ("order total beyond Numeric(10,2) is never checked: 500 on PostgreSQL, stored on SQLite "
-          "(app/api/v1/orders.py:366-368)")
-
 US = timedelta(microseconds=1)
 MS = timedelta(milliseconds=1)
 ZERO = timedelta(0)

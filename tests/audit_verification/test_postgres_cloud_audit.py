@@ -2,7 +2,7 @@
 Skipped without TEST_DATABASE_URL; tests/conftest.py marks this file
 db_sensitive by its name (test_postgres_*).
 
-Each test asserts the correct behaviour and carries an xfail marker.
+Each test asserts the correct behaviour of a finding that has been fixed.
 Interleavings are forced, not timed: a statement hook holds one transaction
 until pg_stat_activity shows the other one waiting on its lock (or the
 server has ended the connection), so no test depends on a sleep.

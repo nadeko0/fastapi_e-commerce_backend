@@ -6,18 +6,14 @@ import torture_support  # noqa: F401, I001  (must precede payment_support & co.)
 #
 # Every response a test here receives goes through `observe`, which enforces the
 # RFC 9457 shape of every error and that nothing internal leaks. Tests named
-# `test_bug_<name>` are minimal deterministic reproducers of a backend defect a
-# property test found.
+# `test_bug_<name>` are minimal deterministic regressions of a backend defect a
+# property test found; the defect is fixed and they assert the correct behaviour.
 #
 # Runs on SQLite (default) and on PostgreSQL (TEST_DATABASE_URL=...).
 #
-# Phase 3 validation:
-# every `test_bug_*` that reproduces a confirmed backend defect is a strict
-# xfail ("BUG DISCOVERED: ..."), so the suite is green and turns red the day
-# the defect is fixed (XPASS(strict)), as a reminder to drop the marker. The
-# property tests stay green by leaving the known-bug input class out of their
-# generators (each exclusion names its strict-xfail reproducer); set
-# TORTURE_STRICT=1 to put those inputs back and re-reveal the bugs.
+# A few property tests leave an input class out of their generators (non-ASCII
+# digits, very deep JSON nesting, ...) where the defect it reproduced lived;
+# set TORTURE_STRICT=1 to put those inputs back.
 import json
 import os
 import re
@@ -43,35 +39,15 @@ from app.schemas.address import AddressUpdate
 from app.schemas.product import ProductUpdate, ProductVariantUpdate
 from app.schemas.user import UserUpdate, normalize_email
 
-# TORTURE_STRICT=1: property tests also generate the inputs of the known
-# (strict-xfailed) bugs below, so they fail again.
+# TORTURE_STRICT=1: property tests also generate the input classes they leave
+# out by default (see the notes at each generator).
 TORTURE_STRICT = os.environ.get("TORTURE_STRICT") == "1"
-
-
-def bug(reason: str, condition: bool = True):
-    """Strict xfail for a confirmed backend defect (an XPASS fails the run)."""
-    return pytest.mark.xfail(condition, strict=True, reason=f"BUG DISCOVERED: {reason}")
 
 
 def strict_only(decorator):
     """Apply a Hypothesis @example that hits a known bug only under TORTURE_STRICT=1."""
     return decorator if TORTURE_STRICT else (lambda test: test)
 
-
-BUG_B1 = ("login looks the account up by normalize_email() only, registration stores email-validator's "
-          "IDNA/UTS #46 form (app/api/v1/users.py:124 vs app/schemas/user.py:104-108)")
-BUG_B2 = ("free-form JSON nested 100 or more levels deep is stored, then every serialisation of it is a 500 "
-          "(no depth bound in app/core/text_input.py:69 first_unusable_text; commit at app/api/v1/admin.py:212)")
-BUG_B3 = ("NaN/Infinity/1e400 in free-form JSON accepted (app/core/text_input.py:58, RequestBody): "
-          "500 from jsonb on PostgreSQL, silently stored as null on SQLite")
-BUG_B4 = ("a '*' anywhere in If-Match/If-None-Match is read as the wildcard "
-          "(app/core/etag.py:21 _TAG with finditer, :29-31 _parse)")
-BUG_B5 = ("money accepts non-ASCII Unicode digits: str-pattern \\d at app/schemas/order.py:45/47 "
-          "(the published OpenAPI pattern is ASCII)")
-BUG_B7 = ("PATCH with application/json-patch+json (any application/*+json) is applied as a merge "
-          "patch instead of 415 (app/api/merge_patch.py, app/core/errors.py:236)")
-BUG_B9 = ("price filter with an exponent beyond PostgreSQL numeric is a 500: bare Decimal "
-          "min_price/max_price at app/schemas/product.py:140-141")
 
 API = "/api/v1"
 PROBLEM = "application/problem+json"
@@ -483,7 +459,7 @@ _SPELLINGS = {
 
 
 # Domains whose registered (IDNA/UTS #46) form differs from what login looks up:
-# test_bug_login_does_not_normalise_email_like_registration (BUG_B1).
+# test_bug_login_does_not_normalise_email_like_registration.
 _B1_DOMAINS = {"xn--mnchen-3ya.de", "ｅｘａｍｐｌｅ.com", "example。com"}
 
 
@@ -492,7 +468,7 @@ _B1_DOMAINS = {"xn--mnchen-3ya.de", "ｅｘａｍｐｌｅ.com", "example。com"
 @strict_only(example(local="jane", domain="xn--mnchen-3ya.de"))
 def test_an_account_logs_in_with_the_exact_email_it_registered_with(api, local, domain):
     """Round trip: whatever spelling of an address registration accepts, login
-    with that very same string finds the account. (Domains of BUG_B1 are left
+    with that very same string finds the account. (Those domains are left
     out unless TORTURE_STRICT=1.)"""
     assume(TORTURE_STRICT or domain not in _B1_DOMAINS)
     email = f"{local}{uuid.uuid4().hex[:6]}@{domain}"
@@ -712,8 +688,8 @@ def _nested(depth: int, kind: str):
 def test_deeply_nested_free_form_json_is_never_a_500(world, depth, kind):
     """A free-form member (variant `attributes`) nested arbitrarily deep is
     stored and served (200) or refused (400/422); it never makes the write - or
-    any later read - a 500. (Deeper than 64 is BUG_B2, left out unless
-    TORTURE_STRICT=1; test_bug_deeply_nested_characteristic_... reproduces it.)"""
+    any later read - a 500. (Deeper than 64 is refused; it is left out unless
+    TORTURE_STRICT=1; test_bug_deeply_nested_characteristic_... pins it.)"""
     body = ('{"attributes":{"k":' + _nested(depth, kind) + "}}").encode()
     response = no_5xx(_patch(world, PATCH_TARGETS[3], body))
     assert response.status_code in (200, 400, 422), response.text
@@ -833,7 +809,7 @@ def test_if_match_only_passes_for_star_or_the_current_strong_tag(world, parts, s
     """Safety property of If-Match (lost-update protection): the PATCH applies
     only when the field is "*" or lists the current entity-tag (strong); a
     well-formed list naming it always applies. (A malformed field carrying a
-    "*" is BUG_B4, left out unless TORTURE_STRICT=1.)"""
+    "*" is refused as malformed; it is left out unless TORTURE_STRICT=1.)"""
     current, before = world.product_etag()
     header = sep.join(parts).replace("CURRAW", current.strip('"')).replace("CUR", current)
     assume(TORTURE_STRICT or "*" not in header or _strict_if_match(header, current) is not None)
@@ -995,7 +971,7 @@ def test_money_as_a_raw_json_number_literal_is_422(world, literal):
 @given(sent=st.one_of(
     st.decimals(allow_nan=True, allow_infinity=True).map(str),
     st.from_regex(r"\A-?[0-9]{0,12}(\.[0-9]{0,5})?([eE][+-]?[0-9]{1,4})?\Z"),
-    # Non-ASCII digits are BUG_B5 (test_bug_money_accepts_non_ascii_digits):
+    # Non-ASCII digits are refused (test_bug_money_accepts_non_ascii_digits):
     # only generated under TORTURE_STRICT=1.
     st.text(alphabet=st.characters(categories=["Nd", "Zs", "Pd", "Po"],
                                    **({} if TORTURE_STRICT else {"max_codepoint": 127})), max_size=12),
@@ -1029,7 +1005,7 @@ def test_bug_money_accepts_non_ascii_digits(world, sent):
 @strict_only(example(value="1e131072", param="min_price"))
 @strict_only(example(value="1e-16384", param="max_price"))
 def test_price_filters_never_500(world, value, param):
-    # An exponent beyond PostgreSQL numeric is BUG_B9 (PostgreSQL only), left out
+    # An exponent beyond PostgreSQL numeric is a PostgreSQL-only case, left out
     # unless TORTURE_STRICT=1.
     if IS_POSTGRES and not TORTURE_STRICT:
         try:

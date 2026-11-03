@@ -1,8 +1,7 @@
 """Reproductions of confirmed audit findings.
 
-Every test here asserts the correct behaviour and carries an xfail marker.
-When a finding is fixed in subsequent commits, the test turns XPASS, signalling
-that the xfail marker should be dropped.
+Every test here asserts the correct behaviour of a finding that has been fixed;
+together they are the regression guards for those findings.
 
 The PostgreSQL-only reproductions (DB-01 deadlock, GDPR-02 idle-in-transaction
 timeout) live in test_postgres_cloud_audit.py next to this file, which
