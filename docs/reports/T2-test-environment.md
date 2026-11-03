@@ -89,7 +89,7 @@ Summary: 24 of 24 checks passed. 0 failures.
   - *Detail:* The codebase did not ship a dedicated CLI command to bootstrap the first administrator user; older documentation referenced an ignored development script.
   - *Remediation:* Staging used direct SQL execution (`UPDATE users SET role='admin'`). Documented in repository setup guides.
 - **Finding 3 (Info / Architectural Note): Email dispatch mechanics.**
-  - *Detail:* Registration, verification, and password reset emails are dispatched via FastAPI `BackgroundTasks` within the API process, whereas order updates and periodic tasks run asynchronously via Celery.
+  - *Detail:* Registration, verification, and password reset emails are dispatched via FastAPI `BackgroundTasks` within the API process, whereas order updates and periodic tasks run asynchronously via Celery. (Since 4.1.0 order emails also go through `BackgroundTasks`; the Celery order-email tasks were removed.)
 - **Finding 4 (Info / Test Environment): Shared client IP from host.**
   - *Detail:* All test traffic originating from the host machine is routed via Caddy under a single IP (`<host-ip>`), causing all test processes to share rate limit buckets unless specific bypasses or elevated thresholds are configured.
 - **Finding 5 (Low Severity / Documentation Gap): Database migration permissions.**

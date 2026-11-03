@@ -156,7 +156,7 @@ Across 13,929 requests during the steady-state plateau, zero requests were shed,
    $$\text{WORKERS} \times (\text{DB\_POOL\_SIZE} + \text{DB\_MAX\_OVERFLOW}) < \text{PostgreSQL } \text{max\_connections}$$
    With 4 workers, a pool of 10+5 requires at least 60 available connections. In Docker Compose, PostgreSQL `max_connections` is sized to 200.
 2. **In-Flight Limit Sizing:**
-   The default `MAX_IN_FLIGHT_REQUESTS=15` is deliberately configured to equal the total synchronous pool size (10 + 5). This mathematical ceiling prevents the worker from ever asking the pool for more connections than exist. Raising this limit without increasing the pool reintroduces stall risks.
+   `MAX_IN_FLIGHT_REQUESTS` is unset in the code (no limit); `.env.example` sets it to 15, deliberately equal to the total synchronous pool size (10 + 5). This mathematical ceiling prevents the worker from ever asking the pool for more connections than exist. Raising this limit without increasing the pool reintroduces stall risks.
 3. **Reverse Proxy Configuration:**
    Because rate limiting and concurrency throttling rely on client IP addresses, deployments behind reverse proxies or load balancers must configure `TRUSTED_PROXIES` (specifying proxy IP addresses or CIDR blocks) and ensure the proxy appends to `X-Forwarded-For`.
 4. **Latency Measurement Warning:**

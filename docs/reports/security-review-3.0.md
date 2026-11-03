@@ -29,7 +29,7 @@ Areas verified as secure during the review with zero exploitable defects:
 | **F-02** | High | A07 Auth Failures | Password-reset tokens remained valid for 24 hours and allowed repeated usage | Fixed in 3.0.0 | Single-use reset tokens validated against current password hash fingerprint; lifetime reduced to 60 minutes |
 | **F-03** | High | A05 Misconfiguration | Mock payment provider and public webhook secret permitted in production | Fixed in 3.0.0 | Startup validation requires `PAYMENT_PROVIDER=stripe` and rejects placeholder secrets outside dev/test |
 | **F-04** | Medium | A04 Insecure Design | Late payment failure webhooks could transition a paid order back to failed | Fixed in 3.0.0 | Webhook handler ignores failure events if the order has already achieved `PAID` status |
-| **F-05** | Medium | A01 / A07 | Account deletion via legal data request permitted without password re-authentication | Fixed in 3.0.0 | Account deletion requires `current_password` (returning 422 if omitted, 401 if invalid) |
+| **F-05** | Medium | A01 / A07 | Account deletion via legal data request permitted without password re-authentication | Fixed in 3.0.0 | Account deletion requires the account's password in the `password` field (returning 422 if omitted, 401 if invalid) |
 | **F-06** | Medium | A07 Auth Failures | Failed-login rate limiter failed open when Redis was unreachable | Fixed in 3.0.0 | Login fails closed, returning 503 with `Retry-After` if Redis is unavailable during authentication |
 | **F-07** | Medium | A04 Privacy | GDPR account anonymization retained sensitive address and consent log entries | Fixed in 3.0.0 | Anonymization scrubs all customer addresses, consent IP logs, and data export request history |
 | **F-08** | Medium | A02 / A05 | Missing startup validation for `JWT_SECRET_KEY` length and default placeholders | Fixed in 3.0.0 | Enforced startup validator ensuring secrets meet minimum length (>= 32 chars) and reject default values |
@@ -118,7 +118,7 @@ Areas verified as secure during the review with zero exploitable defects:
   - In F-36, product titles were rendered directly into HTML confirmation emails without character escaping, creating a stored cross-site scripting (XSS) path.
   - In F-19, product search queries executed unconstrained `ILIKE` operations with unescaped SQL wildcard characters (`%`, `_`), allowing excessive database resource consumption.
 - **Remediation Implemented:**
-  - Account deletion requests require the user's `current_password`, returning 422 if omitted and 401 if incorrect.
+  - Account deletion requests require the user's password in the `password` field, returning 422 if omitted and 401 if incorrect.
   - The GDPR anonymization job scrubs all associated physical addresses, consent IP logs, and historical data export archives, filtering strictly for records where `anonymized_at IS NULL`.
   - Product titles and user-supplied strings in email templates are HTML-entity escaped using Jinja2 autoescaping.
   - Product search strings are capped at 100 characters and wildcard characters are escaped for literal substring matching.
