@@ -1,5 +1,7 @@
 import inspect
 import json
+from collections.abc import Sequence
+from functools import partial
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -11,23 +13,26 @@ from sqlalchemy.orm import joinedload
 
 from app.core.dependencies import Cache, DbSession
 from app.core.etag import IfNoneMatch, etag_for, if_none_match_hits
-from app.core.openapi import DocumentedRoute
+from app.core.openapi import ETAG_HEADER, ETAG_RESPONSE, DocumentedRoute
 from app.core.sorting import order_clauses
 from app.core.text_input import first_unusable_text
 from app.models.category import Category
-from app.models.product import Product
+from app.models.product import Product, ProductVariant
 from app.schemas.category import (
     CategoryListResponse,
     CategoryResponse,
     CategoryTreeNode,
     CategoryTreeResponse,
 )
-from app.schemas.common import Int32, PaginationParams, sortable_pagination
+from app.schemas.common import Int32, PaginationParams, cart_unit_price, sortable_pagination
 from app.schemas.product import (
+    ProductDetailResponse,
     ProductFilter,
+    ProductListItem,
     ProductListResponse,
     ProductResponse,
     ProductSearch,
+    ProductVariantPublic,
 )
 
 router = APIRouter(tags=["catalog"], route_class=DocumentedRoute)
@@ -60,6 +65,59 @@ def _to_product_response(product: Product) -> ProductResponse:
     # create/update endpoints already do this; list_products, get_product,
     # and search_products below did not, and always 500'd.
     return ProductResponse(**product.__dict__, category_name=product.category.name)
+
+
+async def load_product_detail(db: AsyncSession, base: ProductResponse) -> ProductDetailResponse:
+    """The product page representation: `base` plus its active variants.
+
+    One query for all the variants, read on every request and not kept in the
+    Redis copy: an order for a variant takes that variant's stock without
+    dropping the product's entry, so a cached variant list would show stale
+    stock."""
+    variants = (await db.scalars(
+        select(ProductVariant)
+        .where(ProductVariant.product_id == base.id, ProductVariant.is_active)
+        .order_by(ProductVariant.id)
+    )).all()
+    return ProductDetailResponse(
+        **base.model_dump(),
+        has_variants=bool(variants),
+        variants=[
+            ProductVariantPublic(
+                id=variant.id,
+                sku=variant.sku,
+                attributes=variant.attributes,
+                price=cart_unit_price(base, variant),
+                currency=base.currency,
+                stock_quantity=variant.stock_quantity,
+            )
+            for variant in variants
+        ],
+    )
+
+
+def product_etag(base: ProductResponse, detail: ProductDetailResponse) -> str:
+    """The product's ETag, one computation for GET /products/{id} and the admin
+    PUT/PATCH If-Match check and response. A product with variants is hashed
+    with them (variant stock moves through orders without touching the product
+    row); a product without is hashed as the ProductResponse it always was."""
+    return etag_for(detail if detail.has_variants else base)
+
+
+async def _list_items(db: AsyncSession, products: Sequence[Product]) -> list[ProductListItem]:
+    """The page of products as list items. has_variants for the whole page comes
+    from one query (the ids that have an active variant), not one per product."""
+    if not products:
+        return []
+    with_variants = set((await db.scalars(
+        select(ProductVariant.product_id)
+        .where(ProductVariant.product_id.in_([p.id for p in products]), ProductVariant.is_active)
+        .distinct()
+    )).all())
+    return [
+        ProductListItem(**_to_product_response(p).model_dump(), has_variants=p.id in with_variants)
+        for p in products
+    ]
 
 
 def _matches_text(text: str):
@@ -313,7 +371,7 @@ async def list_products(
     )).all()
 
     return ProductListResponse(
-        items=[_to_product_response(p) for p in products],
+        items=await _list_items(db, products),
         total=total,
         page=filter_params.page,
         size=filter_params.size,
@@ -345,7 +403,7 @@ async def search_products(
     )).all()
 
     return ProductListResponse(
-        items=[_to_product_response(p) for p in products],
+        items=await _list_items(db, products),
         total=total,
         page=search.page,
         size=search.size,
@@ -354,9 +412,10 @@ async def search_products(
 
 @router.get(
     "/products/{product_id}",
-    response_model=ProductResponse,
+    response_model=ProductDetailResponse,
     responses={
-        304: {"description": "Not modified: If-None-Match matches the current ETag"},
+        200: ETAG_RESPONSE,
+        304: {"description": "Not modified: If-None-Match matches the current ETag", "headers": ETAG_HEADER},
         404: {"description": "Product not found"},
     },
 )
@@ -367,18 +426,26 @@ async def get_product(
     response: Response,
     if_none_match: IfNoneMatch = None,
 ):
-    """Retrieve a single product by ID.
+    """Retrieve a single product by ID, with its active variants.
 
-    The ETag is a hash of the ProductResponse JSON, so the database path and
-    the Redis copy of the same representation carry the same tag.
+    A product with has_variants true is sold by its variants: each carries its
+    own price and stock, and the cart needs a variant_id for it.
+
+    The ETag is a hash of the response JSON, so the database path and the Redis
+    copy carry the same tag. A product with variants is hashed with them
+    (variant stock moves through orders without touching the product row, so
+    the product's own tag would not see it); a product without is hashed as the
+    ProductResponse it always was, the tag the admin PUT/PATCH If-Match checks.
     """
 
-    def _conditional(representation: ProductResponse):
-        etag = etag_for(representation)
+    def _conditional(base: ProductResponse, representation: ProductDetailResponse):
+        etag = product_etag(base, representation)
         if if_none_match_hits(if_none_match, etag):
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
         response.headers["ETag"] = etag
         return None
+
+    _detail = partial(load_product_detail, db)
 
     cached_product = await redis.get_cached_product(product_id)
     if cached_product:
@@ -387,7 +454,8 @@ async def get_product(
         except ValidationError:
             cached_representation = None  # unreadable cache entry: rebuild below
         if cached_representation is not None:
-            return _conditional(cached_representation) or cached_representation
+            detail = await _detail(cached_representation)
+            return _conditional(cached_representation, detail) or detail
 
     product = (await db.scalars(
         select(Product).options(joinedload(Product.category)).where(
@@ -403,6 +471,8 @@ async def get_product(
 
     representation = _to_product_response(product)
 
+    # The Redis copy is the product alone; the variants are added per request.
     await redis.cache_product(product_id, representation.model_dump())
 
-    return _conditional(representation) or representation
+    detail = await _detail(representation)
+    return _conditional(representation, detail) or detail

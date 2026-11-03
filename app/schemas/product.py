@@ -10,10 +10,18 @@ from pydantic import (
     HttpUrl,
     PlainSerializer,
     ValidationInfo,
+    WithJsonSchema,
     field_validator,
 )
 
-from app.schemas.common import Int32, Int32Max, RequestBody, StoreCurrency, input_schema
+from app.schemas.common import (
+    Int32,
+    Int32Max,
+    RequestBody,
+    ResponseBody,
+    StoreCurrency,
+    input_schema,
+)
 from app.schemas.order import NonNegativeMoney
 
 # An image URL is validated as an HttpUrl but kept as the plain string: it
@@ -29,7 +37,7 @@ ImageUrl = Annotated[
 ]
 
 
-class ProductCharacteristic(BaseModel):
+class ProductCharacteristic(ResponseBody):
     """Schema for dynamic product characteristics"""
     # No limit on the name: it is an input rule, ProductCharacteristicInput's.
     name: str
@@ -120,15 +128,27 @@ class ProductInDB(ProductBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-class ProductResponse(ProductInDB):
+class ProductResponse(ResponseBody, ProductInDB):
     category_name: str
     currency: StoreCurrency
 
     model_config = ConfigDict(from_attributes=True)
 
+class ProductListItem(ProductResponse):
+    """A product in the list and search results: the product, plus whether it
+    is sold by variants (the variants themselves are on GET /products/{id})."""
+    has_variants: bool = Field(
+        ...,
+        description=(
+            "True when the product has at least one active variant. Such a product is bought "
+            "through a variant: open GET /products/{id} for them."
+        ),
+    )
+
+
 class ProductListResponse(BaseModel):
     """Schema for list of products with pagination"""
-    items: list[ProductResponse]
+    items: list[ProductListItem]
     total: int
     page: int
     size: int
@@ -136,11 +156,30 @@ class ProductListResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+# A price in the query string. Pydantic's own schema for a Decimal that takes
+# input is "number or string", which generators turn into `number | string`;
+# a query value is text that is read as a number, so the document says number.
+# Schema only: the field validates exactly as before.
+QueryPrice = Annotated[
+    Decimal,
+    Field(ge=0, le=Decimal("99999999.99"), decimal_places=6),
+    WithJsonSchema(
+        {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 99999999.99,
+            "description": "A price, at most 6 fraction digits.",
+        },
+        mode="validation",
+    ),
+]
+
+
 class ProductFilter(BaseModel):
     """Schema for product filtering"""
     category_id: Int32 | None = None
-    min_price: Decimal | None = Field(None, ge=0, le=Decimal("99999999.99"), decimal_places=6)
-    max_price: Decimal | None = Field(None, ge=0, le=Decimal("99999999.99"), decimal_places=6)
+    min_price: QueryPrice | None = None
+    max_price: QueryPrice | None = None
     in_stock: bool | None = None
     characteristics: dict[str, Any] | None = None
 
@@ -151,7 +190,16 @@ class ProductFilter(BaseModel):
 
     # Bounded like ProductSearch.query: a search term, not a document.
     search_query: str | None = Field(None, max_length=100)
-    sort_by: str | None = Field(None, pattern="^(name|price|created_at)_(asc|desc)$")
+    # field_direction in one value (not sort_by plus sort_order, as the other
+    # lists); anything else is a 422, not ignored.
+    # The description is in the annotation (a Depends() list loses one given on the default).
+    sort_by: Annotated[
+        Annotated[str, Field(
+            pattern="^(name|price|created_at)_(asc|desc)$",
+            json_schema_extra={"enum": [f"{name}_{way}" for name in ("name", "price", "created_at") for way in ("asc", "desc")]},
+        )] | None,
+        Field(description="Sort field and direction in one value, e.g. price_asc or created_at_desc. Without it, by id."),
+    ] = None
     page: Int32Max = Field(1, ge=1)
     size: int = Field(20, ge=1, le=100)
 
@@ -215,7 +263,7 @@ class ProductVariantUpdate(RequestBody):
             raise ValueError('may be omitted but cannot be null')
         return v
 
-class ProductVariantResponse(ProductVariantBase):
+class ProductVariantResponse(ResponseBody, ProductVariantBase):
     id: int
     currency: StoreCurrency
     product_id: int
@@ -223,6 +271,49 @@ class ProductVariantResponse(ProductVariantBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+class ProductVariantPublic(ResponseBody):
+    """A variant as the storefront sees it on a product page: what a customer
+    needs to choose and price it. No is_active (only active variants are
+    listed), no price_override (price is the effective one) and no timestamps."""
+    id: int
+    sku: str
+    attributes: dict[str, Any]
+    price: NonNegativeMoney = Field(
+        ..., description="What this variant costs: its own price_override, or the product's price when it has none."
+    )
+    currency: StoreCurrency
+    stock_quantity: Int32Max = Field(..., ge=0, description="Units of this variant in stock.")
+
+
+class ProductDetailResponse(ProductResponse):
+    """GET /products/{id}: the product, plus the variants it is sold by."""
+    has_variants: bool = Field(
+        ...,
+        description=(
+            "True when the product has at least one active variant. Such a product is bought "
+            "through a variant: add it to the cart with variant_id, a line without one is refused."
+        ),
+    )
+    variants: list[ProductVariantPublic] = Field(
+        ..., description="The active variants, by id; empty when has_variants is false."
+    )
+    price: NonNegativeMoney = Field(
+        ...,
+        description=(
+            "The product's own price, charged when has_variants is false. With variants, each "
+            "variant carries the price to show: its price_override, or this value when it has none."
+        ),
+    )
+    stock_quantity: Int32Max = Field(
+        ...,
+        ge=0,
+        description=(
+            "The product's own stock, used when has_variants is false. With variants it is not "
+            "what can be bought: use each variant's stock_quantity."
+        ),
+    )
+
 
 class ProductVariantListResponse(BaseModel):
     """Schema for a list of variants under a product (no pagination - a

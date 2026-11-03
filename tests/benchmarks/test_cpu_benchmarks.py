@@ -18,6 +18,7 @@ from app.schemas.common import Cart, CartItem, CartResponse
 from app.schemas.product import (
     ProductCharacteristic,
     ProductFilter,
+    ProductListItem,
     ProductListResponse,
     ProductResponse,
 )
@@ -73,7 +74,10 @@ def test_bench_jwt_decode(benchmark):
 
 
 def test_bench_pydantic_product_list_serialization(benchmark):
-    items = [_make_sample_product_response(i) for i in range(1, 21)]
+    items = [
+        ProductListItem(**_make_sample_product_response(i).model_dump(), has_variants=False)
+        for i in range(1, 21)
+    ]
     product_list = ProductListResponse(
         items=items,
         total=100,

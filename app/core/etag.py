@@ -15,8 +15,10 @@ from fastapi import Header, HTTPException, status
 from pydantic import BaseModel
 
 # Optional request headers; declared here so route signatures stay one line.
-IfMatch = Annotated[str | None, Header(description="Entity tag(s) the current resource must match, or *")]
-IfNoneMatch = Annotated[str | None, Header(description="Entity tag(s) the client already holds, or *")]
+# The aliases give the documented header names their usual casing (FastAPI
+# would publish "if-match"); header names are case-insensitive on the wire.
+IfMatch = Annotated[str | None, Header(alias="If-Match", description="Entity tag(s) the current resource must match, or *")]
+IfNoneMatch = Annotated[str | None, Header(alias="If-None-Match", description="Entity tag(s) the client already holds, or *")]
 
 _ENTITY = re.compile(r'(W/)?"([^"]*)"')
 _SEPARATOR_CHARS = " \t,"
