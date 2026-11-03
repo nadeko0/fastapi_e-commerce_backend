@@ -60,6 +60,13 @@ dev = [
     "pytest-benchmark==5.3.0",
 ]
 
+[tool.uv]
+# Dependency age rule: a release is a lock candidate only once it is two weeks old,
+# so a malicious or broken fresh upload has time to be caught and yanked.
+# A security fix that cannot wait is let through per package with
+# exclude-newer-package (see the dependency-age-rule note), never by loosening this.
+exclude-newer = "2 weeks"
+
 [tool.pytest]
 minversion = "9.0"
 # Not `strict = true`: it also enables strict_parametrization_ids, which
