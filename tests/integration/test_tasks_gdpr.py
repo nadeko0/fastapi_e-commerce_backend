@@ -32,11 +32,11 @@ def _make_deletion_requested_user(db_session, email, days_since_request):
 
 
 def test_purge_anonymizes_accounts_past_grace_period(db_session):
-    # Regression test: cleanup_inactive_accounts used to gate the purge on
-    # INACTIVE_ACCOUNT_DELETE_DAYS (730 days) even though the deletion
-    # endpoints tell users their account "will be permanently deleted
-    # within 24 hours". purge_expired_deletion_requests (extracted from
-    # the Celery task) must use DATA_DELETION_GRACE_PERIOD_DAYS instead.
+    # Regression test: the purge used to wait two years (a separate
+    # inactivity setting, since removed) even though the deletion endpoints
+    # tell users their account "will be permanently deleted within 24
+    # hours". purge_expired_deletion_requests (extracted from the Celery
+    # task) must use DATA_DELETION_GRACE_PERIOD_DAYS.
     expired = _make_deletion_requested_user(
         db_session, "expired@example.com",
         days_since_request=settings.DATA_DELETION_GRACE_PERIOD_DAYS + 1,

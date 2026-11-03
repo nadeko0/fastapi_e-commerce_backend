@@ -209,8 +209,7 @@ def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> i
     the grace period. This only targets users who explicitly requested
     deletion (data_deletion_requested=True) - it is not a general inactivity
     purge, so it uses DATA_DELETION_GRACE_PERIOD_DAYS (default: 1 day, to
-    match what users are told at request time), not
-    INACTIVE_ACCOUNT_DELETE_DAYS.
+    match what users are told at request time).
 
     Scrubs PII rather than hard-deleting the User row: User.orders and
     Address.user both cascade="all, delete-orphan", so db.delete(user)
