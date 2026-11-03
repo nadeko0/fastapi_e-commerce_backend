@@ -183,6 +183,8 @@ def test_a_decline_after_the_session_completed_changes_nothing(shop, attempt, ou
     {"order_id": "{order}", "payment_id": "999999"},
     {"order_id": "999999", "payment_id": "{payment}"},
     {"order_id": "{order}", "payment_id": "not-a-number"},
+    {"order_id": "{order}", "payment_id": "0"},
+    {"order_id": "{order}", "payment_id": "99999999999"},
 ])
 def test_an_intent_whose_metadata_does_not_name_the_attempt_is_not_applied(
         shop, attempt, outbox, metadata):

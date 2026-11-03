@@ -140,6 +140,56 @@ def test_variant_stock_is_not_served_from_the_cache(client, db_session, setup):
     assert after.headers["etag"] != etag
 
 
+def _variant_statements(client, product):
+    with StatementCounter() as counter:
+        response = _detail(client, product)
+    assert response.status_code == 200, response.text
+    return [s for s in counter.statements if "product_variants" in str(s)], response.json()
+
+
+def test_a_cached_product_without_variants_does_not_query_them(client, setup):
+    _, product = setup
+    assert _detail(client, product).json()["has_variants"] is False  # primes the cache
+
+    queries, body = _variant_statements(client, product)
+
+    assert queries == []
+    assert body["has_variants"] is False and body["variants"] == []
+
+
+def test_a_cached_product_with_variants_still_queries_them(client, setup):
+    headers, product = setup
+    _add_variant(client, headers, product, "SKU-M")
+    assert _detail(client, product).json()["has_variants"] is True  # primes the cache
+
+    queries, body = _variant_statements(client, product)
+
+    assert len(queries) == 1
+    assert body["has_variants"] is True
+
+
+def test_a_variant_added_after_the_cache_was_primed_shows_at_once(client, setup):
+    headers, product = setup
+    assert _detail(client, product).json()["has_variants"] is False  # primes the cache
+    _add_variant(client, headers, product, "SKU-M")
+
+    assert _detail(client, product).json()["has_variants"] is True
+
+
+def test_a_variant_activated_after_the_cache_was_primed_shows_at_once(client, setup):
+    headers, product = setup
+    variant = _add_variant(client, headers, product, "SKU-OLD", is_active=False)
+    assert _detail(client, product).json()["has_variants"] is False  # primes the cache
+    update = client.put(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
+        json={"is_active": True},
+        headers=headers,
+    )
+    assert update.status_code == 200, update.text
+
+    assert _detail(client, product).json()["has_variants"] is True
+
+
 def test_query_count_does_not_grow_with_the_variants(client, setup):
     headers, product = setup
 

@@ -15,6 +15,7 @@ import pytest
 from conftest import TestingSessionLocal
 from payment_support import Shop, reset_provider
 
+from app.api.v1.orders import _record_refund
 from app.models.payment_ledger import PaymentRefund
 from app.services.payment.exceptions import InvalidRequestError
 from app.services.payment.stripe_provider import StripePaymentProvider
@@ -114,6 +115,19 @@ def test_a_refund_first_seen_in_a_webhook_is_a_provider_refund(shop, paid):
         "status": "succeeded", "failure_reason": None, "metadata": {}})
 
     assert _sources(shop) == [("re_", "provider")]
+
+
+def test_recording_a_known_refund_again_as_provider_keeps_its_source(shop, paid):
+    refund_id = f"re_{uuid.uuid4().hex[:24]}"
+    payment = shop.payments(paid["order"]["id"])[0]
+    first = _record_refund(shop.db, payment, refund_id, 500, "succeeded", source="provider")
+    shop.db.flush()
+
+    again = _record_refund(shop.db, payment, refund_id, 500, "succeeded", source="provider")
+
+    assert again is first
+    assert again.source == "provider"
+    assert payment.amount_refunded == 500  # counted once
 
 
 # -- Provider text stays out of the answers ----------------------------------------

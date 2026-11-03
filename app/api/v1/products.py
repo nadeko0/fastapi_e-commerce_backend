@@ -67,14 +67,21 @@ def _to_product_response(product: Product) -> ProductResponse:
     return ProductResponse(**product.__dict__, category_name=product.category.name)
 
 
-async def load_product_detail(db: AsyncSession, base: ProductResponse) -> ProductDetailResponse:
+async def load_product_detail(
+    db: AsyncSession, base: ProductResponse, *, known_without_variants: bool = False
+) -> ProductDetailResponse:
     """The product page representation: `base` plus its active variants.
 
     One query for all the variants, read on every request and not kept in the
     Redis copy: an order for a variant takes that variant's stock without
     dropping the product's entry, so a cached variant list would show stale
-    stock."""
-    variants = (await db.scalars(
+    stock.
+
+    known_without_variants skips that query. Only the Redis entry of a product
+    that had no active variant when it was cached may say so (get_product):
+    a variant is created or activated only through the admin variant
+    endpoints, and both drop that entry."""
+    variants = [] if known_without_variants else (await db.scalars(
         select(ProductVariant)
         .where(ProductVariant.product_id == base.id, ProductVariant.is_active)
         .order_by(ProductVariant.id)
@@ -449,12 +456,19 @@ async def get_product(
 
     cached_product = await redis.get_cached_product(product_id)
     if cached_product:
+        # The entry is the product plus, for a product that had no active
+        # variant when it was cached, has_variants false: that is what lets a
+        # hit skip the variants query. An entry without the key (written
+        # before it existed) or with true still asks the database.
+        known_without_variants = cached_product.pop("has_variants", None) is False
         try:
             cached_representation = ProductResponse.model_validate(cached_product)
         except ValidationError:
             cached_representation = None  # unreadable cache entry: rebuild below
         if cached_representation is not None:
-            detail = await _detail(cached_representation)
+            detail = await _detail(
+                cached_representation, known_without_variants=known_without_variants
+            )
             return _conditional(cached_representation, detail) or detail
 
     product = (await db.scalars(
@@ -471,8 +485,13 @@ async def get_product(
 
     representation = _to_product_response(product)
 
-    # The Redis copy is the product alone; the variants are added per request.
-    await redis.cache_product(product_id, representation.model_dump())
-
     detail = await _detail(representation)
+
+    # The Redis copy is the product alone; the variants are added per request.
+    # Only "no active variant" is kept with it (see the hit above).
+    cached = representation.model_dump()
+    if not detail.has_variants:
+        cached["has_variants"] = False
+    await redis.cache_product(product_id, cached)
+
     return _conditional(representation, detail) or detail

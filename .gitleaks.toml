@@ -25,6 +25,21 @@ paths = [
     '''(^|/)\.github/workflows/ci\.yml$''',
 ]
 
+# The documentation example of the Token response (access_token and
+# refresh_token in app/schemas/user.py, and the OpenAPI snapshot generated from
+# it) is a JWT-shaped placeholder: its payload is {"sub":"1"} and its signature
+# is the word "signature". Both conditions must hold, so a real token in these
+# two files, or this placeholder anywhere else, is still reported.
+[[allowlists]]
+description = "the placeholder token in the Token response example"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = [
+    '''(^|/)app/schemas/user\.py$''',
+    '''(^|/)tests/snapshots/openapi\.json$''',
+]
+regexes = ['''^eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxIn0\.signature$''']
+
 # `gitleaks dir` does not read .gitignore: a developer's virtual environment
 # is third-party code, not this repository's.
 [[allowlists]]
