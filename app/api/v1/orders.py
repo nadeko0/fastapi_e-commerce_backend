@@ -1320,9 +1320,15 @@ async def process_payment(
         payment_row.status = "failed"
         order.updated_at = utc_now()
         await db.commit()
+        # The provider's wording ("No such PaymentMethod: 'pm_...'") is for
+        # developers: logged, and answered in ours.
+        logger.warning(
+            "Payment %s of order %s refused by the provider as invalid (code %s): %s",
+            payment_row.id, order.id, e.code, e.message,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=e.message,
+            detail="The payment details were not accepted: check the payment method and try again",
         ) from e
     except CardError as e:
         # The provider *did* respond - with a decline. This is a terminal
@@ -1549,7 +1555,11 @@ async def create_checkout_session(
             success_url=success_url,
             cancel_url=cancel_url,
             description=f"Order #{order.id}",
-            metadata={"order_id": str(order.id)},
+            # payment_id names this attempt: the live provider copies the
+            # metadata onto the session's PaymentIntent too, so a
+            # payment_intent.* event can find its attempt before the session's
+            # own event has stored the intent's id (stripe_events.apply_event).
+            metadata={"order_id": str(order.id), "payment_id": str(payment_row.id)},
             expires_at=int(as_utc(payment_row.created_at).timestamp())
             + settings.CHECKOUT_SESSION_EXPIRE_MINUTES * 60,
         )
@@ -1584,9 +1594,14 @@ async def create_checkout_session(
         payment_row.status = "failed"
         order.updated_at = utc_now()
         await db.commit()
+        logger.warning(
+            "Checkout session for payment %s of order %s refused by the provider as invalid "
+            "(code %s): %s",
+            payment_row.id, order.id, e.code, e.message,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=e.message,
+            detail="The checkout session could not be created: the payment details were not accepted",
         ) from e
 
     payment_row.checkout_session_id = session.id
@@ -1710,12 +1725,27 @@ async def refund_payment(
             detail="Idempotency key already used with different refund parameters",
         ) from None
     except (CardError, InvalidRequestError) as e:
+        # The provider's wording is for developers (it names objects, ids and
+        # amounts of its own): logged, and answered in ours.
+        logger.warning(
+            "Refund of order %s refused by the provider (code %s): %s",
+            order.id, getattr(e, "code", None), e.message,
+        )
         if getattr(e, "code", None) in DISPUTED_CHARGE_CODES:
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
-                detail=e.message or "This payment is disputed; it cannot be refunded while the dispute is open",
+                detail="This payment is disputed; it cannot be refunded while the dispute is open",
             ) from e
-        raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message) from e
+        refundable = payment_row.amount - payment_row.amount_refunded
+        if refund_amount_cents is not None and refund_amount_cents > refundable:
+            # From our own records, not the provider's text.
+            detail = (
+                f"Refund amount exceeds the refundable amount of this payment "
+                f"({_cents_to_decimal(max(refundable, 0))} {payment_row.currency})"
+            )
+        else:
+            detail = "The refund could not be processed: the payment provider refused it"
+        raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=detail) from e
 
     # The provider's word on this charge's other refunds, read before taking
     # the lock. A refund that failed at the provider after being recorded
@@ -1919,11 +1949,20 @@ def _record_refund(
     one is added, and its amount to payment_row.amount_refunded unless it
     has already failed. The caller holds the order's lock
     (_lock_order_and_reload) and commits.
+
+    `source` says who made the refund. The webhook for a refund can be
+    recorded before the /refund request that made it records its own row
+    (the event is processed by a worker, concurrently): the row is then
+    first recorded as "provider", and the admin's own call, which knows it
+    made the refund, corrects it to "admin". A webhook never changes an
+    existing row's source.
     """
     refund_row = db.scalars(
         select(PaymentRefund).where(PaymentRefund.refund_id == refund_id).limit(1)
     ).first()
     if refund_row is not None:
+        if source == "admin":
+            refund_row.source = "admin"
         return refund_row
     refund_row = PaymentRefund(
         payment_id=payment_row.id,
@@ -2004,8 +2043,13 @@ def _has_open_dispute(db: Session, order_id: int, payment_id: int | None = None)
             "name": "Stripe-Signature",
             "in": "header",
             "required": True,
-            "description": "Stripe's signature of the payload (t=timestamp,v1=signature).",
-            "schema": {"type": "string"},
+            "description": (
+                "Stripe's signature of the payload, set by Stripe: t=<unix timestamp>,v1=<hex HMAC-SHA256 "
+                "of \"<timestamp>.<raw request body>\" with the endpoint's signing secret>. A missing, "
+                "wrong or too old signature is answered 400 "
+                "(tolerance STRIPE_WEBHOOK_TOLERANCE_SECONDS). Only Stripe is expected to call this route."
+            ),
+            "schema": {"type": "string", "examples": ["t=1700000000,v1=5257a869e7ecebeda32affa62cdca3fa51cad7e77a0e56ff536d0ce8e108d8bd"]},
         }]
     },
 )
@@ -2081,6 +2125,9 @@ async def stripe_webhook(
     )
     if not stored:
         return StripeWebhookAck(status="already_processed")
+    # The one line that ties a delivery to its event: the JSON log formatter
+    # adds this request's request_id (app/core/logging_config.py).
+    logger.info("Stripe event %s (%s) stored", event.id, event.type)
     # Publishing to the broker is blocking network IO (apply_async).
     await run_in_threadpool(stripe_events.enqueue_event, event.id)
     return StripeWebhookAck(status="received")

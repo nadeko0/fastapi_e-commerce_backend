@@ -19,7 +19,22 @@ from pydantic import (
 
 from app.core.config import settings
 from app.models.enums import OrderStatus
-from app.schemas.common import Int32, RequestBody
+from app.models.payment import PAYMENT_STATUSES
+from app.models.payment_ledger import (
+    DISPUTE_REASONS,
+    DISPUTE_STATUSES,
+    REFUND_SOURCES,
+    REFUND_STATUSES,
+)
+from app.schemas.common import (
+    MONEY_OUTPUT_SCHEMA,
+    Int32,
+    RequestBody,
+    ResponseBody,
+    ResponseMoney,
+    published_values,
+)
+from app.services.payment.types import RefundStatus
 
 # Order.total_amount is Numeric(10, 2), so no amount paid or refunded for an
 # order has more digits than that. Checked by the amount fields themselves,
@@ -101,6 +116,7 @@ Money = Annotated[
     _money_input_schema(
         f"^-?{_MONEY_SCHEMA_UNSIGNED}$", "Decimal string, at most two fraction digits."
     ),
+    MONEY_OUTPUT_SCHEMA,
 ]
 NonNegativeMoney = Annotated[
     Decimal,
@@ -112,6 +128,7 @@ NonNegativeMoney = Annotated[
     _money_input_schema(
         f"^{_MONEY_SCHEMA_UNSIGNED}$", "Decimal string, at most two fraction digits, not negative."
     ),
+    MONEY_OUTPUT_SCHEMA,
 ]
 PositiveMoney = Annotated[
     Decimal,
@@ -123,11 +140,12 @@ PositiveMoney = Annotated[
     _money_input_schema(
         f"^{_NOT_ZERO}{_MONEY_SCHEMA_UNSIGNED}$", "Decimal string, at most two fraction digits, greater than zero."
     ),
+    MONEY_OUTPUT_SCHEMA,
 ]
 # An amount in a response: a Decimal with exactly two places, serialized by
 # Pydantic as a string ("10.50"). No input rules: rows and cache entries
 # written before 4.0.0 are read through it.
-OutputMoney = Annotated[Decimal, AfterValidator(_to_cents)]
+OutputMoney = Annotated[Decimal, AfterValidator(_to_cents), MONEY_OUTPUT_SCHEMA]
 
 
 class PaymentStatus(str, Enum):
@@ -147,7 +165,7 @@ class OrderItemBase(BaseModel):
     quantity: int = Field(..., gt=0)
     # Whole cents but, unlike Money, no digit limit: this is read from the DB.
     price_at_time: Annotated[
-        Decimal, Field(ge=0, decimal_places=2), AfterValidator(_to_cents)
+        Decimal, Field(ge=0, decimal_places=2), AfterValidator(_to_cents), MONEY_OUTPUT_SCHEMA
     ]
 
 class OrderItemInDB(OrderItemBase):
@@ -157,7 +175,7 @@ class OrderItemInDB(OrderItemBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-class OrderItemResponse(OrderItemInDB):
+class OrderItemResponse(ResponseBody, OrderItemInDB):
     product_name: str
     product_image: str
     # None for the common no-variant line - only set when this line was for
@@ -214,7 +232,7 @@ class OrderInDB(OrderBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-class OrderResponse(OrderInDB):
+class OrderResponse(ResponseBody, OrderInDB):
     # Read from an order through Order.shipping_address_shown, the address it
     # was placed with; from a dict or JSON by its own name.
     shipping_address: "AddressResponse" = Field(
@@ -223,6 +241,16 @@ class OrderResponse(OrderInDB):
     # A narrower item type than OrderInDB's: Pydantic validates each class by
     # its own annotation, mypy sees an incompatible override of a mutable list.
     items: list[OrderItemResponse]  # type: ignore[assignment]
+    dispute_status: Annotated[str, published_values(DISPUTE_STATUSES)] | None = Field(
+        None,
+        description=(
+            "Status of the latest payment dispute (chargeback or inquiry) on this order, null when "
+            "there is none. needs_response, under_review and the warning_* values except warning_closed "
+            "mean the order is on hold; lost means the money went back to the customer through their "
+            "bank (the order is then shown as refunded). A lost dispute does not cancel the order or "
+            "return its stock. Stripe may add values."
+        ),
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -259,7 +287,7 @@ class PaymentBase(BaseModel):
 class PaymentCreate(RequestBody, PaymentBase):
     """Schema for payment processing"""
 
-class PaymentResponse(PaymentBase):
+class PaymentResponse(ResponseBody, PaymentBase):
     id: int
     status: PaymentStatus
     created_at: datetime
@@ -292,6 +320,8 @@ class OrderCreate(RequestBody):
     """Body of POST /orders."""
     shipping_address_id: Int32
 
+    model_config = ConfigDict(json_schema_extra={"examples": [{"shipping_address_id": 1}]})
+
 
 class OrderStatusUpdate(RequestBody):
     """Body of PUT /orders/{id}/status."""
@@ -314,6 +344,11 @@ class CheckoutSessionCreate(RequestBody):
     # settings.FRONTEND_URL in create_checkout_session).
     success_url: str | None = None
     cancel_url: str | None = None
+
+    # The one example valid under any configuration is the empty body: the
+    # URLs have to be on FRONTEND_URL and the currency the order's own, which
+    # a fixed example cannot know (and the document must not follow a .env).
+    model_config = ConfigDict(json_schema_extra={"examples": [{}]})
 
     # Client-controlled redirect targets, followed by the customer's browser
     # from a Stripe-hosted page they trust, right after paying. Any http(s)
@@ -343,8 +378,10 @@ class CheckoutSessionResponse(BaseModel):
     payment_id: int
     checkout_session_id: str
     url: str
-    status: str
-    amount: Decimal
+    status: Annotated[str, published_values(
+        s.value for s in (PaymentStatus.PENDING, PaymentStatus.REQUIRES_ACTION, PaymentStatus.PAID, PaymentStatus.FAILED)
+    )]
+    amount: ResponseMoney
     currency: str
     created_at: datetime
 
@@ -359,38 +396,58 @@ class RefundCreate(RequestBody):
 class RefundResponse(BaseModel):
     id: str
     order_id: int
-    amount: Decimal
+    amount: ResponseMoney
     currency: str
-    status: str
+    # What the provider reported for the refund just issued: pending is the
+    # 3-valued RefundStatus the provider layer folds Stripe's statuses into.
+    status: Annotated[str, published_values(s.value for s in RefundStatus)]
     payment_status: PaymentStatus
 
     model_config = ConfigDict(from_attributes=True)
 
-class OrderPaymentRefund(BaseModel):
+class OrderPaymentRefund(ResponseBody):
     id: str
-    amount: Decimal
+    amount: ResponseMoney
     currency: str
-    status: str
-    source: str
-    failure_reason: str | None = None
+    status: Annotated[str, published_values(REFUND_STATUSES)] = Field(
+        description="Stripe's Refund.status as last reported. Stripe documents the set as open and may add values."
+    )
+    source: Annotated[str, published_values(REFUND_SOURCES)] = Field(
+        description="admin: issued through this API; provider: recorded from the provider's report of it."
+    )
+    failure_reason: str | None = Field(
+        None, description="Stripe's Refund.failure_reason of a failed or canceled refund, else null."
+    )
     requires_manual_review: bool
     created_at: datetime
 
-class OrderPaymentDispute(BaseModel):
+class OrderPaymentDispute(ResponseBody):
     id: str
-    amount: Decimal
+    amount: ResponseMoney
     currency: str
-    status: str
-    reason: str | None = None
+    status: Annotated[str, published_values(DISPUTE_STATUSES)] = Field(
+        description=(
+            "Stripe's Dispute.status as last reported (won, lost, warning_closed and prevented are "
+            "final). Stripe documents the set as open and may add values."
+        )
+    )
+    reason: Annotated[str, published_values(DISPUTE_REASONS)] | None = Field(
+        None, description="Stripe's Dispute.reason, null when it was not reported. Stripe may add values."
+    )
     closed_at: datetime | None = None
     created_at: datetime
 
-class OrderPayment(BaseModel):
+class OrderPayment(ResponseBody):
     """One payment attempt of an order with its refunds and disputes (admin view)."""
     id: int
-    status: str
-    amount: Decimal
-    amount_refunded: Decimal
+    status: Annotated[str, published_values(PAYMENT_STATUSES)] = Field(
+        description=(
+            "processing: the provider is being asked; unknown: it did not answer in time; "
+            "requires_action: 3D Secure pending; succeeded; failed (declined, canceled or expired)."
+        )
+    )
+    amount: ResponseMoney
+    amount_refunded: ResponseMoney
     currency: str
     transaction_id: str | None = None
     checkout_session_id: str | None = None

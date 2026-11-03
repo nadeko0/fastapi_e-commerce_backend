@@ -20,6 +20,17 @@ if TYPE_CHECKING:
     from app.models.payment_ledger import PaymentDispute, PaymentRefund
 
 
+# Payment.status values, every one the code ever writes (app/api/v1/orders.py,
+# app/services/stripe_events.py). The column is free text and stays so; this
+# is the vocabulary the OpenAPI document publishes.
+#   processing       the provider is being asked (the row is written first)
+#   unknown          the provider did not answer in time; it may or may not have acted
+#   requires_action  3D Secure / SCA is pending
+#   succeeded        paid
+#   failed           declined, canceled or expired
+PAYMENT_STATUSES = ("processing", "requires_action", "unknown", "succeeded", "failed")
+
+
 class Payment(Base):
     """
     One row per payment *attempt* against an order (not one row per order -

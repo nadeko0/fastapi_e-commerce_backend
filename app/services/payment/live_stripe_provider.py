@@ -382,6 +382,11 @@ class LiveStripePaymentProvider(PaymentProvider):
         }
         if metadata:
             params["metadata"] = metadata
+            # The Session's metadata stays on the Session; the PaymentIntent
+            # Checkout creates starts with none, so its events (payment_intent.
+            # succeeded / payment_failed) would name no order. This parameter
+            # (SessionCreateParams.payment_intent_data.metadata) sets it.
+            params["payment_intent_data"] = {"metadata": metadata}
         if expires_at is not None:
             # Unix seconds; Stripe accepts 30 min to 24 h from now.
             params["expires_at"] = expires_at

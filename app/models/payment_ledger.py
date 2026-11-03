@@ -31,6 +31,41 @@ if TYPE_CHECKING:
 # under_review).
 DISPUTE_CLOSED_STATUSES = ("won", "lost", "warning_closed", "prevented")
 
+# The values below are Stripe's own (stripe-python 16.0.0, Refund.status,
+# Dispute.status and Dispute.reason), stored as received. Stripe documents them
+# as open sets, so the columns stay free text; these are the values published
+# in the OpenAPI document.
+REFUND_STATUSES = ("pending", "requires_action", "succeeded", "failed", "canceled")
+# Who recorded the refund: an admin's /refund call, or an event/read from the provider.
+REFUND_SOURCES = ("admin", "provider")
+DISPUTE_STATUSES = (
+    "warning_needs_response",
+    "warning_under_review",
+    "warning_closed",
+    "needs_response",
+    "under_review",
+    "won",
+    "lost",
+    "prevented",
+)
+DISPUTE_REASONS = (
+    "bank_cannot_process",
+    "check_returned",
+    "credit_not_processed",
+    "customer_initiated",
+    "debit_not_authorized",
+    "duplicate",
+    "fraudulent",
+    "general",
+    "incorrect_account_details",
+    "insufficient_funds",
+    "noncompliant",
+    "product_not_received",
+    "product_unacceptable",
+    "subscription_canceled",
+    "unrecognized",
+)
+
 
 class PaymentRefund(Base):
     __tablename__ = "payment_refunds"

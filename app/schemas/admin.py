@@ -1,7 +1,10 @@
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.payment import PAYMENT_STATUSES
+from app.schemas.common import ResponseBody, published_values
 from app.schemas.order import OutputMoney
 
 
@@ -24,7 +27,7 @@ class OrderStatistics(BaseModel):
     popular_products: list[PopularProduct]
 
 
-class DiscrepancyResponse(BaseModel):
+class DiscrepancyResponse(ResponseBody):
     """One difference the payment reconciliation found and that still stands."""
 
     id: int
@@ -59,17 +62,32 @@ class ReconciliationRunResult(BaseModel):
     aborted: bool
 
 
-class AdminPaymentResponse(BaseModel):
+class AdminPaymentResponse(ResponseBody):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     order_id: int
-    provider: str
+    provider: Annotated[str, published_values(["stripe"])]
     payment_intent_id: str
-    amount: int
-    amount_refunded: int
+    # An integer, unlike the decimal strings of OrderPayment and the other
+    # money fields: this is the row as stored. Changing the type would change
+    # the API, so it is stated here instead.
+    amount: int = Field(
+        description=(
+            "In minor units (cents for USD/EUR; the smallest unit of the currency), as an integer. "
+            "Unlike the decimal-string amounts of the other responses, e.g. 1050 is 10.50."
+        )
+    )
+    amount_refunded: int = Field(
+        description="Total refunded so far, in minor units (cents), as an integer; see amount."
+    )
     currency: str
-    status: str
+    status: Annotated[str, published_values(PAYMENT_STATUSES)] = Field(
+        description=(
+            "processing: the provider is being asked; unknown: it did not answer in time; "
+            "requires_action: 3D Secure pending; succeeded; failed (declined, canceled or expired)."
+        )
+    )
     checkout_session_id: str | None = None
     requires_manual_review: bool
     created_at: datetime

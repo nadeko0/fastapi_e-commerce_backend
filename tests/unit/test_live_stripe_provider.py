@@ -300,6 +300,9 @@ def test_create_checkout_session_builds_one_line_for_the_amount(provider, sdk):
                         "quantity": 1}],
         "success_url": "https://shop.example/ok", "cancel_url": "https://shop.example/no",
         "metadata": {"order_id": "7"},
+        # Without it the PaymentIntent Checkout creates has no metadata, and
+        # its events name no order.
+        "payment_intent_data": {"metadata": {"order_id": "7"}},
     }
     assert (session.id, session.status, session.amount_total, session.payment_intent) == (
         "cs_123", CheckoutSessionStatus.OPEN, 1999, None
@@ -313,6 +316,7 @@ def test_create_checkout_session_defaults_the_line_name(provider, sdk):
     params = create.calls[0][1]["params"]
     assert params["line_items"][0]["price_data"]["product_data"] == {"name": "Order payment"}
     assert "metadata" not in params
+    assert "payment_intent_data" not in params
 
 
 def test_session_mapping_fills_gaps_and_flattens_the_intent(provider, sdk):

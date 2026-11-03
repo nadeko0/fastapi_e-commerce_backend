@@ -8,7 +8,7 @@ from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, Field
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
@@ -22,6 +22,7 @@ from app.api.v1.orders import (
     _provider_idempotency_key,
     _record_refund,
 )
+from app.api.v1.products import load_product_detail, product_etag
 from app.core import database
 from app.core.clock import as_utc, utc_now
 from app.core.config import settings
@@ -29,7 +30,14 @@ from app.core.dependencies import AdminUser, Cache, DbSession, Provider
 from app.core.errors import Problem, ProblemType
 from app.core.etag import IfMatch, IfNoneMatch, etag_for, if_none_match_hits, require_if_match
 from app.core.location import set_location
-from app.core.openapi import FORBIDDEN, LOCATION_HEADER, UNAUTHORIZED, DocumentedRoute
+from app.core.openapi import (
+    ETAG_HEADER,
+    ETAG_RESPONSE,
+    FORBIDDEN,
+    LOCATION_HEADER,
+    UNAUTHORIZED,
+    DocumentedRoute,
+)
 from app.core.sorting import order_clauses
 from app.models.category import Category
 from app.models.order import Order
@@ -42,6 +50,7 @@ from app.models.payment import (
     WebhookEvent,
 )
 from app.models.payment_discrepancy import PaymentDiscrepancy
+from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute
 from app.models.product import Product, ProductVariant
 from app.schemas.admin import (
     AdminPaymentListResponse,
@@ -243,6 +252,7 @@ async def create_product(
     description=PATCH_DESCRIPTION,
     openapi_extra=merge_patch_body("ProductUpdate"),
     responses={
+        200: ETAG_RESPONSE,
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or category not found"},
     },
@@ -251,6 +261,7 @@ async def create_product(
     "/products/{product_id}",
     response_model=ProductResponse,
     responses={
+        200: ETAG_RESPONSE,
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or category not found"},
         412: {"description": "If-Match does not match the product's current ETag"},
@@ -288,7 +299,9 @@ async def update_product(
             **ProductInDB.model_validate(db_product, from_attributes=True).model_dump(),
             category_name=db_product.category.name,
         )
-        require_if_match(if_match, etag_for(current))
+        # The same tag GET /products/{id} returns (hashed with the variants
+        # when the product has any).
+        require_if_match(if_match, product_etag(current, await load_product_detail(db, current)))
 
     update_data = product.model_dump(exclude_unset=True)
     # Same check as create_product. Without it a missing category_id was
@@ -326,7 +339,7 @@ async def update_product(
 
     base = ProductInDB.model_validate(db_product, from_attributes=True)
     result = ProductResponse(**base.model_dump(), category_name=db_product.category.name)
-    response.headers["ETag"] = etag_for(result)
+    response.headers["ETag"] = product_etag(result, await load_product_detail(db, result))
 
     await db.commit()
     await redis.invalidate_product_cache(product_id)
@@ -402,9 +415,22 @@ ORDER_SORT_COLUMNS = {
 
 
 class AdminOrderListParams(PaginationParams):
-    sort_by: str | None = Field(
-        None, pattern=f"^({'|'.join(ORDER_SORT_COLUMNS)})_(asc|desc)$"
-    )
+    # field_direction in one value, and anything else is a 422 (the other
+    # lists take sort_by and sort_order apart and ignore an unknown field).
+    sort_by: Annotated[
+        Annotated[str, Field(
+            pattern=f"^({'|'.join(ORDER_SORT_COLUMNS)})_(asc|desc)$",
+            json_schema_extra={"enum": [f"{name}_{way}" for name in ORDER_SORT_COLUMNS for way in ("asc", "desc")]},
+        )] | None,
+        Field(description=(
+            f"Sort field and direction in one value, e.g. total_amount_desc; fields: {', '.join(ORDER_SORT_COLUMNS)}. "
+            "Without it, newest first."
+        )),
+    ] = None
+    sort_order: Annotated[
+        str | None,
+        Field(pattern="^(asc|desc)$", description="Has no effect on this list: the direction is part of sort_by."),
+    ] = None
 
 
 PAYMENT_SORT_COLUMNS = {
@@ -439,6 +465,10 @@ async def list_orders(
     payment_status: PaymentStatusFilter = None,
     start_date: AwareDatetime | None = None,
     end_date: AwareDatetime | None = None,
+    has_dispute: Annotated[bool | None, Query(description=(
+        "true: only orders with a payment dispute that is open or was lost (needs attention); "
+        "false: only orders without one. Omitted: all orders."
+    ))] = None,
 ):
     """List orders across all users, with filtering, sorting, and pagination."""
 
@@ -485,6 +515,21 @@ async def list_orders(
         filters.append(Order.created_at >= as_utc(start_date))
     if end_date:
         filters.append(Order.created_at <= as_utc(end_date))
+    if has_dispute is not None:
+        # Open (not closed) or lost: a won or withdrawn dispute needs nothing.
+        needs_attention = (
+            select(PaymentDispute.id)
+            .join(Payment, Payment.id == PaymentDispute.payment_id)
+            .where(
+                Payment.order_id == Order.id,
+                or_(
+                    PaymentDispute.status.notin_(DISPUTE_CLOSED_STATUSES),
+                    PaymentDispute.status == "lost",
+                ),
+            )
+            .exists()
+        )
+        filters.append(needs_attention if has_dispute else ~needs_attention)
 
     # Apply sorting. AdminOrderListParams' pattern has already answered 422
     # for anything but a whitelisted field_asc/field_desc, so both lookups
@@ -766,7 +811,8 @@ async def list_product_variants(
     "/products/{product_id}/variants/{variant_id}",
     response_model=ProductVariantResponse,
     responses={
-        304: {"description": "Not modified: If-None-Match matches the variant's current ETag"},
+        200: ETAG_RESPONSE,
+        304: {"description": "Not modified: If-None-Match matches the variant's current ETag", "headers": ETAG_HEADER},
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or variant not found"},
     },
@@ -814,6 +860,7 @@ async def get_product_variant(
     description=PATCH_DESCRIPTION,
     openapi_extra=merge_patch_body("ProductVariantUpdate"),
     responses={
+        200: ETAG_RESPONSE,
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or variant not found"},
         409: {"description": "SKU already in use"},
@@ -824,6 +871,7 @@ async def get_product_variant(
     "/products/{product_id}/variants/{variant_id}",
     response_model=ProductVariantResponse,
     responses={
+        200: ETAG_RESPONSE,
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or variant not found"},
         409: {"description": "SKU already in use"},

@@ -21,11 +21,13 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.orders import (
     _MANUAL_REVIEW_RESPONSE,
+    _PENDING_CHECKOUT_ID_PREFIX,
     _PENDING_INTENT_ID_PREFIX,
     _apply_payment_failure,
     _apply_payment_success,
     _apply_refund_object,
     _flag_payment_for_manual_review,
+    _is_checkout_row,
     _reported_charge_matches_order,
     _settle_refunds,
 )
@@ -90,6 +92,40 @@ def _attempt_still_storing_its_id(db: Session, object_data: dict) -> bool:
     ).first() is not None
 
 
+def _checkout_attempt_named_by_metadata(db: Session, object_data: dict) -> Payment | None:
+    """
+    The Checkout Session attempt a payment_intent.* event is about, for an
+    event whose PaymentIntent id is not stored on any Payment row. Such an
+    attempt holds the "pending-cs-..." placeholder until its
+    checkout.session.completed event arrives, and that event may be late or
+    lost. create_checkout_session copies {order_id, payment_id} onto the
+    session's PaymentIntent (payment_intent_data.metadata), so the event
+    names its own attempt. Both ids must agree with one row that still holds
+    the placeholder: metadata alone is not trusted (another deployment on the
+    same Stripe account numbers its rows the same way), and a Session created
+    before this metadata was sent carries none, so it is not found here.
+    """
+    metadata = object_data.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    try:
+        order_id = int(metadata.get("order_id"))  # type: ignore[arg-type]  # None raises TypeError, handled here
+        payment_id = int(metadata.get("payment_id"))  # type: ignore[arg-type]  # as above
+    except (TypeError, ValueError):
+        return None
+    if not (0 < order_id < 2 ** 31 and 0 < payment_id < 2 ** 31):
+        return None
+    return db.scalars(
+        select(Payment)
+        .where(
+            Payment.id == payment_id,
+            Payment.order_id == order_id,
+            Payment.payment_intent_id.like(f"{_PENDING_CHECKOUT_ID_PREFIX}%"),
+        )
+        .limit(1)
+    ).first()
+
+
 # charge.dispute.*: a chargeback or inquiry (Dispute object: id, amount,
 # currency, payment_intent, status, reason). Only the status matters here;
 # the funds_* events report the balance moving and carry it as well.
@@ -149,15 +185,19 @@ def _apply_dispute_event(db: Session, object_data: dict) -> dict:
             reason=reason if isinstance(reason, str) else None,
         )
         db.add(dispute)
+    # created and funds_withdrawn (and updated) report the same status for
+    # one dispute: logged when the dispute is first seen or its status moves.
+    status_changed = dispute.status is None or dispute.status != status
     dispute.status = status
     is_closed = status in DISPUTE_CLOSED_STATUSES
     if is_closed:
         dispute.closed_at = utc_now()
-    logger.warning(
-        "Dispute %s of payment %s (order %s) is %s%s",
-        dispute_id, payment_row.id, order.id, status,
-        "" if is_closed else ": order on hold, needs review",
-    )
+    if status_changed:
+        logger.warning(
+            "Dispute %s of payment %s (order %s) is %s%s",
+            dispute_id, payment_row.id, order.id, status,
+            "" if is_closed else ": order on hold, needs review",
+        )
     _settle_refunds(db, order, payment_row)
     order.updated_at = utc_now()
     db.commit()
@@ -222,7 +262,9 @@ def _apply_refund_event(db: Session, event_type: str, object_data: dict) -> dict
     return {"status": "processed", "applied": True}
 
 
-def apply_event(db: Session, event_type: str, event_data: Any, background_tasks) -> dict:
+def apply_event(
+    db: Session, event_type: str, event_data: Any, background_tasks, event_id: str | None = None
+) -> dict:
     """
     Apply one verified event to the order/payment state and commit. The
     caller's transaction may already hold what must be committed together
@@ -267,6 +309,8 @@ def apply_event(db: Session, event_type: str, event_data: Any, background_tasks)
             if payment_intent_id
             else None
         )
+        if payment_row is None and event_type.startswith("payment_intent."):
+            payment_row = _checkout_attempt_named_by_metadata(db, object_data)
 
     if payment_row is None:
         if _attempt_still_storing_its_id(db, object_data):
@@ -299,6 +343,17 @@ def apply_event(db: Session, event_type: str, event_data: Any, background_tasks)
     db.refresh(payment_row)
 
     if event_type == "payment_intent.succeeded":
+        # A Checkout attempt found through its metadata still holds the
+        # placeholder: store the real PaymentIntent id, as
+        # checkout.session.completed does (re-read under the lock above, so a
+        # session event that got there first has already stored it). Whichever
+        # of the two events runs second finds the attempt succeeded and
+        # changes nothing (_apply_payment_success).
+        intent_id = object_data.get("id")
+        if payment_row.payment_intent_id.startswith(_PENDING_CHECKOUT_ID_PREFIX) and (
+            isinstance(intent_id, str) and intent_id
+        ):
+            payment_row.payment_intent_id = intent_id
         # A success for a cancelled order, or for one another attempt
         # already paid, is flagged rather than applied inside
         # _apply_payment_success (the same rule for /pay's own outcome).
@@ -319,6 +374,20 @@ def apply_event(db: Session, event_type: str, event_data: Any, background_tasks)
 
         if not _apply_payment_success(db, order, payment_row, background_tasks, order.user.email):
             return _MANUAL_REVIEW_RESPONSE
+    elif event_type == "payment_intent.payment_failed" and _is_checkout_row(payment_row):
+        # A decline on Stripe's hosted page is not the end of the attempt:
+        # the customer can retry on the same open Session, and the Session's
+        # own events (completed, expired) end it. Marking the attempt and the
+        # order failed here would be wrong, so it is only recorded in the log.
+        error = object_data.get("last_payment_error")
+        error = error if isinstance(error, dict) else {}
+        logger.warning(
+            "Checkout payment attempt %s (order %s) was declined on the hosted page "
+            "(event %s, code %s, decline code %s); the session stays open for a retry",
+            payment_row.id, order.id, event_id, error.get("code"), error.get("decline_code"),
+        )
+        db.commit()
+        return {"status": "processed", "applied": False}
     elif event_type in ("payment_intent.payment_failed", "payment_intent.canceled"):
         # A canceled PaymentIntent (from the Dashboard, by the integration,
         # or by Stripe after an abandoned authentication) can never be
@@ -526,7 +595,7 @@ def process_stored_event(db: Session, event_id: str) -> EventOutcome:
         _redact_if_owner_erased(db, row)
         row.status = WEBHOOK_EVENT_PROCESSED
         row.processed_at = utc_now()
-        result = apply_event(db, row.event_type, data, after_commit)
+        result = apply_event(db, row.event_type, data, after_commit, event_id=row.event_id)
         db.commit()
     except Exception as error:
         db.rollback()
@@ -632,7 +701,10 @@ def _redact_object(obj: dict) -> dict:
         kept["payment_intent"] = _object_id(kept["payment_intent"])
     metadata = obj.get("metadata")
     if isinstance(metadata, dict) and "order_id" in metadata:
-        kept["metadata"] = {"order_id": metadata["order_id"]}
+        # payment_id too: it is how a payment_intent.* event finds its Checkout attempt.
+        kept["metadata"] = {
+            key: metadata[key] for key in ("order_id", "payment_id") if key in metadata
+        }
     refunds = obj.get("refunds")
     if isinstance(refunds, dict) and isinstance(refunds.get("data"), list):
         kept["refunds"] = {

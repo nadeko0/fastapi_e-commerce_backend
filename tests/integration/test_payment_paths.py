@@ -565,7 +565,9 @@ def test_checkout_session_the_provider_rejects_fails_the_attempt_with_400(shop, 
     response = shop.checkout_session(buyer, order["id"])
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Invalid currency: 'usd'"
+    # The provider's own wording is logged, not sent to the client.
+    assert response.json()["detail"] == (
+        "The checkout session could not be created: the payment details were not accepted")
     assert payment_rows(shop, order["id"]) == [("failed", 1999, 0, "USD", False)]
     # The order itself is untouched and can be paid another way.
     assert order_state(shop, order["id"]) == ("new", "pending")

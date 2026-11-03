@@ -9,18 +9,27 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    func,
+    select,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import (
+    Mapped,
+    column_property,
+    declared_attr,
+    mapped_column,
+    relationship,
+)
 
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.base import Base
 from app.models.enums import OrderStatus, PaymentStatus
+from app.models.payment import Payment
+from app.models.payment_ledger import PaymentDispute
 
 if TYPE_CHECKING:
     from app.models.address import Address
     from app.models.order_items import OrderItem
-    from app.models.payment import Payment
     from app.models.user import User
 
 
@@ -59,6 +68,34 @@ class Order(Base):
     shipping_address: Mapped["Address"] = relationship()
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
     payments: Mapped[list["Payment"]] = relationship(back_populates="order")
+
+    # Status of the latest dispute (chargeback or inquiry) on any of the
+    # order's payments, NULL when there is none. Derived from
+    # payment_disputes, read with the order (no table or column of its own,
+    # so it cannot go stale): it is how a customer or an admin sees that an
+    # order is on hold (open dispute) or was lost to a chargeback. A lost
+    # dispute only flags the order; nothing cancels it or returns stock.
+    @declared_attr
+    def dispute_status(cls) -> Mapped[str | None]:
+        # The latest dispute is the one with the highest id (a max(), not an
+        # ORDER BY ... LIMIT 1: the order list's own ORDER BY stays the only one).
+        # (A table alias, not aliased(): that would configure the mappers
+        # while the models are still being imported.)
+        latest = PaymentDispute.__table__.alias("latest_dispute")
+        latest_id = (
+            select(func.max(latest.c.id))
+            .join(Payment, Payment.id == latest.c.payment_id)
+            .where(Payment.order_id == cls.id)
+            .scalar_subquery()
+        )
+        return column_property(
+            select(PaymentDispute.status).where(PaymentDispute.id == latest_id).scalar_subquery(),
+            # Not expired when the order's own row is updated: an expired
+            # attribute can only be reloaded by IO, and the response is built
+            # on an AsyncSession where that raises MissingGreenlet. It is read
+            # again with every load of the order.
+            expire_on_flush=False,
+        )
 
     @property
     def shipping_address_shown(self):

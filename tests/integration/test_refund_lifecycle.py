@@ -257,7 +257,8 @@ def test_a_refund_webhook_that_overtakes_the_refund_request_is_counted_once(
     assert response.status_code == 200, response.text
     assert response.json()["payment_status"] == "refunded"
     assert payment_rows(shop, order_id) == [("succeeded", 1999, 1999, "USD", False)]
-    assert _ledger(shop, order_id) == [("re_", 1999, "succeeded", "provider", False)]
+    # The webhook recorded it first as "provider"; /refund made it, so it ends as "admin".
+    assert _ledger(shop, order_id) == [("re_", 1999, "succeeded", "admin", False)]
     assert order_state(shop, order_id) == ("confirmed", "refunded")
 
 
