@@ -165,20 +165,26 @@ To integrate with Stripe test mode:
    ```bash
    stripe listen --forward-to http://localhost:8000/api/v1/orders/webhooks/stripe
    ```
+   To receive only the 16 event types the API handles, add `--events`:
+   ```bash
+   stripe listen \
+     --events payment_intent.succeeded,payment_intent.payment_failed,payment_intent.canceled,checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,checkout.session.expired,refund.created,refund.updated,refund.failed,charge.refunded,charge.dispute.created,charge.dispute.updated,charge.dispute.closed,charge.dispute.funds_withdrawn,charge.dispute.funds_reinstated \
+     --forward-to http://localhost:8000/api/v1/orders/webhooks/stripe
+   ```
 3. Copy the webhook signing secret printed by the Stripe CLI into `.env`:
    ```env
    STRIPE_WEBHOOK_SECRET=<your-webhook-signing-secret>
    ```
 4. Restart the API and Celery worker so they read the updated secrets.
 
-Standard Stripe test payment method tokens:
+Standard Stripe test payment method tokens (send these `pm_card_*` ids to the API, never raw card numbers):
 - `pm_card_visa`: Generates an immediately successful charge (`PaymentStatus.PAID`).
 - `pm_card_visa_chargeDeclined`: Simulates a declined card (`card_declined / generic_decline`).
 - `pm_card_createDispute`: Triggers a chargeback dispute webhook (`charge.dispute.created`), placing the associated order on hold for administrative review.
 
 ## Running Tests
 
-The test suite includes 6,623 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
+The test suite includes 6,711 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
 
 To run the full suite locally:
 

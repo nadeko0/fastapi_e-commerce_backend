@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-11-03
+
+A MAJOR release: the operationIds of the OpenAPI document were shortened (69 renamed), so a client generated from the spec gets new method names and has to be regenerated. No route, parameter or payload was removed or changed on the wire. The additions to the HTTP API below are backward compatible. There was no 4.2.0 release: that number was chosen first, corrected before anything was tagged, and its changes are listed here.
+
+### Changed
+- **Breaking for generated clients:** operationIds are the handler names (`get_product`) instead of FastAPI's default built from name and path (`get_product_api_v1_products__product_id__get`); a handler serving a PUT and a PATCH gets the method as a suffix.
+- The OpenAPI document is a complete, typed contract: enums are published without runtime validation, required fields are stated, the `guest_cart` cookie, `ETag` / `If-Match`, `X-Request-ID` and `Retry-After` are documented, and routes carry tags and an admin marker. `tests/unit/test_openapi_contract.py` (27 tests) checks it and the snapshot test pins the whole document. The live spec is at `/api/v1/openapi.json`.
+- Provider error text is no longer echoed to clients on `POST /orders/{id}/pay`, `/checkout-session` and `/refund`: the response carries a fixed message (for a refund above what is left, the payment's own refundable amount) and the provider's text goes to the log.
+- One log line per dispute status change (it used to be one per event), and a `Stripe event <id> (<type>) stored` line per stored webhook delivery.
+- The `.gitleaks.toml` allowlists the placeholder token of the `Token` response example, and only that value in `app/schemas/user.py` and the OpenAPI snapshot.
+
+### Added
+- `GET /products/{id}` returns `has_variants` and the active `variants`; `GET /products` and `GET /products/search` carry `has_variants`. For a product with variants the parent's price and stock are not the purchasable values: adding it to the cart without a variant is answered 409.
+- Orders carry a nullable `dispute_status` (customer order detail, order history, admin order list), and `GET /admin/orders` takes `has_dispute=true|false`.
+
+### Fixed
+- The admin `PUT` and `PATCH` of a product check `If-Match` against the same ETag as `GET /products/{id}`; for a product with variants the two differed.
+- The PaymentIntent of a Checkout Session carries `order_id` and `payment_id` in its metadata, so `payment_intent.succeeded` alone settles a Checkout order (`checkout.session.completed` is then a no-op), even when the session event is late or lost.
+- A decline on Stripe's hosted Checkout page (`payment_intent.payment_failed`) is only logged. It used to fail the attempt and the order although the customer could retry on the same session.
+- A refund made with `POST /orders/{id}/refund` is recorded with source `admin` even when its webhook is processed first.
+- A lost dispute only flags the order (payment status `refunded`); it does not cancel it or return stock, and the manager corrects stock by hand with `PUT` or `PATCH /admin/products/{id}` or `/admin/products/{id}/variants/{variant_id}`.
+- CI: the product detail cache hit stays free of the variants query and the payment guards are covered by tests.
+
 ## [4.1.2] - 2026-11-02
 
 A PATCH release: it fixes the Celery worker's healthcheck in `docker-compose.yml` and the benchmark check in CI. No change to the application code or the API.
@@ -451,6 +474,7 @@ Three independent audits of 4.0.3 reviewed the code, ran it under load and fuzzi
 - Structured JSON logging across all application components.
 - Automated CI pipeline with linting, unit/integration testing (85% coverage gate), and Docker container builds.
 
+[5.0.0]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.2...v5.0.0
 [4.1.2]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.0.3...v4.1.0

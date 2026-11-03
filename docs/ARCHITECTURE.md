@@ -1,6 +1,6 @@
 # Architecture and System Design
 
-Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v4.1.2.
+Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v5.0.0.
 
 ## System Overview and Boundaries
 
@@ -91,7 +91,7 @@ sequenceDiagram
         Admin->>API: POST /api/v1/orders/{id}/refund (Idempotency-Key, optional amount)
         API->>Stripe: Create Refund (payment_intent, amount)
         Stripe-->>API: Refund confirmed
-        API->>DB: Record PaymentRefund ledger entry, update order payment status
+        API->>DB: Record PaymentRefund ledger entry (source: admin), update order payment status
         API-->>Admin: 200 OK (RefundResponse)
     end
 ```
@@ -203,7 +203,7 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 - **Decision:** Incoming Stripe webhooks are verified via HMAC signature and persisted to `webhook_events` (`status: received`) before returning HTTP 200 to Stripe. Processing runs asynchronously in Celery (`process_stripe_event`). Daily scheduled jobs reconcile local ledgers against the Stripe API.
 - **Alternatives:** Synchronous webhook execution inside the route handler; transient Redis queue ingestion without database persistence; relying entirely on external provider retries.
 - **Reason:** Webhook routes must respond within seconds to avoid provider timeouts. Synchronous execution risks event loop stalls. Persisting to PostgreSQL guarantees zero event loss during broker downtime. Daily reconciliation detects drift from unhandled edge events or administrative portal adjustments.
-- **Consequence:** Financial confirmation is eventually consistent. Webhook processing must handle race conditions where an event arrives before the API finishes recording the payment attempt.
+- **Consequence:** Financial confirmation is eventually consistent. Webhook processing must handle race conditions where an event arrives before the API finishes recording the payment attempt. A Checkout attempt is found by `order_id` and `payment_id` in the PaymentIntent metadata, so `payment_intent.succeeded` alone settles it and `checkout.session.completed` is then a no-op. A decline on the hosted page is only logged, because the session stays open for a retry. A lost dispute only flags the order (`dispute_status`, payment status `refunded`): it neither cancels it nor restocks, and the manager corrects stock by hand in the admin API.
 
 ### 8. Fail-Closed Token Revocation in Redis Answering HTTP 503
 - **Decision:** When Redis is unreachable, token blacklist verification cannot complete. The API refuses authenticated requests with HTTP 503 Service Unavailable (`Retry-After: 30`) rather than HTTP 401 Unauthorized or failing open.

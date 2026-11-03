@@ -51,7 +51,7 @@ flowchart TD
 - **sast:** Runs Bandit offline (`-r app --severity-level medium`) for static application security testing.
 - **benchmark:** Times hot execution paths with `pytest-benchmark` on the base commit (the pull request's base, or the previous head of `main`) and on HEAD, one after the other on the same runner, and fails when a median on HEAD is more than 35% slower (`.github/scripts/benchmark_ab.sh`). Both sides share one machine because runners differ: six runs of one commit landed on three AMD EPYC models (7763, 9V74, 9V45) whose medians differed by up to 2.26 times. On one runner, six runs of unchanged code put HEAD within 6% of the base on the CPU benchmarks and within 22% on the request benchmarks, which the 35% leaves room for.
 - **audit:** Exports locked dependencies to check against the PyPI Advisory Database using `pip-audit`, producing a CycloneDX SBOM.
-- **secrets:** Scans git history for exposed credentials using `gitleaks`.
+- **secrets:** Scans git history for exposed credentials using `gitleaks`. `.gitleaks.toml` allowlists one placeholder: the JWT-shaped example of the `Token` response in `app/schemas/user.py` and the OpenAPI snapshot, only when the file and the exact placeholder value both match, so a real token in those files is still reported.
 - **test:** Executes the primary suite in parallel on SQLite, runs timing-sensitive tests sequentially, and enforces coverage gates.
 - **test-timezones:** Matrix testing payment and order logic across 7 timezones (including UTC, Pacific/Kiritimati, Pacific/Pago_Pago, Asia/Kathmandu, America/St_Johns, Europe/Bratislava, America/New_York).
 - **test-postgres:** Tests database-sensitive suites against PostgreSQL 15, 16, and 18 containers, including schema round-trip tests (`tests/integration/test_postgres_migration_roundtrip.py`) across every revision.
@@ -116,7 +116,7 @@ HYPOTHESIS_PROFILE=explore uv run pytest tests/integration/test_payment_state_ma
 ```
 
 ### OpenAPI Contract Snapshot
-Prevent accidental API contract drift against `tests/snapshots/openapi.json`:
+`tests/unit/test_openapi_contract.py` (27 tests) checks what the OpenAPI document promises beyond its shape: the operation ids, the values of free-text response fields, the response fields that are always present, the 429 response and the admin marker. The snapshot test, which pins the shape (including the cookie and response headers), prevents accidental API contract drift against `tests/snapshots/openapi.json`:
 ```bash
 # Verify schema matches snapshot:
 uv run pytest tests/unit/test_openapi_snapshot.py

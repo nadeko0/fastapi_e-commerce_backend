@@ -1,8 +1,10 @@
 # REST API Reference and Conventions
 
-Every API contract in release v4.1.2 is designed around standard HTTP semantics and deterministic data representations. Clients communicate with a uniform interface where resources, errors, authentication lifecycles, and caching rules follow RFC standards rather than framework idiosyncrasies.
+Every API contract in release v5.0.0 is designed around standard HTTP semantics and deterministic data representations. Clients communicate with a uniform interface where resources, errors, authentication lifecycles, and caching rules follow RFC standards rather than framework idiosyncrasies.
 
 Interactive OpenAPI documentation and Swagger UI are accessible at `/api/v1/docs` (with ReDoc at `/redoc` and OpenAPI JSON at `/api/v1/openapi.json`) in non-production environments. When `ENVIRONMENT=production`, all documentation endpoints answer 404 to avoid leaking internal route structures.
+
+The OpenAPI document is written to generate typed clients. Operation ids are the handler names (`get_product`, not `get_product_api_v1_products__product_id__get`; a handler serving both PUT and PATCH gets the method as a suffix, for example `update_product_patch`), so a client generated from the spec names its methods after them; release 5.0.0 renamed 69 operation ids and no route, parameter or payload changed on the wire. The document publishes the closed value sets (enums such as order and payment status, dispute status and problem types) without validating them at runtime, the required fields of every schema, the `guest_cart` cookie (`Set-Cookie`) on the cart routes, the `ETag` header on product and variant responses, `X-Request-ID` on every response and `Retry-After` on 429 and 503. `tests/unit/test_openapi_contract.py` checks the operation ids and the promises of the response fields, and `tests/snapshots/openapi.json` pins the whole document (see TESTING.md).
 
 ## Base Path and Endpoint Overview
 
@@ -13,7 +15,7 @@ The API version prefix is mounted at `/api/v1` (configured via `settings.API_V1_
 | `admin` | 18 | Product catalog management, category creation, payment reconciliation, order review, statistics, listing and refunding flagged payments, and webhook event inspection or replay. |
 | `cart` | 6 | Guest and account cart management, item mutations, live pricing checks, and stock validation. |
 | `catalog` | 6 | Public read-only product listings, category trees, product detail retrieval, and catalog search by name and description. |
-| `Legal & GDPR` | 7 | Consent state tracking, privacy policies, terms of service, cookie disclosures, data export delivered inline via email, and account erasure. |
+| `legal` | 7 | Consent state tracking, privacy policies, terms of service, cookie disclosures, data export delivered inline via email, and account erasure. |
 | `orders` | 9 | Order creation, payment intent confirmation, Stripe Checkout sessions, payment history, cancellations, refunds, and Stripe webhook ingress. |
 | `users` | 20 | Registration (name optional), login with email normalisation, token refresh, logout, password reset lifecycles, email verification, profile management, and address book CRUD. |
 | `health` / probes | 3 | Operational health checks (`/health`), Kubernetes liveness probe (`/livez`), and readiness probe (`/readyz`). |
@@ -147,7 +149,7 @@ Collection endpoints consume standardized query parameters:
 ## Caching and Conditional Requests (ETag)
 
 Entity tags provide strong cache validation (SHA-256 digest of response model JSON):
-- **Read Validation (`If-None-Match`):** Supported by `GET /api/v1/products/{product_id}` and `GET /api/v1/admin/products/{product_id}/variants/{variant_id}`. If the client holds a matching tag, the server responds with 304 Not Modified without a response body. A product's ETag covers what its response shows, so it changes with a variant's creation or update, and with stock moved by an order, a cancellation or the expiry task.
+- **Read Validation (`If-None-Match`):** Supported by `GET /api/v1/products/{product_id}` and `GET /api/v1/admin/products/{product_id}/variants/{variant_id}`. If the client holds a matching tag, the server responds with 304 Not Modified without a response body. A product's ETag covers what its response shows, so it changes with a variant's creation or update, and with stock moved by an order, a cancellation or the expiry task. `GET /products/{id}` returns `has_variants` and the active `variants` (id, sku, attributes, price, currency, stock_quantity); `GET /products` and `GET /products/search` carry `has_variants` on each item. For a product with variants the `price` and `stock_quantity` of the parent are not the purchasable values: adding it to the cart without a `variant_id` is answered 409, and each variant carries its own price and stock. The admin `PUT` and `PATCH` of a product check `If-Match` against the same tag as the detail `GET` (a product with variants is hashed together with them), so the tag read from `GET /products/{id}` is the one to send back.
 - **Optimistic Concurrency (`If-Match`):** Supported by `PUT` and `PATCH` endpoints for products and variants. If the submitted `If-Match` tag does not match the current database state, the mutation is refused with 412 Precondition Failed, returning the latest ETag. The header matches `*` only alone; a malformed field matches nothing and returns 412.
 
 ## JSON Merge Patch (RFC 7396)
@@ -210,6 +212,20 @@ sequenceDiagram
     Worker->>DB: Transition Order to PAID & insert ledger record
 ```
 
-The webhook endpoint (`POST /api/v1/orders/webhooks/stripe`) operates without Bearer authentication. It verifies payload authenticity via the `Stripe-Signature` header and HMAC-SHA256 secret. Valid events are inserted into the `webhook_events` database table. Duplicate event deliveries are acknowledged with 200 OK (`{"status": "already_processed"}`). An asynchronous Celery task executes state reconciliation and updates the payment ledger.
+The webhook endpoint (`POST /api/v1/orders/webhooks/stripe`) operates without Bearer authentication. It verifies payload authenticity via the `Stripe-Signature` header and HMAC-SHA256 secret. Valid events are inserted into the `webhook_events` database table. Duplicate event deliveries are acknowledged with 200 OK (`{"status": "already_processed"}`). An asynchronous Celery task executes state reconciliation and updates the payment ledger. Each stored delivery writes one log line, `Stripe event <id> (<type>) stored`, carrying the request id.
+
+The handled event types are `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded` and the five `charge.dispute.*` events (`created`, `updated`, `closed`, `funds_withdrawn`, `funds_reinstated`).
+
+### Checkout payments
+
+`POST /orders/{id}/checkout-session` puts `order_id` and `payment_id` in the metadata of the session, and the live provider copies it onto the session's PaymentIntent. A `payment_intent.succeeded` event therefore finds its attempt even before `checkout.session.completed` has stored the PaymentIntent id, and alone settles the order; `checkout.session.completed` arriving afterwards changes nothing (the same holds in the other order). Both ids in the metadata must agree with one attempt that still holds the placeholder id, so the metadata alone is not trusted. A `payment_intent.payment_failed` for a Checkout attempt (a decline on the hosted page) is only logged: the customer can retry on the same open session, so the attempt and the order stay untouched until the session itself completes or expires.
+
+### Refunds
+
+`POST /orders/{id}/refund` records its refund with source `admin` even when the refund webhook is processed first (the webhook records it as `provider`, and the admin call corrects it; a webhook never changes the source of an existing row). Error text from Stripe is not passed to clients on `/pay`, `/checkout-session` and `/refund`: the response carries a fixed message (for an amount above what is left, the refundable amount of the payment taken from our own records) and the provider's text goes to the log.
+
+### Disputes
+
+Orders carry `dispute_status`, the status of the latest dispute on any of their payments, `null` when there is none. It appears in `GET /orders/{id}`, in the order history and in `GET /admin/orders`. `GET /admin/orders?has_dispute=true` lists the orders whose dispute is open or lost, `false` those without one. One log line is written when a dispute is first seen and each time its status changes. A lost dispute only flags the order (its `payment_status` becomes `refunded`): it is not cancelled and its stock is not returned. The manager corrects stock by hand with `PUT` or `PATCH /admin/products/{id}` (`stock_quantity`) or `/admin/products/{id}/variants/{variant_id}`.
 
 See also: [SECURITY.md](../SECURITY.md), [ARCHITECTURE.md](ARCHITECTURE.md), [PERFORMANCE.md](PERFORMANCE.md), [RESILIENCE.md](RESILIENCE.md), [reports/T3-schemathesis.md](reports/T3-schemathesis.md).
