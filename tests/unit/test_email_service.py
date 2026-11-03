@@ -129,6 +129,17 @@ def test_send_low_stock_alert_email(monkeypatch):
     assert "Widget" in calls[0][2]
 
 
+def test_send_low_stock_alert_email_escapes_html_in_product_names(monkeypatch):
+    # A product name is typed by an admin and lands in HTML mail to other admins.
+    calls = _no_real_smtp(monkeypatch)
+    products = [SimpleNamespace(name="<script>alert(1)</script>", stock_quantity=2)]
+
+    assert email_module.send_low_stock_alert_email("admin@example.com", products) is True
+
+    assert "<script>" not in calls[0][2]
+    assert "&lt;script&gt;" in calls[0][2]
+
+
 def test_send_welcome_email(monkeypatch):
     calls = _no_real_smtp(monkeypatch)
 

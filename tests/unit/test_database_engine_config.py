@@ -30,6 +30,13 @@ def test_postgres_database_uri_gets_idle_in_transaction_timeout():
     assert "statement_timeout=60000" in connect_args["options"]
 
 
+def test_postgres_connections_give_up_connecting_after_five_seconds():
+    # Without it a database that accepts the TCP connection and then says
+    # nothing would hold every request until the pool timeout.
+    for uri in ("postgresql://user:pw@localhost/dbname", "postgresql+psycopg://user:pw@localhost/dbname"):
+        assert _build_connect_args(uri)["connect_timeout"] == 5
+
+
 def test_postgresql_psycopg_uri_also_matches():
     # The driver-qualified form (postgresql+psycopg://...) is what
     # app.core.config's DATABASE_URI validator actually produces -

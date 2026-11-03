@@ -40,6 +40,29 @@ def test_sql_debug_turns_on_statement_echo_on_every_engine():
     assert echo[1] == echo[3] == echo[5] == "True"
 
 
+def _parameters_hidden(**env):
+    code = (
+        "from app.core.database import engine, async_engine; import app.tasks as t;"
+        "print(engine.hide_parameters, async_engine.sync_engine.hide_parameters, t.engine.hide_parameters)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=_ROOT, env={**os.environ, **env},
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.split()
+
+
+def test_statement_parameters_are_hidden_from_errors_on_every_engine_by_default():
+    # A failed statement's error text would otherwise carry the bound values
+    # (emails, addresses) into logs.
+    assert _parameters_hidden() == ["True", "True", "True"]
+
+
+def test_sql_debug_shows_statement_parameters_on_every_engine():
+    assert _parameters_hidden(SQL_DEBUG="true") == ["False", "False", "False"]
+
+
 def test_sync_redis_pool_uses_redis_pool_size(monkeypatch):
     monkeypatch.setattr(settings, "REDIS_POOL_SIZE", 7)
     monkeypatch.setattr(RedisService, "_instance", None)

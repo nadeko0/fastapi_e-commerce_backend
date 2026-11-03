@@ -439,6 +439,35 @@ def test_password_reset_needs_only_new_password(client, valid_registration_paylo
     assert login.status_code == 200
 
 
+def test_password_reset_is_503_and_changes_nothing_when_old_tokens_cannot_be_revoked(
+    client, valid_registration_payload, monkeypatch
+):
+    # The old tokens are revoked before the password changes. If that cannot be
+    # recorded (Redis down), the reset must say so and leave the password as it
+    # was, so the same link works again once the store is back.
+    async def cannot_record(user_id):
+        return False
+
+    monkeypatch.setattr("app.api.v1.users.invalidate_tokens_issued_before_now", cannot_record)
+    email = valid_registration_payload["email"]
+    client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
+    reset_token = _reset_token_for(email)
+
+    response = client.post(
+        f"{API_PREFIX}/password/reset/confirm",
+        json={"token": reset_token, "new_password": "NewStr0ngPass"},
+    )
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "5"
+    old = client.post(
+        f"{API_PREFIX}/login", data={"username": email, "password": valid_registration_payload["password"]}
+    )
+    new = client.post(f"{API_PREFIX}/login", data={"username": email, "password": "NewStr0ngPass"})
+    assert old.status_code == 200
+    assert new.status_code == 401
+
+
 def test_password_reset_refuses_a_current_password(client, valid_registration_payload):
     # 4.0.0: a body names only the fields the API knows. Clients written
     # against the old contract, which sent current_password and had it
