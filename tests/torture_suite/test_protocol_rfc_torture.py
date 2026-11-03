@@ -155,6 +155,18 @@ class World:
         self.product = self.shop.product()
         self.variant = self.shop.variant(self.product)
         self.buyer = self.shop.buyer()
+        # The setup commits expired the product and the variant, so the first
+        # world.product.id would reopen a transaction on this session and leave
+        # it idle for the rest of the test: a property test runs for tens of
+        # seconds on a loaded runner, and Postgres ends a connection idle in a
+        # transaction after 30 s (app.core.database._build_connect_args), which
+        # showed as an error at teardown. Load them once, detach them and end
+        # the transaction; their column values stay readable.
+        self.db.refresh(self.product)
+        self.db.refresh(self.variant)
+        self.db.expunge(self.product)
+        self.db.expunge(self.variant)
+        self.db.commit()
 
     @property
     def product_url(self):
