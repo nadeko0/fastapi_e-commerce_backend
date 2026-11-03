@@ -25,7 +25,12 @@ from fastapi.security.base import SecurityBase
 from pydantic import BaseModel, Field
 
 from app.core.errors import PROBLEM_MEDIA_TYPE, ProblemType
-from app.core.security import get_current_active_user, get_optional_active_user
+from app.core.rate_limit import _EXEMPT as _RATE_LIMIT_EXEMPT
+from app.core.security import (
+    get_current_active_user,
+    get_current_admin_user,
+    get_optional_active_user,
+)
 
 
 class Problem(BaseModel):
@@ -38,6 +43,10 @@ class Problem(BaseModel):
             "else one of the problem types, which are identifiers, not links: "
             + ", ".join(problem_type.value for problem_type in ProblemType)
         ),
+        # Published, not enforced: this model only describes what the
+        # handlers in app/core/errors.py send (the same technique as the
+        # status filters in app/api/v1/admin.py).
+        json_schema_extra={"enum": ["about:blank", *(problem_type.value for problem_type in ProblemType)]},
     )
     title: str = Field(description="The status phrase for about:blank, else a fixed title of the type.")
     status: int = Field(description="The HTTP status code.")
@@ -77,6 +86,53 @@ RETRY_AFTER_HEADER = {
 LOCATION_HEADER = {
     "Location": {
         "description": "The URL of the resource that was created (RFC 9110 10.2.2).",
+        "schema": {"type": "string"},
+    }
+}
+# On the 200 and 304 of a product or variant that has a validator
+# (app/core/etag.py): a hash of the JSON of the response body. Send it back
+# in If-Match (PUT/PATCH) or If-None-Match (GET).
+ETAG_HEADER = {
+    "ETag": {
+        "description": (
+            "Strong entity tag of this representation (RFC 9110 8.8.3). Send it back as "
+            "If-Match on PUT/PATCH, or as If-None-Match on GET."
+        ),
+        "schema": {"type": "string"},
+    }
+}
+ETAG_RESPONSE = {"description": "Successful Response", "headers": ETAG_HEADER}
+# The guest cart cookie (app/api/v1/cart.py, "Why a cookie, and why this cookie").
+GUEST_CART_COOKIE_HEADER = {
+    "Set-Cookie": {
+        "description": (
+            "The guest cart cookie, for a request without an Authorization header: "
+            '"guest_cart" ("__Host-guest_cart" when GUEST_CART_COOKIE_SECURE is on), '
+            "HttpOnly, SameSite=Lax, Path=/, Secure when GUEST_CART_COOKIE_SECURE is on. "
+            "Max-Age is REDIS_GUEST_CART_TTL_DAYS days (7 by default) and is renewed by every write. "
+            "When the write leaves the cart empty the cookie is cleared instead (Max-Age=0). "
+            "Absent for a request made with an account."
+        ),
+        "schema": {"type": "string"},
+    }
+}
+GUEST_CART_COOKIE_RESPONSE = {"description": "Successful Response", "headers": GUEST_CART_COOKIE_HEADER}
+CLEAR_GUEST_CART_COOKIE_HEADER = {
+    "Set-Cookie": {
+        "description": (
+            'Clears the guest cart cookie ("guest_cart", or "__Host-guest_cart" when '
+            "GUEST_CART_COOKIE_SECURE is on; Max-Age=0, Path=/) when the request carried one and its cart "
+            "was merged into the account's cart, or named no cart. Absent otherwise, or when the "
+            "merge could not be done (the cookie is kept for the next login)."
+        ),
+        "schema": {"type": "string"},
+    }
+}
+CLEAR_GUEST_CART_COOKIE_RESPONSE = {"description": "Successful Response", "headers": CLEAR_GUEST_CART_COOKIE_HEADER}
+# The request id the RequestContextMiddleware puts on every response.
+REQUEST_ID_HEADER = {
+    "X-Request-ID": {
+        "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
         "schema": {"type": "string"},
     }
 }
@@ -198,6 +254,10 @@ class DocumentedRoute(APIRoute):
                 **(kwargs.get("openapi_extra") or {}),
                 "security": [{}],
             }
+        if _depends_on(self.dependant, get_current_admin_user):
+            # One marker for every admin operation, the ones outside /admin
+            # (PUT /orders/{id}/status, the refund) included.
+            kwargs["openapi_extra"] = {**(kwargs.get("openapi_extra") or {}), "x-admin-only": True}
         merged = {code: dict(spec) for code, spec in (self.responses or {}).items()}
         if schemes:
             _merge(merged, 401, UNAUTHORIZED)
@@ -213,6 +273,11 @@ class DocumentedRoute(APIRoute):
                 _merge(merged, 403, {**FORBIDDEN, "description": ACCOUNT_INACTIVE_NOTE.capitalize()})
             else:
                 own["description"] = f"{own['description']}; {ACCOUNT_INACTIVE_NOTE}"
+        if not any((method, self.path) in _RATE_LIMIT_EXEMPT for method in self.methods or ()):
+            # The rate limit is an application-wide dependency
+            # (app/core/rate_limit.py): any route can answer 429, but the
+            # exempt ones (the Stripe webhook).
+            _merge(merged, 429, TOO_MANY_REQUESTS)
         if self.methods and self.methods & {"POST", "PUT", "PATCH"}:
             _merge(merged, 413, PAYLOAD_TOO_LARGE)
         if self.body_field is not None and not isinstance(self.body_field.field_info, params.Form):
@@ -234,6 +299,27 @@ class DocumentedRoute(APIRoute):
         super().__init__(path, endpoint, responses=merged, **kwargs)
 
 
+# Functions that serve two methods (a PUT and a PATCH decorating one handler):
+# their name alone would be the operationId of both.
+_SHARED_BY_METHODS = frozenset({
+    "update_current_user",
+    "update_address",
+    "update_product",
+    "update_product_variant",
+})
+
+
+def operation_id(route: APIRoute) -> str:
+    """The operationId: the handler's name (get_product), which FastAPI's
+    default builds from the name and the whole path instead
+    (get_product_api_v1_products__product_id__get). A handler that serves a
+    PUT and a PATCH gets the method as a suffix. Unique by construction;
+    tests/unit/test_openapi_operation_ids.py checks that it stays so."""
+    if route.name in _SHARED_BY_METHODS:
+        return f"{route.name}_{sorted(route.methods or ())[0].lower()}"
+    return route.name
+
+
 def install_problem_media_type(app: FastAPI) -> None:
     """Make the document say application/problem+json for every error
     response (status 400 and up): FastAPI puts a response's model under the
@@ -253,6 +339,9 @@ def install_problem_media_type(app: FastAPI) -> None:
         for path in schema["paths"].values():
             for operation in path.values():
                 for code, response in operation.get("responses", {}).items():
+                    # On every response, the 404 of an unknown path included
+                    # (app/core/request_context.py): stated here, once.
+                    response.setdefault("headers", {}).setdefault("X-Request-ID", REQUEST_ID_HEADER["X-Request-ID"])
                     content = response.get("content", {})
                     if code.isdigit() and int(code) >= 400 and "application/json" in content:
                         content[PROBLEM_MEDIA_TYPE] = content.pop("application/json")

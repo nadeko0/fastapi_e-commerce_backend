@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password, normalize_password
 from app.models.enums import UserRole
-from app.schemas.common import E164_PHONE_PATTERN, RequestBody, input_schema
+from app.schemas.common import E164_PHONE_PATTERN, RequestBody, ResponseBody, input_schema
 
 
 class ConsentType(str, Enum):
@@ -52,7 +52,7 @@ def normalize_email(email: str) -> str:
     return unicodedata.normalize("NFC", composed.lower())
 
 
-class ConsentHistory(BaseModel):
+class ConsentHistory(ResponseBody):
     type: ConsentType
     granted: bool
     timestamp: datetime
@@ -125,6 +125,15 @@ class UserCreate(RequestBody, UserBase):
     # below refuse false): a registration is not made by declining them.
     model_config = ConfigDict(json_schema_extra=input_schema(
         rules={"gdpr_consent": {"const": True}, "privacy_policy_accepted": {"const": True}},
+        model={"examples": [{
+            "email": "jane.doe@example.com",
+            "password": "correct horse battery staple 42",
+            "full_name": "Jane Doe",
+            "phone": "+14155550123",
+            "gdpr_consent": True,
+            "privacy_policy_accepted": True,
+            "marketing_consent": False,
+        }]},
     ))
 
     @field_validator('gdpr_consent')
@@ -172,7 +181,7 @@ class UserUpdate(RequestBody):
             raise ValueError('may be omitted but cannot be null')
         return v
 
-class UserResponse(UserBase):
+class UserResponse(ResponseBody, UserBase):
     id: int
     role: UserRole
     is_active: bool
@@ -181,10 +190,16 @@ class UserResponse(UserBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-class Token(BaseModel):
+class Token(ResponseBody):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+    model_config = ConfigDict(json_schema_extra={"examples": [{
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.signature",
+        "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.signature",
+        "token_type": "bearer",
+    }]})
 
 class RefreshTokenRequest(RequestBody):
     refresh_token: str

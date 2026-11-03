@@ -27,7 +27,7 @@ from app.core.clock import utc_now
 from app.core.dependencies import BearerToken, Cache, CurrentUser, DbSession
 from app.core.errors import Problem, ProblemType, sanitized_errors
 from app.core.location import set_location
-from app.core.openapi import LOCATION_HEADER, DocumentedRoute
+from app.core.openapi import CLEAR_GUEST_CART_COOKIE_RESPONSE, LOCATION_HEADER, DocumentedRoute
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password
 from app.core.rate_limit import check_login_attempt, clear_login_failures, login_unavailable
 from app.core.security import (
@@ -307,6 +307,7 @@ async def resend_verification_email(
     "/login",
     response_model=Token,
     responses={
+        200: CLEAR_GUEST_CART_COOKIE_RESPONSE,
         401: {"description": "Incorrect email or password"},
         429: {"description": "Too many failed login attempts"},
         503: {"description": "Failed attempts cannot be counted right now, retry later"},

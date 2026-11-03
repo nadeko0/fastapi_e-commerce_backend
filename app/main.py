@@ -14,7 +14,7 @@ from app.core.errors import check_patch_media_type, register_error_handlers
 from app.core.forwarded import ForwardedClientMiddleware
 from app.core.head import HeadMiddleware
 from app.core.logging_config import setup_logging
-from app.core.openapi import install_problem_media_type
+from app.core.openapi import install_problem_media_type, operation_id
 from app.core.overload import InFlightLimitMiddleware
 from app.core.rate_limit import rate_limit
 from app.core.request_context import RequestContextMiddleware
@@ -60,8 +60,23 @@ logger.info("Initializing FastAPI application with rate limiting")
 app = FastAPI(
     lifespan=lifespan,
     title=settings.PROJECT_NAME,
-    description="E-commerce backend API with FastAPI",
+    description=(
+        "E-commerce backend API with FastAPI.\n\n"
+        "Every timestamp is UTC (RFC 3339, written with a Z suffix). "
+        "Deleting an account and exporting its data are requests made with "
+        "POST /legal/data-request (request_type deletion or export), not a DELETE of /users/me."
+    ),
     version=settings.VERSION,
+    generate_unique_id_function=operation_id,
+    openapi_tags=[
+        {"name": "users", "description": "Registration, login, tokens, the signed-in account, its addresses and orders."},
+        {"name": "catalog", "description": "Public product, variant and category browsing and search."},
+        {"name": "cart", "description": "The cart of an account or of a guest (cookie), pricing and validation."},
+        {"name": "orders", "description": "Checkout, payment (PaymentIntent and Checkout Session), refunds and the Stripe webhook."},
+        {"name": "admin", "description": "Administrator operations: catalog management, orders, payments, reconciliation, webhook events."},
+        {"name": "legal", "description": "Legal documents, consent and GDPR data requests."},
+        {"name": "health", "description": "Liveness and readiness probes, public and not rate limited."},
+    ],
     docs_url=f"{settings.API_V1_STR}/docs" if _docs_published else None,
     redoc_url="/redoc" if _docs_published else None,
     openapi_url=f"{settings.API_V1_STR}/openapi.json" if _docs_published else None,
@@ -184,7 +199,7 @@ app.include_router(legal.router, prefix=settings.API_V1_STR)
 
 
 @app.head("/health", include_in_schema=False)
-@app.get("/health")
+@app.get("/health", tags=["health"], responses=probes.probe_responses(probes.HealthBody))
 async def health_check(request: Request):
     """Liveness and readiness in one: 200 when the database and Redis both
     answer, 503 otherwise, which is what the Docker healthchecks look at.

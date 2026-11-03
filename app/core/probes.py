@@ -23,9 +23,11 @@ no-store): a cached 200 would hide an outage from the monitor.
 
 import asyncio
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -47,6 +49,54 @@ PROBE_PATHS = frozenset({"/health", "/livez", "/readyz"})
 NO_STORE = {"Cache-Control": "no-store"}
 
 router = APIRouter(tags=["health"])
+
+
+# What the probes answer, for the OpenAPI document only: the routes return a
+# ready-made response, so nothing validates against these.
+class LivenessBody(BaseModel):
+    status: Literal["ok"]
+
+
+class ReadinessChecks(BaseModel):
+    database: Literal["ok", "fail"]
+    redis: Literal["ok", "fail"]
+
+
+class ReadinessBody(BaseModel):
+    status: Literal["ok", "fail"]
+    checks: ReadinessChecks
+
+
+class HealthServices(BaseModel):
+    database: Literal["healthy", "unhealthy"]
+    redis: Literal["healthy", "unhealthy"]
+
+
+class HealthBody(BaseModel):
+    status: Literal["healthy", "degraded"]
+    services: HealthServices
+
+
+_PROBE_HEADERS = {"Cache-Control": {"description": "Always no-store.", "schema": {"type": "string"}}}
+
+
+def probe_responses(model: type[BaseModel]) -> dict:
+    """The `responses=` of a probe that can fail: the 200 and the 503 carry
+    the same shape, the 503 with Retry-After."""
+    return {
+        200: {"description": "Ready", "model": model, "headers": _PROBE_HEADERS},
+        503: {
+            "description": "Not ready",
+            "model": model,
+            "headers": {
+                **_PROBE_HEADERS,
+                "Retry-After": {
+                    "description": "Seconds to wait before probing again.",
+                    "schema": {"type": "integer", "minimum": 0},
+                },
+            },
+        },
+    }
 
 
 async def database_is_up(limit_seconds: float | None = None) -> bool:
@@ -85,14 +135,14 @@ def probe_response(request: Request, content: dict, status_code: int = 200, head
 # HEAD is served but kept out of the schema: one documented operation per
 # probe, and FastAPI would give a GET+HEAD route two identical operation ids.
 @router.head("/livez", include_in_schema=False)
-@router.get("/livez")
+@router.get("/livez", responses={200: {"description": "Alive", "model": LivenessBody, "headers": _PROBE_HEADERS}})
 async def liveness(request: Request):
     """The process is up and serving; checks nothing else."""
     return probe_response(request, {"status": "ok"})
 
 
 @router.head("/readyz", include_in_schema=False)
-@router.get("/readyz")
+@router.get("/readyz", responses=probe_responses(ReadinessBody))
 async def readiness(request: Request):
     """200 when the database and Redis both answer within a short timeout,
     503 with Retry-After otherwise."""

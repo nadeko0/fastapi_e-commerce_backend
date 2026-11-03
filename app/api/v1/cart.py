@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.dependencies import Cache, DbSession
 from app.core.errors import Problem, ProblemType
-from app.core.openapi import DocumentedRoute
+from app.core.openapi import GUEST_CART_COOKIE_RESPONSE, DocumentedRoute
 from app.core.rate_limit import (
     client_address,
     parse_rate,
@@ -437,6 +437,7 @@ async def get_user_cart(
     "/items",
     response_model=CartResponse,
     responses={
+        200: GUEST_CART_COOKIE_RESPONSE,
         409: {"description": "Not enough stock available, or the cart already holds the maximum number of different items"},
         404: {"description": "Product not found or inactive, or variant_id doesn't belong to product_id / isn't active"},
         429: {"description": "This address has opened too many guest carts (RATE_LIMIT_GUEST_CART)"},
@@ -533,6 +534,7 @@ async def add_to_cart(
     "/items/{product_id}",
     response_model=CartResponse,
     responses={
+        200: GUEST_CART_COOKIE_RESPONSE,
         409: {"description": "Not enough stock available"},
         404: {"description": "Product not found or inactive, item not in cart, or variant_id invalid for this product"},
         503: {"description": "Cart store unavailable, nothing was changed"},
@@ -590,6 +592,7 @@ async def update_cart_item(
     "/items/{product_id}",
     response_model=CartResponse,
     responses={
+        200: GUEST_CART_COOKIE_RESPONSE,
         404: {"description": "Item not in cart"},
         503: {"description": "Cart store unavailable, nothing was changed"},
     },
@@ -623,7 +626,10 @@ async def remove_from_cart(
 @router.delete(
     "",
     response_model=CartResponse,
-    responses={503: {"description": "Cart store unavailable, nothing was changed"}},
+    responses={
+        200: GUEST_CART_COOKIE_RESPONSE,
+        503: {"description": "Cart store unavailable, nothing was changed"},
+    },
 )
 async def clear_cart(
     response: Response,

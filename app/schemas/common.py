@@ -12,6 +12,7 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
+    WithJsonSchema,
     create_model,
     field_validator,
     model_validator,
@@ -58,6 +59,45 @@ StoreCurrency = Annotated[
     ),
 ]
 _CENT = Decimal("0.01")
+
+
+class ResponseBody(BaseModel):
+    """Base of a model a client reads, nested models included: in the OpenAPI
+    document a field that has a default (an empty list, null, False) is
+    listed as required, because a response always carries every field. Pydantic
+    marks such a field optional by default, as it is for the request that
+    builds the model, which made clients type `items?: ...` for a field that is
+    always there. Only the serialization schema changes (Pydantic: config
+    `json_schema_serialization_defaults_required`), so what a client may send
+    is untouched. Not for a model that is also a request body: a model shared
+    by input and output has its output side split off, as RequestBody says."""
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+
+def published_values(values: Iterable[str]) -> Any:
+    """A `Field` that lists the values a free-text response field takes in the
+    OpenAPI document (`enum`) and checks nothing: a value outside the list
+    (a provider adding a status) is still sent, never a 500. The same technique
+    as the status filters of app/api/v1/admin.py. Use as
+    `status: Annotated[str, published_values(STATUSES)]`."""
+    return Field(json_schema_extra={"enum": list(values)})
+
+
+# What a money field of a response looks like on the wire: Pydantic writes a
+# Decimal as a string, and every amount reaches a response quantized to cents
+# (Numeric(10, 2) columns, _to_cents, whole-cent conversions of integer
+# minor units). Schema only: nothing is validated against it.
+MONEY_OUTPUT_SCHEMA = WithJsonSchema(
+    {
+        "type": "string",
+        "pattern": r"^-?[0-9]+\.[0-9]{2}$",
+        "examples": ["10.50"],
+        "description": "Decimal string with exactly two fraction digits, in the currency of the object.",
+    },
+    mode="serialization",
+)
+ResponseMoney = Annotated[Decimal, MONEY_OUTPUT_SCHEMA]
 
 
 class RequestBody(BaseModel):
@@ -165,16 +205,20 @@ def sortable_pagination(name: str, fields: Sequence[str]) -> Any:
     endpoint sorts by (see app.core.sorting). A value outside `fields` is
     ignored and the default order applies; it is not an error."""
     listed = ", ".join(fields)
-    return create_model(
-        name,
-        __base__=PaginationParams,
-        sort_by=(str | None, Field(None, description=(
+    # The enum is published, not enforced: another value is ignored.
+    # The description sits in the annotation, not in the default: a list
+    # that reads this model through Depends() gets its parameters from
+    # the annotations, and a description given on the default is lost.
+    # Typed Any: mypy cannot read an Annotated alias as a field type here.
+    definitions: dict[str, Any] = {
+        "sort_by": (Annotated[Annotated[str, published_values(fields)] | None, Field(description=(
             f"Field to sort by: one of {listed}. Without it, or with any other "
-            "value, the default order of the list applies (not an error)."))),
-        sort_order=(str | None, Field(None, pattern="^(asc|desc)$", description=(
+            "value, the default order of the list applies (not an error)."))], None),
+        "sort_order": (Annotated[str | None, Field(pattern="^(asc|desc)$", description=(
             "asc (the default) or desc; used with sort_by. Ties are broken by id "
-            "in the same direction."))),
-    )
+            "in the same direction."))], None),
+    }
+    return create_model(name, __base__=PaginationParams, **definitions)
 
 def cart_item_key(product_id: int, variant_id: int | None = None) -> str:
     """The Cart.items dict key for a given product/variant combination.
@@ -277,7 +321,7 @@ def resolve_cart_line(
     return product, variant, None
 
 
-class CartResponseItem(BaseModel):
+class CartResponseItem(ResponseBody):
     """One cart line as returned by the API, priced at the moment of the
     request."""
     product_id: int
@@ -294,21 +338,21 @@ class CartResponseItem(BaseModel):
     available: bool
     unavailable_reason: Literal["product_unavailable", "variant_unavailable"] | None = None
     # Current catalog price; None for an unavailable line.
-    unit_price: Decimal | None = None
+    unit_price: ResponseMoney | None = None
     currency: StoreCurrency = Field(default_factory=store_currency)
-    line_total: Decimal | None = None
+    line_total: ResponseMoney | None = None
     # The price shown when the line was added, and whether the current one
     # differs from it. Information for the customer, never an error.
-    price_when_added: Decimal | None = None
+    price_when_added: ResponseMoney | None = None
     price_changed: bool = False
 
 
-class CartResponse(BaseModel):
+class CartResponse(ResponseBody):
     """A cart as returned by the API. Money is Decimal, serialized as a
     string ("19.98"), like the order total."""
     items: list[CartResponseItem] = Field(default_factory=list)
     # Sum of line_total over the available lines.
-    total_amount: Decimal = Field(default=_ZERO)
+    total_amount: ResponseMoney = Field(default=_ZERO)
     currency: StoreCurrency = Field(default_factory=store_currency)
     # Number of lines, unavailable ones included.
     items_count: int = Field(default=0)
@@ -367,7 +411,7 @@ class CartResponse(BaseModel):
         )
 
 
-class CartValidationIssue(BaseModel):
+class CartValidationIssue(ResponseBody):
     """A reason the cart cannot be ordered as it stands."""
     product_id: int
     variant_id: int | None = None
@@ -378,16 +422,16 @@ class CartValidationIssue(BaseModel):
     requested: int | None = None
 
 
-class CartPriceChange(BaseModel):
+class CartPriceChange(ResponseBody):
     """A line whose price differs from the one it was added at."""
     product_id: int
     variant_id: int | None = None
-    price_when_added: Decimal
-    current_price: Decimal
+    price_when_added: ResponseMoney
+    current_price: ResponseMoney
     currency: StoreCurrency
 
 
-class CartValidationResponse(BaseModel):
+class CartValidationResponse(ResponseBody):
     # True when the cart can be ordered right now: every line is available
     # and in stock. A changed price does not make it False.
     valid: bool

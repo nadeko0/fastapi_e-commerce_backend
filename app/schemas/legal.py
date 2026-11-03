@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 # different modules also collided in the generated OpenAPI schema
 # (FastAPI disambiguates same-named schemas with an ugly
 # module-qualified name), which this avoids.
-from app.schemas.common import RequestBody, input_schema
+from app.schemas.common import RequestBody, input_schema, published_values
 from app.schemas.user import ConsentHistory
 
 
@@ -67,7 +68,8 @@ class DataRequest(RequestBody):
 
 class DataRequestResponse(BaseModel):
     request_id: str
-    status: str
+    # Always "processing": the only status the route (app/api/v1/legal.py) sends.
+    status: Annotated[str, published_values(["processing"])]
     estimated_completion_time: datetime
 
     model_config = ConfigDict(
@@ -96,7 +98,7 @@ class LegalDocument(BaseModel):
     )
 
 class ConsentUpdateResponse(BaseModel):
-    status: str
+    status: Annotated[str, published_values(["success"])]
     updated_consents: dict[str, bool]
     timestamp: datetime
 

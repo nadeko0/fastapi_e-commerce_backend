@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import AddressType
-from app.schemas.common import E164_PHONE_PATTERN, Int32, RequestBody, input_schema
+from app.schemas.common import E164_PHONE_PATTERN, Int32, RequestBody, ResponseBody, input_schema
 
 
 # Mirrors app.schemas.user.UserBase's phone validation exactly - both
@@ -110,6 +110,17 @@ class AddressCreate(RequestBody, AddressBase):
 
     model_config = ConfigDict(json_schema_extra=input_schema(
         rules={"delivery_phone": {"pattern": INPUT_PHONE_SCHEMA_PATTERN}},
+        model={"examples": [{
+            "street": "221B Baker Street",
+            "city": "London",
+            "state": "Greater London",
+            "postal_code": "NW1 6XE",
+            "country": "GB",
+            "address_type": "home",
+            "is_default": True,
+            "delivery_instructions": "Ring twice",
+            "delivery_phone": "+442071234567",
+        }]},
     ))
 
     @field_validator('postal_code')
@@ -179,7 +190,7 @@ class AddressUpdate(RequestBody):
     def validate_delivery_phone(cls, v):
         return _validate_input_phone(v)
 
-class AddressResponse(AddressBase):
+class AddressResponse(ResponseBody, AddressBase):
     id: int
     created_at: datetime
     updated_at: datetime

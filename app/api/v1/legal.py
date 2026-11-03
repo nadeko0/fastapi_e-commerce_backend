@@ -21,7 +21,7 @@ from app.schemas.legal import (
 )
 from app.services.gdpr import GDPRService
 
-router = APIRouter(prefix="/legal", tags=["Legal & GDPR"], route_class=DocumentedRoute)
+router = APIRouter(prefix="/legal", tags=["legal"], route_class=DocumentedRoute)
 
 # Legal document content - In production, these should be stored in a database or CMS
 PRIVACY_POLICY = """

@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.common import Int32, RequestBody, input_schema
+from app.schemas.common import Int32, RequestBody, ResponseBody, input_schema
 
 
 class CategoryBase(BaseModel):
@@ -66,7 +66,7 @@ class CategoryInDB(CategoryBase):
         # today; treat any non-dict source as empty rather than reject it.
         return v if isinstance(v, dict) else {}
 
-class CategoryResponse(CategoryInDB):
+class CategoryResponse(ResponseBody, CategoryInDB):
     """Schema for API responses"""
     product_count: int = 0
     children_count: int = 0
