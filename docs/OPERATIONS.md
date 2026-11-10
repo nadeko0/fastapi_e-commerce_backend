@@ -142,7 +142,14 @@ CI checks every migration's downgrade and upgrade against the PostgreSQL catalog
 
 ### PostgreSQL Major Upgrades (PostgreSQL 15 to 18)
 
-Official PostgreSQL 18 container images store cluster data under a version-specific path (`/var/lib/postgresql/18/docker`) and define the container volume at `/var/lib/postgresql`, differing from PostgreSQL 15 (`/var/lib/postgresql/data`). Upgrading from PostgreSQL 15 to 18 cannot reuse the existing volume in-place; operators must execute a logical dump and restore (`pg_dump` and `pg_restore`) and update volume mount paths.
+Since 6.0.0 `docker-compose.yml` runs `postgres:18.6-alpine` and mounts the `postgres_data` volume on `/var/lib/postgresql`. The official 18 image keeps cluster data in `/var/lib/postgresql/18/docker` (PGDATA) and declares `/var/lib/postgresql` as its volume; 15 used `/var/lib/postgresql/data`. A volume created by a 15 container is refused at start (the entrypoint reports the old layout), so an existing deployment moves its data with a logical dump and restore:
+
+1. With the 5.x stack still running: `docker compose exec db pg_dumpall -U "$POSTGRES_USER" > backup.sql`.
+2. `docker compose down`, then remove the old volume (`docker volume rm <DOCKER_NETWORK_NAME>-postgres-data`, `ecommerce-postgres-data` by default) once the dump is checked.
+3. Start the 6.x stack (`docker compose up -d db`): the 18 container initialises an empty cluster and runs `docker/postgres/initdb` (it creates `APP_DB_USER`).
+4. Restore: `docker compose exec -T db psql -U "$POSTGRES_USER" -d postgres < backup.sql` (the role already created by the init script makes `pg_dumpall`'s CREATE ROLE for it fail harmlessly), then start the rest.
+
+A later major (18 to 19) can use `pg_upgrade --link` inside the one volume, which is what the new layout is for.
 
 ## Redis Configuration and Failure Modes
 

@@ -180,15 +180,25 @@ services:
     # release at least two weeks old, with one exception: a security patch of
     # an official image that removes known CRITICAL/HIGH findings may be
     # pinned earlier (redis, 2026-10-25: two HIGH in libssl3/libcrypto3, scan
-    # before and after kept in the change record).
-    image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
+    # before and after kept in the change record). PostgreSQL 18, the newest
+    # major release psycopg 3.3 supports (10 to 18, its install docs). The
+    # 2026-11-05 digest is under the exception: the 15-alpine digest it
+    # replaces carried musl CVE-2026-107891 and zlib CVE-2026-85091 (HIGH),
+    # which this one does not (Trivy 0.76.1, 2026-11-10); what it still
+    # carries is in .trivyignore.yaml.
+    image: postgres:18.6-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
     # max_connections: each API worker can open up to 2 x (DB_POOL_SIZE +
     # DB_MAX_OVERFLOW) connections (a sync and an async pool), so 4 workers
     # with the default 10 + 5 can reach 120, plus the Celery worker. The
     # Postgres default of 100 is below that.
     command: ["postgres", "-c", "max_connections=200"]
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # The image's VOLUME since 18: data lives in /var/lib/postgresql/18/docker
+      # (PGDATA), so a later major upgrade can use pg_upgrade --link inside
+      # one volume. A volume made by a 15 container is refused at start (the
+      # entrypoint reports the old layout): see "Upgrading from 5.x" in
+      # SETUP.md.
+      - postgres_data:/var/lib/postgresql
       # Run once, on an empty data directory: creates APP_DB_USER, the role
       # the api and Celery connect as.
       - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
@@ -217,7 +227,13 @@ services:
       - APP_DB_PASSWORD=${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env}
 
   redis:
-    image: redis:7-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
+    # Redis 8.8: the newest release redis-py 8.1 lists as supported (its
+    # README, "Supported Redis Versions": 7.2 to 8.8); 8.10 is not listed yet.
+    # Redis 8's breaking change is to ACL categories of the module commands,
+    # and this instance has one password user and no ACL rules. The
+    # 2026-11-05 digest is under the security exception: Trivy 0.76.1 finds
+    # no fixable HIGH or CRITICAL in it (2026-11-10).
+    image: redis:8.8-alpine@sha256:c027ae0f677dcf73d74038256f5b88c9ba7b11ccbfae97e96a9f091208d36125
     # One Redis holds the Celery broker queues, the token blacklist and
     # password-change watermarks, the rate-limit counters and every cart.
     # maxmemory: without it, growth (guest carts above all: anyone can make

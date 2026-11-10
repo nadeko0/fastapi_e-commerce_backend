@@ -148,8 +148,8 @@ def test_base_images_are_pinned_by_digest_on_their_current_majors():
     # A tag alone can point at a different image on the next pull: builds
     # stop being reproducible and a replaced image is taken unnoticed. The
     # tag stays in front of the digest for the reader (Docker uses the
-    # digest). Majors as they were: python 3.13, postgres 15, redis 7,
-    # uv 0.13.5.
+    # digest). python 3.13, postgres 18, redis 8.8 (the newest redis-py 8.1
+    # supports), uv 0.13.6.
     dockerfile = _read("Dockerfile")
     references = re.findall(r"^FROM (\S+)", dockerfile, re.M)
     stages = set(re.findall(r"^FROM \S+ AS (\S+)", dockerfile, re.M))
@@ -158,12 +158,23 @@ def test_base_images_are_pinned_by_digest_on_their_current_majors():
     ]
     references += re.findall(r"^\s*image: (\S+)", _read("docker-compose.yml"), re.M)
     expected_tags = [
-        "python:3.13-slim", "python:3.13-slim", "ghcr.io/astral-sh/uv:0.13.5",
-        "postgres:15-alpine", "redis:7-alpine",
+        "python:3.13-slim", "python:3.13-slim", "ghcr.io/astral-sh/uv:0.13.6",
+        "postgres:18.6-alpine", "redis:8.8-alpine",
     ]
     assert sorted(ref.split("@")[0] for ref in references) == sorted(expected_tags), references
     for ref in references:
         assert re.search(_PINNED, ref), ref
+    ci_uv = re.search(r'^\s*UV_VERSION: "([\d.]+)"', _read(".github/workflows/ci.yml"), re.M)
+    assert ci_uv and ci_uv.group(1) == "0.13.6", "CI and the image use the same uv"
+
+
+def test_postgres_data_volume_follows_the_18_layout():
+    # From 18 the image keeps PGDATA in /var/lib/postgresql/18/docker and
+    # declares /var/lib/postgresql as its VOLUME. A volume still mounted on
+    # /var/lib/postgresql/data is refused by the 18 entrypoint at start.
+    db = _without_comments(service_block("db"))
+    assert re.search(r"^\s*- postgres_data:/var/lib/postgresql\s*$", db, re.M), db
+    assert "/var/lib/postgresql/data" not in db
 
 
 def test_ci_tests_against_the_postgres_image_production_runs():

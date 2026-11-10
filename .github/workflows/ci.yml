@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  UV_VERSION: "0.13.5"
+  UV_VERSION: "0.13.6"
   # Hypothesis settings profile registered in tests/conftest.py (more examples,
   # derandomized, print_blob); every test job below inherits it.
   HYPOTHESIS_PROFILE: ci
@@ -186,15 +186,16 @@ jobs:
     # tests/conftest.py creates a throwaway database on it, builds the schema
     # with `alembic upgrade head` and drops it at the end.
     #
-    # One run per PostgreSQL major: 15 is what docker-compose.yml deploys
-    # (SETUP.md: "15+"), 16 and 18 are the other supported majors. 15 runs the
+    # One run per PostgreSQL major: 18 is what docker-compose.yml deploys
+    # (SETUP.md: "15+"), 15 and 16 are the oldest supported majors. 18 runs the
     # whole suite on PostgreSQL (everything that does not assert on elapsed
-    # time), 16 and 18 the database-sensitive subset: the subset is ~80% of the
+    # time), 15 and 16 the database-sensitive subset: the subset is ~80% of the
     # whole run's time (11 min of ~15 on two local workers), so the full suite
     # on each major would triple the cost for ~20% more coverage of code that
     # does not touch the database differently between majors. Images by tag and
-    # digest, each digest more than two weeks old when pinned; 15's is the one
-    # test_docker_compose.py keeps equal to docker-compose.yml.
+    # digest; 18's is the one test_docker_compose.py keeps equal to
+    # docker-compose.yml (pinned under the security exception noted there), the
+    # others were more than two weeks old when pinned.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -202,13 +203,13 @@ jobs:
         include:
           - postgres: "15"
             image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
-            selection: not timing_sensitive
+            selection: db_sensitive and not timing_sensitive
           - postgres: "16"
             image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
             selection: db_sensitive and not timing_sensitive
           - postgres: "18"
-            image: postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
-            selection: db_sensitive and not timing_sensitive
+            image: postgres:18.6-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+            selection: not timing_sensitive
     name: test-postgres (PostgreSQL ${{ matrix.postgres }})
     services:
       postgres:
@@ -278,7 +279,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
+        image: postgres:18.6-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
@@ -317,7 +318,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       redis:
-        image: redis:7-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
+        image: redis:8.8-alpine@sha256:c027ae0f677dcf73d74038256f5b88c9ba7b11ccbfae97e96a9f091208d36125
         ports:
           - 6379:6379
         options: >-
@@ -450,12 +451,13 @@ jobs:
       # the app image and in the postgres and redis images docker-compose.yml
       # runs (read from it, so a re-pin there is scanned here). Only findings
       # with a fix fail the job (one without cannot be acted on yet). The ignore
-      # list holds nothing but the gosu findings shown unreachable (see
-      # .trivyignore.yaml).
+      # list holds the gosu findings shown unreachable and, until they expire,
+      # fixed Alpine packages the postgres image has not been rebuilt with
+      # (see .trivyignore.yaml).
       - name: Scan the app image and the compose images (Trivy)
         env:
-          # Trivy 0.75.0 by digest, as the other tools in this workflow.
-          TRIVY: aquasec/trivy@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+          # Trivy 0.76.1 by digest, as the other tools in this workflow.
+          TRIVY: aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
         run: |
           images="fastapi-ecommerce-backend:ci $(tr -d '\r' < docker-compose.yml | sed -n 's/^ *image: \(postgres:.*\|redis:.*\)$/\1/p')"
           test "$(echo $images | wc -w)" = 3

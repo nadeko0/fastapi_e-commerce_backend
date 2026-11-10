@@ -54,9 +54,9 @@ flowchart TD
 - **secrets:** Scans git history for exposed credentials using `gitleaks`. `.gitleaks.toml` allowlists one placeholder: the JWT-shaped example of the `Token` response in `app/schemas/user.py` and the OpenAPI snapshot, only when the file and the exact placeholder value both match, so a real token in those files is still reported.
 - **test:** Executes the primary suite in parallel on SQLite, runs timing-sensitive tests sequentially, and enforces coverage gates.
 - **test-timezones:** Matrix testing payment and order logic across 7 timezones (including UTC, Pacific/Kiritimati, Pacific/Pago_Pago, Asia/Kathmandu, America/St_Johns, Europe/Bratislava, America/New_York).
-- **test-postgres:** Tests database-sensitive suites against PostgreSQL 15, 16, and 18 containers, including schema round-trip tests (`tests/integration/test_postgres_migration_roundtrip.py`) across every revision.
-- **migration-compat:** Runs the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses against the current migrations on PostgreSQL 15 (`.github/scripts/migration_compat.sh`); that release's tests about the migrations themselves are left out. It ends at once when `migrations/` is unchanged since the tag.
-- **test-redis:** Tests Redis Lua scripts, token revocation, and concurrency on a real Redis 7 container.
+- **test-postgres:** Runs the whole suite on PostgreSQL 18 (the deployed image) and the database-sensitive subset on 15 and 16, including schema round-trip tests (`tests/integration/test_postgres_migration_roundtrip.py`) across every revision.
+- **migration-compat:** Runs the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses against the current migrations on PostgreSQL 18 (`.github/scripts/migration_compat.sh`); that release's tests about the migrations themselves are left out. It ends at once when `migrations/` is unchanged since the tag.
+- **test-redis:** Tests Redis Lua scripts, token revocation, and concurrency on a real Redis 8.8 container (the deployed image).
 - **docker-build:** Builds the production container image and runs Trivy vulnerability scanning across the app and compose images.
 
 ## Test Markers and Isolation

@@ -33,8 +33,8 @@ flowchart TD
         Routers --> Services["Domain Services (app/services: orders, payments, webhooks, email)"]
     end
 
-    Services --> DB[(PostgreSQL 15)]
-    Services --> Cache[(Redis 7)]
+    Services --> DB[(PostgreSQL 18)]
+    Services --> Cache[(Redis 8.8)]
     Services --> StripeExt[Stripe API]
 
     subgraph AsyncWorkers ["Background Processing Stack"]
