@@ -9,6 +9,7 @@ from app.core.clock import utc_now
 from app.models.user import User
 from app.schemas.legal import ConsentUpdate
 from app.services.gdpr import GDPRService
+from app.services.redis_async import AsyncRedisService
 
 # The write methods take an AsyncSession. These tests open one from
 # database.AsyncSessionLocal, which tests/conftest.py points at the test
@@ -112,7 +113,7 @@ def test_process_data_deletion_deactivates_user_and_sends_emails(monkeypatch):
 
     async def scenario(session):
         user = await _make_user(session)
-        request_id = await GDPRService(session).process_data_deletion(user)
+        request_id = await GDPRService(session).process_data_deletion(user, AsyncRedisService())
         return user.id, request_id, user.is_active, user.data_deletion_requested
 
     user_id, request_id, is_active, requested = _run(scenario)
@@ -240,7 +241,7 @@ def test_a_deletion_request_that_cannot_be_stored_leaves_the_account_as_it_was(m
         user_id = user.id
         rolled_back = _commit_fails(monkeypatch, session)
         with pytest.raises(HTTPException) as error:
-            await GDPRService(session).process_data_deletion(user)
+            await GDPRService(session).process_data_deletion(user, AsyncRedisService())
         # The rollback expired the user; a fresh read shows what is stored.
         stored = await session.get(User, user_id, populate_existing=True)
         return error.value, rolled_back, stored.is_active, stored.data_deletion_requested

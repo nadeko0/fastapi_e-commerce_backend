@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import utc_now
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DbSession
+from app.core.dependencies import Cache, CurrentUser, DbSession
 from app.core.openapi import DocumentedRoute
 from app.core.rate_limit import check_consent_change, check_login_attempt, clear_login_failures
 from app.core.security import verify_password_async
@@ -349,7 +349,8 @@ async def request_personal_data(
     request_data: DataRequest,
     request: Request,
     db: DbSession,
-    current_user: CurrentUser
+    current_user: CurrentUser,
+    redis: Cache,
 ):
     """
     Handle GDPR data access and deletion requests.
@@ -366,7 +367,9 @@ async def request_personal_data(
     default). A deletion deactivates the account at once (it can no longer
     log in) and the account is anonymised after DATA_DELETION_GRACE_PERIOD_DAYS
     (1 by default); it needs the account's password, and the only active
-    administrator cannot be erased (409). Limited per client address by
+    administrator cannot be erased (409). The account's new, unpaid orders
+    are cancelled with it, their stock returned and their open payment
+    attempts closed at the provider; paid orders are kept. Limited per client address by
     RATE_LIMIT_AUTH (20/minute by default).
     """
     gdpr_service = GDPRService(db)
@@ -392,7 +395,7 @@ async def request_personal_data(
         # Deactivates the user and commits `db`, so it needs the row loaded
         # through `db` (see _load_user).
         request_id = await gdpr_service.process_data_deletion(
-            await _load_user(db, current_user.id)
+            await _load_user(db, current_user.id), redis
         )
 
     return DataRequestResponse(

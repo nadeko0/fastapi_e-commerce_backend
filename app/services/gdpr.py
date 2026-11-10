@@ -4,12 +4,24 @@ from fastapi import HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.clock import utc_now
 from app.core.config import settings
+from app.models.order import Order
 from app.models.user import User
 from app.schemas.legal import ConsentUpdate
+from app.schemas.order import OrderStatus
 from app.schemas.user import GDPRExport
+from app.services.orders import (
+    cancel_order_and_restock,
+    close_attempts_at_provider,
+    is_unpaid_and_new,
+    open_payment_attempts,
+    products_with_cached_stock,
+)
+from app.services.payment import get_payment_provider
+from app.services.redis_async import AsyncRedisService
 
 CONSENT_USER_AGENT_MAX = 512
 
@@ -213,10 +225,15 @@ class GDPRService:
                 detail="Failed to process data export request"
             ) from e
 
-    async def process_data_deletion(self, user: User) -> str:
+    async def process_data_deletion(self, user: User, cache: AsyncRedisService) -> str:
         """
         Process a GDPR data deletion request
         Returns a request ID that can be used to track the deletion status
+
+        The account's new, unpaid orders are cancelled and restocked, and
+        their open payment attempts closed at the provider: the deactivated
+        owner could otherwise still pay one and get an order they cannot
+        see (403 on every route). Paid orders are left as they are.
         """
         request_id = f"deletion_{user.id}_{utc_now().timestamp()}"
 
@@ -239,11 +256,38 @@ class GDPRService:
             # DATA_DELETION_GRACE_PERIOD_DAYS has passed. Committed before any
             # mail is sent: SMTP inside the open transaction (2D-03) could
             # outlast idle_in_transaction_session_timeout.
+            # Locked in id order like the cancel routes' read, so the expiry
+            # sweep or an admin cancel cannot restock the same order again.
+            orders = (await db.scalars(
+                select(Order).options(selectinload(Order.items))
+                .where(Order.user_id == user.id, Order.status == OrderStatus.NEW)
+                .order_by(Order.id).with_for_update(of=Order)
+            )).all()
+            unpaid = [order for order in orders if is_unpaid_and_new(order)]
+            attempts: list[tuple[str | None, str]] = []
+            for order in unpaid:
+                await db.run_sync(cancel_order_and_restock, order)
+                attempts += await db.run_sync(open_payment_attempts, order.id)
+            restocked = products_with_cached_stock(
+                [(item.product_id, item.variant_id) for order in unpaid for item in order.items]
+            )
+
             user.is_active = False
             user.data_deletion_requested = True
             user.data_deletion_date = utc_now()
 
             await db.commit()
+
+            # After the commit, as the cancel routes do (_drop_product_details,
+            # close_attempts_at_provider). Inline rather than as a background
+            # task: a mail failure below answers 500, and a response that is
+            # not the route's own drops its background tasks.
+            for product_id in restocked:
+                await cache.invalidate_product_cache(product_id)
+            if attempts:
+                await run_in_threadpool(
+                    close_attempts_at_provider, get_payment_provider(), attempts
+                )
 
             # Send emails after commit (2D-03)
             from app.services.email import (

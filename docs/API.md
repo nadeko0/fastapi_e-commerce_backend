@@ -162,7 +162,7 @@ Each operation in the OpenAPI document lists every status it can answer and the 
 | Unpaid orders | Cancelled, and their stock returned, `UNPAID_ORDER_EXPIRE_MINUTES` (30) after they were placed; a new payment attempt after that is 409 | 409 |
 | Payment attempts | One open attempt per order; another is 409 for up to `PAYMENT_ATTEMPT_STALE_AFTER_MINUTES` (5); a Checkout Session expires `CHECKOUT_SESSION_EXPIRE_MINUTES` (60) after the attempt, and until then the customer cannot cancel the order | 409 (`Retry-After` where the attempt is still being processed, 60 on the cancel) |
 | Tokens in emails | Verification link `EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS` (48); reset link `PASSWORD_RESET_TOKEN_EXPIRE_MINUTES` (60) and single use | 400 |
-| Data requests | An export is sent by email; a deletion deactivates the account at once and anonymises it after `DATA_DELETION_GRACE_PERIOD_DAYS` (1); the only active administrator cannot be erased | 409 |
+| Data requests | An export is sent by email; a deletion deactivates the account at once, cancels its new, unpaid orders (stock returned, open payment attempts closed at the provider; paid orders are kept) and anonymises it after `DATA_DELETION_GRACE_PERIOD_DAYS` (1); the only active administrator cannot be erased | 409 |
 | Admin statistics | `GET /admin/stats` is cached 5 minutes | stale by up to 5 minutes |
 
 ## Caching and Conditional Requests (ETag)

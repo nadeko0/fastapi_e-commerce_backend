@@ -9,13 +9,23 @@ is made to misbehave: every other backend is terminated between two requests.
 Skipped unless TEST_DATABASE_URL names a server; CI's test-postgres job runs it.
 """
 
+import asyncio
+import select
+
 import pytest
 from conftest import TEST_DB_URL, requires_postgres
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pg_pool_support import APPLICATION_NAME, app_pool
+from psycopg.errors import IdleInTransactionSessionTimeout, TransactionTimeout
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+import app.core.database as database_module
 from app.core.config import settings
+from app.core.database import DbSession
+from app.core.errors import http_exception_handler
 
 pytestmark = requires_postgres
 
@@ -122,3 +132,52 @@ def test_no_session_is_left_idle_in_transaction_after_requests(client, monkeypat
             assert response.status_code < 500, response.text
             assert _idle_in_transaction(admin) == []
             assert engine.pool.checkedout() == 0
+
+
+@pytest.mark.parametrize(
+    ("setting", "server_error"),
+    [
+        ("idle_in_transaction_session_timeout", IdleInTransactionSessionTimeout),
+        ("transaction_timeout", TransactionTimeout),
+    ],
+)
+def test_a_connection_the_server_closed_for_a_transaction_timeout_answers_503(
+    monkeypatch, setting, server_error
+):
+    # The server ends the session with FATAL 25P03 or 25P04, and psycopg 3.3
+    # raises that error itself on the next statement: both are InternalError,
+    # not OperationalError. The connection is gone all the same (psycopg
+    # marks it broken, so SQLAlchemy sets connection_invalidated, which
+    # is_database_unavailable_error checks): a temporary outage, not a bug.
+    test_app = FastAPI()
+    test_app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    classified = []
+    classify = database_module.is_database_unavailable_error
+
+    def recording(exc):
+        classified.append(exc)
+        return classify(exc)
+
+    monkeypatch.setattr(database_module, "is_database_unavailable_error", recording)
+
+    @test_app.get("/idle")
+    async def idle(db: DbSession):
+        await db.execute(text(f"SET {setting} = '100ms'"))
+        # libpq reads the FATAL before the next statement on Linux. On
+        # Windows the socket loses it once the server's close arrives, and
+        # psycopg reports a bare OperationalError (also a 503). Read it as
+        # soon as it is there, so the server's error is tested on both.
+        pgconn = (await (await db.connection()).get_raw_connection()).driver_connection.pgconn
+        readable, _, _ = await asyncio.to_thread(select.select, [pgconn.socket], [], [], 5)
+        assert readable, "the server did not end the transaction"
+        pgconn.consume_input()
+        await db.execute(text("SELECT 1"))
+
+    with TestClient(test_app, raise_server_exceptions=False) as lenient:
+        response = lenient.get("/idle")
+
+    assert response.status_code == 503, response.text
+    assert response.headers.get("Retry-After") == "5"
+    [error] = classified
+    assert isinstance(error.orig, server_error)
+    assert error.connection_invalidated
