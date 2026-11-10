@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/nadeko0/fastapi_e-commerce_backend?sort=semver)](https://github.com/nadeko0/fastapi_e-commerce_backend/releases)
 ![Python](https://img.shields.io/badge/python-3.13-3776AB)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.153-009688)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%20%7C%2016%20%7C%2018-4169E1)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017%20%7C%2018-4169E1)
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 
 ![tests](https://img.shields.io/badge/tests-6%2C711%20cases-brightgreen)
@@ -87,7 +87,7 @@ uv run pytest tests/ -n 2 -m "not timing_sensitive"   # the fast local run
 | Tests | 6,711 cases from 2,668 test functions on SQLite and PostgreSQL, 54 live Stripe tests, 0 warnings |
 | Coverage | 98.7 % overall, lines and branches combined; 100 % on the payment-layer files, the mock provider excluded (enforced in CI) |
 | Mutation testing | 98.7 % of 3,434 mutants detected (3,119 killed, 272 timed out; measured on 4.1.1); the 43 survivors reviewed as equivalent |
-| CI | lint (Ruff, mypy), sast (Bandit), benchmarks, migration-compat, tests, 7 time zones, PostgreSQL 15/16/18 with migration round-trip checks, real Redis, pip-audit, gitleaks, Trivy |
+| CI | lint (Ruff, mypy), sast (Bandit), benchmarks, migration-compat, tests, 7 time zones, PostgreSQL 16/17/18 with migration round-trip checks, real Redis, pip-audit, gitleaks, Trivy |
 | Load (4-core host, app on 3 cores, 200 users, mock payments, rate limits raised, measured on 4.0.1) | p95 57 to 68 ms; overload answers fast 503s instead of stalling |
 | Chaos (measured on 4.0.x) | Redis or PostgreSQL down: 503 with Retry-After, recovery on its own, no webhook lost or applied twice |
 | Security (measured on 4.0.3) | ZAP and a manual OWASP API Top 10 review: no open high or medium issues |

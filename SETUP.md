@@ -59,6 +59,8 @@ The `ENVIRONMENT` variable dictates security constraints and runtime behavior:
 
 ### 3. Running Services Locally
 
+Supported servers: PostgreSQL 16, 17 or 18 (CI tests all three; `docker-compose.yml` runs 18) and Redis 7.2 to 8.8 (the range the redis-py client supports; `docker-compose.yml` runs 8.8).
+
 Start local PostgreSQL and Redis servers, then run database migrations:
 
 ```bash

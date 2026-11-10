@@ -189,7 +189,7 @@ def test_ci_tests_against_the_postgres_image_production_runs():
     assert re.search(r"^\s*image: \$\{\{ matrix\.image \}\}\s*$", job, re.M), job
     matrix_images = re.findall(r"^\s+image: (postgres:\S+)\s*$", job, re.M)
     assert compose_image in matrix_images
-    assert sorted(re.match(r"postgres:(\d+)", image).group(1) for image in matrix_images) == ["15", "16", "18"]
+    assert sorted(re.match(r"postgres:(\d+)", image).group(1) for image in matrix_images) == ["16", "17", "18"]
     for image in matrix_images:
         assert re.search(_PINNED, image), image
     needs = re.search(r"docker-build:.*?needs: \[([^\]]*)\]", ci, re.S).group(1)

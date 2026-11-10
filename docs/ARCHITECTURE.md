@@ -4,7 +4,7 @@ Architecture is the art of deciding which trade-offs you would prefer to defend 
 
 ## System Overview and Boundaries
 
-The platform is a headless, production-ready e-commerce backend exposing a uniform REST API. The codebase intentionally contains no frontend user interface; customer web shops and administrative tools integrate externally via JSON endpoints over TLS. The core system boundary comprises an asynchronous FastAPI web application running on Uvicorn, backed by PostgreSQL 15 for relational ACID persistence and Redis 7 for caching, rate limiting, and task queues. Asynchronous background jobs, scheduled maintenance, and webhook ingestion run through Celery workers and a Celery beat daemon. External third-party boundaries are confined to Stripe (for card payments, payment intents, checkout sessions, refunds, and webhooks) and an SMTP relay (for transactional customer and administrative email notifications).
+The platform is a headless, production-ready e-commerce backend exposing a uniform REST API. The codebase intentionally contains no frontend user interface; customer web shops and administrative tools integrate externally via JSON endpoints over TLS. The core system boundary comprises an asynchronous FastAPI web application running on Uvicorn, backed by PostgreSQL 18 for relational ACID persistence and Redis 8.8 for caching, rate limiting, and task queues. Asynchronous background jobs, scheduled maintenance, and webhook ingestion run through Celery workers and a Celery beat daemon. External third-party boundaries are confined to Stripe (for card payments, payment intents, checkout sessions, refunds, and webhooks) and an SMTP relay (for transactional customer and administrative email notifications).
 
 ## Component and Container Architecture
 
@@ -224,7 +224,7 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 - **Consequence:** Client requests must strictly conform to documented schemas. Input and output schemas must be decoupled where request and response structures differ.
 
 ### 11. Hermetic Local Tests with Multi-Service CI Validation
-- **Decision:** Local and unit tests run hermetically without external dependencies (mocked Stripe, isolated SQLite/Redis with `REDIS_PORT=1`). CI matrix workflows validate integration against real container services: PostgreSQL 15, 16 and 18, real Redis, and 7 time zones (separate jobs). Live Stripe and chaos runs were manual campaign stages (T4, T8).
+- **Decision:** Local and unit tests run hermetically without external dependencies (mocked Stripe, isolated SQLite/Redis with `REDIS_PORT=1`). CI matrix workflows validate integration against real container services: PostgreSQL 16, 17 and 18, real Redis, and 7 time zones (separate jobs). Live Stripe and chaos runs were manual campaign stages (T4, T8).
 - **Alternatives:** Executing all tests solely against SQLite in CI; mocking database engines universally; relying on shared remote staging environments.
 - **Reason:** SQLite ignores foreign keys by default and does not support PostgreSQL row-level locks (`SELECT ... FOR UPDATE`). Real-service CI jobs found defects that SQLite did not, including deadlocks and pool recovery behavior. Hermetic local defaults prevent test contamination of developer services.
 - **Consequence:** Rapid local development feedback combined with multi-environment CI validation (one workflow, 19 jobs).

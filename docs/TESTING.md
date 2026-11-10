@@ -7,12 +7,12 @@ Software that processes money cannot rely on good intentions or manual smoke tes
 ```mermaid
 flowchart TD
     E2E["E2E Tests (Stripe Test Mode, Stripe CLI, 54 live Stripe tests)"] --> Fuzz["Contract & Fuzz (Schemathesis, Hypothesis State Machines)"]
-    Fuzz --> Integration["Integration Tests (PostgreSQL 15/16/18, SQLite WAL, Real Redis, 2,752 cases)"]
+    Fuzz --> Integration["Integration Tests (PostgreSQL 16/17/18, SQLite WAL, Real Redis, 2,752 cases)"]
     Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, 2,707 cases)"]
 ```
 
 1. **Unit Tests:** Fast, isolated tests covering models, services, schema serialization, and money calculations. All external I/O (Stripe, Redis, SMTP) is mocked deterministically.
-2. **Integration Tests:** Executed across SQLite (local development) and PostgreSQL 15, 16, and 18 (CI). Tests verify row locking in payment paths, database CHECK constraints, lower(email) unique indexes, and Alembic migrations.
+2. **Integration Tests:** Executed across SQLite (local development) and PostgreSQL 16, 17, and 18 (CI). Tests verify row locking in payment paths, database CHECK constraints, lower(email) unique indexes, and Alembic migrations.
 3. **Property and State-Machine Tests:** Hypothesis generates pseudo-random inputs to find boundary bugs. Stateful tests (`PaymentChain`) exercise arbitrary sequences of orders, payments, cancellations, and refunds. One property test discovered that normalizing the German letter "ß" expands "0ß" into two characters ("0SS"), quietly invalidating ISO country code length invariants.
 4. **Contract and Fuzz Testing:** Schemathesis was run against the 4.0.0 OpenAPI document (54 paths), outside this suite. It uncovered unhandled 500 errors on NUL bytes (`\x00`) and lone surrogates, prompting global input sanitization.
 5. **E2E Tests (Stripe Test Mode):** Black-box tests driven against real Stripe test-mode endpoints (`api.stripe.com`) with webhook forwarding via the Stripe CLI.
@@ -32,7 +32,7 @@ flowchart TD
         secrets["secrets (gitleaks)"]
         test["test (SQLite & Coverage Gate)"]
         test_tz["test-timezones (7 Timezones)"]
-        test_pg["test-postgres (PG 15, 16, 18)"]
+        test_pg["test-postgres (PG 16, 17, 18)"]
         migration_compat["migration-compat (Previous Release)"]
         test_redis["test-redis (Real Redis Parity)"]
     end
@@ -54,7 +54,7 @@ flowchart TD
 - **secrets:** Scans git history for exposed credentials using `gitleaks`. `.gitleaks.toml` allowlists one placeholder: the JWT-shaped example of the `Token` response in `app/schemas/user.py` and the OpenAPI snapshot, only when the file and the exact placeholder value both match, so a real token in those files is still reported.
 - **test:** Executes the primary suite in parallel on SQLite, runs timing-sensitive tests sequentially, and enforces coverage gates.
 - **test-timezones:** Matrix testing payment and order logic across 7 timezones (including UTC, Pacific/Kiritimati, Pacific/Pago_Pago, Asia/Kathmandu, America/St_Johns, Europe/Bratislava, America/New_York).
-- **test-postgres:** Runs the whole suite on PostgreSQL 18 (the deployed image) and the database-sensitive subset on 15 and 16, including schema round-trip tests (`tests/integration/test_postgres_migration_roundtrip.py`) across every revision.
+- **test-postgres:** Runs the whole suite on PostgreSQL 18 (the deployed image) and the database-sensitive subset on 16 and 17, including schema round-trip tests (`tests/integration/test_postgres_migration_roundtrip.py`) across every revision.
 - **migration-compat:** Runs the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses against the current migrations on PostgreSQL 18 (`.github/scripts/migration_compat.sh`); that release's tests about the migrations themselves are left out. It ends at once when `migrations/` is unchanged since the tag.
 - **test-redis:** Tests Redis Lua scripts, token revocation, and concurrency on a real Redis 8.8 container (the deployed image).
 - **docker-build:** Builds the production container image and runs Trivy vulnerability scanning across the app and compose images.
