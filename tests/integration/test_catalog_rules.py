@@ -2,6 +2,7 @@
 and pages; what search scopes; the category list and tree; and that a
 product withdrawn from sale is nowhere to be seen."""
 
+import json
 from decimal import Decimal
 
 import pytest
@@ -9,7 +10,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from app.models.category import Category
-from app.models.product import Product
+from app.models.product import Product, ProductVariant
 
 API = "/api/v1"
 
@@ -157,6 +158,53 @@ def test_in_stock_filter_and_its_absence(client, db_session):
     # false means "do not filter", not "only what is sold out".
     assert sorted(_names(_listing(client, in_stock=False))) == ["Plenty", "Sold out"]
     assert sorted(_names(_listing(client))) == ["Plenty", "Sold out"]
+
+
+def test_in_stock_follows_the_variants_when_there_is_an_active_one(client, db_session):
+    category = _category(db_session, "Things")
+    stocked = _product(db_session, category, "Stocked variant", stock=0)
+    hidden = _product(db_session, category, "Inactive variant only", stock=0)
+    sold_out = _product(db_session, category, "Sold out variant", stock=5)
+    mixed = _product(db_session, category, "Inactive variant, own stock", stock=4)
+    db_session.add_all([
+        ProductVariant(product_id=stocked.id, sku="S-1", stock_quantity=3),
+        ProductVariant(product_id=hidden.id, sku="H-1", stock_quantity=3, is_active=False),
+        # The parent's own stock does not count once it has an active variant.
+        ProductVariant(product_id=sold_out.id, sku="O-1", stock_quantity=0),
+        ProductVariant(product_id=mixed.id, sku="M-1", stock_quantity=3, is_active=False),
+    ])
+    db_session.commit()
+
+    assert sorted(_names(_listing(client, in_stock=True))) == ["Inactive variant, own stock", "Stocked variant"]
+
+
+@pytest.mark.parametrize(
+    "stored,asked",
+    [
+        (True, True), (False, False), (5, 5), (5.5, 5.5), ("red", "red"),
+    ],
+)
+def test_characteristic_filter_matches_booleans_numbers_and_text(client, db_session, stored, asked):
+    category = _category(db_session, "Things")
+    for name, value in (("Match", stored), ("Other", "other")):
+        product = _product(db_session, category, name)
+        product.characteristics = {"k": {"name": "K", "value": value}}
+    db_session.commit()
+
+    body = _listing(client, characteristics=json.dumps({"k": asked}))
+
+    assert _names(body) == ["Match"]
+
+
+def test_characteristic_boolean_filter_separates_true_from_false(client, db_session):
+    category = _category(db_session, "Things")
+    for name, value in (("Yes", True), ("No", False)):
+        product = _product(db_session, category, name)
+        product.characteristics = {"waterproof": {"name": "Waterproof", "value": value}}
+    db_session.commit()
+
+    assert _names(_listing(client, characteristics='{"waterproof": true}')) == ["Yes"]
+    assert _names(_listing(client, characteristics='{"waterproof": false}')) == ["No"]
 
 
 def test_category_filter(client, db_session):

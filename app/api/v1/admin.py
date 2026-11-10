@@ -19,6 +19,7 @@ from app.api.v1.orders import (
     REFUND_KEY_HEADER_DESCRIPTION,
     _cents_to_decimal,
     _has_open_dispute,
+    _lock_order_and_reload,
     _provider_idempotency_key,
     _record_refund,
 )
@@ -1198,7 +1199,7 @@ async def list_payments(
     requires_manual_review or order_id, with sorting and pagination."""
     filters = []
     if requires_manual_review is not None:
-        filters.append(Payment.requires_manual_review == requires_manual_review)
+        filters.append(Payment.review_open if requires_manual_review else ~Payment.review_open)
     if order_id is not None:
         filters.append(Payment.order_id == order_id)
 
@@ -1223,7 +1224,12 @@ async def list_payments(
     ).scalars().all()
 
     return AdminPaymentListResponse(
-        items=[AdminPaymentResponse.model_validate(p) for p in payments],
+        items=[
+            AdminPaymentResponse.model_validate(p).model_copy(
+                update={"requires_manual_review": p.review_open}
+            )
+            for p in payments
+        ],
         total=total,
         page=pagination.page,
         size=pagination.size,
@@ -1278,8 +1284,6 @@ async def refund_flagged_payment(
 
     provider_key = _provider_idempotency_key("refund", order, idempotency_key)
 
-    # A resolved payment is no longer flagged, so a retry of a refund that went
-    # through ends here, with no call to the provider: nothing can move twice.
     if not (payment.status == "succeeded" and payment.requires_manual_review):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
@@ -1294,6 +1298,8 @@ async def refund_flagged_payment(
             detail="This payment is disputed; it cannot be refunded while the dispute is open",
         )
 
+    # A retry of a refund that went through ends here, with no call to the
+    # provider: nothing can move twice.
     remaining_cents = payment.amount - payment.amount_refunded
     if remaining_cents <= 0:
         raise HTTPException(
@@ -1333,25 +1339,18 @@ async def refund_flagged_payment(
             status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message
         ) from e
 
-    # Re-read and update payment under lock
-    payment = (
-        await db.execute(
-            select(Payment).where(Payment.id == payment_id).with_for_update().limit(1)
-        )
-    ).scalars().first()
-    assert payment is not None, "Payment row must exist for refund that was just created"
-
+    # Under the order's lock, like every refund event: a Dashboard refund's
+    # webhook recorded at the same time would otherwise overwrite this one's
+    # amount_refunded (or this one, it).
+    await db.run_sync(_lock_order_and_reload, order, payment)
     refund_row = await db.run_sync(
         _record_refund,
         payment,
         refund.id,
         refund.amount,
-        refund.status.value,
+        refund.provider_status or refund.status.value,
         source="admin",
     )
-
-    if payment.amount_refunded >= payment.amount:
-        payment.requires_manual_review = False
     payment.updated_at = utc_now()
     await db.commit()
 

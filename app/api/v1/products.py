@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -330,7 +330,14 @@ async def list_products(
     if filter_params.max_price is not None:
         stmt = stmt.where(Product.price <= filter_params.max_price)
     if filter_params.in_stock:
-        stmt = stmt.where(Product.stock_quantity > 0)
+        # Same rule as app/services/orders.py: a product with an active
+        # variant is bought through its variants, so their stock decides and
+        # the parent's own stock is ignored.
+        active_variants = ProductVariant.product_id == Product.id, ProductVariant.is_active
+        stmt = stmt.where(or_(
+            ~exists().where(*active_variants) & (Product.stock_quantity > 0),
+            exists().where(*active_variants, ProductVariant.stock_quantity > 0),
+        ))
     if filter_params.characteristics:
         for key, value in filter_params.characteristics.items():
             # Stored characteristics are structured ProductCharacteristic
@@ -345,7 +352,17 @@ async def list_products(
             # Python-side indexing Comparator used to build this
             # expression) - using .astext here raised AttributeError on
             # every request that passed a characteristics filter.
-            stmt = stmt.where(Product.characteristics[key]["value"].as_string() == str(value))
+            #
+            # .as_string() renders a JSON boolean as 'true'/'false' on
+            # Postgres but as '1'/'0' on SQLite (json_extract yields an
+            # integer), and str(True) is 'True' on neither. Numbers and
+            # strings come out alike on both.
+            if isinstance(value, bool):
+                dialect = db.get_bind().dialect.name
+                wanted = ("1" if value else "0") if dialect == "sqlite" else ("true" if value else "false")
+            else:
+                wanted = str(value)
+            stmt = stmt.where(Product.characteristics[key]["value"].as_string() == wanted)
     if filter_params.search_query:
         stmt = stmt.where(_matches_text(filter_params.search_query))
 

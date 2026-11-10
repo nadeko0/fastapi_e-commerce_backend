@@ -99,30 +99,6 @@ def test_invalidate_product_cache_removes_cached_product():
     assert redis.get_cached_product(5) is None
 
 
-def test_create_session_returns_id_and_get_session_reads_it_back():
-    redis = _service()
-
-    session_id = redis.create_session(42, {"role": "client"})
-
-    assert session_id.startswith("session:42:")
-    session = redis.get_session(session_id)
-    assert session["role"] == "client"
-
-
-def test_delete_session_removes_it():
-    redis = _service()
-    session_id = redis.create_session(42, {"role": "client"})
-
-    assert redis.delete_session(session_id) is True
-    assert redis.get_session(session_id) is None
-
-
-def test_get_session_returns_none_when_absent():
-    redis = _service()
-
-    assert redis.get_session("session:does-not-exist") is None
-
-
 def test_generic_get_setex_and_delete():
     redis = _service()
 
@@ -283,13 +259,6 @@ def test_get_cached_category_tree_returns_none_when_json_is_not_a_dict():
     assert redis._redis.get("category:tree") is None
 
 
-def test_get_session_returns_none_for_non_json_data():
-    redis = _service()
-    redis._redis.set("session:corrupt", "not-json")
-
-    assert redis.get_session("session:corrupt") is None
-
-
 def test_generic_get_returns_none_for_non_json_data():
     redis = _service()
     redis._redis.set("custom:corrupt", "not-json")
@@ -372,27 +341,6 @@ def test_get_cached_product_fails_open_on_connection_error(monkeypatch):
     _break(monkeypatch, redis, "get")
 
     assert redis.get_cached_product(1) is None
-
-
-def test_create_session_fails_open_on_connection_error(monkeypatch):
-    redis = _service()
-    _break(monkeypatch, redis, "set")
-
-    assert redis.create_session(1, {"role": "client"}) == ""
-
-
-def test_get_session_fails_open_on_connection_error(monkeypatch):
-    redis = _service()
-    _break(monkeypatch, redis, "get")
-
-    assert redis.get_session("session:1") is None
-
-
-def test_delete_session_fails_open_on_connection_error(monkeypatch):
-    redis = _service()
-    _break(monkeypatch, redis, "delete")
-
-    assert redis.delete_session("session:1") is False
 
 
 # --- Atomic cart mutations: failure and checkout clean-up ------------------

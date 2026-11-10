@@ -27,7 +27,16 @@ services:
       # real server: the container ran and reported healthy startup, but
       # nothing was reachable on the mapped host port because uvicorn was
       # listening on a different port than the one being forwarded to.
-      - "${DOCKER_API_PORT:-8000}:8000"
+      # DOCKER_API_BIND is the host address it is published on: the default
+      # is every interface; set 127.0.0.1 when the reverse proxy runs on the
+      # same host.
+      - "${DOCKER_API_BIND:-0.0.0.0}:${DOCKER_API_PORT:-8000}:8000"
+    # `docker stop` sends SIGTERM and, after stop_grace_period (default 10 s),
+    # SIGKILL. A /pay request can wait on Stripe 76.5 s in the worst case
+    # ((5 s connect + 20 s read) x 3 tries + backoff), so uvicorn is told to
+    # wait 90 s (timeout_graceful_shutdown in main.py) and Docker 100 s:
+    # grace period > graceful-shutdown timeout > longest provider wait.
+    stop_grace_period: 100s
     env_file:
       - .env
     # The unprivileged role (docker/postgres/initdb/10-app-role.sh), not

@@ -9,6 +9,8 @@ Setting `ENVIRONMENT=production` (or `staging`) activates fail-closed deployment
 - **Log Level:** `LOG_LEVEL` must not be `DEBUG`. Verbose debugging exposes sensitive payload internals that outlive the HTTP request.
 - **Password Hashing Cost:** `BCRYPT_ROUNDS` must be at least 12. Test suites lower this cost factor to 4 for execution speed, but production forbids cheap hashes to resist offline brute-force attacks.
 - **Payment Provider:** `PAYMENT_PROVIDER` must be set to `stripe`. The in-process `mock` provider marks orders as paid without moving funds and is prohibited outside development and test environments.
+- **Email Provider:** `EMAIL_PROVIDER` must be `smtp`. The `logging` provider drops every email (verification and password-reset links included) while reporting success.
+- **SMTP TLS:** The connection is upgraded with STARTTLS (use port 587; port 465 is not supported) and the server certificate is verified against the system CAs. `SMTP_TLS_VERIFY` must stay `true` (it may be `false` only in development and test, for a mail catcher with a self-signed certificate). A relay with a private CA is trusted by setting the standard `SSL_CERT_FILE` (or `SSL_CERT_DIR`) environment variable for the api and worker processes.
 - **Cryptographic Secrets and Placeholders:** Secrets must not contain default placeholders (`change-me`, `changeme`, `placeholder`, or test-mock prefixes) and must meet strict minimum byte lengths:
   - `JWT_SECRET_KEY`: Minimum length determined by `JWT_ALGORITHM` (32 bytes for HS256, 48 bytes for HS384, 64 bytes for HS512; RFC 7518 §3.2).
   - `STRIPE_SECRET_KEY`: Must be defined and non-placeholder.
@@ -30,6 +32,9 @@ flowchart LR
     App --> DB[(PostgreSQL)]
     App --> Cache[(Redis)]
 ```
+
+- **Published address:** compose publishes the API on `${DOCKER_API_BIND:-0.0.0.0}:${DOCKER_API_PORT:-8000}`. Set `DOCKER_API_BIND=127.0.0.1` when the proxy runs on the same host so the API cannot be reached around it; leave the default when the proxy is on another host.
+- **Shutdown:** on SIGTERM uvicorn waits `timeout_graceful_shutdown=90` s (root `main.py`) for requests in flight; compose gives the `api` container `stop_grace_period: 100s`. The longest wait is a Stripe call, 76.5 s worst case with default `STRIPE_*` settings ((5 s connect + 20 s read) x 3 tries + 1.5 s backoff). Raising `STRIPE_READ_TIMEOUT_SECONDS` or `STRIPE_MAX_NETWORK_RETRIES` means raising both values, keeping grace period > graceful-shutdown timeout > longest provider wait.
 
 ### Trusted Proxies and Client Resolution
 
@@ -90,7 +95,7 @@ All recurring jobs run strictly on UTC clocks:
 | `cleanup-inactive-accounts` | `cleanup_inactive_accounts` | Daily at 02:30 UTC | Executes GDPR Art. 17 erasures past `DATA_DELETION_GRACE_PERIOD_DAYS`. |
 | `update-product-stats` | `update_product_stats` | Every 1 hour | Caches the 20 best-selling products of the last 30 days (quantity, revenue) in Redis `product_stats`. |
 | `check-low-stock` | `check_low_stock` | Every 4 hours | Dispatches low-inventory notification emails to `ADMIN_EMAIL`. |
-| `cancel-expired-unpaid-orders` | `cancel_expired_unpaid_orders` | Every 5 minutes | Cancels orders unpaid after `UNPAID_ORDER_EXPIRE_MINUTES` (default 30 min) whose attempts have aged past `CHECKOUT_SESSION_EXPIRE_MINUTES`, closes older attempts at Stripe, and returns reserved inventory. |
+| `cancel-expired-unpaid-orders` | `cancel_expired_unpaid_orders` | Every 5 minutes | Cancels orders unpaid after `UNPAID_ORDER_EXPIRE_MINUTES` (default 30 min) whose attempts have aged past `CHECKOUT_SESSION_EXPIRE_MINUTES`, closes older attempts at Stripe, and returns reserved inventory. An attempt Stripe refuses to close is read back: if it is paid or being paid (its webhook late or failed), the order is left for the webhook and for reconciliation. |
 | `check-payment-reconciliation` | `check_payment_reconciliation` | Daily at 03:15 UTC | Reconciles local payment records against the Stripe API for discrepancy detection. |
 | `sweep-stripe-events` | `sweep_stripe_events` | Every 5 minutes | Re-publishes unhandled webhook events stranded by transient broker outages (`STRIPE_EVENT_SWEEP_AFTER_MINUTES`). |
 | `cleanup-expired-retention` | `cleanup_expired_retention` | Daily at 02:45 UTC | Anonymises deactivated accounts past `USER_DATA_RETENTION_DAYS` (GDPR Art. 5(1)(e)). |
@@ -172,6 +177,7 @@ Tune the following settings in `.env` based on instance resources. The defaults 
 | `RATE_LIMIT_SEARCH` | `"60/minute"` | Limit on catalog search queries. |
 | `RATE_LIMIT_AUTH` | `"20/minute"` | Limit on registration, login, and password-reset endpoints per IP. |
 | `RATE_LIMIT_CHECKOUT` | `"10/minute"` | Limit on order placement and payment execution per user. |
+| `RATE_LIMIT_CONSENT` | `"10/hour"` | Limit on consent changes per user: every `POST /legal/consent` and every `PATCH`/`PUT /users/me` that changes `marketing_consent` share one count. |
 | `RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS` | `"10/15 minutes"` | Hard lockout for a specific IP attempting to authenticate against an email. |
 | `RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL` | `"100/hour"` | Distributed guessing backstop locking an account across all IPs. |
 | `RATE_LIMIT_GUEST_CART` | `"100/hour"` | Limit on new guest cart creation per IP address. |

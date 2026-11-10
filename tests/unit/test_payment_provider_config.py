@@ -32,6 +32,8 @@ def _production(**overrides):
     values = {
         "ENVIRONMENT": "production",
         "PAYMENT_PROVIDER": "stripe",
+        # conftest sets EMAIL_PROVIDER=logging, which production refuses.
+        "EMAIL_PROVIDER": "smtp",
         # conftest lowers the cost to 4; a deployment must run at 12 or more.
         "BCRYPT_ROUNDS": 12,
         "STRIPE_SECRET_KEY": REAL_LOOKING_SECRET_KEY,
@@ -71,6 +73,40 @@ def test_unknown_provider_name_is_refused():
 def test_production_refuses_the_mock_provider():
     with pytest.raises(ValidationError, match="PAYMENT_PROVIDER"):
         _production(PAYMENT_PROVIDER="mock")
+
+
+def test_production_refuses_the_logging_email_provider():
+    with pytest.raises(ValidationError, match="EMAIL_PROVIDER"):
+        _production(EMAIL_PROVIDER="logging")
+
+
+def test_unknown_email_provider_name_is_refused():
+    with pytest.raises(ValidationError, match="EMAIL_PROVIDER"):
+        _settings(EMAIL_PROVIDER="sendgrid")
+
+
+def test_development_may_use_the_logging_email_provider():
+    assert _settings(ENVIRONMENT="development", EMAIL_PROVIDER="logging").EMAIL_PROVIDER == "logging"
+
+
+def test_production_refuses_unverified_smtp_tls():
+    with pytest.raises(ValidationError, match="SMTP_TLS_VERIFY"):
+        _production(SMTP_TLS_VERIFY=False)
+
+
+def test_development_may_talk_to_a_mail_catcher_with_a_self_signed_certificate():
+    assert _settings(ENVIRONMENT="development", SMTP_TLS_VERIFY=False).SMTP_TLS_VERIFY is False
+
+
+@pytest.mark.parametrize("minutes,valid", [(30, False), (31, True)])
+def test_checkout_session_lifetime_must_leave_stripes_30_minute_minimum(minutes, valid):
+    # expires_at is counted from the attempt's created_at, so 30 minutes
+    # would fall under Stripe's minimum by the time the call is made.
+    if valid:
+        assert _settings(CHECKOUT_SESSION_EXPIRE_MINUTES=minutes).CHECKOUT_SESSION_EXPIRE_MINUTES == 31
+    else:
+        with pytest.raises(ValidationError, match="CHECKOUT_SESSION_EXPIRE_MINUTES"):
+            _settings(CHECKOUT_SESSION_EXPIRE_MINUTES=minutes)
 
 
 @pytest.mark.parametrize(

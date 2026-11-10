@@ -7,9 +7,10 @@ from app.services.email.smtp_provider import SmtpEmailProvider
 def get_email_provider() -> EmailProvider:
     """Factory - swap this to switch email providers.
 
-    EMAIL_PROVIDER defaults to smtp in every environment. Set
-    EMAIL_PROVIDER=logging (as the test suite does) to suppress real sends
-    and only log, so local dev never needs a real SMTP server.
+    EMAIL_PROVIDER is "smtp" or "logging" (validated by Settings) and defaults
+    to smtp in every environment. Set EMAIL_PROVIDER=logging (as the test
+    suite does) to suppress real sends and only log, so local dev never needs
+    a real SMTP server. Production refuses "logging".
     """
     if settings.EMAIL_PROVIDER == "smtp":
         return SmtpEmailProvider()

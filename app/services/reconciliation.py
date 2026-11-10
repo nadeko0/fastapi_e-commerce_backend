@@ -38,6 +38,7 @@ from typing import Any
 
 from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import Row, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now
@@ -347,7 +348,17 @@ def reconcile_payments(
                 break
             continue
         consecutive_errors = 0
-        opened, resolved = record(db, payment_id, found, now)
+        try:
+            opened, resolved = record(db, payment_id, found, now)
+        except IntegrityError:
+            # Another run (the daily one and an admin's for one order) recorded
+            # the same new difference first (uix_payment_discrepancy). Theirs
+            # stands; this payment counts as an error and the run goes on.
+            db.rollback()
+            logger.warning("Reconciliation: payment %s was recorded by another run", payment_id)
+            result.errors += 1
+            result.error_payment_ids.append(payment_id)
+            continue
         result.checked += 1
         result.opened += opened
         result.resolved += resolved

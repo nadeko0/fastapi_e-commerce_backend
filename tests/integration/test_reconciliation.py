@@ -454,6 +454,43 @@ def test_the_run_stops_after_too_many_errors_in_a_row(shop, monkeypatch):
     assert len(flaky.calls) == 2
 
 
+def test_a_difference_another_run_recorded_first_does_not_stop_the_run(shop):
+    # The daily run and an admin's run for one order can record the same new
+    # difference at once; the second hit the unique index and the whole run
+    # died there (the task) or answered 500 (the admin route).
+    from conftest import TestingSessionLocal
+    from sqlalchemy import event
+
+    first, second = paid(shop)[1], paid(shop)[1]
+    for payment in (first, second):
+        payment.amount = 2600
+    shop.db.commit()
+    second_id = second.id
+    done = []
+
+    def other_run_first(session, flush_context, instances):
+        # Between this run's read of the payment's rows and its INSERT.
+        if done or not any(isinstance(o, PaymentDiscrepancy) and o.payment_id == second_id
+                           for o in session.new):
+            return
+        done.append(True)
+        other = TestingSessionLocal()
+        try:
+            other.add(PaymentDiscrepancy(
+                payment_id=second_id, kind=KIND_AMOUNT, subject="", ours="2600",
+                theirs="2500", detected_at=utc_now(), last_seen_at=utc_now()))
+            other.commit()
+        finally:
+            other.close()
+
+    event.listen(shop.db, "before_flush", other_run_first)
+    result = run(shop.db, StripePaymentProvider())
+
+    assert (result.checked, result.errors, result.aborted) == (1, 1, False)
+    assert result.error_payment_ids == [second.id]
+    assert sorted(d.payment_id for d in rows(shop.db)) == [first.id, second.id]
+
+
 def test_errors_that_are_not_in_a_row_do_not_stop_the_run(shop, monkeypatch):
     monkeypatch.setattr(settings, "RECONCILIATION_MAX_CONSECUTIVE_ERRORS", 2)
     first, second, third = _three_payments(shop)

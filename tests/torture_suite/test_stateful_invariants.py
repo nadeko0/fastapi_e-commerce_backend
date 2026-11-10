@@ -67,6 +67,7 @@ from payment_support import (
 from app import tasks
 from app.core.clock import utc_now
 from app.core.config import settings
+from app.core.currencies import MINIMUM_CHARGE
 from app.main import app
 from app.models.category import Category
 from app.models.order import Order
@@ -437,9 +438,14 @@ class CartWorld(RuleBasedStateMachine):
             ORDERS, json={"shipping_address_id": self.buyer.address_id},
             headers={**self.user_headers, "Idempotency-Key": new_key()}), 201, 400, 409, 422)
         if response.status_code == 422:
-            # An admin raised the stock so far that the total passed Numeric(10, 2):
-            # refused as a whole, nothing sold.
-            assert expected == 201 and "exceeds the maximum" in response.text, response.text
+            # An admin raised the stock so far that the total passed Numeric(10, 2),
+            # or the total is below Stripe's minimum charge: refused as a whole,
+            # nothing sold.
+            total = sum(Decimal(self._price(k)) * q for k, q in cart.items())
+            below = total < MINIMUM_CHARGE[settings.STORE_CURRENCY]
+            assert expected == 201, response.text
+            assert ("below the minimum" if below else "exceeds the maximum") in response.text, (
+                response.text, total)
             assert {k: self._stock(k) for k in self.keys} == stock_before
             return
         assert response.status_code == expected, (response.text, cart)
@@ -1613,7 +1619,7 @@ def test_bug_refund_after_an_unreported_refund_failure_is_a_500(client, db_sessi
 def _order_at_int32_max_stock(shop, admin):
     """An unpaid order of 1 unit, after which an admin sets the product's stock
     to the largest value the API accepts (Int32Max)."""
-    product = make_product(shop.db, "0.00", 2)
+    product = make_product(shop.db, "1.00", 2)
     buyer = shop.buyer()
     order = shop.order_of(buyer, product, 1)
     check(shop.client.put(f"{ADMIN}/products/{product.id}", json={"stock_quantity": INT32_MAX},

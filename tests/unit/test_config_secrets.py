@@ -32,6 +32,7 @@ def _settings(environment="production", **overrides):
         _env_file=None,
         ENVIRONMENT=environment,
         PAYMENT_PROVIDER="stripe",
+        EMAIL_PROVIDER="smtp",
         FRONTEND_URL="https://shop.example",
         # conftest lowers the cost to 4; a deployment must run at 12 or more.
         **{"BCRYPT_ROUNDS": 12, **_GOOD_SECRETS, **overrides},
@@ -75,7 +76,13 @@ def test_the_stripe_webhook_secret_default_is_rejected_in_production():
     # and anyone who knows it can sign a webhook.
     secrets = {k: v for k, v in _GOOD_SECRETS.items() if k != "STRIPE_WEBHOOK_SECRET"}
     with pytest.raises(ValidationError) as error:
-        Settings(_env_file=None, ENVIRONMENT="production", PAYMENT_PROVIDER="stripe", **secrets)
+        Settings(
+            _env_file=None,
+            ENVIRONMENT="production",
+            PAYMENT_PROVIDER="stripe",
+            EMAIL_PROVIDER="smtp",
+            **secrets,
+        )
     assert "STRIPE_WEBHOOK_SECRET" in str(error.value)
 
 

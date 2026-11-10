@@ -1,6 +1,6 @@
 # REST API Reference and Conventions
 
-Every API contract in release v5.0.0 is designed around standard HTTP semantics and deterministic data representations. Clients communicate with a uniform interface where resources, errors, authentication lifecycles, and caching rules follow RFC standards rather than framework idiosyncrasies.
+Every API contract in release v5.1.0 is designed around standard HTTP semantics and deterministic data representations. Clients communicate with a uniform interface where resources, errors, authentication lifecycles, and caching rules follow RFC standards rather than framework idiosyncrasies.
 
 Interactive OpenAPI documentation and Swagger UI are accessible at `/api/v1/docs` (with ReDoc at `/redoc` and OpenAPI JSON at `/api/v1/openapi.json`) in non-production environments. When `ENVIRONMENT=production`, all documentation endpoints answer 404 to avoid leaking internal route structures.
 
@@ -15,7 +15,7 @@ The API version prefix is mounted at `/api/v1` (configured via `settings.API_V1_
 | `admin` | 18 | Product catalog management, category creation, payment reconciliation, order review, statistics, listing and refunding flagged payments, and webhook event inspection or replay. |
 | `cart` | 6 | Guest and account cart management, item mutations, live pricing checks, and stock validation. |
 | `catalog` | 6 | Public read-only product listings, category trees, product detail retrieval, and catalog search by name and description. |
-| `legal` | 7 | Consent state tracking, privacy policies, terms of service, cookie disclosures, data export delivered inline via email, and account erasure. |
+| `legal` | 7 | Consent state tracking, privacy policies, terms of service, cookie disclosures (each document carries a fixed version and effective date, `last_updated`, that change only with its text; the terms state prices in `STORE_CURRENCY`), data export delivered inline via email, and account erasure. |
 | `orders` | 9 | Order creation, payment intent confirmation, Stripe Checkout sessions, payment history, cancellations, refunds, and Stripe webhook ingress. |
 | `users` | 20 | Registration (name optional), login with email normalisation, token refresh, logout, password reset lifecycles, email verification, profile management, and address book CRUD. |
 | `health` / probes | 3 | Operational health checks (`/health`), Kubernetes liveness probe (`/livez`), and readiness probe (`/readyz`). |
@@ -108,8 +108,8 @@ The API strictly adheres to RFC 9110 status code semantics:
 - **204 No Content:** Deleting an address (`DELETE /api/v1/users/addresses/{id}`) or a product (`DELETE /api/v1/admin/products/{id}`). Contains no body. `DELETE /api/v1/cart` and `DELETE /api/v1/cart/items/{product_id}` return 200 with the updated cart.
 - **400 vs 409 vs 422:**
   - `400 Bad Request`: Syntactically invalid payloads (non-JSON body, unreadable text), missing or invalid `Idempotency-Key` format, or invalid Stripe signature HMAC.
-  - `409 Conflict`: Request conflicts with current resource or inventory state (`insufficient-stock`, `idempotency-key-in-use`, an invalid order status transition, cancelling an order that is paid or no longer new (or, with `Retry-After: 60`, one whose payment attempt is still in progress), replaying a webhook event that has not failed). Also returned for ordering a variant-enabled product without selecting a variant, exceeding `MAX_PENDING_ORDERS_PER_USER`, retrying an admin refund on a settled payment, attempting to refund a disputed payment, when `/pay` cannot apply a payment success, or when the last active administrator requests erasure.
-  - `422 Unprocessable Content`: Syntactically well-formed JSON violating domain constraints (unknown properties, negative prices, order total exceeding 21,474,836.47, non-finite numbers, JSON depth exceeding 64, failed regex, `idempotency-key-reused`, or declined cards).
+  - `409 Conflict`: Request conflicts with current resource or inventory state (`insufficient-stock`, `idempotency-key-in-use`, an invalid order status transition, cancelling an order that is paid or no longer new (or, with `Retry-After: 60`, one whose payment attempt is still in progress), replaying a webhook event that has not failed). Also returned for ordering a variant-enabled product without selecting a variant, exceeding `MAX_PENDING_ORDERS_PER_USER`, a new payment attempt (`/pay` or `/checkout-session` with a new `Idempotency-Key`) on an order placed more than `UNPAID_ORDER_EXPIRE_MINUTES` ago (a retry with the key of an earlier attempt is still served), retrying an admin refund on a settled payment, attempting to refund a disputed payment, when `/pay` cannot apply a payment success, or when the last active administrator requests erasure.
+  - `422 Unprocessable Content`: Syntactically well-formed JSON violating domain constraints (unknown properties, negative prices, order total exceeding 21,474,836.47 or below Stripe's minimum charge for the store currency (0.50 USD, 0.50 EUR, 0.30 GBP and others; `MINIMUM_CHARGE` in `app/core/currencies.py`), non-finite numbers, JSON depth exceeding 64, failed regex, `idempotency-key-reused`, or declined cards).
 - **401 vs 403:**
   - `401 Unauthorized`: Missing, invalid, expired, or revoked Bearer token, or invalid login credentials. Includes `WWW-Authenticate: Bearer` challenge.
   - `403 Forbidden`: Authenticated identity lacks permission (non-admin accessing `/admin`), or account is inactive (`account-inactive`).
@@ -124,7 +124,9 @@ Financial and mutating order endpoints enforce the IETF draft `Idempotency-Key` 
 
 - **Enforced Routes:** `POST /api/v1/orders`, `POST /api/v1/orders/{order_id}/pay`, `POST /api/v1/orders/{order_id}/checkout-session`, `POST /api/v1/orders/{order_id}/refund`, and `POST /api/v1/admin/payments/{payment_id}/refund`.
 - **Format Requirements:** A string of 8 to 255 characters (a UUID is a good choice). Missing or out-of-range headers immediately receive 400 `idempotency-key-missing`.
-- **Payload Fingerprinting:** On `POST /orders`, `/pay` and `/checkout-session`, a canonical SHA-256 fingerprint is generated from validated payload fields. Replaying the identical key with different payload parameters triggers 422 `idempotency-key-reused`. The two refund routes store no fingerprint: Stripe compares the parameters, and a key it has already seen with different refund parameters gives 409 `idempotency-key-in-use`. `/pay` and `/checkout-session` answer the same 409 when Stripe reports such a key conflict.
+- **Payload Fingerprinting:** On `POST /orders`, `/pay` and `/checkout-session`, a canonical SHA-256 fingerprint is generated from validated payload fields. Replaying the identical key with different payload parameters triggers 422 `idempotency-key-reused`. The two refund routes store no fingerprint: Stripe compares the parameters, and a key it has already seen with different refund parameters gives 409 `idempotency-key-in-use`. `/pay` and `/checkout-session` answer the same 409 when Stripe reports such a key conflict. A key whose request died before the provider answered (its attempt left "processing") is answered 409 with `Retry-After` for `PAYMENT_ATTEMPT_STALE_AFTER_MINUTES`; after that, on both routes, the retry is sent to Stripe again with the same provider key.
+- **Cancelling an order:** an admin's cancellation (`PUT`/`PATCH /orders/{id}/status`) and the customer's (`POST /orders/{id}/cancel`) close the order's open payment attempts at Stripe after the commit (a Checkout Session is expired, a PaymentIntent cancelled), so a cancelled order whose stock is back on sale can no longer be paid.
+- **Placing an order:** two `POST /orders` of one account run one after the other (a lock on the user's row), so requests with different keys no longer place several orders from one cart or pass `MAX_PENDING_ORDERS_PER_USER`.
 - **Concurrent In-Flight Locks:** If a request arrives while an identical key is already being processed, the server yields 409 `idempotency-key-in-use`.
 - **Retention and TTL:**
   - Order creation keys are retained in PostgreSQL for `IDEMPOTENCY_KEY_TTL_HOURS` (default 24 hours). Periodic Celery cleanup tasks clear expired keys to allow reuse while preserving order history.
@@ -144,6 +146,7 @@ The API enforces strict data hygiene on all inputs:
 Collection endpoints consume standardized query parameters:
 - `page`: Page index (1-based integer, default 1, bounded to 32-bit signed integer).
 - `size`: Items per page (default 20, minimum 1, maximum 100).
+- `GET /api/v1/products` filters: `in_stock=true` lists a product that has an active variant only when an active variant has stock (the product's own stock is ignored then), and a product without an active variant when its own stock is above zero; `in_stock=false` does not filter. `characteristics` is a JSON object of name to value, e.g. `{"color": "red", "waterproof": true}`; strings, numbers and booleans match the stored value.
 - `sort_by`, `sort_order`: on the account lists, categories, admin payments, webhook events and discrepancies, `sort_by` is a field name and `sort_order` is `asc` (default when `sort_by` is given) or `desc`; without `sort_by`, or with an unknown field, each list keeps its own default order (newest first for orders, payments and webhook events; by id for addresses and categories; oldest detected first for discrepancies). `GET /api/v1/products` takes one combined `sort_by` (`name_asc`, `name_desc`, `price_asc`, `price_desc`, `created_at_asc`, `created_at_desc`), and any other value is 422. `GET /api/v1/admin/orders` also takes one combined `sort_by`, `<field>_asc` or `<field>_desc` with the field one of `id`, `created_at`, `updated_at`, `total_amount`, `status`, `payment_status` (`sort_order` is ignored there); any other value is 422, and without it the list is newest first.
 
 ## Caching and Conditional Requests (ETag)
@@ -160,7 +163,7 @@ Partial updates on `PATCH /api/v1/users/me`, `PATCH /api/v1/users/addresses/{id}
 - Merging is one level deep: an object value (`characteristics`, `attributes`) replaces the stored one whole; send the complete object. This is a deliberate difference from RFC 7396's recursive merge.
 - Explicit `null` clears nullable fields (attempting to set a required, non-nullable field to `null` yields 422).
 - Properties omitted from the payload remain completely unmodified.
-- `PATCH /api/v1/users/me` records timestamped consent audit entries when marketing consent changes.
+- `PATCH /api/v1/users/me` records timestamped consent audit entries when marketing consent changes. Consent changes (these and `POST /api/v1/legal/consent`) are limited per user by `RATE_LIMIT_CONSENT` (default `10/hour`), answering 429 over the limit; the stored `user_agent` is truncated to 512 characters.
 
 ## HEAD Method Semantics
 

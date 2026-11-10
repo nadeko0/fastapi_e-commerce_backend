@@ -116,6 +116,31 @@ def test_a_pending_refund_is_not_reported_as_completed(shop, paid, monkeypatch):
     assert _ledger(shop, order_id) == [("re_", 1999, "succeeded", "admin", False)]
 
 
+@pytest.mark.parametrize("stripe_status,counted", [("canceled", 0), ("requires_action", 1999)])
+def test_a_refund_stripe_answers_with_a_status_outside_the_folded_three_is_recorded_as_such(
+    shop, paid, monkeypatch, stripe_status, counted
+):
+    # The live provider folds canceled and requires_action into PENDING; the
+    # refund used to be recorded as pending, so a canceled one was counted as
+    # money on its way back and the charge could not be refunded again.
+    real_refund = StripePaymentProvider.create_refund
+
+    def _refund(self, **kwargs):
+        refund = real_refund(self, **kwargs)
+        refund.status, refund.provider_status = RefundStatus.PENDING, stripe_status
+        return refund
+
+    monkeypatch.setattr(StripePaymentProvider, "create_refund", _refund)
+    order_id = paid["order"]["id"]
+
+    response = shop.refund(paid["admin"], order_id)
+
+    assert response.status_code == 200, response.text
+    assert (response.json()["status"], response.json()["payment_status"]) == (stripe_status, "paid")
+    assert payment_rows(shop, order_id) == [("succeeded", 1999, counted, "USD", False)]
+    assert _ledger(shop, order_id) == [("re_", 1999, stripe_status, "admin", False)]
+
+
 def test_a_partial_refund_completing_does_not_refund_the_order(shop, paid, monkeypatch):
     _refunds_start(monkeypatch, RefundStatus.PENDING)
     order_id = paid["order"]["id"]
@@ -309,6 +334,47 @@ def test_a_refund_of_a_flagged_second_charge_leaves_the_order_alone(shop, paid):
         ("succeeded", 1999, 0, "USD", False), ("succeeded", 1999, 1999, "USD", True)]
     assert order_state(shop, order_id) == ("confirmed", "paid")
     assert second.amount_refunded == 0
+
+
+def test_an_admin_refund_of_a_flagged_second_charge_keeps_it_apart_from_the_paying_one(
+    shop, paid
+):
+    # The admin route used to clear the flag once the second charge was fully
+    # refunded. The charge then looked like the one that paid the order: its
+    # refund's webhook marked the paid order refunded, and the order's own
+    # /refund picked it (the newest unflagged success), so the charge that
+    # really paid the order could no longer be refunded.
+    from app.services.payment.types import PaymentIntent, PaymentIntentStatus
+
+    order_id = paid["order"]["id"]
+    flagged = Payment(order_id=order_id, provider="stripe", payment_intent_id="pi_second_charge",
+                      idempotency_key=uuid.uuid4().hex, amount=1999, currency="USD",
+                      status="succeeded", requires_manual_review=True)
+    shop.db.add(flagged)
+    shop.db.commit()
+    StripePaymentProvider._intents_by_id["pi_second_charge"] = PaymentIntent(
+        id="pi_second_charge", amount=1999, currency="USD",
+        status=PaymentIntentStatus.SUCCEEDED, client_secret="pi_second_charge_secret")
+
+    admin_refund = shop.client.post(f"/api/v1/admin/payments/{flagged.id}/refund",
+                                    headers={**paid["admin"], "Idempotency-Key": "second-charge-1"})
+    assert admin_refund.status_code == 200, admin_refund.text
+    reported = shop.webhook("refund.updated",
+                            _refund_object(flagged, admin_refund.json()["id"], 1999, "succeeded"))
+    assert reported.status_code == 200, reported.text
+
+    assert order_state(shop, order_id) == ("confirmed", "paid")
+    assert payment_rows(shop, order_id) == [
+        ("succeeded", 1999, 0, "USD", False), ("succeeded", 1999, 1999, "USD", True)]
+    listed = shop.client.get(f"/api/v1/orders/{order_id}/payments", headers=paid["admin"])
+    assert [p["requires_manual_review"] for p in listed.json()["items"]] == [False, False]
+
+    order_refund = shop.refund(paid["admin"], order_id)
+
+    assert order_refund.status_code == 200, order_refund.text
+    assert order_state(shop, order_id) == ("confirmed", "refunded")
+    assert payment_rows(shop, order_id) == [
+        ("succeeded", 1999, 1999, "USD", False), ("succeeded", 1999, 1999, "USD", True)]
 
 
 # -- Odd reports ---------------------------------------------------------------------

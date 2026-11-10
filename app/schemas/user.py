@@ -207,11 +207,6 @@ class RefreshTokenRequest(RequestBody):
 class LogoutRequest(RequestBody):
     refresh_token: str | None = None
 
-class TokenPayload(BaseModel):
-    sub: int  # user_id
-    exp: datetime
-    role: UserRole
-
 class PasswordReset(RequestBody):
     email: EmailStr
 
@@ -243,9 +238,6 @@ class PasswordResetConfirm(TokenBody, NewPassword):
     (what clients sent before 4.0.0, when it was ignored) is refused like
     any other unknown member."""
 
-
-class PasswordUpdate(NewPassword):
-    current_password: str
 
 class GDPRExport(BaseModel):
     """Schema for GDPR data export metadata"""

@@ -27,6 +27,7 @@ from app.services.payment.exceptions import (
     InvalidRequestError,
     PaymentProviderError,
 )
+from app.services.payment.types import CheckoutSessionStatus, PaymentIntentStatus
 from app.services.reconciliation import PENDING_INTENT_ID_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -130,20 +131,46 @@ def open_payment_attempts(
 
 def close_attempts_at_provider(provider, attempts) -> bool:
     """Make these attempts unpayable: a Checkout Session is expired, a
-    PaymentIntent cancelled. False when the provider could not be asked. A
-    refusal is an answer (the attempt was paid or closed meanwhile), and a
-    charge that got through is flagged for manual review by its webhook."""
+    PaymentIntent cancelled. False when one of them is not known to be
+    closed: the provider could not be asked, or it refused and the attempt
+    is not expired or canceled at the provider - it was paid (a webhook
+    that is late or failed), or is being paid. Treating every refusal as
+    closed let the expiry sweep cancel and restock an order its customer
+    had paid for."""
     closed = True
     for session_id, intent_id in attempts:
+        attempt = session_id or intent_id
         try:
             if session_id:
                 provider.expire_checkout_session(session_id)
             elif not intent_id.startswith(PENDING_INTENT_ID_PREFIX):
                 provider.cancel_payment_intent(intent_id)
         except (CardError, InvalidRequestError) as e:
-            logger.info("Attempt %s was not closed: %s", session_id or intent_id, e)
+            if e.code == "resource_missing":
+                # Unknown to the provider (another account's or mode's keys):
+                # nothing there can be paid.
+                logger.info("Attempt %s is unknown to the provider: %s", attempt, e)
+                continue
+            try:
+                if session_id:
+                    gone = (provider.retrieve_checkout_session(session_id).status
+                            == CheckoutSessionStatus.EXPIRED)
+                else:
+                    gone = (provider.retrieve_payment_intent(intent_id).status
+                            == PaymentIntentStatus.CANCELED)
+            except PaymentProviderError as read_error:
+                logger.warning("Attempt %s was not closed (%s) and could not be read: %s",
+                               attempt, e, read_error)
+                closed = False
+                continue
+            if gone:
+                logger.info("Attempt %s was already closed: %s", attempt, e)
+            else:
+                logger.warning("Attempt %s was not closed, it is paid or being paid: %s",
+                               attempt, e)
+                closed = False
         except PaymentProviderError as e:
-            logger.warning("Attempt %s could not be closed: %s", session_id or intent_id, e)
+            logger.warning("Attempt %s could not be closed: %s", attempt, e)
             closed = False
     return closed
 

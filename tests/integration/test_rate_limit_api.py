@@ -33,7 +33,7 @@ def limits(monkeypatch):
     lowers the one it is about: limits(RATE_LIMIT_SEARCH="2/minute")."""
     monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
     for name in (
-        "DEFAULT", "SEARCH", "AUTH", "CHECKOUT",
+        "DEFAULT", "SEARCH", "AUTH", "CHECKOUT", "CONSENT",
         "LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS", "LOGIN_FAILURES_PER_EMAIL",
     ):
         monkeypatch.setattr(settings, f"RATE_LIMIT_{name}", UNLIMITED)
@@ -154,6 +154,73 @@ def test_checkout_is_limited_per_user(client, limits, valid_registration_payload
     assert client.post(f"{API}/orders", json={}, headers=alice).status_code == 400
     assert client.post(f"{API}/orders", json={}, headers=alice).status_code == 429
     assert client.post(f"{API}/orders", json={}, headers=bob).status_code == 400
+
+
+def _consent(client, headers, marketing):
+    return client.post(
+        f"{API}/legal/consent",
+        json={"marketing_consent": marketing, "privacy_policy_accepted": True},
+        headers=headers,
+    )
+
+
+def test_consent_changes_are_limited_per_user_across_both_routes(
+    client, limits, valid_registration_payload
+):
+    alice = auth_header(client, valid_registration_payload)
+    bob = auth_header(client, valid_registration_payload, email="bob@example.com")
+    limits(RATE_LIMIT_CONSENT="3/hour")
+
+    assert _consent(client, alice, True).status_code == 200
+    # /users/me shares the count; a change there is the second.
+    assert client.patch(
+        f"{API}/users/me", json={"marketing_consent": False}, headers=alice
+    ).status_code == 200
+    # Not a change, so not counted; other fields are never counted.
+    assert client.patch(
+        f"{API}/users/me", json={"marketing_consent": False}, headers=alice
+    ).status_code == 200
+    assert client.patch(
+        f"{API}/users/me", json={"full_name": "Alice A"}, headers=alice
+    ).status_code == 200
+    assert _consent(client, alice, True).status_code == 200
+
+    blocked = _consent(client, alice, False)
+    assert blocked.status_code == 429
+    assert int(blocked.headers["Retry-After"]) > 0
+    blocked = client.put(f"{API}/users/me", json={"marketing_consent": False}, headers=alice)
+    assert blocked.status_code == 429
+    # Refused before anything was written.
+    status = client.get(f"{API}/legal/consent-status", headers=alice).json()
+    assert status["marketing_consent"] is True
+
+    # Another user is not affected.
+    assert _consent(client, bob, True).status_code == 200
+
+
+def test_consent_user_agent_is_stored_truncated(client, valid_registration_payload):
+    long_agent = "A" * 5000
+    short_agent = "pytest-agent/1.0"
+    payload = {**valid_registration_payload, "marketing_consent": True}
+    assert client.post(
+        f"{API}/users/register", json=payload, headers={"User-Agent": long_agent}
+    ).status_code == 202
+    token = login(client, payload["email"], payload["password"]).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    assert _consent(client, {**headers, "User-Agent": long_agent}, False).status_code == 200
+    assert client.patch(
+        f"{API}/users/me", json={"marketing_consent": True},
+        headers={**headers, "User-Agent": long_agent},
+    ).status_code == 200
+    assert _consent(client, {**headers, "User-Agent": short_agent}, False).status_code == 200
+
+    history = client.get(f"{API}/legal/consent-status", headers=headers).json()["consent_history"]
+    agents = [entry["user_agent"] for entry in history]
+    # Three registration entries, then the three changes above.
+    assert len(agents) == 6
+    assert agents[:5] == ["A" * 512] * 5
+    assert agents[5] == short_agent
 
 
 def test_auth_routes_are_limited_per_address_whoever_is_named(client, limits):

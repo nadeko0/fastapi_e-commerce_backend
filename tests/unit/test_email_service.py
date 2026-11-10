@@ -1,4 +1,5 @@
 import logging
+import ssl
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -260,8 +261,9 @@ def test_smtp_provider_send_success(monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def starttls(self):
+        def starttls(self, *, context=None):
             sent["starttls"] = True
+            sent["context"] = context
 
         def login(self, user, password):
             sent["login"] = (user, password)
@@ -276,6 +278,10 @@ def test_smtp_provider_send_success(monkeypatch):
 
     assert result is True
     assert sent["starttls"] is True
+    # The server certificate and host name must be verified.
+    assert isinstance(sent["context"], ssl.SSLContext)
+    assert sent["context"].verify_mode == ssl.CERT_REQUIRED
+    assert sent["context"].check_hostname is True
     assert sent["message"]["To"] == "user@example.com"
     assert sent["message"]["Subject"] == "subject"
     # Regression: smtplib.SMTP(host, port) with no timeout blocks on the OS
@@ -285,6 +291,36 @@ def test_smtp_provider_send_success(monkeypatch):
     # bounded timeout.
     assert sent["init_kwargs"].get("timeout") == provider.smtp_timeout
     assert sent["init_kwargs"]["timeout"] is not None
+
+
+def test_smtp_tls_verify_false_accepts_a_self_signed_mail_catcher(monkeypatch):
+    seen = {}
+
+    class _FakeServer:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self, *, context=None):
+            seen["context"] = context
+
+        def login(self, user, password):
+            pass
+
+        def send_message(self, message):
+            pass
+
+    monkeypatch.setattr(smtp_provider_module.smtplib, "SMTP", _FakeServer)
+    monkeypatch.setattr(smtp_provider_module.settings, "SMTP_TLS_VERIFY", False)
+
+    assert SmtpEmailProvider().send("user@example.com", "subject", "<p>body</p>") is True
+    assert seen["context"].verify_mode == ssl.CERT_NONE
+    assert seen["context"].check_hostname is False
 
 
 def test_smtp_provider_send_returns_false_and_does_not_raise_on_connection_refused(monkeypatch):
@@ -313,7 +349,7 @@ def test_smtp_provider_send_returns_false_and_does_not_raise_on_auth_failure(mon
         def __exit__(self, *a):
             return False
 
-        def starttls(self):
+        def starttls(self, *, context=None):
             pass
 
         def login(self, user, password):
@@ -358,7 +394,7 @@ def test_a_refused_recipient_is_not_written_to_the_log(monkeypatch, caplog):
         def __exit__(self, *exc):
             return False
 
-        def starttls(self):
+        def starttls(self, *, context=None):
             pass
 
         def login(self, *a):

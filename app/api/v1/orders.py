@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.clock import as_utc, utc_now
 from app.core.config import settings
+from app.core.currencies import MINIMUM_CHARGE
 from app.core.dependencies import AdminUser, Cache, CurrentUser, DbSession, Provider
 from app.core.errors import Problem, ProblemType
 from app.core.idempotency import (
@@ -42,6 +43,7 @@ from app.models.order_items import OrderItem
 from app.models.payment import Payment
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, PaymentRefund
 from app.models.product import Product, ProductVariant
+from app.models.user import User
 from app.schemas.common import Int32
 from app.schemas.order import (
     ORDER_TOTAL_MAX,
@@ -159,7 +161,9 @@ def _created_order(request: Request, response: Response, order: Order) -> OrderR
         403: {"description": "Email verification required before placing orders"},
         404: {"description": "Shipping address not found"},
         409: {"description": "A cart item is out of stock or no longer on sale"},
-        422: {"description": "The key was already used with a different shipping_address_id"},
+        422: {"description": "The key was already used with a different shipping_address_id, "
+                             "or the order total is above the maximum or below the payment "
+                             "provider's minimum charge for the store currency (0.50 USD)"},
     },
 )
 async def create_order(
@@ -218,6 +222,16 @@ async def create_order(
         ensure_same_request(existing.idempotency_fingerprint, fingerprint)
         return _created_order(request, response, existing)
 
+    # One order placement per user at a time, until this transaction ends:
+    # requests with different keys used to read the same cart and the same
+    # count of unpaid orders, and each placed an order (eight orders from one
+    # cart, past the cap). A short window stays between the first request's
+    # commit and its emptying of the cart in Redis. FOR NO KEY UPDATE: the
+    # foreign-key checks of rows referencing the user (FOR KEY SHARE) are
+    # not held up.
+    await db.execute(
+        select(User.id).where(User.id == current_user.id).with_for_update(key_share=True)
+    )
     try:
         cart = await redis.get_cart(current_user.id)
     except RedisError as e:
@@ -430,6 +444,16 @@ async def create_order(
             type=ProblemType.VALIDATION_ERROR,
             detail="Order total exceeds the maximum amount",
         )
+    # An order Stripe will not charge used to be placed anyway: it held its
+    # stock until it expired, and every /pay was refused.
+    minimum = MINIMUM_CHARGE.get(order.currency)
+    if minimum is not None and total_amount < minimum:
+        await db.rollback()
+        raise Problem(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            type=ProblemType.VALIDATION_ERROR,
+            detail=f"Order total is below the minimum charge of {minimum} {order.currency}",
+        )
     order.total_amount = total_amount
     await db.commit()
     await _drop_product_details(redis, products_with_cached_stock(
@@ -555,10 +579,12 @@ async def update_order_status(
         )
 
 
+    attempts: list[tuple[str | None, str]] = []
     if new_status == OrderStatus.CANCELLED:
         # Releases the stock create_order took (the one restock path, shared
         # with the customer's own cancel and the unpaid-order expiry).
         await db.run_sync(cancel_order_and_restock, order)
+        attempts = await db.run_sync(open_payment_attempts, order.id)
     else:
         order.status = new_status
         order.updated_at = utc_now()
@@ -568,6 +594,11 @@ async def update_order_status(
     ) if new_status == OrderStatus.CANCELLED else []
     await db.commit()
     await _drop_product_details(redis, restocked)
+    # After the commit, outside the transaction: an open Checkout Session or
+    # PaymentIntent of a cancelled order could still be paid, for stock that
+    # may already be sold again.
+    if attempts:
+        background_tasks.add_task(close_attempts_at_provider, get_payment_provider(), attempts)
 
 
     # The transition was validated above and no status moves to itself, so
@@ -633,11 +664,16 @@ async def cancel_own_order(
         )
 
     await db.run_sync(cancel_order_and_restock, order)
+    # Older than the window above, so its Checkout Session has expired, but a
+    # PaymentIntent (3D Secure left open) does not expire by itself.
+    attempts = await db.run_sync(open_payment_attempts, order.id)
     restocked = products_with_cached_stock(
         [(item.product_id, item.variant_id) for item in order.items]
     )
     await db.commit()
     await _drop_product_details(redis, restocked)
+    if attempts:
+        background_tasks.add_task(close_attempts_at_provider, get_payment_provider(), attempts)
 
     if not is_anonymised_email(current_user.email):
         background_tasks.add_task(
@@ -958,6 +994,21 @@ def _guard_order_payable(order: Order) -> None:
         )
 
 
+def _guard_payment_window_open(order: Order) -> None:
+    """
+    Shared by /pay and /checkout-session for a new attempt (a retry of an
+    existing one by its own key is not refused): an order is paid within
+    UNPAID_ORDER_EXPIRE_MINUTES of being placed. The expiry sweep spares an
+    order while an attempt of it is young, so a fresh attempt now and then
+    used to keep an order nobody paid for, and its stock, alive for good.
+    """
+    if order.created_at <= utc_now() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The payment window of this order has closed; place a new order",
+        )
+
+
 # Payment.payment_intent_id of an attempt until the provider has given it
 # a real id (the column is NOT NULL and unique): /pay stores the
 # PaymentIntent's id when it is created, and a Checkout Session attempt
@@ -1087,7 +1138,9 @@ _MANUAL_REVIEW_RESPONSE = {"status": "processed", "applied": False, "requires_ma
         409: {
             "description": "Order already paid, refunded or cancelled; another attempt for this order is in progress; "
                            "the Idempotency-Key belongs to an attempt still being processed; "
-                           "or the key was already used with different payment parameters",
+                           "the key was already used with different payment parameters; "
+                           "or the order's payment window has closed (a new key on an order placed "
+                           "more than UNPAID_ORDER_EXPIRE_MINUTES ago): place a new order",
             "headers": RETRY_AFTER_HEADER,
         },
         422: {"description": "Card declined by the payment provider (payment-declined), or the key was already used with a different request body"},
@@ -1118,6 +1171,13 @@ async def process_payment(
     Requires an `Idempotency-Key` header. Repeating a request with a key
     already used for this order returns the first attempt's outcome; a key
     already used with a different request body is answered 422.
+
+    Payment window: a new attempt (a new key, on this route or on
+    /checkout-session) is accepted only within UNPAID_ORDER_EXPIRE_MINUTES
+    (30 by default) of the order's `created_at`; after that it is a 409 and
+    the unpaid order is cancelled by the expiry task. A retry with the key of
+    an attempt started in time is still served. A card declined after the
+    window cannot be retried with a new key: the customer places a new order.
     """
 
     # Locked (SELECT ... FOR UPDATE) until the commit that records this
@@ -1191,6 +1251,8 @@ async def process_payment(
         retried_attempt = existing_payment
 
     _guard_order_payable(order)
+    if retried_attempt is None:
+        _guard_payment_window_open(order)
     await db.run_sync(
         _guard_no_attempt_in_flight, order,
         except_payment_id=retried_attempt.id if retried_attempt else None,
@@ -1423,7 +1485,9 @@ async def process_payment(
         409: {
             "description": "Order already paid, refunded or cancelled; another attempt for this order is in progress; "
                            "the Idempotency-Key belongs to an attempt still being processed; "
-                           "or the key was already used with different checkout session parameters",
+                           "the key was already used with different checkout session parameters; "
+                           "or the order's payment window has closed (a new key on an order placed "
+                           "more than UNPAID_ORDER_EXPIRE_MINUTES ago): place a new order",
             "headers": RETRY_AFTER_HEADER,
         },
         422: {"description": "The key was already used with a different request body"},
@@ -1454,6 +1518,11 @@ async def create_checkout_session(
     via /webhooks/stripe (checkout.session.completed/.expired/
     .async_payment_failed), never in this response. Both flows remain
     available side by side; this does not replace or change /pay.
+
+    Payment window: as on /pay, a new attempt is accepted only within
+    UNPAID_ORDER_EXPIRE_MINUTES (30 by default) of the order's `created_at`;
+    after that it is a 409 and the customer places a new order. A retry with
+    the key of a session started in time returns that session.
     """
     payload = payload or CheckoutSessionCreate()
 
@@ -1490,11 +1559,23 @@ async def create_checkout_session(
     # second Checkout Session for the order.
     retried_attempt = None
     if existing_payment:
+        # As in /pay: a request that died between recording its attempt and
+        # hearing from the provider left it "processing" with no session, and
+        # every retry of its key was a 409 for ever. Past the stale window it
+        # is "unknown" and sent again.
+        if (_is_checkout_attempt(existing_payment)
+                and existing_payment.status == "processing"
+                and not existing_payment.checkout_session_id
+                and existing_payment.created_at <= utc_now() - timedelta(
+                    minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES)):
+            existing_payment.status = "unknown"
         if existing_payment.status != "unknown" or not _is_checkout_attempt(existing_payment):
             return _replay_checkout_session(existing_payment, order)
         retried_attempt = existing_payment
 
     _guard_order_payable(order)
+    if retried_attempt is None:
+        _guard_payment_window_open(order)
     await db.run_sync(
         _guard_no_attempt_in_flight, order,
         except_payment_id=retried_attempt.id if retried_attempt else None,
@@ -1770,14 +1851,17 @@ async def refund_payment(
         for other in provider_refunds:
             # Only what this app counted can be overstated; a failed refund it
             # never recorded took nothing from amount_refunded.
+            other_status = other.provider_status or other.status.value
             if (other.id != refund.id and other.id in recorded
-                    and other.status.value in _REFUND_STATUSES_NOT_RETURNED):
+                    and other_status in _REFUND_STATUSES_NOT_RETURNED):
                 _apply_refund_object(db_session, payment_row, {
-                    "id": other.id, "status": other.status.value, "amount": other.amount,
+                    "id": other.id, "status": other_status, "amount": other.amount,
                 })
+        # Stripe's own status, not the folded one: a refund canceled at once
+        # was recorded as pending and counted as money on its way back.
         row = _record_refund(
-            db_session, payment_row, refund.id, refund.amount, refund.status.value,
-            source="admin",
+            db_session, payment_row, refund.id, refund.amount,
+            refund.provider_status or refund.status.value, source="admin",
         )
         _settle_refunds(db_session, order, payment_row)
         if _has_open_dispute(db_session, order.id, payment_row.id):
@@ -1859,7 +1943,7 @@ async def list_order_payments(
             currency=p.currency,
             transaction_id=p.payment_intent_id,
             checkout_session_id=p.checkout_session_id,
-            requires_manual_review=p.requires_manual_review,
+            requires_manual_review=p.review_open,
             created_at=p.created_at,
             refunds=[
                 OrderPaymentRefund(

@@ -182,12 +182,6 @@ def input_schema(
     return extend
 
 
-class TokenPayload(BaseModel):
-    """Schema for JWT token payload"""
-    sub: int | str  # Subject (user ID)
-    exp: datetime  # Expiration time
-    type: str  # Token type (access, refresh, reset)
-
 class Message(BaseModel):
     """The answer of a route that only confirms what it did."""
     message: str

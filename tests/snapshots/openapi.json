@@ -3648,9 +3648,11 @@
           },
           "status": {
             "enum": [
-              "succeeded",
               "pending",
-              "failed"
+              "requires_action",
+              "succeeded",
+              "failed",
+              "canceled"
             ],
             "title": "Status",
             "type": "string"
@@ -12175,7 +12177,7 @@
                 }
               }
             },
-            "description": "The key was already used with a different shipping_address_id",
+            "description": "The key was already used with a different shipping_address_id, or the order total is above the maximum or below the payment provider's minimum charge for the store currency (0.50 USD)",
             "headers": {
               "X-Request-ID": {
                 "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
@@ -12830,7 +12832,7 @@
     },
     "/api/v1/orders/{order_id}/checkout-session": {
       "post": {
-        "description": "Create a Stripe Checkout Session (the fully-hosted-redirect flow) for an\norder's total. Unlike /pay - which confirms a PaymentIntent server-side\nusing a payment_method_token the client already collected via\nStripe.js/Elements - this flow hands card entry/3DS/the entire payment\nUI to Stripe's own hosted page: the caller redirects the customer to the\nreturned `url`, and the eventual outcome is reported back asynchronously\nvia /webhooks/stripe (checkout.session.completed/.expired/\n.async_payment_failed), never in this response. Both flows remain\navailable side by side; this does not replace or change /pay.",
+        "description": "Create a Stripe Checkout Session (the fully-hosted-redirect flow) for an\norder's total. Unlike /pay - which confirms a PaymentIntent server-side\nusing a payment_method_token the client already collected via\nStripe.js/Elements - this flow hands card entry/3DS/the entire payment\nUI to Stripe's own hosted page: the caller redirects the customer to the\nreturned `url`, and the eventual outcome is reported back asynchronously\nvia /webhooks/stripe (checkout.session.completed/.expired/\n.async_payment_failed), never in this response. Both flows remain\navailable side by side; this does not replace or change /pay.\n\nPayment window: as on /pay, a new attempt is accepted only within\nUNPAID_ORDER_EXPIRE_MINUTES (30 by default) of the order's `created_at`;\nafter that it is a 409 and the customer places a new order. A retry with\nthe key of a session started in time returns that session.",
         "operationId": "create_checkout_session",
         "parameters": [
           {
@@ -12980,7 +12982,7 @@
                 }
               }
             },
-            "description": "Order already paid, refunded or cancelled; another attempt for this order is in progress; the Idempotency-Key belongs to an attempt still being processed; or the key was already used with different checkout session parameters",
+            "description": "Order already paid, refunded or cancelled; another attempt for this order is in progress; the Idempotency-Key belongs to an attempt still being processed; the key was already used with different checkout session parameters; or the order's payment window has closed (a new key on an order placed more than UNPAID_ORDER_EXPIRE_MINUTES ago): place a new order",
             "headers": {
               "Retry-After": {
                 "description": "Seconds to wait before repeating the request.",
@@ -13147,7 +13149,7 @@
     },
     "/api/v1/orders/{order_id}/pay": {
       "post": {
-        "description": "Charge an order's total via the payment provider, creating a PaymentIntent.\n\nRequires an `Idempotency-Key` header. Repeating a request with a key\nalready used for this order returns the first attempt's outcome; a key\nalready used with a different request body is answered 422.",
+        "description": "Charge an order's total via the payment provider, creating a PaymentIntent.\n\nRequires an `Idempotency-Key` header. Repeating a request with a key\nalready used for this order returns the first attempt's outcome; a key\nalready used with a different request body is answered 422.\n\nPayment window: a new attempt (a new key, on this route or on\n/checkout-session) is accepted only within UNPAID_ORDER_EXPIRE_MINUTES\n(30 by default) of the order's `created_at`; after that it is a 409 and\nthe unpaid order is cancelled by the expiry task. A retry with the key of\nan attempt started in time is still served. A card declined after the\nwindow cannot be retried with a new key: the customer places a new order.",
         "operationId": "process_payment",
         "parameters": [
           {
@@ -13290,7 +13292,7 @@
                 }
               }
             },
-            "description": "Order already paid, refunded or cancelled; another attempt for this order is in progress; the Idempotency-Key belongs to an attempt still being processed; or the key was already used with different payment parameters",
+            "description": "Order already paid, refunded or cancelled; another attempt for this order is in progress; the Idempotency-Key belongs to an attempt still being processed; the key was already used with different payment parameters; or the order's payment window has closed (a new key on an order placed more than UNPAID_ORDER_EXPIRE_MINUTES ago): place a new order",
             "headers": {
               "Retry-After": {
                 "description": "Seconds to wait before repeating the request.",

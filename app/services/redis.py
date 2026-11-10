@@ -595,34 +595,6 @@ class RedisService:
             return None
 
 
-    def create_session(self, user_id: int, session_data: dict) -> str:
-        try:
-            session_id = f"session:{user_id}:{utc_now().timestamp()}"
-            self._redis.set(
-                session_id,
-                self._serialize(session_data),
-                ex=timedelta(hours=24),
-            )
-            return session_id
-        except RedisError as e:
-            self._handle_redis_error(f"create_session: {str(e)}")
-            return ""
-
-    def get_session(self, session_id: str) -> dict | None:
-        try:
-            data = cast(str | None, self._redis.get(session_id))
-            return self._deserialize(data) if data else None
-        except RedisError as e:
-            self._handle_redis_error(f"get_session: {str(e)}")
-            return None
-
-    def delete_session(self, session_id: str) -> bool:
-        try:
-            return bool(self._redis.delete(session_id))
-        except RedisError as e:
-            self._handle_redis_error(f"delete_session: {str(e)}")
-            return False
-
     def delete(self, key: str) -> bool:
         try:
             return bool(self._redis.delete(key))

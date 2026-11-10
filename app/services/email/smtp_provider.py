@@ -12,6 +12,7 @@ rather than being lost.
 """
 import logging
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -28,6 +29,10 @@ class SmtpEmailProvider(EmailProvider):
         self.smtp_user = settings.SMTP_USER
         self.smtp_password = settings.SMTP_PASSWORD.get_secret_value()
         self.smtp_timeout = settings.SMTP_TIMEOUT_SECONDS
+        self.tls_context = ssl.create_default_context()
+        if not settings.SMTP_TLS_VERIFY:
+            self.tls_context.check_hostname = False
+            self.tls_context.verify_mode = ssl.CERT_NONE
         self.from_email = settings.EMAILS_FROM_EMAIL
         self.from_name = settings.EMAILS_FROM_NAME
 
@@ -43,7 +48,7 @@ class SmtpEmailProvider(EmailProvider):
         try:
             message = self._create_message(to_email, subject, html_content)
             with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.smtp_timeout) as server:
-                server.starttls()
+                server.starttls(context=self.tls_context)
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(message)
             return True

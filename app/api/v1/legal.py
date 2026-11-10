@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +7,7 @@ from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession
 from app.core.openapi import DocumentedRoute
-from app.core.rate_limit import check_login_attempt, clear_login_failures
+from app.core.rate_limit import check_consent_change, check_login_attempt, clear_login_failures
 from app.core.security import verify_password_async
 from app.models.user import User
 from app.schemas.legal import (
@@ -19,11 +19,20 @@ from app.schemas.legal import (
     LegalDocument,
     UserConsent,
 )
-from app.services.gdpr import GDPRService
+from app.services.gdpr import GDPRService, consent_user_agent
 
 router = APIRouter(prefix="/legal", tags=["legal"], route_class=DocumentedRoute)
 
 # Legal document content - In production, these should be stored in a database or CMS
+# Version and effective date are fixed per document: change them together with
+# the text below, never per request.
+PRIVACY_POLICY_VERSION = "1.0"
+PRIVACY_POLICY_EFFECTIVE = datetime(2026, 11, 10, tzinfo=UTC)
+TERMS_OF_SERVICE_VERSION = "1.0"
+TERMS_OF_SERVICE_EFFECTIVE = datetime(2026, 11, 10, tzinfo=UTC)
+COOKIE_POLICY_VERSION = "1.0"
+COOKIE_POLICY_EFFECTIVE = datetime(2026, 11, 10, tzinfo=UTC)
+
 PRIVACY_POLICY = """
 Privacy Policy for {company_name}
 
@@ -110,7 +119,7 @@ These terms constitute a legally binding agreement.
 - One account per user
 
 4. Orders and Payments
-- All prices in EUR including VAT
+- All prices are in {store_currency}
 - Payment required before shipping
 - Secure payment processing
 - Order confirmation via email
@@ -191,7 +200,6 @@ def get_privacy_policy():
     """
     Retrieve the current privacy policy.
     """
-    current_time = utc_now()
     return LegalDocument(
         content=PRIVACY_POLICY.format(
             company_name=settings.PROJECT_NAME,
@@ -202,10 +210,10 @@ def get_privacy_policy():
             technical_contact=settings.TECHNICAL_CONTACT,
             company_email=settings.COMPANY_EMAIL,
             retention_days=settings.USER_DATA_RETENTION_DAYS,
-            last_updated=current_time.strftime("%Y-%m-%d")
+            last_updated=PRIVACY_POLICY_EFFECTIVE.strftime("%Y-%m-%d")
         ),
-        version="1.0",
-        last_updated=current_time
+        version=PRIVACY_POLICY_VERSION,
+        last_updated=PRIVACY_POLICY_EFFECTIVE
     )
 
 @router.get("/terms-of-service", response_model=LegalDocument)
@@ -213,7 +221,6 @@ def get_terms_of_service():
     """
     Retrieve the current terms of service.
     """
-    current_time = utc_now()
     return LegalDocument(
         content=TERMS_OF_SERVICE.format(
             company_name=settings.PROJECT_NAME,
@@ -222,10 +229,11 @@ def get_terms_of_service():
             company_email=settings.COMPANY_EMAIL,
             technical_contact=settings.TECHNICAL_CONTACT,
             dpo_name=settings.DPO_NAME,
-            last_updated=current_time.strftime("%Y-%m-%d")
+            store_currency=settings.STORE_CURRENCY,
+            last_updated=TERMS_OF_SERVICE_EFFECTIVE.strftime("%Y-%m-%d")
         ),
-        version="1.0",
-        last_updated=current_time
+        version=TERMS_OF_SERVICE_VERSION,
+        last_updated=TERMS_OF_SERVICE_EFFECTIVE
     )
 
 @router.get("/cookie-policy", response_model=LegalDocument)
@@ -233,7 +241,6 @@ def get_cookie_policy():
     """
     Retrieve the current cookie policy.
     """
-    current_time = utc_now()
     return LegalDocument(
         content=COOKIE_POLICY.format(
             company_name=settings.PROJECT_NAME,
@@ -242,10 +249,10 @@ def get_cookie_policy():
             dpo_email=settings.DPO_EMAIL,
             essential_cookies=", ".join(settings.ESSENTIAL_COOKIES),
             cookie_consent_days=settings.COOKIE_CONSENT_EXPIRE_DAYS,
-            last_updated=current_time.strftime("%Y-%m-%d")
+            last_updated=COOKIE_POLICY_EFFECTIVE.strftime("%Y-%m-%d")
         ),
-        version="1.0",
-        last_updated=current_time
+        version=COOKIE_POLICY_VERSION,
+        last_updated=COOKIE_POLICY_EFFECTIVE
     )
 
 async def _load_user(db: AsyncSession, user_id: int) -> User:
@@ -283,6 +290,7 @@ async def update_user_consent(
 
     The endpoint also maintains a complete history of consent changes.
     """
+    await check_consent_change(current_user.id)
     gdpr_service = GDPRService(db)
     updated_consents = await gdpr_service.update_user_consent(
         # Loaded through `db`: the service mutates this object and commits
@@ -296,7 +304,7 @@ async def update_user_consent(
         # .client is always present, which would otherwise raise
         # AttributeError and turn a routine consent update into a 500.
         ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent")
+        user_agent=consent_user_agent(request),
     )
 
     return ConsentUpdateResponse(

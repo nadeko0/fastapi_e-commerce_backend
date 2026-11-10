@@ -1,6 +1,6 @@
 # Architecture and System Design
 
-Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v5.0.0.
+Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v5.1.0.
 
 ## System Overview and Boundaries
 
@@ -22,9 +22,9 @@ flowchart TD
             M1["1. OpenTelemetry (only when OTEL_* is set and the telemetry extra is installed)"]
             --> M2["2. SecurityHeadersMiddleware (HSTS, CSP, CORP, COOP)"]
             --> M3["3. RequestContextMiddleware (X-Request-ID, Traceparent)"]
-            --> M4["4. InFlightLimitMiddleware (only when MAX_IN_FLIGHT_REQUESTS is set)"]
-            --> M5["5. ForwardedClientMiddleware (TRUSTED_PROXIES Client Extraction)"]
-            --> M6["6. CORSMiddleware (Origins, Allowed Headers, Exposed Headers)"]
+            --> M4["4. CORSMiddleware (Origins, Allowed Headers, Exposed Headers)"]
+            --> M5["5. InFlightLimitMiddleware (only when MAX_IN_FLIGHT_REQUESTS is set)"]
+            --> M6["6. ForwardedClientMiddleware (TRUSTED_PROXIES Client Extraction)"]
             --> M7["7. BodySizeLimitMiddleware (MAX_REQUEST_BODY_BYTES, 413)"]
             --> M8["8. HeadMiddleware (RFC 9110 9.3.2 GET Execution)"]
         end

@@ -345,6 +345,20 @@ class RateLimiter:
 limiter = RateLimiter()
 
 
+async def check_consent_change(user_id: int) -> None:
+    """Count one consent change of this user; raise the 429 when the user
+    has used up RATE_LIMIT_CONSENT. Called by the routes that can change
+    consent, so that they share one count and /users/me is counted only
+    when the value actually changes. Fails open like the other limits."""
+    if not settings.RATE_LIMIT_ENABLED:
+        return
+    retry_after = await seconds_until_allowed(
+        f"rl:consent:{user_id}", parse_rate(settings.RATE_LIMIT_CONSENT)
+    )
+    if retry_after:
+        raise too_many_requests("Too many consent changes", retry_after)
+
+
 async def rate_limit(request: Request, response: Response) -> None:
     """The FastAPI dependency: FastAPI(dependencies=[Depends(rate_limit)]).
     Headers set on `response` are merged into the route's own response."""

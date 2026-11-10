@@ -64,7 +64,7 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
   - *Why not:* Partial resource updates implement RFC 7396 semantics one level deep. Nested object values (`characteristics`, `attributes`) replace the stored object as a whole rather than merging keys recursively. This is a deliberate design difference from RFC 7396.
   - *Where to start:* Implement recursive dictionary merging for nested JSON attributes.
 - **Admin Flagged Payment Refund Retry (409):**
-  - *Why not:* Retrying `POST /api/v1/admin/payments/{payment_id}/refund` after a successful refund returns HTTP 409 without calling the payment provider because the payment is no longer flagged for manual review (`requires_manual_review=False`).
+  - *Why not:* Retrying `POST /api/v1/admin/payments/{payment_id}/refund` after a successful refund returns HTTP 409 without calling the payment provider because nothing of the charge is left to refund. The payment keeps its manual-review flag (it marks the charge that did not pay the order); the API reports `requires_manual_review=false` once the charge is fully refunded.
   - *Where to start:* Persist a dedicated refund idempotency record to permit idempotent replays of admin refund operations.
 - **Live Product Image References:**
   - *Why not:* Orders snapshot product names, variant SKUs, and variant attributes at checkout time, but line item image URLs are read dynamically from current catalog records. Modifying or deleting product images changes or clears displayed thumbnails on past order views.

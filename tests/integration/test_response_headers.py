@@ -287,3 +287,33 @@ def test_the_headers_layer_is_outside_the_in_flight_limit(client):
     assert response.headers["retry-after"] == "1"
     for name in SECURITY_HEADERS:
         assert name in response.headers
+
+
+def test_the_shed_503_carries_cors_headers_for_an_allowed_origin(client):
+    from fastapi.middleware.cors import CORSMiddleware
+
+    from app.core.config import settings
+    from app.core.forwarded import ForwardedClientMiddleware
+
+    # The limiter is registered only when MAX_IN_FLIGHT_REQUESTS is set; it sits
+    # between CORS and the forwarded-client layer, so CORS must come first in
+    # the list (outermost first) of the real app.
+    classes = [m.cls for m in app.user_middleware]
+    assert classes.index(CORSMiddleware) < classes.index(ForwardedClientMiddleware)
+
+    async def index(request):
+        return PlainTextResponse("ok")
+
+    inner = Starlette(routes=[Route("/", index)])
+    origin = settings.BACKEND_CORS_ORIGINS[0]
+
+    stack = CORSMiddleware(
+        InFlightLimitMiddleware(inner, limit=0),
+        allow_origins=settings.BACKEND_CORS_ORIGINS,
+        allow_credentials=True,
+    )
+    with TestClient(stack) as probe:
+        response = probe.get("/", headers={"Origin": origin})
+
+    assert response.status_code == 503
+    assert response.headers["access-control-allow-origin"] == origin

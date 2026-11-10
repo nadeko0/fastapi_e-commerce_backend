@@ -34,7 +34,6 @@ from app.schemas.common import (
     ResponseMoney,
     published_values,
 )
-from app.services.payment.types import RefundStatus
 
 # Order.total_amount is Numeric(10, 2), so no amount paid or refunded for an
 # order has more digits than that. Checked by the amount fields themselves,
@@ -398,9 +397,9 @@ class RefundResponse(BaseModel):
     order_id: int
     amount: ResponseMoney
     currency: str
-    # What the provider reported for the refund just issued: pending is the
-    # 3-valued RefundStatus the provider layer folds Stripe's statuses into.
-    status: Annotated[str, published_values(s.value for s in RefundStatus)]
+    # The refund's status as recorded: Stripe's own value (a replay, or a
+    # refund a webhook already reported, says where it is now).
+    status: Annotated[str, published_values(REFUND_STATUSES)]
     payment_status: PaymentStatus
 
     model_config = ConfigDict(from_attributes=True)

@@ -29,7 +29,12 @@ from app.core.errors import Problem, ProblemType, sanitized_errors
 from app.core.location import set_location
 from app.core.openapi import CLEAR_GUEST_CART_COOKIE_RESPONSE, LOCATION_HEADER, DocumentedRoute
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password
-from app.core.rate_limit import check_login_attempt, clear_login_failures, login_unavailable
+from app.core.rate_limit import (
+    check_consent_change,
+    check_login_attempt,
+    clear_login_failures,
+    login_unavailable,
+)
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
     RefreshTokenError,
@@ -88,6 +93,7 @@ from app.services.email import (
     send_password_reset_email,
     send_welcome_email,
 )
+from app.services.gdpr import consent_user_agent
 from app.services.redis_async import TokenStateUnavailable
 
 logger = logging.getLogger(__name__)
@@ -163,7 +169,7 @@ async def register_user(
     a "you already have an account" email instead of the welcome one."""
     now = utc_now()
     client_ip = request.client.host if request.client else None
-    client_ua = request.headers.get("user-agent")
+    client_ua = consent_user_agent(request)
     # Hashed in both cases, before the database is asked, so that the
     # answer for an existing email does not come back a bcrypt early.
     hashed_password = await get_password_hash_async(user_in.password)
@@ -559,6 +565,11 @@ async def update_current_user(
             detail="User not found"
         )
 
+    # Outside the try below, which turns every exception into a 500.
+    new_consent = update_data.get("marketing_consent")
+    if new_consent is not None and new_consent != user.marketing_consent:
+        await check_consent_change(user.id)
+
     try:
         consent = update_data.pop("marketing_consent", None)
         if consent is not None and consent != user.marketing_consent:
@@ -570,7 +581,7 @@ async def update_current_user(
                 "granted": consent,
                 "timestamp": now.isoformat(),
                 "ip_address": request.client.host if request.client else None,
-                "user_agent": request.headers.get("user-agent"),
+                "user_agent": consent_user_agent(request),
             }]
             user.marketing_consent = consent
             user.marketing_consent_date = now

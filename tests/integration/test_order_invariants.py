@@ -29,6 +29,7 @@ from app import tasks
 from app.api.v1.orders import _cents_to_decimal, _decimal_to_cents
 from app.core.clock import utc_now
 from app.core.config import settings
+from app.core.currencies import MINIMUM_CHARGE
 from app.core.security import create_access_token, get_password_hash
 from app.models.address import Address
 from app.models.category import Category
@@ -164,7 +165,8 @@ def test_order_total_is_the_exact_decimal_sum_of_its_lines(client, db_session, l
 
     response = _checkout(client, headers, address_id)
 
-    if expected_total > ORDER_TOTAL_MAX:
+    # Above the column's maximum, or below Stripe's minimum charge: refused.
+    if expected_total > ORDER_TOTAL_MAX or expected_total < MINIMUM_CHARGE[settings.STORE_CURRENCY]:
         assert response.status_code == 422, response.text
         db_session.expire_all()
         for product, variant, _quantity in stocks:

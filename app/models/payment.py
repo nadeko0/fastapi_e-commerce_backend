@@ -8,8 +8,11 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    and_,
 )
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.clock import utc_now
 from app.models.base import Base
@@ -68,9 +71,23 @@ class Payment(Base):
     # order state (e.g. "succeeded" for an order already cancelled) - the
     # payment record is kept truthful but the order is NOT silently
     # overridden; this flag marks the row for manual reconciliation.
+    # The flag is never cleared: on a succeeded attempt it is what says "this
+    # charge did not pay the order" (_settle_refunds, the order's /refund).
+    # Whether a person still has to act is review_open.
     requires_manual_review: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+    @hybrid_property
+    def review_open(self) -> bool:
+        """Flagged and not yet fully refunded: the review still needs a person.
+        This is what the API publishes as requires_manual_review."""
+        return self.requires_manual_review and self.amount_refunded < self.amount
+
+    @review_open.inplace.expression
+    @classmethod
+    def _review_open_expression(cls) -> ColumnElement[bool]:
+        return and_(cls.requires_manual_review, cls.amount_refunded < cls.amount)
 
     order: Mapped["Order"] = relationship(back_populates="payments")
     discrepancies: Mapped[list["PaymentDiscrepancy"]] = relationship(back_populates="payment")

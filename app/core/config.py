@@ -296,6 +296,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_AUTH: str = Field("20/minute", pattern=RATE_LIMIT_PATTERN)
     # Creating an order, paying, opening a checkout session. Per user.
     RATE_LIMIT_CHECKOUT: str = Field("10/minute", pattern=RATE_LIMIT_PATTERN)
+    # Consent changes, one shared count per user: every POST /legal/consent
+    # and every PATCH/PUT /users/me that changes marketing_consent. Each
+    # change adds an entry to the user's consent history, which is never
+    # trimmed (evidence of consent, GDPR Art. 7(1)).
+    RATE_LIMIT_CONSENT: str = Field("10/hour", pattern=RATE_LIMIT_PATTERN)
     # Failed logins, two counts (see "Failed logins" in app/core/rate_limit.py).
     # A successful login or a completed password reset clears them.
     # The hard lock: failed logins for one email from one client address.
@@ -374,14 +379,19 @@ class Settings(BaseSettings):
     SMTP_USER: str
     SMTP_PASSWORD: SecretStr
     SMTP_TIMEOUT_SECONDS: int = 10
+    # STARTTLS checks the server certificate and host name against the system
+    # CAs (or SSL_CERT_FILE / SSL_CERT_DIR). false skips the check, for a local
+    # mail catcher with a self-signed certificate (Mailpit); staging and
+    # production refuse it (check_deployment_settings).
+    SMTP_TLS_VERIFY: bool = True
     EMAILS_FROM_EMAIL: str
     EMAILS_FROM_NAME: str
     EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = 48
     # Which EmailProvider app.services.email.get_email_provider() hands out:
-    # "smtp" actually sends via SMTP_HOST; "logging" (or anything else) only
-    # logs and never touches the network - used by tests/local dev so they
-    # don't need a real SMTP server.
-    EMAIL_PROVIDER: str = "smtp"
+    # "smtp" actually sends via SMTP_HOST; "logging" only logs and never
+    # touches the network - used by tests/local dev so they don't need a real
+    # SMTP server. Production refuses "logging" (check_deployment_settings).
+    EMAIL_PROVIDER: Literal["smtp", "logging"] = "smtp"
 
     # Which PaymentProvider app.services.payment.get_payment_provider()
     # hands out: "mock" is the in-process StripePaymentProvider, which
@@ -421,11 +431,12 @@ class Settings(BaseSettings):
     # flagged for manual review (a refund), not applied.
     UNPAID_ORDER_EXPIRE_MINUTES: int = Field(30, ge=1)
     # Lifetime of a Stripe Checkout Session (expires_at; Stripe accepts 30 min
-    # to 24 h, default 24 h) and how long a payment attempt that can still be
-    # paid (processing / requires_action / unknown) keeps its order from
+    # to 24 h from its call, while expires_at is computed from the attempt's
+    # created_at, so the minimum here is 31) and how long a payment attempt
+    # that can still be paid (processing / requires_action / unknown) keeps its order from
     # expiring or being cancelled by the customer. Without it an order could
     # be cancelled and restocked while its customer could still pay for it.
-    CHECKOUT_SESSION_EXPIRE_MINUTES: int = Field(60, ge=30, le=1440)
+    CHECKOUT_SESSION_EXPIRE_MINUTES: int = Field(60, ge=31, le=1440)
     # The most unpaid orders (new, payment pending or failed) one user can
     # hold at once. Each reserves stock until it is paid, cancelled or expired
     # (above), and only the checkout rate limit otherwise bounds how much a
@@ -540,6 +551,14 @@ class Settings(BaseSettings):
         # The mock provider marks every order paid without taking any money.
         if self.PAYMENT_PROVIDER != "stripe":
             problems.append("PAYMENT_PROVIDER must be 'stripe' outside development and test")
+        # The logging provider drops every email, including verification and
+        # password-reset links, while reporting success.
+        if self.EMAIL_PROVIDER != "smtp":
+            problems.append("EMAIL_PROVIDER must be 'smtp' outside development and test")
+        # Unverified STARTTLS hands SMTP_PASSWORD and every reset link to
+        # whoever sits between the app and the mail server.
+        if not self.SMTP_TLS_VERIFY:
+            problems.append("SMTP_TLS_VERIFY must be true outside development and test")
         for name, minimum_bytes in (
             ("JWT_SECRET_KEY", _JWT_KEY_MIN_BYTES.get(self.JWT_ALGORITHM, 32)),
             ("STRIPE_SECRET_KEY", 0),

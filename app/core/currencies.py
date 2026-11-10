@@ -2,6 +2,26 @@
 
 Nothing here is read from memory: each list names where it was copied from.
 """
+from decimal import Decimal
+
+# Stripe's minimum charge per currency, https://docs.stripe.com/currencies
+# ("Minimum charge amount by currency", read through Stripe's documentation
+# search in November 2026). It holds for a charge in the currency the account
+# settles in; a charge converted to another settlement currency must meet that
+# currency's minimum after conversion, which depends on the rate and is not
+# checked here. JPY and KRW are left out: STORE_CURRENCY refuses them.
+MINIMUM_CHARGE = {
+    currency: Decimal(amount) for currency, amount in (
+        ("USD", "0.50"), ("AED", "2.00"), ("ARS", "0.50"), ("AUD", "0.50"),
+        ("BRL", "0.50"), ("CAD", "0.50"), ("CHF", "0.50"), ("COP", "0.50"),
+        ("CZK", "15.00"), ("DKK", "2.50"), ("EUR", "0.50"), ("GBP", "0.30"),
+        ("HKD", "4.00"), ("HUF", "175.00"), ("IDR", "0.50"), ("ILS", "0.50"),
+        ("INR", "0.50"), ("MXN", "10.00"), ("MYR", "2.00"), ("NOK", "3.00"),
+        ("NZD", "0.50"), ("PHP", "0.50"), ("PLN", "2.00"), ("RON", "2.00"),
+        ("RUB", "0.50"), ("SEK", "3.00"), ("SGD", "0.50"), ("THB", "10.00"),
+        ("ZAR", "0.50"),
+    )
+}
 
 # Currencies whose smallest unit is not a hundredth, which STORE_CURRENCY
 # refuses. Copied from Stripe's own lists, not from memory:

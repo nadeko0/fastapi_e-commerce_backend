@@ -110,6 +110,19 @@ app.add_middleware(HeadMiddleware)
 # outside it, so a request that is shed never gets this far.
 app.add_middleware(BodySizeLimitMiddleware, limit=settings.MAX_REQUEST_BODY_BYTES)
 
+# X-Forwarded-For -> request.client, by TRUSTED_PROXIES and nothing else,
+# however the server was started (app/core/forwarded.py).
+app.add_middleware(ForwardedClientMiddleware)
+
+# Outside everything but CORS, request-id, security headers (and OTel): a request
+# that is going to be shed should cost nothing - no rate-limit Redis call.
+if settings.MAX_IN_FLIGHT_REQUESTS:
+    logger.info(f"Limiting in-flight requests to {settings.MAX_IN_FLIGHT_REQUESTS} per worker")
+    app.add_middleware(InFlightLimitMiddleware, limit=settings.MAX_IN_FLIGHT_REQUESTS)
+
+# Just outside the in-flight limit, so the shed 503 carries the CORS headers: a
+# browser client would otherwise see an opaque network error, not the 503 and its
+# Retry-After. A shed request still costs only this layer's origin check.
 logger.debug(f"Configuring CORS with origins: {settings.BACKEND_CORS_ORIGINS}")
 app.add_middleware(
     CORSMiddleware,
@@ -124,18 +137,8 @@ app.add_middleware(
     expose_headers=["Retry-After", "X-Request-ID", "RateLimit", "RateLimit-Policy", "ETag"],
 )
 
-# X-Forwarded-For -> request.client, by TRUSTED_PROXIES and nothing else,
-# however the server was started (app/core/forwarded.py).
-app.add_middleware(ForwardedClientMiddleware)
-
-# Outside everything but request-id, security headers (and OTel): a request that
-# is going to be shed should cost nothing - no rate-limit Redis call, no CORS handling.
-if settings.MAX_IN_FLIGHT_REQUESTS:
-    logger.info(f"Limiting in-flight requests to {settings.MAX_IN_FLIGHT_REQUESTS} per worker")
-    app.add_middleware(InFlightLimitMiddleware, limit=settings.MAX_IN_FLIGHT_REQUESTS)
-
 # Request id + traceparent, just inside the security headers and outside the
-# in-flight limit: the shed 503, the 404 and the 413 carry X-Request-ID and
+# CORS and in-flight layers: the shed 503, the 404 and the 413 carry X-Request-ID and
 # every log record has the ids (app/core/request_context.py). The 500 gets
 # it in server_error_handler.
 app.add_middleware(RequestContextMiddleware)

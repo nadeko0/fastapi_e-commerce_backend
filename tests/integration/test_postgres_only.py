@@ -246,6 +246,35 @@ def _run_holding_after_first_stock_update(actions):
     return results
 
 
+def test_placing_an_order_waits_for_another_placement_by_the_same_user(client, db_session):
+    # Requests with different keys used to read the same cart and the same
+    # count of unpaid orders side by side: eight orders from one cart, past
+    # the cap. The user's row is the lock that puts them in line.
+    shop = Shop(client, db_session)
+    product = shop.product(stock=5)
+    buyer = shop.buyer()
+    assert shop.add_to_cart(buyer, product).status_code == 200
+
+    holder = TestingSessionLocal()
+    holder.execute(text("SELECT id FROM users WHERE id = :id FOR NO KEY UPDATE"),
+                   {"id": buyer.user_id})
+    results = {}
+    thread = threading.Thread(target=lambda: results.update(r=shop.place_order(buyer)))
+    thread.start()
+    try:
+        assert _wait_until(lambda: _blocked_on_a_lock() >= 1), "POST /orders never waited"
+        time.sleep(0.3)
+        assert thread.is_alive(), "POST /orders went on while another placement held the user"
+        assert shop.stock(product) == 5
+    finally:
+        holder.commit()
+        holder.close()
+    thread.join(timeout=30)
+
+    assert results["r"].status_code == 201, results["r"].text
+    assert shop.stock(product) == 4
+
+
 def _cart_with(shop, buyer, products):
     for product in products:
         assert shop.add_to_cart(buyer, product).status_code == 200

@@ -106,7 +106,15 @@ def test_refund_flagged_payment_happy_path(client, db_session):
     shop.db.expire_all()
     updated_payment = shop.db.get(Payment, payment.id)
     assert updated_payment.amount_refunded == 3000
-    assert updated_payment.requires_manual_review is False
+    # Kept: it says this charge did not pay the order. The review is closed
+    # because the charge is fully refunded, and the API shows it so.
+    assert updated_payment.requires_manual_review is True
+    open_ids = [p["id"] for p in client.get(
+        f"{ADMIN}/payments?requires_manual_review=true", headers=admin).json()["items"]]
+    closed = {p["id"]: p for p in client.get(
+        f"{ADMIN}/payments?requires_manual_review=false", headers=admin).json()["items"]}
+    assert payment.id not in open_ids
+    assert closed[payment.id]["requires_manual_review"] is False
 
     order = shop.db.get(Order, order_id)
     assert order.status == "cancelled"

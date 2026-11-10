@@ -63,8 +63,8 @@ class Refund:
     currency: str
     status: RefundStatus
     # The status exactly as the provider reports it ("canceled" and
-    # "requires_action" too, which `status` folds into PENDING). Only the
-    # read operations fill it; None means `status.value` is all there is.
+    # "requires_action" too, which `status` folds into PENDING). The live
+    # provider always fills it; None means `status.value` is all there is.
     provider_status: str | None = None
 
 

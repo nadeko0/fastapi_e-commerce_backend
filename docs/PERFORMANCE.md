@@ -84,6 +84,7 @@ Configuration parameters in `app/core/config.py`:
 | `RATE_LIMIT_SEARCH` | `"60/minute"` | Product search endpoint limit |
 | `RATE_LIMIT_AUTH` | `"20/minute"` | Authentication route limit per IP |
 | `RATE_LIMIT_CHECKOUT` | `"10/minute"` | Order creation, payment, and checkout session limit |
+| `RATE_LIMIT_CONSENT` | `"10/hour"` | Consent changes per user (`POST /legal/consent`, `PATCH`/`PUT /users/me` when marketing consent changes) |
 | `RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS` | `"10/15 minutes"` | Hard lockout for a specific IP targeting an account |
 | `RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL` | `"100/hour"` | Distributed guessing backstop across all IPs |
 | `RATE_LIMIT_GUEST_CART` | `"100/hour"` | Limit on new guest cart creation per IP |

@@ -77,7 +77,7 @@ def test_weak_password_422_does_not_echo_it(client):
 
 
 def test_short_password_422_keeps_constraint_context(client):
-    # PasswordUpdate.new_password has min_length=8; ctx carries the 8, not the input.
+    # NewPassword.new_password has min_length=8; ctx carries the 8, not the input.
     response = _assert_same_but_input(
         client, "POST", f"{USERS}/password/reset/confirm",
         secret="sh0rt", json={"token": "sometoken", "new_password": "sh0rt"},

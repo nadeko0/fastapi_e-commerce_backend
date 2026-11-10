@@ -359,6 +359,139 @@ def test_expiry_sweep_checkout_session_attempt_provider_unreachable_leaves_order
     assert shop.stock(product) == 10
 
 
+def test_expiry_sweep_leaves_an_order_paid_on_the_hosted_page_whose_webhook_is_late(
+    client, db_session, tasks_db
+):
+    # Stripe refuses to expire a completed session. That refusal used to count
+    # as "closed": the sweep cancelled and restocked the order, and the late
+    # checkout.session.completed then flagged a charge for a cancelled order.
+    shop = Shop(client, db_session)
+    product = shop.product(price="10.00", stock=10)
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product, quantity=2)
+    assert shop.checkout_session(buyer, order["id"]).status_code == 200
+    payment = shop.payments(order["id"])[0]
+    session = StripePaymentProvider._sessions_by_id[payment.checkout_session_id]
+    session.status, session.payment_status = CheckoutSessionStatus.COMPLETE, "paid"
+
+    age = utc_now() - timedelta(minutes=settings.CHECKOUT_SESSION_EXPIRE_MINUTES + 1)
+    payment.created_at = age
+    shop.db.commit()
+    db_order = shop.order(order["id"])
+    db_order.created_at = age
+    shop.db.commit()
+
+    assert tasks.cancel_expired_unpaid_orders() == 0
+    assert (shop.order(order["id"]).status, shop.order(order["id"]).payment_status) == (
+        "new", "pending")
+    assert shop.stock(product) == 8
+
+
+def test_a_new_attempt_after_the_payment_window_is_refused_so_the_sweep_can_release_the_stock(
+    client, db_session, tasks_db
+):
+    # A fresh attempt every so often kept an unpaid order out of the sweep (it
+    # spares an order with a young attempt) and its stock off sale for good.
+    shop = Shop(client, db_session)
+    product = shop.product(price="10.00", stock=10)
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product, quantity=2)
+    db_order = shop.order(order["id"])
+    db_order.created_at = utc_now() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES + 1)
+    shop.db.commit()
+
+    assert shop.checkout_session(buyer, order["id"]).status_code == 409
+    assert shop.pay(buyer, order["id"]).status_code == 409
+    assert shop.payments(order["id"]) == []
+    assert tasks.cancel_expired_unpaid_orders() == 1
+    assert shop.stock(product) == 10
+
+
+def test_a_retry_of_an_attempt_made_in_time_is_still_served_after_the_window(client, db_session):
+    shop = Shop(client, db_session)
+    product = shop.product(price="10.00", stock=10)
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product, quantity=2)
+    first = shop.checkout_session(buyer, order["id"], key="session-key-in-time")
+    assert first.status_code == 200
+    db_order = shop.order(order["id"])
+    db_order.created_at = utc_now() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES + 1)
+    shop.db.commit()
+
+    again = shop.checkout_session(buyer, order["id"], key="session-key-in-time")
+
+    assert again.status_code == 200
+    assert again.json()["checkout_session_id"] == first.json()["checkout_session_id"]
+
+
+def test_a_checkout_key_whose_request_died_is_sent_again_once_stale(client, db_session):
+    # The request died after recording its attempt and before the provider
+    # answered: every retry of its key used to be a 409 with Retry-After, for ever.
+    shop = Shop(client, db_session)
+    product = shop.product(price="10.00", stock=10)
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product, quantity=2)
+
+    def died(self, **kwargs):
+        raise SoftTimeLimitExceeded()
+
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(StripePaymentProvider, "create_checkout_session", died)
+        with pytest.raises(SoftTimeLimitExceeded):
+            shop.checkout_session(buyer, order["id"], key="session-key-died")
+    [attempt] = shop.payments(order["id"])
+    assert (attempt.status, attempt.checkout_session_id) == ("processing", None)
+
+    assert shop.checkout_session(buyer, order["id"], key="session-key-died").status_code == 409
+    attempt.created_at = utc_now() - timedelta(
+        minutes=settings.PAYMENT_ATTEMPT_STALE_AFTER_MINUTES + 1)
+    shop.db.commit()
+
+    retried = shop.checkout_session(buyer, order["id"], key="session-key-died")
+
+    assert retried.status_code == 200, retried.text
+    [attempt] = shop.payments(order["id"])
+    assert attempt.checkout_session_id == retried.json()["checkout_session_id"]
+
+
+def test_a_customer_cancel_closes_a_3ds_payment_intent_left_open(client, db_session):
+    # Older than the window, so the cancel is allowed; a PaymentIntent waiting
+    # for 3D Secure does not expire by itself and could still be completed.
+    shop = Shop(client, db_session)
+    product = shop.product(price="10.00", stock=10)
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product, quantity=2)
+    assert shop.pay(buyer, order["id"], token=PAY_3DS).status_code == 200
+    payment = shop.payments(order["id"])[0]
+    payment.created_at = utc_now() - timedelta(minutes=settings.CHECKOUT_SESSION_EXPIRE_MINUTES + 1)
+    shop.db.commit()
+    intent_id = payment.payment_intent_id
+
+    assert shop.cancel(buyer, order["id"]).status_code == 200
+
+    assert shop.stock(product) == 10
+    assert StripePaymentProvider().retrieve_payment_intent(intent_id).status == "canceled"
+
+
+def test_an_admin_cancel_closes_the_orders_open_checkout_session(client, db_session):
+    # It used to leave the session payable for its whole lifetime, while the
+    # stock it held was back on sale.
+    shop = Shop(client, db_session)
+    product = shop.product(price="10.00", stock=10)
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, product, quantity=2)
+    assert shop.checkout_session(buyer, order["id"]).status_code == 200
+    session_id = shop.payments(order["id"])[0].checkout_session_id
+
+    response = client.put(f"/api/v1/orders/{order['id']}/status", json={"status": "cancelled"},
+                          headers=shop.admin())
+
+    assert response.status_code == 200, response.text
+    assert shop.stock(product) == 10
+    assert (StripePaymentProvider._sessions_by_id[session_id].status
+            == CheckoutSessionStatus.EXPIRED)
+
+
 def test_expiry_sweep_attempt_older_than_window_paid_during_cancel_leaves_order_alone(
     client, db_session, tasks_db, monkeypatch
 ):

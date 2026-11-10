@@ -6,7 +6,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from app.core.passwords import is_blocked_password
-from app.schemas.user import PasswordReset, PasswordUpdate, UserCreate, normalize_email
+from app.schemas.user import PasswordReset, UserCreate, normalize_email
 
 # Local parts and domains that email-validator accepts, in mixed case.
 _local = st.from_regex(r"[A-Za-z][A-Za-z0-9._]{0,15}[A-Za-z0-9]", fullmatch=True).filter(
@@ -69,8 +69,6 @@ def test_what_is_not_an_email_is_still_refused(email):
 def test_weak_or_unusable_passwords_are_refused(password, reason):
     with pytest.raises(ValidationError):
         UserCreate(**_registration(password=password))
-    with pytest.raises(ValidationError):
-        PasswordUpdate(current_password="x", new_password=password)
 
 
 @pytest.mark.parametrize(
@@ -79,7 +77,6 @@ def test_weak_or_unusable_passwords_are_refused(password, reason):
 )
 def test_good_passwords_are_accepted(password):
     assert UserCreate(**_registration(password=password)).password == password
-    assert PasswordUpdate(current_password="x", new_password=password).new_password == password
 
 
 # No composition rule: the only reasons to refuse an 8..72 character

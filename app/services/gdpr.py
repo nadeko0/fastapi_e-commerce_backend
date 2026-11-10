@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,16 @@ from app.core.config import settings
 from app.models.user import User
 from app.schemas.legal import ConsentUpdate
 from app.schemas.user import GDPRExport
+
+CONSENT_USER_AGENT_MAX = 512
+
+
+def consent_user_agent(request: Request) -> str | None:
+    """The User-Agent to store in a consent history entry. Cut short: the
+    header can be ~16 KiB, the entries are kept for good and the row is
+    loaded on every authenticated request."""
+    value = request.headers.get("user-agent")
+    return None if value is None else value[:CONSENT_USER_AGENT_MAX]
 
 
 def _row(obj, fields: tuple[str, ...]) -> dict:

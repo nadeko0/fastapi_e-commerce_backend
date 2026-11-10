@@ -28,20 +28,6 @@ class CategoryCreate(RequestBody, CategoryBase):
             raise ValueError('parent_id must be a positive integer')
         return v
 
-class CategoryUpdate(RequestBody):
-    """Schema for updating an existing category"""
-    name: str | None = Field(None, min_length=2, max_length=100)
-    description: str | None = None
-    parent_id: Int32 | None = None
-    metadata: dict | None = None
-
-    @field_validator('parent_id')
-    @classmethod
-    def validate_parent_id(cls, v):
-        if v is not None and v <= 0:
-            raise ValueError('parent_id must be a positive integer')
-        return v
-
 class CategoryInDB(CategoryBase):
     """Internal schema with all category fields"""
     id: int

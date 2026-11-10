@@ -29,6 +29,8 @@ _PRODUCTION_ENV = {
     "SMTP_PASSWORD": "an-smtp-app-password",
     "STRIPE_WEBHOOK_SECRET": "whsec_" + "w" * 32,
     "PAYMENT_PROVIDER": "stripe",
+    # conftest sets EMAIL_PROVIDER=logging, which production refuses.
+    "EMAIL_PROVIDER": "smtp",
     # conftest lowers the cost to 4; a deployment must run at 12 or more.
     "BCRYPT_ROUNDS": "12",
     "FRONTEND_URL": "https://shop.example",

@@ -482,6 +482,43 @@ def test_the_policies_name_the_controller_and_how_to_reach_the_dpo(client):
         assert "{" not in content and "}" not in content
 
 
+DOCUMENTS = ("privacy-policy", "terms-of-service", "cookie-policy")
+
+
+def test_each_document_keeps_its_effective_date_and_version_whatever_the_clock_says(
+    client, monkeypatch
+):
+    from datetime import UTC, datetime
+
+    from app.api.v1 import legal
+
+    seen = {}
+    for label, moment in (
+        ("first", datetime(2031, 1, 2, 3, 4, tzinfo=UTC)),
+        ("second", datetime(2032, 5, 6, 7, 8, tzinfo=UTC)),
+    ):
+        monkeypatch.setattr(legal, "utc_now", lambda moment=moment: moment)
+        seen[label] = {name: client.get(f"{LEGAL_PREFIX}/{name}").json() for name in DOCUMENTS}
+
+    assert seen["first"] == seen["second"]
+    for body in seen["first"].values():
+        assert body["version"] == "1.0"
+        assert body["last_updated"].startswith("2026-11-10T00:00:00")
+        assert "Last Updated: 2026-11-10" in body["content"]
+
+
+def test_the_terms_state_the_configured_store_currency_and_no_vat_claim(client, monkeypatch):
+    from app.core.config import settings
+
+    for currency in ("USD", "EUR", "GBP"):
+        monkeypatch.setattr(settings, "STORE_CURRENCY", currency)
+
+        terms = client.get(f"{LEGAL_PREFIX}/terms-of-service").json()["content"]
+
+        assert f"All prices are in {currency}" in terms
+        assert "including VAT" not in terms
+
+
 def test_a_consent_update_with_a_missing_field_is_422(client):
     token = _register_and_login(client, _valid_registration_payload())
 

@@ -42,7 +42,9 @@ The application uses Pydantic Settings (`app/core/config.py`). The following set
 | `POSTGRES_DB` | PostgreSQL database name | `ecommerce` |
 | `APP_DB_USER`, `APP_DB_PASSWORD` | Application's restricted database role, required by Docker Compose | See `.env.example` |
 | `REDIS_HOST` | Redis server hostname or IP | `localhost` (or `redis` inside Docker Compose) |
-| `SMTP_HOST` | Mail transfer agent hostname | `localhost` |
+| `EMAIL_PROVIDER` | `smtp` (default) sends mail; `logging` only logs and is refused in `staging` and `production` | `logging` for local work without a mail server |
+| `SMTP_HOST` | Mail transfer agent hostname. The connection is upgraded with STARTTLS (port 587; port 465 is not supported) and the server certificate is verified against the system CAs. For a relay with a private CA, set `SSL_CERT_FILE` (or `SSL_CERT_DIR`) in the environment of the api and worker processes | `localhost` |
+| `SMTP_TLS_VERIFY` | `true` (default) verifies the SMTP server certificate and host name; `false` skips the check for a local mail catcher with a self-signed certificate and is refused in `staging` and `production` | `false` with Mailpit |
 | `SMTP_USER` | Mail authentication username | Local username or placeholder |
 | `SMTP_PASSWORD` | Mail authentication password | Local password or placeholder |
 | `EMAILS_FROM_EMAIL` | Sender address on transactional emails | `noreply@example.com` |
@@ -53,7 +55,7 @@ The application uses Pydantic Settings (`app/core/config.py`). The following set
 The `ENVIRONMENT` variable dictates security constraints and runtime behavior:
 - `development`: Automatically forces `DEBUG=True`, `RELOAD=True`, and `WORKERS=1`. `DB_POOL_SIZE` and `DB_MAX_OVERFLOW` are halved with a floor of 5 (at the defaults: 5 and 5). Interactive OpenAPI documentation is enabled at `/api/v1/docs` and `/redoc`. Deployment secret strength checks are skipped.
 - `test`: For a non-production environment without the development overrides (pytest itself runs as `development` unless `ENVIRONMENT` is already set). Allows `LOG_LEVEL=DEBUG`, skips production secret checks, and maintains interactive documentation.
-- `staging` and `production`: Enforces strict production deployment gates in `Settings.check_deployment_settings`. Forbids `LOG_LEVEL=DEBUG`, requires `BCRYPT_ROUNDS >= 12`, enforces `PAYMENT_PROVIDER=stripe`, mandates non-placeholder secrets meeting minimum length requirements, and requires `FRONTEND_URL` to start with `https://`. In `production`, interactive documentation (`/api/v1/docs`, `/redoc`, and `/api/v1/openapi.json`) is disabled (returns 404).
+- `staging` and `production`: Enforces strict production deployment gates in `Settings.check_deployment_settings`. Forbids `LOG_LEVEL=DEBUG`, requires `BCRYPT_ROUNDS >= 12`, enforces `PAYMENT_PROVIDER=stripe`, `EMAIL_PROVIDER=smtp` and `SMTP_TLS_VERIFY=true`, mandates non-placeholder secrets meeting minimum length requirements, and requires `FRONTEND_URL` to start with `https://`. In `production`, interactive documentation (`/api/v1/docs`, `/redoc`, and `/api/v1/openapi.json`) is disabled (returns 404).
 
 ### 3. Running Services Locally
 
@@ -116,7 +118,7 @@ docker compose --profile migrate run --rm migrate
 > Never attempt to run `docker compose exec api alembic upgrade head`. The runtime application role has no DDL permissions, and Alembic will fail with a PostgreSQL permission denied error.
 
 Published host ports:
-- API: `http://localhost:8000` (controlled by `DOCKER_API_PORT`, container binds to internal 8000)
+- API: `http://localhost:8000` (port controlled by `DOCKER_API_PORT`, bind address by `DOCKER_API_BIND`, default `0.0.0.0`; set `127.0.0.1` to keep it behind a same-host proxy; the container binds to internal 8000)
 - PostgreSQL: `127.0.0.1:5432` (loopback only, controlled by `DOCKER_POSTGRES_PORT`)
 - Redis: `127.0.0.1:6379` (loopback only, controlled by `DOCKER_REDIS_PORT`)
 

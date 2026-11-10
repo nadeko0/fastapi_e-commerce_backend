@@ -55,7 +55,7 @@ def test_operation_ids_are_unique_and_short():
         ("OrderPaymentRefund", "source", {"admin", "provider"}),
         ("OrderPaymentDispute", "status", {"won", "lost", "prevented", "needs_response", "under_review",
                                            "warning_needs_response", "warning_under_review", "warning_closed"}),
-        ("RefundResponse", "status", {"pending", "succeeded", "failed"}),
+        ("RefundResponse", "status", {"pending", "requires_action", "succeeded", "failed", "canceled"}),
         ("CheckoutSessionResponse", "status", {"pending", "requires_action", "paid", "failed"}),
         ("WebhookEventResponse", "status", {"received", "processing", "processed", "retrying", "failed"}),
         ("ConsentUpdateResponse", "status", {"success"}),
