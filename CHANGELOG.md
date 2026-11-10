@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.0] - 2026-11-10
+
+A MINOR release: fixes from a full review of payments, orders, configuration and the catalog, with new settings (`RATE_LIMIT_CONSENT`, `SMTP_TLS_VERIFY`, `DOCKER_API_BIND`) and two refund statuses newly published in the OpenAPI document. No route, field or parameter was removed.
+
+Upgrade notes: `ENVIRONMENT=staging` and `production` now refuse to start with `EMAIL_PROVIDER=logging` or `SMTP_TLS_VERIFY=false`; `EMAIL_PROVIDER` accepts only `smtp` and `logging`; `CHECKOUT_SESSION_EXPIRE_MINUTES` must be at least 31. Development and test accept the logging provider and a mail catcher with a self-signed certificate (`SMTP_TLS_VERIFY=false`).
+
+### Fixed
+- A flagged second charge refunded through `POST /admin/payments/{id}/refund` keeps its manual-review flag in the database, which marks it as the charge that did not pay the order. Clearing it made the refund's webhook mark the paid order refunded, and the order's own `POST /orders/{id}/refund` then picked the already refunded charge, so the charge that paid the order could no longer be refunded through the API. The API still reports `requires_manual_review=false` once such a charge is fully refunded (admin payment list and its filter, order payments view), and the admin route records the refund under the order's lock, like every refund event.
+- The expiry sweep no longer cancels and restocks an order that its customer paid for while the webhook was late or had failed: when Stripe refuses to expire a session or cancel a PaymentIntent, the attempt is read back, and one that is paid or being paid keeps the order for the webhook and for reconciliation. An attempt Stripe does not know at all still counts as closed.
+- Cancelling an order (admin `PUT`/`PATCH /orders/{id}/status`, customer `POST /orders/{id}/cancel`) closes its open payment attempts at Stripe after the commit. A Checkout Session of a cancelled order used to stay payable for its whole lifetime while its stock was back on sale.
+- A new payment attempt (`/pay` or `/checkout-session` with a new `Idempotency-Key`) on an order placed more than `UNPAID_ORDER_EXPIRE_MINUTES` ago is answered 409. A fresh attempt now and then kept an unpaid order, and its stock, out of the expiry sweep for good. A retry with the key of an earlier attempt is still served.
+- A `/checkout-session` key whose request died before Stripe answered is sent to Stripe again once older than `PAYMENT_ATTEMPT_STALE_AFTER_MINUTES`, as on `/pay`. Every retry used to be answered 409 with `Retry-After` for ever.
+- Two `POST /orders` of one account run one after the other (a `FOR NO KEY UPDATE` lock on the user's row). With different keys they used to read the same cart and the same count of unpaid orders: eight parallel requests placed eight orders from one cart and passed `MAX_PENDING_ORDERS_PER_USER`. A short window remains between the first request's commit and the emptying of the cart in Redis.
+- An order whose total is below Stripe's minimum charge for the store currency (0.50 USD, 0.50 EUR, 0.30 GBP and the other currencies Stripe lists) is answered 422 and takes no stock. It used to be placed, hold its stock until it expired, and fail at every `/pay`. A currency without a published minimum is left to Stripe.
+- A refund is recorded with Stripe's own status. The live provider folds `canceled` and `requires_action` into `pending`, so a refund canceled at once was counted as money on its way back. `RefundResponse.status` publishes the five values Stripe documents.
+- Reconciliation goes on when another run (the daily task and an admin's run for one order) records the same new difference first: the payment counts as an error. The unique index used to stop the task with the rest of the window unchecked, or answer 500 on the admin route.
+- SMTP STARTTLS verifies the server certificate and host name. `smtplib` used an unverified context by default, so anyone on the path to the mail server could read `SMTP_PASSWORD` and every reset link. A relay with a private CA is trusted through `SSL_CERT_FILE` / `SSL_CERT_DIR`.
+- `EMAIL_PROVIDER` is `smtp` or `logging`; a misspelt value used to select the logging provider silently.
+- `CHECKOUT_SESSION_EXPIRE_MINUTES` must be at least 31: the session's `expires_at` is counted from the attempt's creation, so 30 fell below Stripe's 30-minute minimum by the time of the call.
+- The consent history stores at most 512 characters of the User-Agent, and consent changes are limited per user (`RATE_LIMIT_CONSENT`, default `10/hour`, one count shared by `POST /legal/consent` and `PUT`/`PATCH /users/me` when they change `marketing_consent`). Each change used to add an entry with the whole header (up to 16 KiB) without limit, to a row loaded on every authenticated request. The history itself is never trimmed: it is the evidence of consent.
+- The privacy policy, terms of service and cookie policy carry a fixed version and effective date (2026-11-10) instead of the time of the request, and the terms state prices in `STORE_CURRENCY` instead of "EUR including VAT".
+- `GET /products?in_stock=true` follows the variants of a product that has an active one (in stock when an active variant has stock), and a boolean characteristic filter (`true`/`false`) matches on PostgreSQL and SQLite. `str(True)` matched neither.
+- A load-shed 503 carries the CORS headers: CORSMiddleware now sits outside the in-flight limit, so a browser sees the 503 and its `Retry-After` instead of an opaque network error.
+
+### Added
+- `SMTP_TLS_VERIFY` (default `true`): `false` skips the certificate check for a local mail catcher; refused in staging and production.
+- `RATE_LIMIT_CONSENT` (default `10/hour`).
+- `DOCKER_API_BIND` in `docker-compose.yml`: the host address the API port is published on (default every interface; `127.0.0.1` when the reverse proxy runs on the same host).
+
+### Changed
+- On `docker stop` the API finishes requests in flight for up to 90 s (`timeout_graceful_shutdown` in `main.py`), and Docker waits 100 s (`stop_grace_period`) before SIGKILL. A `/pay` call can wait on Stripe about 76 s in the worst case; Docker's default of 10 s cut it off.
+- Unused code removed: `PasswordUpdate`, both `TokenPayload` schemas, `CategoryUpdate`, and the unused Redis session helpers.
+
 ## [5.0.0] - 2026-11-03
 
 A MAJOR release: the operationIds of the OpenAPI document were shortened (69 renamed), so a client generated from the spec gets new method names and has to be regenerated. No route, parameter or payload was removed or changed on the wire. The additions to the HTTP API below are backward compatible. There was no 4.2.0 release: that number was chosen first, corrected before anything was tagged, and its changes are listed here.
@@ -474,6 +507,7 @@ Three independent audits of 4.0.3 reviewed the code, ran it under load and fuzzi
 - Structured JSON logging across all application components.
 - Automated CI pipeline with linting, unit/integration testing (85% coverage gate), and Docker container builds.
 
+[5.1.0]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.2...v5.0.0
 [4.1.2]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.0...v4.1.1
