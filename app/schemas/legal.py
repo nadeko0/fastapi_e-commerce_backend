@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Reused rather than redefined: app.schemas.user.ConsentHistory has the
 # identical shape (both were unified to match the one
@@ -15,8 +15,8 @@ from app.schemas.user import ConsentHistory
 
 
 class ConsentUpdate(RequestBody):
-    marketing_consent: bool
-    privacy_policy_accepted: bool
+    marketing_consent: bool = Field(description="Whether marketing emails are allowed.")
+    privacy_policy_accepted: bool = Field(description="Whether the privacy policy is accepted.")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -37,12 +37,16 @@ class UserConsent(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class DataRequest(RequestBody):
-    request_type: str  # "export" or "deletion" (the route answers 400 to any other)
-    reason: str | None = None
+    request_type: str = Field(
+        description="export or deletion (any other value is answered 400)."
+    )
+    reason: str | None = Field(None, description="Optional free text; not stored or acted on.")
     # The account's current password. Required for "deletion": erasure
     # cannot be undone after the grace period, and a bearer token alone (a
     # stolen session) must not be enough for it. Not needed for "export".
-    password: str | None = None
+    password: str | None = Field(
+        None, description="The account's current password; required for deletion (422 without it), not used for export."
+    )
 
     @model_validator(mode="after")
     def require_password_for_deletion(self):

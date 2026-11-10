@@ -151,7 +151,12 @@ REGISTRATION_RECEIVED = (
     "/register",
     response_model=Message,
     status_code=status.HTTP_202_ACCEPTED,
-    responses={202: {"description": "Registration received, whether or not the email already had an account"}},
+    responses={
+        202: {"description": "Registration received, whether or not the email already had an account"},
+        422: {"description": "Invalid email, name, phone or password (8 characters to 72 bytes, not a commonly "
+                             "used password or one derived from the email), or gdpr_consent or "
+                             "privacy_policy_accepted is not true"},
+    },
 )
 async def register_user(
     user_in: UserCreate,
@@ -166,7 +171,12 @@ async def register_user(
     account, so that registration cannot be used to find out which emails
     are registered (login and password reset already take care not to).
     For an existing account nothing is created or changed; its owner gets
-    a "you already have an account" email instead of the welcome one."""
+    a "you already have an account" email instead of the welcome one.
+
+    The welcome email carries a verification link, valid for
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS (48 by default). Placing an order
+    needs a verified email, a full name and a phone number. Limited per
+    client address by RATE_LIMIT_AUTH (20/minute by default)."""
     now = utc_now()
     client_ip = request.client.host if request.client else None
     client_ua = consent_user_agent(request)
@@ -252,7 +262,12 @@ async def verify_email_by_body(
     db: DbSession,
 ):
     """Confirm a user's email address using a verification token sent in the
-    body."""
+    body.
+
+    The token is valid for EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS (48 by
+    default); ask for a new one with `POST /users/verify-email/resend`.
+    Confirming an address that is already verified is a 200 too. Limited per
+    client address by RATE_LIMIT_AUTH (20/minute by default)."""
 
     return await _confirm_email(payload.token, db)
 
@@ -290,7 +305,9 @@ async def resend_verification_email(
     current_user: CurrentUser,
     background_tasks: BackgroundTasks,
 ):
-    """Resend the email verification link to the current user."""
+    """Resend the email verification link to the current user. The link is
+    valid for EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS (48 by default). Limited
+    per client address by RATE_LIMIT_AUTH (20/minute by default)."""
 
     if current_user.is_email_verified:
         raise HTTPException(
@@ -314,9 +331,14 @@ async def resend_verification_email(
     response_model=Token,
     responses={
         200: CLEAR_GUEST_CART_COOKIE_RESPONSE,
-        401: {"description": "Incorrect email or password"},
-        429: {"description": "Too many failed login attempts"},
-        503: {"description": "Failed attempts cannot be counted right now, retry later"},
+        401: {"description": "Incorrect email or password (also for a deactivated account)"},
+        429: {"description": "Too many requests from this address (RATE_LIMIT_AUTH, 20/minute by default), or "
+                             "too many failed logins for this email: "
+                             "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS (10 per 15 minutes by default, "
+                             "from one address) or RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL (100/hour, from anywhere); "
+                             "a correct password does not help until Retry-After has passed"},
+        503: {"description": "Failed attempts cannot be counted, or the refresh token cannot be recorded "
+                             "(Retry-After: 30), retry later"},
     },
 )
 async def login(
@@ -439,7 +461,12 @@ async def login(
 @router.post(
     "/refresh",
     response_model=Token,
-    responses={401: {"description": "Invalid, expired, or already-used refresh token"}},
+    responses={
+        401: {"description": "Invalid, expired, or already-used refresh token (reuse also revokes the "
+                             "token's family: log in again)"},
+        503: {"description": "The token cannot be checked right now (Retry-After: 30); keep the refresh "
+                             "token and retry"},
+    },
 )
 async def refresh_access_token(
     refresh_in: RefreshTokenRequest,
@@ -481,7 +508,7 @@ _NO_LOGOUT_BODY = LogoutRequest()
 @router.post(
     "/logout",
     response_model=Message,
-    responses={503: {"description": "Tokens could not be revoked, retry the request"}},
+    responses={503: {"description": "Tokens could not be revoked (Retry-After: 5), retry the request"}},
 )
 async def logout(
     token: BearerToken,
@@ -519,11 +546,20 @@ async def get_current_user_data(
     "/me",
     response_model=UserResponse,
     summary="Patch Current User",
-    description=PATCH_DESCRIPTION,
+    description=(
+        PATCH_DESCRIPTION
+        + "\n\nAt least one field is required (else 400). `marketing_consent` cannot be null. A change of "
+        "`marketing_consent` is recorded in the consent history and counts against RATE_LIMIT_CONSENT "
+        "(10/hour by default, per user, shared with POST /legal/consent): over the limit the answer is 429 "
+        "with Retry-After. Order placement needs a full name and a phone number."
+    ),
     openapi_extra=merge_patch_body("UserUpdate"),
     responses={
         400: {"description": "No fields to update"},
         404: {"description": "User not found"},
+        429: {"description": "Too many requests, or too many consent changes: a change of marketing_consent is "
+                             "limited per user by RATE_LIMIT_CONSENT (10/hour by default), shared with "
+                             "POST /legal/consent; sending the value it already has is not counted"},
         500: {"description": "Failed to update profile"},
     },
 )
@@ -533,6 +569,9 @@ async def get_current_user_data(
     responses={
         400: {"description": "No fields to update"},
         404: {"description": "User not found"},
+        429: {"description": "Too many requests, or too many consent changes: a change of marketing_consent is "
+                             "limited per user by RATE_LIMIT_CONSENT (10/hour by default), shared with "
+                             "POST /legal/consent; sending the value it already has is not counted"},
         500: {"description": "Failed to update profile"},
     },
 )
@@ -542,7 +581,14 @@ async def update_current_user(
     current_user: CurrentUser,
     db: DbSession,
 ):
-    """Update fields on the current authenticated user's profile."""
+    """Update fields on the current authenticated user's profile.
+
+    At least one field is required (else 400). `full_name` and `phone` may be
+    cleared with null; `marketing_consent` cannot be null. A change of
+    `marketing_consent` is recorded in the consent history and counts
+    against RATE_LIMIT_CONSENT (10/hour by default, per user, shared with
+    POST /legal/consent): over the limit the answer is 429 with Retry-After.
+    Order placement needs a full name and a phone number."""
 
     # Field names only, never their values: names and phone numbers are
     # personal data, and the logs are kept apart from the account and not
@@ -691,7 +737,8 @@ async def get_address(
     status_code=status.HTTP_201_CREATED,
     responses={
         201: {"description": "Address created; Location is its URL", "headers": LOCATION_HEADER},
-        409: {"description": "This address already exists for the current user"},
+        409: {"description": "This address already exists for the current user (same street, city, state, "
+                             "postal code and country as an active address)"},
         422: {"description": "Invalid address data"},
     },
 )
@@ -702,7 +749,12 @@ async def create_address(
     current_user: CurrentUser,
     db: DbSession,
 ):
-    """Add a new address for the current user."""
+    """Add a new address for the current user.
+
+    The first address, and one sent with `is_default` true, becomes the
+    default; the previous default is unset. Whitespace in `postal_code` is
+    removed and `country` is normalised (a two-letter code is upper-cased).
+    There is no limit on the number of addresses."""
 
     try:
 
@@ -769,16 +821,16 @@ async def create_address(
     description=PATCH_DESCRIPTION,
     openapi_extra=merge_patch_body("AddressUpdate"),
     responses={
-        404: {"description": "Address not found"},
-        409: {"description": "Address is not active"},
+        404: {"description": "Address not found (or not the current user's)"},
+        409: {"description": "Address is not active (it was deleted)"},
     },
 )
 @router.put(
     "/addresses/{address_id:sint}",
     response_model=AddressResponse,
     responses={
-        404: {"description": "Address not found"},
-        409: {"description": "Address is not active"},
+        404: {"description": "Address not found (or not the current user's)"},
+        409: {"description": "Address is not active (it was deleted)"},
     },
 )
 async def update_address(
@@ -787,7 +839,10 @@ async def update_address(
     current_user: CurrentUser,
     db: DbSession,
 ):
-    """Update fields on one of the current user's addresses."""
+    """Update fields on one of the current user's addresses. Sending
+    `is_default` true makes it the default and unsets the previous one. An
+    order keeps the address it was placed with: a later change does not
+    alter it."""
 
     address = (await db.execute(
         select(Address).where(
@@ -848,7 +903,9 @@ async def delete_address(
     """Deactivate one of the current user's addresses.
 
     A deactivated address is gone for the client, so deleting it again is a
-    404 like any other address that does not exist."""
+    404 like any other address that does not exist. Orders already placed
+    with it keep it. If it was the default, the most recently created
+    remaining address becomes the default."""
 
     address = (await db.execute(
         select(Address).where(
@@ -886,8 +943,8 @@ async def delete_address(
     "/addresses/default",
     response_model=Message,
     responses={
-        404: {"description": "Address not found"},
-        409: {"description": "Address is not active"},
+        404: {"description": "Address not found (or not the current user's)"},
+        409: {"description": "Address is not active (it was deleted)"},
     },
 )
 async def set_default_address(
@@ -943,7 +1000,12 @@ async def get_user_orders(
     current_user: CurrentUser,
     db: DbSession,
 ):
-    """List the current user's orders, most recent first, paginated."""
+    """List the current user's orders, most recent first, paginated (`page`
+    from 1, `size` 1 to 100, 20 by default). `sort_by` is one of id,
+    created_at, total_amount, with `sort_order` asc (the default when `sort_by`
+    is given) or desc. An unpaid order shows status `new` until it is paid,
+    cancelled, or expired UNPAID_ORDER_EXPIRE_MINUTES (30 by default) after
+    it was placed."""
 
     total = await db.scalar(
         select(func.count()).select_from(Order).where(Order.user_id == current_user.id)
@@ -989,7 +1051,11 @@ async def request_password_reset(
     db: DbSession,
     background_tasks: BackgroundTasks,
 ):
-    """Request a password reset email; always succeeds to avoid leaking registered emails."""
+    """Request a password reset email; always succeeds to avoid leaking registered emails.
+
+    The link is valid for PASSWORD_RESET_TOKEN_EXPIRE_MINUTES (60 by
+    default) and only until the password changes. Limited per client address
+    by RATE_LIMIT_AUTH (20/minute by default)."""
 
     user = await _user_by_email(db, reset_request.email)
     if user:
@@ -1018,7 +1084,9 @@ async def validate_reset_token_by_body(
     db: DbSession,
 ):
     """Check whether a password reset token, sent in the body, is still valid.
-    It changes nothing."""
+    It changes nothing. A token is not valid after PASSWORD_RESET_TOKEN_EXPIRE_MINUTES
+    (60 by default) or once the password has been changed. Limited per client
+    address by RATE_LIMIT_AUTH (20/minute by default)."""
 
     return await _check_reset_token(payload.token, db)
 
@@ -1049,8 +1117,10 @@ async def _check_reset_token(token: str, db: AsyncSession):
     responses={
         400: {"description": "Invalid or expired reset token"},
         404: {"description": "User not found"},
-        422: {"description": "Invalid password format"},
-        503: {"description": "Old tokens could not be revoked, nothing changed; retry"},
+        422: {"description": "Invalid new password (8 characters to 72 bytes, not a commonly used password or "
+                             "one derived from the account's email)"},
+        503: {"description": "Old tokens could not be revoked (Retry-After: 5), nothing changed; retry with "
+                             "the same token"},
     },
 )
 async def reset_password(
@@ -1058,7 +1128,12 @@ async def reset_password(
     request: Request,
     db: DbSession,
 ):
-    """Reset a user's password using a valid reset token, both sent in the body."""
+    """Reset a user's password using a valid reset token, both sent in the body.
+
+    The token is single use and valid for PASSWORD_RESET_TOKEN_EXPIRE_MINUTES
+    (60 by default). A reset signs the account out on every device and clears
+    its failed-login counters. Limited per client address by RATE_LIMIT_AUTH
+    (20/minute by default)."""
 
     claims = verify_password_reset_token(payload.token)
     if not claims:

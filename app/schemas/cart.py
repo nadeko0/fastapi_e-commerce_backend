@@ -24,13 +24,19 @@ CartQuantity = Annotated[int, Field(ge=1, le=INT32_MAX)]
 
 class CartItemAdd(RequestBody):
     product_id: Int32
-    quantity: CartQuantity = 1
-    variant_id: Int32 | None = None
+    quantity: CartQuantity = Field(
+        1, description="Units to add to the line; the line's total cannot exceed the stock (409)."
+    )
+    variant_id: Int32 | None = Field(
+        None, description="Required (409 if omitted) for a product that has active variants."
+    )
 
 
 class CartItemUpdate(RequestBody):
-    quantity: CartQuantity
-    variant_id: Int32 | None = None
+    quantity: CartQuantity = Field(description="The line's new quantity; it cannot exceed the stock (409).")
+    variant_id: Int32 | None = Field(
+        None, description="The variant of the line; required (409 if omitted) for a product that has active variants."
+    )
 
 
 # An account's cart: "cart:{user_id}".

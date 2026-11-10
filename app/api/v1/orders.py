@@ -157,13 +157,19 @@ def _created_order(request: Request, response: Response, order: Order) -> OrderR
                            "Idempotency-Key answers the same 201 and Location.",
             "headers": LOCATION_HEADER,
         },
-        400: {"description": "Cart is empty, profile incomplete, or the Idempotency-Key header is missing or malformed"},
+        400: {"description": "Cart is empty, profile incomplete (full name and phone are required), "
+                             "or the Idempotency-Key header is missing or malformed"},
         403: {"description": "Email verification required before placing orders"},
-        404: {"description": "Shipping address not found"},
-        409: {"description": "A cart item is out of stock or no longer on sale"},
+        404: {"description": "Shipping address not found (it must be an active address of the current user)"},
+        409: {"description": "A cart item is out of stock (insufficient-stock) or no longer on sale, a product "
+                             "with variants was added without a variant, or the user already holds "
+                             "MAX_PENDING_ORDERS_PER_USER (10 by default) unpaid orders: pay for or cancel "
+                             "one first"},
         422: {"description": "The key was already used with a different shipping_address_id, "
-                             "or the order total is above the maximum or below the payment "
-                             "provider's minimum charge for the store currency (0.50 USD)"},
+                             "or the order total is above 21,474,836.47 or below the payment "
+                             "provider's minimum charge for the store currency (MINIMUM_CHARGE: "
+                             "0.50 USD, 0.50 EUR, 0.30 GBP and others)"},
+        503: {"description": "The cart store is unavailable (Retry-After: 5), or the server is at capacity"},
     },
 )
 async def create_order(
@@ -193,6 +199,17 @@ async def create_order(
     already used by this user returns the order created the first time;
     a key already used with a different `shipping_address_id` is answered 422.
     The answer to a replay is the first one, 201 and Location included.
+
+    Rules: the account needs a verified email, a full name and a phone
+    number. The shipping address must be an active address of the user. The
+    order is built from the whole cart and takes its stock at once; the cart
+    lines it was built from are removed. The total must not exceed
+    21,474,836.47 and must reach the payment provider's minimum charge for
+    the store currency (0.50 for USD, 0.50 EUR, 0.30 GBP and others). A user
+    can hold at most MAX_PENDING_ORDERS_PER_USER (10 by default) unpaid
+    orders. An unpaid order is cancelled, and its stock returned,
+    UNPAID_ORDER_EXPIRE_MINUTES (30 by default) after it was placed. This
+    route is limited per user by RATE_LIMIT_CHECKOUT (10/minute by default).
     """
 
     shipping_address_id = body.shipping_address_id
@@ -493,7 +510,7 @@ async def create_order(
 @router.get(
     "/{order_id}",
     response_model=OrderResponse,
-    responses={404: {"description": "Order not found"}},
+    responses={404: {"description": "Order not found (an order of another user is not found either)"}},
 )
 async def get_order(
     order_id: Int32,
@@ -535,7 +552,16 @@ async def update_order_status(
     redis: Cache,
     body: Annotated[OrderStatusUpdate, Body()],
 ):
-    """Transition an order to a new status (admin only)."""
+    """Transition an order to a new status (admin only).
+
+    Allowed moves: new to confirmed or cancelled, confirmed to processing or
+    cancelled, processing to sent or cancelled, sent to delivered or
+    cancelled; delivered and cancelled are final. Moving an order to
+    confirmed, processing, sent or delivered needs payment_status paid.
+    An order whose payment is disputed is on hold: it cannot be moved on,
+    only cancelled. Cancelling returns the stock and closes the order's open
+    payment attempts at the provider; a paid order is not refunded by it
+    (use the refund route)."""
 
     new_status = body.status
 
@@ -617,8 +643,10 @@ async def update_order_status(
     "/{order_id}/cancel",
     response_model=OrderResponse,
     responses={
-        404: {"description": "Order not found"},
-        409: {"description": "Order is paid, or no longer new"},
+        404: {"description": "Order not found (an order of another user is not found either)"},
+        409: {"description": "Order is paid, or no longer new; or a payment attempt for it is still in "
+                             "progress (Retry-After: 60): finish or abandon it first",
+              "headers": RETRY_AFTER_HEADER},
     },
 )
 async def cancel_own_order(
@@ -635,8 +663,14 @@ async def cancel_own_order(
     an admin could cancel: an order its customer abandoned kept its items
     out of sale until someone noticed. A paid order is not cancelled here;
     that goes through support, with a refund. Unpaid orders are also
-    cancelled automatically UNPAID_ORDER_EXPIRE_MINUTES after they were
-    placed (cancel_expired_unpaid_orders in app/tasks.py)."""
+    cancelled automatically UNPAID_ORDER_EXPIRE_MINUTES (30 by default)
+    after they were placed (cancel_expired_unpaid_orders in app/tasks.py).
+
+    Only an order with status new and payment_status pending or failed can
+    be cancelled here. While a payment attempt can still be paid (in
+    progress, 3D Secure pending, outcome unknown, or an open Checkout
+    Session, for up to CHECKOUT_SESSION_EXPIRE_MINUTES, 60 by default) the
+    answer is 409 with Retry-After: 60."""
     # Locked like update_order_status's read, for the same reason; another
     # user's order is a 404, not a 403, as in get_order.
     order = (await db.execute(
@@ -1133,18 +1167,27 @@ _MANUAL_REVIEW_RESPONSE = {"status": "processed", "applied": False, "requires_ma
     "/{order_id}/pay",
     response_model=PaymentResponse,
     responses={
-        400: {"description": "Amount or currency does not match the order, or the Idempotency-Key header is missing or malformed"},
-        404: {"description": "Order not found"},
+        400: {"description": "Amount or currency does not match the order, the provider did not accept the "
+                             "payment details (check the payment method and try again), or the "
+                             "Idempotency-Key header is missing or malformed"},
+        404: {"description": "Order not found (an order of another user is not found either)"},
         409: {
             "description": "Order already paid, refunded or cancelled; another attempt for this order is in progress; "
-                           "the Idempotency-Key belongs to an attempt still being processed; "
+                           "the Idempotency-Key belongs to an attempt still being processed (Retry-After: 5), "
+                           "or to a Checkout Session attempt that must be retried on /checkout-session; "
                            "the key was already used with different payment parameters; "
+                           "the payment was taken but the order could not be completed (it was cancelled "
+                           "or paid meanwhile; the payment is flagged for a refund); "
                            "or the order's payment window has closed (a new key on an order placed "
                            "more than UNPAID_ORDER_EXPIRE_MINUTES ago): place a new order",
             "headers": RETRY_AFTER_HEADER,
         },
-        422: {"description": "Card declined by the payment provider (payment-declined), or the key was already used with a different request body"},
-        503: {"description": "Payment provider unavailable, retry the request"},
+        422: {"description": "Card declined or payment not completed (payment-declined; the order's payment_status "
+                             "becomes failed and a new Idempotency-Key is needed), or the key was already used "
+                             "with a different request body"},
+        503: {"description": "Payment provider unavailable or timed out (Retry-After: 5); the attempt is left "
+                             "unknown: retry with the same Idempotency-Key",
+              "headers": RETRY_AFTER_HEADER},
     },
 )
 async def process_payment(
@@ -1178,6 +1221,16 @@ async def process_payment(
     the unpaid order is cancelled by the expiry task. A retry with the key of
     an attempt started in time is still served. A card declined after the
     window cannot be retried with a new key: the customer places a new order.
+
+    Only one attempt per order can be in progress: another one is a 409
+    until the first settles, or PAYMENT_ATTEMPT_STALE_AFTER_MINUTES (5 by
+    default) have passed. `amount` must equal the order's total, and
+    `currency`, if sent, its currency. The 200 answer is not always a paid
+    order: `status` is `paid`, `requires_action` (3D Secure: finish it with
+    `client_secret` and `next_action`; the outcome then arrives by webhook)
+    or `pending` (accepted, not settled yet). A declined attempt is a 422;
+    repeating its key answers 200 with status `failed`. This route is limited per user by
+    RATE_LIMIT_CHECKOUT (10/minute by default).
     """
 
     # Locked (SELECT ... FOR UPDATE) until the commit that records this
@@ -1480,18 +1533,23 @@ async def process_payment(
     "/{order_id}/checkout-session",
     response_model=CheckoutSessionResponse,
     responses={
-        400: {"description": "Currency does not match the order, or the Idempotency-Key header is missing or malformed"},
-        404: {"description": "Order not found"},
+        400: {"description": "Currency does not match the order, the provider did not accept the payment "
+                             "details, or the Idempotency-Key header is missing or malformed"},
+        404: {"description": "Order not found (an order of another user is not found either)"},
         409: {
             "description": "Order already paid, refunded or cancelled; another attempt for this order is in progress; "
-                           "the Idempotency-Key belongs to an attempt still being processed; "
+                           "the Idempotency-Key belongs to an attempt still being processed (Retry-After: 5), "
+                           "or to a /pay attempt or one without a checkout session; "
                            "the key was already used with different checkout session parameters; "
                            "or the order's payment window has closed (a new key on an order placed "
                            "more than UNPAID_ORDER_EXPIRE_MINUTES ago): place a new order",
             "headers": RETRY_AFTER_HEADER,
         },
-        422: {"description": "The key was already used with a different request body"},
-        503: {"description": "Payment provider unavailable, retry the request"},
+        422: {"description": "The key was already used with a different request body, or success_url or "
+                             "cancel_url is not a plain URL on the frontend origin (FRONTEND_URL)"},
+        503: {"description": "Payment provider unavailable or timed out (Retry-After: 5); the attempt is left "
+                             "unknown: retry with the same Idempotency-Key",
+              "headers": RETRY_AFTER_HEADER},
     },
 )
 async def create_checkout_session(
@@ -1523,6 +1581,13 @@ async def create_checkout_session(
     UNPAID_ORDER_EXPIRE_MINUTES (30 by default) of the order's `created_at`;
     after that it is a 409 and the customer places a new order. A retry with
     the key of a session started in time returns that session.
+
+    The session expires CHECKOUT_SESSION_EXPIRE_MINUTES (60 by default)
+    after the attempt was created, and until then the customer cannot cancel
+    the order (409). While an attempt is open, a new attempt with another key
+    is a 409 for up to PAYMENT_ATTEMPT_STALE_AFTER_MINUTES (5 by default).
+    The amount is always the order's total. This route is limited per user by
+    RATE_LIMIT_CHECKOUT (10/minute by default).
     """
     payload = payload or CheckoutSessionCreate()
 
@@ -1696,11 +1761,15 @@ async def create_checkout_session(
     "/{order_id}/refund",
     response_model=RefundResponse,
     responses={
-        400: {"description": "The provider refused the refund as invalid, or the Idempotency-Key header is missing or malformed"},
+        400: {"description": "The provider refused the refund as invalid (for example an amount above what is "
+                             "left to refund; the detail then names the refundable amount), or the "
+                             "Idempotency-Key header is missing or malformed"},
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
         409: {"description": "Order not paid, no successful payment found, payment disputed, or idempotency key already used with different refund parameters"},
-        503: {"description": "Payment provider unavailable, retry the request"},
+        503: {"description": "Payment provider unavailable or timed out (Retry-After: 5); retry with the same "
+                             "Idempotency-Key",
+              "headers": RETRY_AFTER_HEADER},
     },
 )
 async def refund_payment(
@@ -1726,7 +1795,12 @@ async def refund_payment(
     idempotency cache, which mirrors that behavior for the mock. A retried
     refund request (client timeout, double-click "Refund") therefore gets
     the first one's refund back, and that refund is recorded once
-    (PaymentRefund, by refund id)."""
+    (PaymentRefund, by refund id).
+
+    `amount` is optional: omit it for a full refund; it must be greater than
+    zero and not more than what is left to refund on the payment. Only an
+    order with payment_status paid can be refunded, and not while a dispute
+    on its payment is open."""
     order = (await db.execute(
         select(Order).where(Order.id == order_id).limit(1)
     )).scalars().first()

@@ -273,7 +273,17 @@ async def _load_user(db: AsyncSession, user_id: int) -> User:
     return user
 
 
-@router.post("/consent", response_model=ConsentUpdateResponse)
+@router.post(
+    "/consent",
+    response_model=ConsentUpdateResponse,
+    responses={
+        404: {"description": "User not found (the account was removed after the token was issued)"},
+        429: {"description": "Too many requests, or too many consent changes: limited per user by "
+                             "RATE_LIMIT_CONSENT (10/hour by default), shared with PATCH/PUT /users/me; "
+                             "wait Retry-After seconds"},
+        500: {"description": "Failed to update consent preferences"},
+    },
+)
 async def update_user_consent(
     consent_update: ConsentUpdate,
     request: Request,
@@ -289,6 +299,11 @@ async def update_user_consent(
     * Privacy policy acceptance
 
     The endpoint also maintains a complete history of consent changes.
+
+    Every call counts against RATE_LIMIT_CONSENT (10/hour by default, per
+    user), whether or not a value changes; the same limit covers a change of
+    `marketing_consent` through PATCH/PUT /users/me. Over the limit the
+    answer is 429 with Retry-After.
     """
     await check_consent_change(current_user.id)
     gdpr_service = GDPRService(db)
@@ -317,8 +332,17 @@ async def update_user_consent(
     "/data-request",
     response_model=DataRequestResponse,
     responses={
+        400: {"description": "request_type is neither export nor deletion"},
         401: {"description": "Incorrect password (deletion)"},
+        404: {"description": "User not found (the account was removed after the token was issued)"},
+        409: {"description": "Deletion requested by the only active administrator"},
         422: {"description": "Password missing for a deletion request"},
+        429: {"description": "Too many requests from this address (RATE_LIMIT_AUTH, 20/minute by default), or, "
+                             "for a deletion, too many failed password checks "
+                             "(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS and "
+                             "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL, shared with login)"},
+        500: {"description": "The export or the deletion could not be processed"},
+        503: {"description": "Failed password attempts cannot be counted right now (Retry-After: 30), retry later"},
     },
 )
 async def request_personal_data(
@@ -336,6 +360,14 @@ async def request_personal_data(
       account's current password
 
     The process is asynchronous and returns a request ID for tracking.
+
+    `request_type` is `export` or `deletion`. An export is sent to the
+    account's email address, valid for GDPR_EXPORT_EXPIRY_HOURS (24 by
+    default). A deletion deactivates the account at once (it can no longer
+    log in) and the account is anonymised after DATA_DELETION_GRACE_PERIOD_DAYS
+    (1 by default); it needs the account's password, and the only active
+    administrator cannot be erased (409). Limited per client address by
+    RATE_LIMIT_AUTH (20/minute by default).
     """
     gdpr_service = GDPRService(db)
 

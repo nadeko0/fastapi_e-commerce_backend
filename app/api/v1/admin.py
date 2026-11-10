@@ -36,6 +36,7 @@ from app.core.openapi import (
     ETAG_RESPONSE,
     FORBIDDEN,
     LOCATION_HEADER,
+    RETRY_AFTER_HEADER,
     UNAUTHORIZED,
     DocumentedRoute,
 )
@@ -256,6 +257,8 @@ async def create_product(
         200: ETAG_RESPONSE,
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or category not found"},
+        412: {"description": "If-Match does not match the product's current ETag (the current one is in the "
+                             "ETag header)", "headers": ETAG_HEADER},
     },
 )
 @router.put(
@@ -265,7 +268,8 @@ async def create_product(
         200: ETAG_RESPONSE,
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or category not found"},
-        412: {"description": "If-Match does not match the product's current ETag"},
+        412: {"description": "If-Match does not match the product's current ETag (the current one is in the "
+                             "ETag header)", "headers": ETAG_HEADER},
     },
 )
 async def update_product(
@@ -282,6 +286,11 @@ async def update_product(
     With If-Match (an ETag from GET /products/{id} or a previous update, or
     *), the update is applied only if the product is unchanged since (412
     otherwise). Without it the update is unconditional, as before.
+
+    Every field is optional but at least the ones sent must be valid and
+    none may be null; `category_id` must be an existing category (404). A
+    product with variants is hashed together with them, so the ETag of
+    GET /products/{id} is the one to send. The response carries the new ETag.
     """
 
     stmt = select(Product).options(joinedload(Product.category)).where(Product.id == product_id).limit(1)
@@ -352,6 +361,8 @@ async def update_product(
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     responses={
+        204: {"description": "Product deleted, or deactivated when orders reference it (it is then "
+                             "no longer sold and a later GET /products/{id} is a 404)"},
         403: {"description": "Admin privileges required"},
         404: {"description": "Product not found"},
     },
@@ -464,14 +475,23 @@ async def list_orders(
     # hence the http_status alias.
     status: OrderStatusFilter = None,
     payment_status: PaymentStatusFilter = None,
-    start_date: AwareDatetime | None = None,
-    end_date: AwareDatetime | None = None,
+    start_date: Annotated[AwareDatetime | None, Query(
+        description="Only orders created at or after this instant; ISO 8601 with a UTC offset."
+    )] = None,
+    end_date: Annotated[AwareDatetime | None, Query(
+        description="Only orders created at or before this instant; ISO 8601 with a UTC offset."
+    )] = None,
     has_dispute: Annotated[bool | None, Query(description=(
         "true: only orders with a payment dispute that is open or was lost (needs attention); "
         "false: only orders without one. Omitted: all orders."
     ))] = None,
 ):
-    """List orders across all users, with filtering, sorting, and pagination."""
+    """List orders across all users, with filtering, sorting, and pagination.
+
+    `status` and `payment_status` are matched case-insensitively and an unknown
+    value is a 422. `start_date` and `end_date` filter on `created_at`, both
+    inclusive, and must carry a UTC offset (a date without one is a 422).
+    `page` starts at 1; `size` is 1 to 100 (20 by default)."""
 
     # Eager-load shipping_address (many-to-one) with joinedload and items
     # -> product (one-to-many) with selectinload: OrderResponse serializes
@@ -576,9 +596,17 @@ async def get_statistics(
     current_user: AdminUser,
     db: DbSession,
     redis: Cache,
-    period: Annotated[str, Query(pattern="^(24h|7d|30d)$")] = "24h",
+    period: Annotated[str, Query(
+        pattern="^(24h|7d|30d)$",
+        description="The last 24 hours, 7 days or 30 days.",
+    )] = "24h",
 ):
-    """Retrieve order/revenue statistics and popular products for a time period."""
+    """Retrieve order/revenue statistics and popular products for a time period.
+
+    Only orders that are paid and not cancelled, created within the period,
+    are counted. The result is cached for 5 minutes, so it can lag behind
+    new payments. `popular_products` lists up to 10 products by quantity
+    sold."""
 
     cache_key = f"admin_stats_{period}"
     cached_stats = await redis.get(cache_key)
@@ -744,7 +772,11 @@ async def create_product_variant(
     db: DbSession,
     redis: Cache,
 ):
-    """Create a new variant (e.g. a size/color combination) under a product."""
+    """Create a new variant (e.g. a size/color combination) under a product.
+
+    The SKU must be unique across all variants (409). Once a product has an
+    active variant it is sold through its variants only: the cart and orders
+    then need a `variant_id` for it."""
 
     db_product = await _get_product_or_404(db, product_id)
 
@@ -865,6 +897,8 @@ async def get_product_variant(
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or variant not found"},
         409: {"description": "SKU already in use"},
+        412: {"description": "If-Match does not match the variant's current ETag (the current one is in the "
+                             "ETag header)", "headers": ETAG_HEADER},
         422: {"description": "Invalid variant data"},
     },
 )
@@ -876,7 +910,8 @@ async def get_product_variant(
         403: {"description": "Admin privileges required"},
         404: {"description": "Product or variant not found"},
         409: {"description": "SKU already in use"},
-        412: {"description": "If-Match does not match the variant's current ETag"},
+        412: {"description": "If-Match does not match the variant's current ETag (the current one is in the "
+                             "ETag header)", "headers": ETAG_HEADER},
         422: {"description": "Invalid variant data"},
     },
 )
@@ -893,7 +928,9 @@ async def update_product_variant(
     """Update fields on an existing variant of a product.
 
     With If-Match (the ETag of an earlier update response of this variant, or
-    *), applied only if the variant is unchanged since (412 otherwise).
+    *), applied only if the variant is unchanged since (412 otherwise). The
+    SKU must be unique across all variants (409). The response carries the
+    new ETag.
     """
 
     db_product = await _get_product_or_404(db, product_id)
@@ -979,7 +1016,7 @@ async def list_reconciliation_discrepancies(
     pagination: Annotated[DiscrepancyListParams, Depends()],
     current_user: AdminUser,
     db: DbSession,
-    order_id: Int32 | None = None,
+    order_id: Annotated[Int32 | None, Query(description="Only the discrepancies of this order.")] = None,
 ):
     """The differences the payment reconciliation found between our payments
     and the provider's and that still stand, oldest first (admin only):
@@ -1027,14 +1064,16 @@ async def list_reconciliation_discrepancies(
         202: {"description": "The full run is queued (no order_id)", "model": ReconciliationQueued},
         403: {"description": "Admin privileges required"},
         404: {"description": "Order not found"},
-        503: {"description": "Task queue unavailable, the full run was not queued"},
+        503: {"description": "Task queue unavailable (Retry-After: 5), the full run was not queued"},
     },
 )
 async def run_reconciliation(
     current_user: AdminUser,
     db: DbSession,
     provider: Provider,
-    order_id: Int32 | None = None,
+    order_id: Annotated[Int32 | None, Query(
+        description="Reconcile only this order's payments, now; omit to queue the full run."
+    )] = None,
 ):
     """Reconcile now (admin only). With order_id: every payment of that order,
     whatever its age, and the outcome in the response. Without: the same run
@@ -1192,8 +1231,11 @@ async def list_payments(
     pagination: Annotated[AdminPaymentListParams, Depends()],
     current_user: AdminUser,
     db: DbSession,
-    requires_manual_review: bool | None = None,
-    order_id: Int32 | None = None,
+    requires_manual_review: Annotated[bool | None, Query(
+        description="true: only attempts flagged for manual review whose flag is still open; "
+                    "false: only those without an open flag; omitted: all."
+    )] = None,
+    order_id: Annotated[Int32 | None, Query(description="Only the payment attempts of this order.")] = None,
 ):
     """List payment attempts across orders, optionally filtering by
     requires_manual_review or order_id, with sorting and pagination."""
@@ -1241,11 +1283,16 @@ async def list_payments(
     "/payments/{payment_id}/refund",
     response_model=RefundResponse,
     responses={
-        400: {"description": "The provider refused the refund as invalid, or the Idempotency-Key header is missing or malformed"},
+        400: {"description": "The provider refused the refund as invalid (its message is in the detail), or the "
+                             "Idempotency-Key header is missing or malformed"},
         403: {"description": "Admin privileges required"},
-        404: {"description": "Payment not found"},
-        409: {"description": "Only a succeeded payment flagged for manual review can be refunded"},
-        503: {"description": "Payment provider unavailable, retry the request"},
+        404: {"description": "Payment or its order not found"},
+        409: {"description": "Only a succeeded payment flagged for manual review can be refunded; the payment is "
+                             "disputed; it has already been fully refunded; or the idempotency key was already "
+                             "used with different refund parameters"},
+        503: {"description": "Payment provider unavailable or timed out (Retry-After: 5); retry with the same "
+                             "Idempotency-Key",
+              "headers": RETRY_AFTER_HEADER},
     },
 )
 async def refund_flagged_payment(
@@ -1263,7 +1310,12 @@ async def refund_flagged_payment(
         ),
     ],
 ):
-    """Issue a full refund for a payment attempt flagged for manual review."""
+    """Issue a refund of everything still refundable on a payment attempt
+    flagged for manual review (a second charge, or a success for a cancelled
+    order or for the wrong amount). Only a succeeded payment with an open
+    flag can be refunded, and not while a dispute on it is open; there is no
+    `amount`: it is always the remaining amount. Repeat a lost request with
+    the same `Idempotency-Key`."""
     payment = (
         await db.execute(select(Payment).where(Payment.id == payment_id).limit(1))
     ).scalars().first()

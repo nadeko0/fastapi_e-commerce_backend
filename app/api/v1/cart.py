@@ -1,7 +1,7 @@
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -420,7 +420,11 @@ async def get_cart(
 
 CurrentCart = Annotated[Cart, Depends(get_cart)]
 
-@router.get("", response_model=CartResponse)
+@router.get(
+    "",
+    response_model=CartResponse,
+    responses={503: {"description": "Cart store unavailable (Retry-After: 5), retry the request"}},
+)
 async def get_user_cart(
     cart: CurrentCart,
     db: DbSession,
@@ -429,7 +433,11 @@ async def get_user_cart(
     the account's cart with an `Authorization` header, the guest cart named
     by the guest cart cookie without one (empty if there is none). A line
     whose product or variant is no longer on sale is returned with
-    `available: false` and is not part of `total_amount`."""
+    `available: false` and is not part of `total_amount`.
+
+    A cart lives REDIS_CART_TTL_DAYS (30 by default) for an account and
+    REDIS_GUEST_CART_TTL_DAYS (7 by default) for a guest, counted from its
+    last change."""
 
     return await _priced_cart(db, cart)
 
@@ -438,10 +446,13 @@ async def get_user_cart(
     response_model=CartResponse,
     responses={
         200: GUEST_CART_COOKIE_RESPONSE,
-        409: {"description": "Not enough stock available, or the cart already holds the maximum number of different items"},
+        409: {"description": "Not enough stock available (insufficient-stock: the resulting quantity of the line "
+                             "would exceed the stock), the product has variants and no variant_id was sent, "
+                             "or the cart already holds CART_MAX_LINES (100 by default) different items"},
         404: {"description": "Product not found or inactive, or variant_id doesn't belong to product_id / isn't active"},
-        429: {"description": "This address has opened too many guest carts (RATE_LIMIT_GUEST_CART)"},
-        503: {"description": "Cart store unavailable, nothing was changed"},
+        429: {"description": "Too many requests, or (for a guest) this address has opened too many guest carts "
+                             "(RATE_LIMIT_GUEST_CART, 100/hour by default)"},
+        503: {"description": "Cart store unavailable (Retry-After: 5), nothing was changed"},
     },
 )
 async def add_to_cart(
@@ -462,6 +473,11 @@ async def add_to_cart(
     Without an `Authorization` header this is a guest's cart. The first
     successful add creates it and sets the guest cart cookie (HttpOnly);
     the client only has to send cookies back.
+
+    The quantity of a line cannot go above the stock of the product (or of
+    the variant, when `variant_id` is sent); a product that has active
+    variants can only be added with one. A cart holds at most CART_MAX_LINES
+    (100 by default) different lines.
 
     The fields (`product_id`, optional `quantity` (default 1) and `variant_id`)
     go in the JSON body."""
@@ -535,9 +551,10 @@ async def add_to_cart(
     response_model=CartResponse,
     responses={
         200: GUEST_CART_COOKIE_RESPONSE,
-        409: {"description": "Not enough stock available"},
+        409: {"description": "Not enough stock available (insufficient-stock: the new quantity exceeds the "
+                             "stock), or the product has variants and no variant_id was sent"},
         404: {"description": "Product not found or inactive, item not in cart, or variant_id invalid for this product"},
-        503: {"description": "Cart store unavailable, nothing was changed"},
+        503: {"description": "Cart store unavailable (Retry-After: 5), nothing was changed"},
     },
 )
 async def update_cart_item(
@@ -550,7 +567,11 @@ async def update_cart_item(
 ):
     """Update the quantity of an item already in the caller's cart.
 
-    `quantity` (and optional `variant_id`) go in the JSON body."""
+    `quantity` (and optional `variant_id`) go in the JSON body. The quantity
+    replaces the line's, and cannot be above the current stock. A product
+    that has active variants is addressed with `variant_id`. A product that
+    was withdrawn from sale is a 404: remove its line with the DELETE
+    route."""
 
     quantity = body.quantity
     variant_id = body.variant_id
@@ -594,7 +615,7 @@ async def update_cart_item(
     responses={
         200: GUEST_CART_COOKIE_RESPONSE,
         404: {"description": "Item not in cart"},
-        503: {"description": "Cart store unavailable, nothing was changed"},
+        503: {"description": "Cart store unavailable (Retry-After: 5), nothing was changed"},
     },
 )
 async def remove_from_cart(
@@ -603,7 +624,9 @@ async def remove_from_cart(
     owner: Owner,
     db: DbSession,
     redis: Cache,
-    variant_id: Int32 | None = None,
+    variant_id: Annotated[Int32 | None, Query(
+        description="The variant of the line to remove; send it for a line that was added with one."
+    )] = None,
 ):
     """Remove an item from the caller's cart. This is also how a line
     marked unavailable is cleared: the product does not need to exist.
@@ -628,7 +651,7 @@ async def remove_from_cart(
     response_model=CartResponse,
     responses={
         200: GUEST_CART_COOKIE_RESPONSE,
-        503: {"description": "Cart store unavailable, nothing was changed"},
+        503: {"description": "Cart store unavailable (Retry-After: 5), nothing was changed"},
     },
 )
 async def clear_cart(
@@ -646,7 +669,11 @@ async def clear_cart(
     # query at all.
     return await _priced_cart(db, cart)
 
-@router.post("/validate", response_model=CartValidationResponse)
+@router.post(
+    "/validate",
+    response_model=CartValidationResponse,
+    responses={503: {"description": "Cart store unavailable (Retry-After: 5), retry the request"}},
+)
 async def validate_cart(
     cart: CurrentCart,
     db: DbSession,

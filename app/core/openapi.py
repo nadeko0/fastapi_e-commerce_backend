@@ -161,7 +161,7 @@ FORBIDDEN = {"description": "Not allowed for this account", "model": Problem}
 ACCOUNT_INACTIVE_NOTE = "the account is inactive (problem type account-inactive)"
 NOT_FOUND = {"description": "Not found", "model": Problem}
 CONFLICT = {"description": "Conflicts with the current state", "model": Problem}
-PAYLOAD_TOO_LARGE = {"description": "Request body is too large", "model": Problem}
+PAYLOAD_TOO_LARGE = {"description": "Request body is too large (MAX_REQUEST_BODY_BYTES, 1 MiB by default)", "model": Problem}
 UNSUPPORTED_MEDIA_TYPE = {
     "description": "The request body is not sent as JSON",
     "model": Problem,
@@ -172,12 +172,23 @@ VALIDATION_ERROR = {
     "model": ValidationProblem | Problem,
 }
 TOO_MANY_REQUESTS = {
-    "description": "Too many requests",
+    "description": (
+        "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client "
+        "address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for "
+        "product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a "
+        "checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, "
+        "password reset, email verification and data requests (defaults shown)"
+    ),
     "model": Problem,
     "headers": RETRY_AFTER_HEADER,
 }
 SERVICE_UNAVAILABLE = {
-    "description": "Temporarily unavailable, or the server is at capacity",
+    "description": (
+        "Temporarily unavailable: the server is at capacity (Retry-After: 1), or a service it needs cannot "
+        "answer (the token check or the cart store, Retry-After 5 to 30; the database; the payment "
+        "provider, Retry-After: 5). Repeat the request after Retry-After seconds, with the same "
+        "Idempotency-Key where the route takes one"
+    ),
     "model": Problem,
     "headers": RETRY_AFTER_HEADER,
 }

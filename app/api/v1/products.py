@@ -198,7 +198,13 @@ _product_filter.__signature__ = _filter_signature.replace(parameters=[  # type: 
             json_schema_extra={"contentMediaType": "application/json", "contentSchema": {"type": "object"}},
         )],
         default=None,
-    ) if parameter.name == "characteristics" else parameter
+    ) if parameter.name == "characteristics" else (
+        # The signature drops a field's description: put it back as the
+        # query parameter's.
+        parameter.replace(annotation=Annotated[
+            parameter.annotation, Query(description=ProductFilter.model_fields[parameter.name].description)
+        ]) if ProductFilter.model_fields[parameter.name].description else parameter
+    )
     for parameter in _filter_signature.parameters.values()
 ])
 
@@ -316,7 +322,13 @@ async def list_products(
     filter_params: Annotated[ProductFilter, Depends(_product_filter)],
     db: DbSession,
 ):
-    """List products with optional filtering, sorting, and pagination."""
+    """List active products with optional filtering, sorting, and pagination.
+
+    `page` starts at 1; `size` is 1 to 100 (20 by default). `sort_by` is one of
+    name_asc, name_desc, price_asc, price_desc, created_at_asc, created_at_desc
+    (any other value is 422; without it, by id). `max_price` below `min_price`
+    is a 422. A product with has_variants true is sold by its variants: its own
+    price and stock are not the purchasable values (see GET /products/{id})."""
 
     stmt = select(Product).options(joinedload(Product.category)).where(
         Product.is_active
@@ -411,7 +423,12 @@ async def search_products(
     search: Annotated[ProductSearch, Query()],
     db: DbSession,
 ):
-    """Search products by name/description, optionally scoped to a category."""
+    """Search active products by name/description, optionally scoped to a category.
+
+    `query` is 3 to 100 characters (shorter or longer is 422). Results are
+    ordered by id and paginated like the product list. This route has its own
+    limit per user or client address, RATE_LIMIT_SEARCH (60/minute by
+    default)."""
 
     stmt = select(Product).options(joinedload(Product.category)).where(
         Product.is_active,
@@ -440,7 +457,7 @@ async def search_products(
     responses={
         200: ETAG_RESPONSE,
         304: {"description": "Not modified: If-None-Match matches the current ETag", "headers": ETAG_HEADER},
-        404: {"description": "Product not found"},
+        404: {"description": "Product not found, or not active"},
     },
 )
 async def get_product(

@@ -189,8 +189,8 @@ class Message(BaseModel):
 class PaginationParams(BaseModel):
     """Common pagination parameters"""
     # offset = (page - 1) * size stays far inside a bigint
-    page: Int32Max = Field(1, ge=1)
-    size: int = Field(20, ge=1, le=100)
+    page: Int32Max = Field(1, ge=1, description="Page number, from 1.")
+    size: int = Field(20, ge=1, le=100, description="Items per page, 1 to 100.")
     sort_by: str | None = None
     sort_order: str | None = Field(None, pattern="^(asc|desc)$")
 

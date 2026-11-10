@@ -177,10 +177,21 @@ QueryPrice = Annotated[
 
 class ProductFilter(BaseModel):
     """Schema for product filtering"""
-    category_id: Int32 | None = None
-    min_price: QueryPrice | None = None
-    max_price: QueryPrice | None = None
-    in_stock: bool | None = None
+    category_id: Annotated[Int32 | None, Field(
+        description="Only products of this category (its subcategories are not included)."
+    )] = None
+    min_price: Annotated[QueryPrice | None, Field(
+        description="Lowest price, in the store currency, inclusive."
+    )] = None
+    max_price: Annotated[QueryPrice | None, Field(
+        description="Highest price, in the store currency, inclusive; 422 if below min_price."
+    )] = None
+    in_stock: Annotated[bool | None, Field(
+        description=(
+            "true: only products that can be bought now (an active variant with stock, or, for a "
+            "product without variants, stock above zero); false or omitted: no filter."
+        )
+    )] = None
     characteristics: dict[str, Any] | None = None
 
     @field_validator("min_price", "max_price")
@@ -189,7 +200,10 @@ class ProductFilter(BaseModel):
         return Decimal(0) if v == 0 else v
 
     # Bounded like ProductSearch.query: a search term, not a document.
-    search_query: str | None = Field(None, max_length=100)
+    search_query: Annotated[str | None, Field(
+        max_length=100,
+        description="Products whose name or description contains this text, ignoring case.",
+    )] = None
     # field_direction in one value (not sort_by plus sort_order, as the other
     # lists); anything else is a 422, not ignored.
     # The description is in the annotation (a Depends() list loses one given on the default).
@@ -200,8 +214,8 @@ class ProductFilter(BaseModel):
         )] | None,
         Field(description="Sort field and direction in one value, e.g. price_asc or created_at_desc. Without it, by id."),
     ] = None
-    page: Int32Max = Field(1, ge=1)
-    size: int = Field(20, ge=1, le=100)
+    page: Int32Max = Field(1, ge=1, description="Page number, from 1.")
+    size: int = Field(20, ge=1, le=100, description="Items per page, 1 to 100.")
 
     @field_validator('max_price')
     @classmethod
@@ -217,10 +231,15 @@ class ProductFilter(BaseModel):
 
 class ProductSearch(BaseModel):
     """Schema for product search"""
-    query: str = Field(..., min_length=3, max_length=100)
-    category_id: Int32 | None = None
-    page: Int32Max = Field(1, ge=1)
-    size: int = Field(20, ge=1, le=100)
+    query: str = Field(
+        ..., min_length=3, max_length=100,
+        description="Text to find in the name or description, ignoring case; 3 to 100 characters.",
+    )
+    category_id: Int32 | None = Field(
+        None, description="Only products of this category (its subcategories are not included)."
+    )
+    page: Int32Max = Field(1, ge=1, description="Page number, from 1.")
+    size: int = Field(20, ge=1, le=100, description="Items per page, 1 to 100.")
 
 
 class ProductVariantBase(BaseModel):

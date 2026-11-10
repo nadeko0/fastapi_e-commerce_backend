@@ -137,15 +137,17 @@ def probe_response(request: Request, content: dict, status_code: int = 200, head
 @router.head("/livez", include_in_schema=False)
 @router.get("/livez", responses={200: {"description": "Alive", "model": LivenessBody, "headers": _PROBE_HEADERS}})
 async def liveness(request: Request):
-    """The process is up and serving; checks nothing else."""
+    """The process is up and serving; checks nothing else. Public, never
+    rate limited or cached."""
     return probe_response(request, {"status": "ok"})
 
 
 @router.head("/readyz", include_in_schema=False)
 @router.get("/readyz", responses=probe_responses(ReadinessBody))
 async def readiness(request: Request):
-    """200 when the database and Redis both answer within a short timeout,
-    503 with Retry-After otherwise."""
+    """200 when the database and Redis both answer within a short timeout
+    (2 seconds each), 503 with Retry-After: 5 otherwise. Public, never rate
+    limited or cached."""
     database_up, redis_up = await asyncio.gather(
         database_is_up(READINESS_TIMEOUT_SECONDS), redis_is_up(READINESS_TIMEOUT_SECONDS)
     )

@@ -267,28 +267,46 @@ class PaymentBase(BaseModel):
     """The fields a payment request and the payment it produces have in
     common. The request side (PaymentCreate) refuses unknown members; the
     response (PaymentResponse) does not."""
-    order_id: Int32
-    payment_method: str = Field(..., pattern="^(stripe|paypal)$")
-    amount: Money
+    order_id: Int32 = Field(
+        description="Required in the request, but the order is the one in the path; this value is not compared with it."
+    )
+    payment_method: str = Field(
+        ..., pattern="^(stripe|paypal)$",
+        description="stripe or paypal; the charge is made through Stripe whichever is sent.",
+    )
+    amount: Money = Field(
+        description="Must equal the order's total_amount, else 400 (the order is not charged)."
+    )
     # Optional: the order is always charged in its own currency
     # (Order.currency). A client may still send the code it expects to pay
     # in; one that differs is rejected with 400, the same as an amount that
     # differs from the order total, rather than ignored, so a client that
     # believes it is paying in another currency finds out before any charge.
-    currency: str | None = Field(None, pattern="^[A-Z]{3}$")
+    currency: str | None = Field(
+        None, pattern="^[A-Z]{3}$",
+        description="Optional; if sent it must be the order's currency (STORE_CURRENCY), else 400.",
+    )
     # Stripe PaymentMethod token to confirm the intent with (e.g.
     # "pm_card_visa"). Optional and defaults to a successful mock card in
     # the provider - a real integration would require this (the client's
     # Stripe.js/Elements collects it), but making it optional here keeps
     # the existing request shape backward compatible.
-    payment_method_token: str | None = None
+    payment_method_token: str | None = Field(
+        None, description="Stripe PaymentMethod id collected by Stripe.js or Elements, for example pm_card_visa."
+    )
 
 class PaymentCreate(RequestBody, PaymentBase):
     """Schema for payment processing"""
 
 class PaymentResponse(ResponseBody, PaymentBase):
     id: int
-    status: PaymentStatus
+    status: PaymentStatus = Field(
+        description=(
+            "paid; requires_action (3D Secure pending: complete it with client_secret and next_action); "
+            "pending (accepted, not settled yet: the outcome arrives by webhook); failed (only when the "
+            "key of a declined attempt is repeated)."
+        )
+    )
     created_at: datetime
     transaction_id: str | None = None
     # Client-side secret needed to complete 3D Secure authentication via
@@ -317,14 +335,22 @@ def _url_origin(url: str) -> tuple | None:
 
 class OrderCreate(RequestBody):
     """Body of POST /orders."""
-    shipping_address_id: Int32
+    shipping_address_id: Int32 = Field(
+        description="An active address of the current user; any other id is a 404."
+    )
 
     model_config = ConfigDict(json_schema_extra={"examples": [{"shipping_address_id": 1}]})
 
 
 class OrderStatusUpdate(RequestBody):
     """Body of PUT /orders/{id}/status."""
-    status: OrderStatus
+    status: OrderStatus = Field(
+        description=(
+            "The status to move to. Allowed: new to confirmed or cancelled, confirmed to processing "
+            "or cancelled, processing to sent or cancelled, sent to delivered or cancelled; "
+            "confirmed, processing, sent and delivered need a paid order."
+        )
+    )
 
 
 class CheckoutSessionCreate(RequestBody):
@@ -337,12 +363,27 @@ class CheckoutSessionCreate(RequestBody):
     The currency is the order's too; as in PaymentCreate, one sent that
     differs from it is rejected (400).
     """
-    currency: str | None = Field(None, pattern="^[A-Z]{3}$")
+    currency: str | None = Field(
+        None, pattern="^[A-Z]{3}$",
+        description="Optional; if sent it must be the order's currency (STORE_CURRENCY), else 400.",
+    )
     # Where Stripe sends the customer after the hosted page. Omit to use the
     # frontend's /checkout/success and /checkout/cancel (built on
     # settings.FRONTEND_URL in create_checkout_session).
-    success_url: str | None = None
-    cancel_url: str | None = None
+    success_url: str | None = Field(
+        None,
+        description=(
+            "Where the customer returns after paying. Must be an http(s) URL on the frontend origin "
+            "(FRONTEND_URL), else 422; omit it for the frontend's /checkout/success page."
+        ),
+    )
+    cancel_url: str | None = Field(
+        None,
+        description=(
+            "Where the customer returns if they leave. Must be an http(s) URL on the frontend origin "
+            "(FRONTEND_URL), else 422; omit it for the frontend's /checkout/cancel page."
+        ),
+    )
 
     # The one example valid under any configuration is the empty body: the
     # URLs have to be on FRONTEND_URL and the currency the order's own, which
