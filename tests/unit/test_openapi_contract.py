@@ -51,6 +51,7 @@ def test_operation_ids_are_unique_and_short():
         ("OrderPayment", "status", {"processing", "requires_action", "unknown", "succeeded", "failed"}),
         ("AdminPaymentResponse", "status", {"processing", "requires_action", "unknown", "succeeded", "failed"}),
         ("AdminPaymentResponse", "provider", {"stripe"}),
+        ("PaymentResponse", "payment_method", {"stripe"}),
         ("OrderPaymentRefund", "status", {"pending", "requires_action", "succeeded", "failed", "canceled"}),
         ("OrderPaymentRefund", "source", {"admin", "provider"}),
         ("OrderPaymentDispute", "status", {"won", "lost", "prevented", "needs_response", "under_review",
@@ -92,6 +93,21 @@ def test_a_request_field_with_a_default_stays_optional(document):
     assert "marketing_consent" not in schemas["UserCreate"]["required"]
     assert "is_default" not in schemas["AddressCreate"]["required"]
     assert "currency" not in schemas["PaymentCreate"]["required"]
+
+
+def test_the_pay_body_holds_only_what_the_route_reads(document):
+    # The order is the path's and the provider is always Stripe; Stripe
+    # cannot confirm a payment without a payment method.
+    pay = document["components"]["schemas"]["PaymentCreate"]
+    assert set(pay["properties"]) == {"amount", "currency", "payment_method_token"}
+    assert set(pay["required"]) == {"amount", "payment_method_token"}
+    assert pay["additionalProperties"] is False
+
+
+def test_closed_request_values_are_an_enum(document):
+    schemas = document["components"]["schemas"]
+    assert schemas["DataRequest"]["properties"]["request_type"]["enum"] == ["export", "deletion"]
+    assert "metadata" not in schemas["CategoryCreate"]["properties"]
 
 
 def test_admin_payment_amounts_say_they_are_minor_units(document):

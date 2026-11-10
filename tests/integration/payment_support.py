@@ -181,8 +181,7 @@ class Shop:
     def pay(self, buyer: Buyer, order_id, token=PAY_OK, amount=None, currency=None, key=None):
         if amount is None:
             amount = str(self.order(order_id).total_amount)
-        body = {"order_id": order_id, "payment_method": "stripe", "amount": str(amount),
-                "payment_method_token": token}
+        body = {"amount": str(amount), "payment_method_token": token}
         if currency is not None:
             body["currency"] = currency
         return self.client.post(f"{ORDERS}/{order_id}/pay", json=body,

@@ -68,7 +68,7 @@ sequenceDiagram
     DB-->>API: Commit successful
     API-->>Customer: 201 Created (OrderResponse, Location: /api/v1/orders/{id})
 
-    Customer->>API: POST /api/v1/orders/{id}/pay (Idempotency-Key, payment_method, amount, payment_method_token)
+    Customer->>API: POST /api/v1/orders/{id}/pay (Idempotency-Key, amount, payment_method_token)
     API->>DB: Commit Payment row (placeholder intent id, status: processing)
     API->>Stripe: Create & confirm PaymentIntent (amount, currency, idempotency_key), no transaction open
     Stripe-->>API: PaymentIntent (status: succeeded, requires_action or processing)

@@ -285,7 +285,8 @@ class StripePaymentProvider(PaymentProvider):
             id=f"pi_{uuid.uuid4().hex[:24]}",
             amount=amount,
             currency=currency,
-            status=PaymentIntentStatus.REQUIRES_CONFIRMATION,
+            status=(PaymentIntentStatus.REQUIRES_CONFIRMATION if payment_method
+                    else PaymentIntentStatus.REQUIRES_PAYMENT_METHOD),
             client_secret=f"pi_{uuid.uuid4().hex[:24]}_secret_{uuid.uuid4().hex[:16]}",
             payment_method=payment_method,
             idempotency_key=idempotency_key,
@@ -341,7 +342,16 @@ class StripePaymentProvider(PaymentProvider):
             intent.amount_received = intent.amount
             return intent
 
-        token = intent.payment_method or TOKEN_SUCCESS_DEFAULT
+        token = intent.payment_method
+        if not token:
+            # Stripe's answer to a confirm of an intent with no payment
+            # method: an invalid request, the intent left as it is. The mock
+            # used to charge pm_card_visa here, so a /pay without a token
+            # was paid in tests and refused by Stripe.
+            raise InvalidRequestError(
+                "You cannot confirm this PaymentIntent because it's missing a payment method",
+                code="payment_intent_unexpected_state",
+            )
         if token in DECLINING_TOKENS:
             self._decline(intent, *DECLINING_TOKENS[token])
         if token in AUTHENTICATING_TOKENS:

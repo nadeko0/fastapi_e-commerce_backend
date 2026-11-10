@@ -483,8 +483,7 @@ def _unpaid_order(shop, price="19.99"):
 
 
 def _pay_body(order, token=PAY_OK, amount=None):
-    return {"order_id": order["id"], "payment_method": "stripe",
-            "amount": str(amount if amount is not None else order["total_amount"]),
+    return {"amount": str(amount if amount is not None else order["total_amount"]),
             "payment_method_token": token}
 
 

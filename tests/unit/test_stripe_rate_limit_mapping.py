@@ -107,9 +107,8 @@ def test_orders_pay_endpoint_maps_rate_limit_to_503(client, db_session):
         response = client.post(
             f"/api/v1/orders/{order.id}/pay",
             json={
-                "order_id": order.id,
-                "payment_method": "stripe",
                 "amount": str(order.total_amount),
+                "payment_method_token": "pm_card_visa",
             },
             headers=headers,
         )

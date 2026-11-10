@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 import pytest
@@ -230,17 +231,26 @@ def test_a_dispute_only_stripe_knows_about_is_a_409(client, db_session, monkeypa
     assert response.status_code == 409, response.text
 
 
-def test_another_provider_refusal_stays_a_400(client, db_session, monkeypatch):
+def test_another_provider_refusal_stays_a_400(client, db_session, monkeypatch, caplog):
+    # The provider's text is logged, not echoed: the rule of the order
+    # refund route.
     shop = Shop(client, db_session)
     admin = shop.admin()
     _, payment = _setup_cancelled_order_with_flagged_payment(shop, amount=2500, flagged=True)
 
     def refused(self, **kwargs):
-        raise CardError("Refused.", code="charge_already_refunded")
+        raise CardError("Charge ch_secret_123 has already been refunded.",
+                        code="charge_already_refunded")
 
     monkeypatch.setattr(StripePaymentProvider, "create_refund", refused)
-    response = client.post(
-        f"{ADMIN}/payments/{payment.id}/refund",
-        headers={**admin, "Idempotency-Key": "refused-key-1"},
-    )
+    with caplog.at_level(logging.WARNING, logger="app.api.v1.admin"):
+        response = client.post(
+            f"{ADMIN}/payments/{payment.id}/refund",
+            headers={**admin, "Idempotency-Key": "refused-key-1"},
+        )
     assert response.status_code == 400, response.text
+    assert response.json()["detail"] == (
+        "The refund could not be processed: the payment provider refused it")
+    assert "ch_secret_123" not in response.text
+    assert any("ch_secret_123" in r.getMessage() and "charge_already_refunded" in r.getMessage()
+               for r in caplog.records)

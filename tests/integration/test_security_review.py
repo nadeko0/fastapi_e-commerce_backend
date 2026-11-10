@@ -103,8 +103,7 @@ def _order(db, order_id):
 def test_payment_currency_cannot_be_chosen_by_client(client, db):
     headers, order, _ = _buyer_with_order(client, db)
     resp = client.post(f"{ORDERS}/{order['id']}/pay", headers={**headers, "Idempotency-Key": uuid.uuid4().hex},
-                       json={"order_id": order["id"], "payment_method": "stripe",
-                             "amount": order["total_amount"], "currency": "JPY",
+                       json={"amount": order["total_amount"], "currency": "JPY",
                              "payment_method_token": TOKEN_SUCCESS_DEFAULT})
     assert resp.status_code == 400, f"order paid in a client-chosen currency: {resp.status_code} {resp.text}"
     assert _order(db, order["id"]).payment_status != "paid"

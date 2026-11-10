@@ -49,7 +49,7 @@ def _fresh_mock():
 
 
 def _pay(amount):
-    return PaymentCreate(order_id=1, payment_method="stripe", amount=amount).amount
+    return PaymentCreate(payment_method_token="pm_card_visa", amount=amount).amount
 
 
 # -- conversion ------------------------------------------------------------------
@@ -121,11 +121,11 @@ def test_a_zero_order_total_is_never_sent_as_a_charge(currency):
                     max_size=5))
 def test_a_payment_currency_must_be_three_capital_letters(code):
     if re.fullmatch(r"[A-Z]{3}", code):
-        assert PaymentCreate(order_id=1, payment_method="stripe", amount="1",
+        assert PaymentCreate(payment_method_token="pm_card_visa", amount="1",
                              currency=code).currency == code
     else:
         with pytest.raises(ValidationError):
-            PaymentCreate(order_id=1, payment_method="stripe", amount="1", currency=code)
+            PaymentCreate(payment_method_token="pm_card_visa", amount="1", currency=code)
 
 
 @pytest.mark.parametrize("currency", STORE_CURRENCIES)

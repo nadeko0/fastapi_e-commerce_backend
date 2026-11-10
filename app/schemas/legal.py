@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -37,8 +37,8 @@ class UserConsent(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class DataRequest(RequestBody):
-    request_type: str = Field(
-        description="export or deletion (any other value is answered 400)."
+    request_type: Literal["export", "deletion"] = Field(
+        description="export or deletion; any other value is a 422."
     )
     reason: str | None = Field(None, description="Optional free text; not stored or acted on.")
     # The account's current password. Required for "deletion": erasure
@@ -56,7 +56,6 @@ class DataRequest(RequestBody):
 
     model_config = ConfigDict(
         json_schema_extra=input_schema(
-            rules={"request_type": {"enum": ["export", "deletion"]}},
             model={
                 "examples": [{
                     "request_type": "deletion",

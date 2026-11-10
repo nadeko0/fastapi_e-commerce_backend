@@ -332,11 +332,11 @@ async def update_user_consent(
     "/data-request",
     response_model=DataRequestResponse,
     responses={
-        400: {"description": "request_type is neither export nor deletion"},
         401: {"description": "Incorrect password (deletion)"},
         404: {"description": "User not found (the account was removed after the token was issued)"},
         409: {"description": "Deletion requested by the only active administrator"},
-        422: {"description": "Password missing for a deletion request"},
+        422: {"description": "request_type is neither export nor deletion, or the password is missing for a "
+                             "deletion request"},
         429: {"description": "Too many requests from this address (RATE_LIMIT_AUTH, 20/minute by default), or, "
                              "for a deletion, too many failed password checks "
                              "(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS and "
@@ -374,9 +374,10 @@ async def request_personal_data(
     if request_data.request_type == "export":
         # Reads user.id and user.email only - the detached snapshot will do.
         request_id = await gdpr_service.process_data_export(current_user)
-    elif request_data.request_type == "deletion":
-        # Re-authentication. The schema has already refused a deletion
-        # request without a password (422). Counted against the same
+    else:
+        # "deletion", the schema's only other value. Re-authentication. The
+        # schema has already refused a deletion request without a password
+        # (422). Counted against the same
         # failed-attempt limits as /users/login, or a stolen token would be a
         # password oracle with no lockout.
         await check_login_attempt(current_user.email, request)
@@ -392,11 +393,6 @@ async def request_personal_data(
         # through `db` (see _load_user).
         request_id = await gdpr_service.process_data_deletion(
             await _load_user(db, current_user.id)
-        )
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid request type. Must be either 'export' or 'deletion'"
         )
 
     return DataRequestResponse(

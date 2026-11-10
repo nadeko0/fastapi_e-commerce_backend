@@ -235,13 +235,17 @@ The webhook endpoint (`POST /api/v1/orders/webhooks/stripe`) operates without Be
 
 The handled event types are `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded` and the five `charge.dispute.*` events (`created`, `updated`, `closed`, `funds_withdrawn`, `funds_reinstated`).
 
+### Paying with a PaymentIntent
+
+`POST /orders/{id}/pay` takes `amount` (the order total), an optional `currency` (the order's) and a required `payment_method_token`, the PaymentMethod id collected by Stripe.js or Elements. The order is the one in the path and every charge goes through Stripe, so the body names neither: a body without the token, or one that still sends `order_id` or `payment_method`, is a 422.
+
 ### Checkout payments
 
 `POST /orders/{id}/checkout-session` puts `order_id` and `payment_id` in the metadata of the session, and the live provider copies it onto the session's PaymentIntent. A `payment_intent.succeeded` event therefore finds its attempt even before `checkout.session.completed` has stored the PaymentIntent id, and alone settles the order; `checkout.session.completed` arriving afterwards changes nothing (the same holds in the other order). Both ids in the metadata must agree with one attempt that still holds the placeholder id, so the metadata alone is not trusted. A `payment_intent.payment_failed` for a Checkout attempt (a decline on the hosted page) is only logged: the customer can retry on the same open session, so the attempt and the order stay untouched until the session itself completes or expires.
 
 ### Refunds
 
-`POST /orders/{id}/refund` records its refund with source `admin` even when the refund webhook is processed first (the webhook records it as `provider`, and the admin call corrects it; a webhook never changes the source of an existing row). Error text from Stripe is not passed to clients on `/pay`, `/checkout-session` and `/refund`: the response carries a fixed message (for an amount above what is left, the refundable amount of the payment taken from our own records) and the provider's text goes to the log.
+`POST /orders/{id}/refund` records its refund with source `admin` even when the refund webhook is processed first (the webhook records it as `provider`, and the admin call corrects it; a webhook never changes the source of an existing row). Error text from Stripe is not passed to clients on `/pay`, `/checkout-session`, `/refund` and `POST /admin/payments/{payment_id}/refund`: the response carries a fixed message (for an amount above what is left, the refundable amount of the payment taken from our own records) and the provider's text goes to the log.
 
 ### Disputes
 

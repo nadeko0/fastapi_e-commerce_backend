@@ -1283,7 +1283,7 @@ async def list_payments(
     "/payments/{payment_id}/refund",
     response_model=RefundResponse,
     responses={
-        400: {"description": "The provider refused the refund as invalid (its message is in the detail), or the "
+        400: {"description": "The provider refused the refund (its reason is logged, not returned), or the "
                              "Idempotency-Key header is missing or malformed"},
         403: {"description": "Admin privileges required"},
         404: {"description": "Payment or its order not found"},
@@ -1382,13 +1382,20 @@ async def refund_flagged_payment(
             detail="Idempotency key already used with different refund parameters",
         ) from None
     except (CardError, InvalidRequestError) as e:
+        # The provider's wording is for developers: logged, and answered in
+        # ours, as on POST /orders/{order_id}/refund.
+        logger.warning(
+            "Refund of payment %s (order %s) refused by the provider (code %s): %s",
+            payment.id, order.id, getattr(e, "code", None), e.message,
+        )
         if getattr(e, "code", None) in DISPUTED_CHARGE_CODES:
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail="This payment is disputed; it cannot be refunded while the dispute is open",
             ) from e
         raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST, detail=e.message
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="The refund could not be processed: the payment provider refused it",
         ) from e
 
     # Under the order's lock, like every refund event: a Dashboard refund's

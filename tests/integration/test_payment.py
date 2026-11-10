@@ -225,8 +225,6 @@ def _create_admin(db_session):
 
 def _payment_payload(order, token=TOKEN_SUCCESS_DEFAULT, currency="USD"):
     return {
-        "order_id": order["id"],
-        "payment_method": "stripe",
         "amount": order["total_amount"],
         "currency": currency,
         "payment_method_token": token,
@@ -308,6 +306,30 @@ def test_successful_payment_confirms_intent_and_advances_order(client, db_sessio
     db_order = _get_order(db_session, order["id"])
     assert db_order.payment_status == "paid"
     assert db_order.status == "confirmed"
+    assert (body["order_id"], body["payment_method"], body["payment_method_token"]) == (
+        order["id"], "stripe", TOKEN_SUCCESS_DEFAULT)
+
+
+def test_a_payment_without_a_payment_method_token_is_refused_before_any_attempt(
+    client, db_session
+):
+    # It used to be optional: the mock then charged a default card, while
+    # live Stripe refused the confirm and the client got a generic 400.
+    setup = _create_verified_buyer_with_order(client, db_session)
+    order = setup["order"]
+    payload = _payment_payload(order)
+    del payload["payment_method_token"]
+
+    response = client.post(
+        f"{ORDERS_PREFIX}/{order['id']}/pay",
+        json=payload,
+        headers=_with_idempotency_key(setup["headers"]),
+    )
+
+    assert response.status_code == 422
+    assert "payment_method_token" in response.text
+    assert _get_payments(db_session, order["id"]) == []
+    assert _get_order(db_session, order["id"]).payment_status == "pending"
 
 
 # -- Cents vs. dollars -------------------------------------------------------
@@ -1362,7 +1384,7 @@ def test_provider_refund_unknown_payment_intent_raises_card_error():
 def test_provider_refund_unconfirmed_intent_raises_card_error():
     provider = StripePaymentProvider()
     intent = provider.create_payment_intent(amount=1000, currency="USD", idempotency_key="k4")
-    # Never confirmed - still requires_confirmation, not succeeded.
+    # Never confirmed, so not succeeded.
     with pytest.raises(CardError) as exc_info:
         provider.create_refund(payment_intent_id=intent.id)
     assert exc_info.value.code == "invalid_request"

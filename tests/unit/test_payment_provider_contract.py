@@ -17,7 +17,8 @@ Relied on, and covered below:
   code and decline code, the intent left requires_payment_method with
   last_payment_error), or requires 3D Secure (requires_action with a
   redirect next_action back to the return_url), after which authentication
-  completes or declines it.
+  completes or declines it. An intent created without a payment method
+  waits for one, and confirming it is an InvalidRequestError.
 - Refunds: full and partial, never above what was captured, partials
   summing to it (property-tested in six store currencies), idempotent per
   key; asynchronous ones (pending then succeeded, succeeded then failed)
@@ -253,6 +254,21 @@ def test_confirming_with_the_create_calls_key_is_refused(stripe):
     with pytest.raises(IdempotencyError):
         stripe.provider.confirm_payment_intent(intent.id, idempotency_key=key,
                                                return_url=RETURN_URL)
+
+
+def test_an_intent_without_a_payment_method_cannot_be_confirmed(stripe):
+    # The mock used to charge a default card here, which Stripe refuses.
+    intent = stripe.provider.create_payment_intent(amount=5000, currency="EUR",
+                                                   idempotency_key=_key())
+    assert intent.status == PaymentIntentStatus.REQUIRES_PAYMENT_METHOD
+
+    with pytest.raises(InvalidRequestError) as refused:
+        stripe.provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
+
+    assert refused.value.code == "payment_intent_unexpected_state"
+    still = stripe.provider.retrieve_payment_intent(intent.id)
+    assert (still.status, still.amount_received) == (
+        PaymentIntentStatus.REQUIRES_PAYMENT_METHOD, 0)
 
 
 @pytest.mark.parametrize("call", ["confirm", "retrieve"])
@@ -519,20 +535,6 @@ def test_confirming_again_while_3d_secure_is_pending(stripe):
     expected = {"mock": PaymentIntentStatus.SUCCEEDED,
                 "live": PaymentIntentStatus.REQUIRES_ACTION}
     assert again.status == expected[stripe.name]
-
-
-def test_an_intent_created_without_a_payment_method(stripe):
-    # PaymentCreate.payment_method_token is optional: the mock then charges
-    # its default card, pm_card_visa. Stripe cannot confirm without one.
-    intent = stripe.provider.create_payment_intent(amount=5000, currency="EUR",
-                                                   idempotency_key=_key())
-    if stripe.name == "mock":
-        assert stripe.provider.confirm_payment_intent(
-            intent.id, return_url=RETURN_URL).status == PaymentIntentStatus.SUCCEEDED
-    else:
-        assert intent.status == PaymentIntentStatus.REQUIRES_PAYMENT_METHOD
-        with pytest.raises(InvalidRequestError):
-            stripe.provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
 
 
 def test_an_amount_below_stripes_minimum_charge(stripe):

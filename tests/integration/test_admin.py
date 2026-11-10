@@ -216,6 +216,8 @@ def test_admin_creates_category(client, db_session):
     assert response.status_code == 201
     assert response.json()["name"] == "New Category"
     assert response.json()["level"] == 0
+    # Fields that were never stored or computed are gone (C-05).
+    assert not {"metadata", "product_count", "children_count"} & response.json().keys()
 
 
 def test_admin_creates_subcategory_with_correct_level_and_path(client, db_session):
@@ -1109,7 +1111,9 @@ def test_admin_create_product_rejects_invalid_fields(client, db_session, field, 
     assert db_session.query(Product).count() == 0
 
 
-@pytest.mark.parametrize("payload", [{"name": "Kid", "parent_id": 0}, {"name": "K"}])
+@pytest.mark.parametrize("payload", [{"name": "Kid", "parent_id": 0}, {"name": "K"},
+                                     # Never stored: refused rather than dropped.
+                                     {"name": "Kid", "metadata": {"colour": "red"}}])
 def test_admin_create_category_rejects_invalid_fields(client, db_session, payload):
     admin = _make_admin(db_session)
     admin_token = _login_as(client, admin.email, "AdminPass1")

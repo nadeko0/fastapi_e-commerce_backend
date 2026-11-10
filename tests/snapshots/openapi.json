@@ -899,18 +899,6 @@
             ],
             "title": "Description"
           },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata"
-          },
           "name": {
             "maxLength": 100,
             "minLength": 2,
@@ -978,11 +966,6 @@
       "CategoryResponse": {
         "description": "Schema for API responses",
         "properties": {
-          "children_count": {
-            "default": 0,
-            "title": "Children Count",
-            "type": "integer"
-          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1006,11 +989,6 @@
           "level": {
             "title": "Level",
             "type": "integer"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
           },
           "name": {
             "title": "Name",
@@ -1036,11 +1014,6 @@
             "title": "Path",
             "type": "array"
           },
-          "product_count": {
-            "default": 0,
-            "title": "Product Count",
-            "type": "integer"
-          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -1055,10 +1028,7 @@
           "path",
           "level",
           "created_at",
-          "updated_at",
-          "metadata",
-          "product_count",
-          "children_count"
+          "updated_at"
         ],
         "title": "CategoryResponse",
         "type": "object"
@@ -1073,11 +1043,6 @@
             "title": "Children",
             "type": "array"
           },
-          "children_count": {
-            "default": 0,
-            "title": "Children Count",
-            "type": "integer"
-          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1101,11 +1066,6 @@
           "level": {
             "title": "Level",
             "type": "integer"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
           },
           "name": {
             "title": "Name",
@@ -1131,11 +1091,6 @@
             "title": "Path",
             "type": "array"
           },
-          "product_count": {
-            "default": 0,
-            "title": "Product Count",
-            "type": "integer"
-          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -1151,9 +1106,6 @@
           "level",
           "created_at",
           "updated_at",
-          "metadata",
-          "product_count",
-          "children_count",
           "children"
         ],
         "title": "CategoryTreeNode",
@@ -1463,7 +1415,7 @@
             "title": "Reason"
           },
           "request_type": {
-            "description": "export or deletion (any other value is answered 400).",
+            "description": "export or deletion; any other value is a 422.",
             "enum": [
               "export",
               "deletion"
@@ -2433,7 +2385,7 @@
       },
       "PaymentCreate": {
         "additionalProperties": false,
-        "description": "Schema for payment processing",
+        "description": "The body of POST /orders/{order_id}/pay. It names neither the order\n(the path does) nor a payment method type (every charge goes through\nthe Stripe provider).",
         "properties": {
           "amount": {
             "description": "Must equal the order's total_amount, else 400 (the order is not charged).",
@@ -2457,36 +2409,16 @@
             "description": "Optional; if sent it must be the order's currency (STORE_CURRENCY), else 400.",
             "title": "Currency"
           },
-          "order_id": {
-            "description": "Required in the request, but the order is the one in the path; this value is not compared with it.",
-            "maximum": 2147483647.0,
-            "minimum": -2147483648.0,
-            "title": "Order Id",
-            "type": "integer"
-          },
-          "payment_method": {
-            "description": "stripe or paypal; the charge is made through Stripe whichever is sent.",
-            "pattern": "^(stripe|paypal)$",
-            "title": "Payment Method",
-            "type": "string"
-          },
           "payment_method_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Stripe PaymentMethod id collected by Stripe.js or Elements, for example pm_card_visa.",
-            "title": "Payment Method Token"
+            "minLength": 1,
+            "title": "Payment Method Token",
+            "type": "string"
           }
         },
         "required": [
-          "order_id",
-          "payment_method",
-          "amount"
+          "amount",
+          "payment_method_token"
         ],
         "title": "PaymentCreate",
         "type": "object"
@@ -2494,7 +2426,7 @@
       "PaymentResponse": {
         "properties": {
           "amount": {
-            "description": "Must equal the order's total_amount, else 400 (the order is not charged).",
+            "description": "The amount charged: the order's total_amount.",
             "examples": [
               "10.50"
             ],
@@ -2528,7 +2460,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional; if sent it must be the order's currency (STORE_CURRENCY), else 400.",
+            "description": "The order's currency.",
             "title": "Currency"
           },
           "id": {
@@ -2548,15 +2480,17 @@
             "title": "Next Action"
           },
           "order_id": {
-            "description": "Required in the request, but the order is the one in the path; this value is not compared with it.",
+            "description": "The order paid: the one in the path.",
             "maximum": 2147483647.0,
             "minimum": -2147483648.0,
             "title": "Order Id",
             "type": "integer"
           },
           "payment_method": {
-            "description": "stripe or paypal; the charge is made through Stripe whichever is sent.",
-            "pattern": "^(stripe|paypal)$",
+            "description": "Always stripe: every charge goes through Stripe.",
+            "enum": [
+              "stripe"
+            ],
             "title": "Payment Method",
             "type": "string"
           },
@@ -2569,7 +2503,7 @@
                 "type": "null"
               }
             ],
-            "description": "Stripe PaymentMethod id collected by Stripe.js or Elements, for example pm_card_visa.",
+            "description": "The PaymentMethod id sent with this request; null when status is pending or when the answer repeats an earlier attempt (same Idempotency-Key).",
             "title": "Payment Method Token"
           },
           "requires_action": {
@@ -5251,7 +5185,7 @@
                 }
               }
             },
-            "description": "The provider refused the refund as invalid (its message is in the detail), or the Idempotency-Key header is missing or malformed",
+            "description": "The provider refused the refund (its reason is logged, not returned), or the Idempotency-Key header is missing or malformed",
             "headers": {
               "X-Request-ID": {
                 "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
@@ -11545,7 +11479,7 @@
                 }
               }
             },
-            "description": "request_type is neither export nor deletion",
+            "description": "The request cannot be served as sent",
             "headers": {
               "X-Request-ID": {
                 "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
@@ -11691,7 +11625,7 @@
                 }
               }
             },
-            "description": "Password missing for a deletion request",
+            "description": "request_type is neither export nor deletion, or the password is missing for a deletion request",
             "headers": {
               "X-Request-ID": {
                 "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",

@@ -104,7 +104,25 @@ def test_a_refund_amount_must_be_positive(amount):
 
 def test_amounts_are_normalised_to_cents():
     assert RefundCreate(amount="5").amount == Decimal("5.00")
-    assert PaymentCreate(order_id=1, payment_method="stripe", amount="5").amount == Decimal("5.00")
+    assert PaymentCreate(payment_method_token="pm_card_visa", amount="5").amount == Decimal("5.00")
+
+
+@pytest.mark.parametrize("body", [{"amount": "5"}, {"amount": "5", "payment_method_token": ""},
+                                  {"amount": "5", "payment_method_token": None}])
+def test_a_payment_needs_a_payment_method_token(body):
+    # Stripe cannot confirm a payment without one.
+    with pytest.raises(ValidationError) as refused:
+        PaymentCreate.model_validate(body)
+    assert refused.value.errors()[0]["loc"] == ("payment_method_token",)
+
+
+@pytest.mark.parametrize("field,value", [("order_id", 1), ("payment_method", "stripe")])
+def test_a_payment_body_names_neither_the_order_nor_a_method_type(field, value):
+    # The order is the path's; every charge goes through Stripe.
+    with pytest.raises(ValidationError) as refused:
+        PaymentCreate.model_validate(
+            {"amount": "5", "payment_method_token": "pm_card_visa", field: value})
+    assert refused.value.errors()[0]["type"] == "extra_forbidden"
 
 
 def test_checkout_redirects_may_be_left_out_or_null():
@@ -122,7 +140,7 @@ def test_checkout_redirects_may_be_left_out_or_null():
                                     "10000000000", "123456789.123"])
 def test_an_amount_beyond_any_order_total_is_a_validation_error(amount):
     with pytest.raises(ValidationError):
-        PaymentCreate(order_id=1, payment_method="stripe", amount=amount)
+        PaymentCreate(payment_method_token="pm_card_visa", amount=amount)
     with pytest.raises(ValidationError):
         RefundCreate(amount=amount)
 
@@ -135,18 +153,18 @@ def test_a_fraction_of_a_cent_is_refused_not_rounded(amount):
     with pytest.raises(ValidationError):
         RefundCreate(amount=amount)
     with pytest.raises(ValidationError):
-        PaymentCreate(order_id=1, payment_method="stripe", amount=amount)
+        PaymentCreate(payment_method_token="pm_card_visa", amount=amount)
 
 
 @pytest.mark.parametrize("amount,cents", [("0.01", "0.01"), ("10.5", "10.50"),
                                           ("10.500", "10.50"), ("7", "7.00")])
 def test_whole_cents_are_accepted_however_they_are_written(amount, cents):
     assert RefundCreate(amount=amount).amount == Decimal(cents)
-    assert PaymentCreate(order_id=1, payment_method="stripe",
+    assert PaymentCreate(payment_method_token="pm_card_visa",
                          amount=amount).amount == Decimal(cents)
 
 
 def test_the_largest_order_total_is_still_accepted():
     assert RefundCreate(amount="99999999.99").amount == Decimal("99999999.99")
-    assert PaymentCreate(order_id=1, payment_method="stripe",
+    assert PaymentCreate(payment_method_token="pm_card_visa",
                          amount="99999999.99").amount == Decimal("99999999.99")

@@ -428,8 +428,7 @@ def test_a_declined_card_is_422_payment_declined(shop):
 
 
 def _order_calls(shop, buyer, order_id):
-    body = {"order_id": order_id, "payment_method": "stripe",
-            "amount": str(shop.order(order_id).total_amount), "payment_method_token": "tok_visa"}
+    body = {"amount": str(shop.order(order_id).total_amount), "payment_method_token": "tok_visa"}
     return {
         "order": lambda headers: shop.client.post(
             f"{API}/orders", json={"shipping_address_id": buyer.address_id}, headers=headers),

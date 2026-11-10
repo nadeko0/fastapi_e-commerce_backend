@@ -15,7 +15,6 @@ class CategoryBase(BaseModel):
 class CategoryCreate(RequestBody, CategoryBase):
     """Schema for creating a new category"""
     name: str = Field(..., min_length=2, max_length=100)
-    metadata: dict | None = Field(default_factory=dict)
 
     # validate_parent_id: an id is positive; null (a root category) is not an id.
     model_config = ConfigDict(json_schema_extra=input_schema(rules={"parent_id": {"exclusiveMinimum": 0}}))
@@ -35,27 +34,11 @@ class CategoryInDB(CategoryBase):
     level: int  # Tree level (0 for root categories)
     created_at: datetime
     updated_at: datetime
-    metadata: dict = Field(default_factory=dict)
 
     model_config = ConfigDict(from_attributes=True)
 
-    @field_validator('metadata', mode="before")
-    @classmethod
-    def coerce_missing_metadata(cls, v):
-        # app.models.category.Category has no `metadata` column. Every
-        # SQLAlchemy declarative model exposes its own class-level
-        # `metadata` (the mapper's MetaData registry, not a dict) via
-        # `Base.metadata`, and with from_attributes=True that shadows this
-        # field on every ORM-loaded instance - so every GET that returns a
-        # category (list/detail/tree) raised a 500 ValidationError before
-        # this coercion. There is no real persisted category metadata
-        # today; treat any non-dict source as empty rather than reject it.
-        return v if isinstance(v, dict) else {}
-
 class CategoryResponse(ResponseBody, CategoryInDB):
     """Schema for API responses"""
-    product_count: int = 0
-    children_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 

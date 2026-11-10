@@ -196,8 +196,7 @@ def test_order_total_is_the_exact_decimal_sum_of_its_lines(client, db_session, l
     # And the amount charged is that total, in cents.
     paid = client.post(
         f"{ORDERS}/{order.id}/pay",
-        json={"order_id": order.id, "payment_method": "stripe",
-              "amount": body["total_amount"], "payment_method_token": TOKEN_SUCCESS_DEFAULT},
+        json={"amount": body["total_amount"], "payment_method_token": TOKEN_SUCCESS_DEFAULT},
         headers={**headers, "Idempotency-Key": uuid.uuid4().hex},
     )
     assert paid.status_code == 200, paid.text
@@ -268,8 +267,7 @@ def test_stock_equals_start_minus_live_orders_whatever_happens(
                 total = db_session.get(Order, order_id).total_amount
                 response = client.post(
                     f"{ORDERS}/{order_id}/pay",
-                    json={"order_id": order_id, "payment_method": "stripe",
-                          "amount": str(total), "payment_method_token": TOKEN_SUCCESS_DEFAULT},
+                    json={"amount": str(total), "payment_method_token": TOKEN_SUCCESS_DEFAULT},
                     headers={**headers, "Idempotency-Key": uuid.uuid4().hex},
                 )
             elif kind == "cancel_by_customer":

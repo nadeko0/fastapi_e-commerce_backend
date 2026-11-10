@@ -120,8 +120,7 @@ UNKNOWN_FIELD_CASES = [
         json={"status": "confirmed", **BOGUS})),
     ("pay", lambda w: w.client.post(
         f"{API}/orders/{w.order['id']}/pay", headers=_with_key(w.buyer.headers),
-        json={"order_id": w.order["id"], "payment_method": "stripe", "amount": "25.00",
-              "payment_method_token": PAY_OK, **BOGUS})),
+        json={"amount": "25.00", "payment_method_token": PAY_OK, **BOGUS})),
     ("checkout-session", lambda w: w.client.post(
         f"{API}/orders/{w.order['id']}/checkout-session",
         headers=_with_key(w.buyer.headers), json=BOGUS)),
@@ -236,8 +235,7 @@ def _update_variant(w, price):
 def _pay(w, amount):
     return w.client.post(
         f"{API}/orders/{w.order['id']}/pay", headers=_with_key(w.buyer.headers),
-        json={"order_id": w.order["id"], "payment_method": "stripe", "amount": amount,
-              "payment_method_token": PAY_OK})
+        json={"amount": amount, "payment_method_token": PAY_OK})
 
 
 def _refund(w, amount):

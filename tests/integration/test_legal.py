@@ -230,7 +230,8 @@ def test_data_request_rejects_invalid_request_type(client):
         headers=_auth_headers(token),
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 422
+    assert [e["loc"] for e in response.json()["errors"]] == [["body", "request_type"]]
 
 
 def test_consent_status_returns_current_state(client):
@@ -561,4 +562,5 @@ def test_a_password_is_not_needed_for_an_unknown_request_type_to_be_refused(clie
         headers=_auth_headers(token),
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 422
+    assert [e["loc"] for e in response.json()["errors"]] == [["body", "request_type"]]

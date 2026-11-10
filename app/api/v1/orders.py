@@ -1263,7 +1263,7 @@ async def process_payment(
     # guard exists for, and must not be rejected as a duplicate payment.
     existing_payment = await _payment_by_key(db, order.id, idempotency_key)
     # What defines the request is the whole validated body (amount, currency,
-    # method, token), so a retry that changes any of it is not a replay. The
+    # token), so a retry that changes any of it is not a replay. The
     # order is fixed by the path and the key is scoped to it.
     fingerprint = request_fingerprint(
         operation="pay", body=payment.model_dump(mode="json")
@@ -1470,7 +1470,7 @@ async def process_payment(
         await db.commit()
         return PaymentResponse(
             order_id=order.id,
-            payment_method=payment.payment_method,
+            payment_method="stripe",
             amount=payment.amount,
             currency=order.currency,
             payment_method_token=payment.payment_method_token,
@@ -1517,7 +1517,7 @@ async def process_payment(
 
     return PaymentResponse(
         order_id=order.id,
-        payment_method=payment.payment_method,
+        payment_method="stripe",
         amount=payment.amount,
         currency=order.currency,
         payment_method_token=payment.payment_method_token,

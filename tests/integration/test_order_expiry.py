@@ -100,8 +100,7 @@ def _cancel(client, token, order_id):
 def _pay(client, token, order):
     return client.post(
         f"{ORDERS_PREFIX}/{order['id']}/pay",
-        json={"order_id": order["id"], "payment_method": "stripe",
-              "amount": order["total_amount"], "payment_method_token": TOKEN_SUCCESS_DEFAULT},
+        json={"amount": order["total_amount"], "payment_method_token": TOKEN_SUCCESS_DEFAULT},
         headers=_with_idempotency_key(_auth_headers(token)),
     )
 

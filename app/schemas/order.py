@@ -263,17 +263,10 @@ class OrderListResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class PaymentBase(BaseModel):
-    """The fields a payment request and the payment it produces have in
-    common. The request side (PaymentCreate) refuses unknown members; the
-    response (PaymentResponse) does not."""
-    order_id: Int32 = Field(
-        description="Required in the request, but the order is the one in the path; this value is not compared with it."
-    )
-    payment_method: str = Field(
-        ..., pattern="^(stripe|paypal)$",
-        description="stripe or paypal; the charge is made through Stripe whichever is sent.",
-    )
+class PaymentCreate(RequestBody):
+    """The body of POST /orders/{order_id}/pay. It names neither the order
+    (the path does) nor a payment method type (every charge goes through
+    the Stripe provider)."""
     amount: Money = Field(
         description="Must equal the order's total_amount, else 400 (the order is not charged)."
     )
@@ -286,19 +279,28 @@ class PaymentBase(BaseModel):
         None, pattern="^[A-Z]{3}$",
         description="Optional; if sent it must be the order's currency (STORE_CURRENCY), else 400.",
     )
-    # Stripe PaymentMethod token to confirm the intent with (e.g.
-    # "pm_card_visa"). Optional and defaults to a successful mock card in
-    # the provider - a real integration would require this (the client's
-    # Stripe.js/Elements collects it), but making it optional here keeps
-    # the existing request shape backward compatible.
-    payment_method_token: str | None = Field(
-        None, description="Stripe PaymentMethod id collected by Stripe.js or Elements, for example pm_card_visa."
+    # Required: Stripe cannot confirm a PaymentIntent without a payment
+    # method. While it was optional, the mock charged a default card and
+    # live Stripe refused the confirm (a failed attempt and a generic 400).
+    payment_method_token: str = Field(
+        min_length=1,
+        description="Stripe PaymentMethod id collected by Stripe.js or Elements, for example pm_card_visa.",
     )
 
-class PaymentCreate(RequestBody, PaymentBase):
-    """Schema for payment processing"""
-
-class PaymentResponse(ResponseBody, PaymentBase):
+class PaymentResponse(ResponseBody):
+    order_id: Int32 = Field(description="The order paid: the one in the path.")
+    payment_method: Annotated[str, published_values(["stripe"])] = Field(
+        description="Always stripe: every charge goes through Stripe."
+    )
+    amount: Money = Field(description="The amount charged: the order's total_amount.")
+    currency: str | None = Field(None, pattern="^[A-Z]{3}$", description="The order's currency.")
+    payment_method_token: str | None = Field(
+        None,
+        description=(
+            "The PaymentMethod id sent with this request; null when status is pending "
+            "or when the answer repeats an earlier attempt (same Idempotency-Key)."
+        ),
+    )
     id: int
     status: PaymentStatus = Field(
         description=(

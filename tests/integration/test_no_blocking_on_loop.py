@@ -543,7 +543,7 @@ ORDERS = RouteGroup(
             {
                 "auth": ids["identity"],
                 "headers": {"Idempotency-Key": "orders-load-pay"},
-                "json": {"order_id": 1, "payment_method": "stripe", "amount": "9.99"},
+                "json": {"amount": "9.99", "payment_method_token": "pm_card_visa"},
             },
         ),
     ],
