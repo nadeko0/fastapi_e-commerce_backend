@@ -150,7 +150,11 @@ async def create_category(
     db: DbSession,
     redis: Cache,
 ):
-    """Create a new category, optionally nested under a parent category."""
+    """Create a new category, optionally nested under a parent category.
+
+    Changed in 6.0.0: `metadata` is no longer accepted (it was never stored;
+    sending it is a 422), and category responses no longer carry `metadata`,
+    `product_count` or `children_count` (always empty or 0 before)."""
 
     parent = None
     if category.parent_id:

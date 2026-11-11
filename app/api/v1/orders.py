@@ -1215,6 +1215,14 @@ async def process_payment(
     already used for this order returns the first attempt's outcome; a key
     already used with a different request body is answered 422.
 
+    Body (changed in 6.0.0): `{"amount": "<order total>", "currency":
+    "<optional, the order's>", "payment_method_token": "<pm_... from
+    Stripe.js>"}`. `payment_method_token` is required; `order_id` (the order
+    is the one in the path) and `payment_method` (always Stripe) are no
+    longer accepted, and a body that still sends them is a 422
+    (`extra_forbidden`). The response still carries `order_id` and
+    `payment_method` ("stripe").
+
     Payment window: a new attempt (a new key, on this route or on
     /checkout-session) is accepted only within UNPAID_ORDER_EXPIRE_MINUTES
     (30 by default) of the order's `created_at`; after that it is a 409 and

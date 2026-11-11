@@ -362,7 +362,8 @@ async def request_personal_data(
 
     The process is asynchronous and returns a request ID for tracking.
 
-    `request_type` is `export` or `deletion`. An export is sent to the
+    `request_type` is `export` or `deletion` (since 6.0.0 any other value is
+    a 422 from the schema, before 6.0.0 it was a 400). An export is sent to the
     account's email address, valid for GDPR_EXPORT_EXPIRY_HOURS (24 by
     default). A deletion deactivates the account at once (it can no longer
     log in) and the account is anonymised after DATA_DELETION_GRACE_PERIOD_DAYS
