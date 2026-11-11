@@ -25,19 +25,21 @@ from app.models.base import Base
 from app.models.category import Category
 from app.models.order import Order
 from app.models.order_items import OrderItem
-from app.models.payment import Payment
+from app.models.payment import PAYMENT_STATUSES, Payment
 from app.models.product import Product, ProductVariant
 from app.models.user import User
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _REVISION = "76d14f9f12e5"
 _PREVIOUS = "ed98c07e2fbc"
+# ck_payment_attempt_status came later, with the default-address index.
+STATUS_REVISION = "f180919aaf3b"
 
 
-def _migration():
+def _migration(revision=_REVISION):
     versions = os.path.join(_ROOT, "migrations", "versions")
-    (name,) = [f for f in os.listdir(versions) if f"-{_REVISION}_" in f]
-    spec = importlib.util.spec_from_file_location("check_constraints_migration", os.path.join(versions, name))
+    (name,) = [f for f in os.listdir(versions) if f"-{revision}_" in f]
+    spec = importlib.util.spec_from_file_location(f"migration_{revision}", os.path.join(versions, name))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -92,6 +94,8 @@ def order_graph(db_session):
         ("payment", "amount", -1),
         ("payment", "amount_refunded", -1),
         ("payment", "amount_refunded", 1000),  # more than the 999 paid
+        ("payment", "status", "canceled"),  # not a Payment.status (ck_payment_attempt_status)
+        ("payment", "status", "Succeeded"),
     ],
 )
 def test_the_database_refuses_a_value_the_application_would_never_write(db_session, order_graph, row, column, value):
@@ -110,6 +114,7 @@ def test_the_database_refuses_a_value_the_application_would_never_write(db_sessi
         ("variant", "price_override", Decimal("0.00")),
         ("order", "total_amount", Decimal("0.00")),
         ("payment", "amount_refunded", 999),  # a full refund
+        *[("payment", "status", status) for status in PAYMENT_STATUSES],
     ],
 )
 def test_the_boundaries_are_allowed(db_session, order_graph, row, column, value):
@@ -177,6 +182,20 @@ def test_the_migration_refuses_to_run_over_rows_that_break_a_constraint(db_sessi
 
 def test_the_migration_finds_nothing_wrong_with_valid_rows(db_session, order_graph):
     assert _migration().find_violations(db_session.connection()) == []
+
+
+def test_the_payment_status_migration_adds_the_models_constraint():
+    migration = _migration(STATUS_REVISION)
+    (check,) = [
+        c for c in Payment.__table__.constraints
+        if isinstance(c, CheckConstraint) and c.name == "ck_payment_attempt_status"
+    ]
+    assert migration.CONSTRAINTS == [("payments", check.name, str(check.sqltext))]
+    assert migration.down_revision == "d7a3b9e15c28"
+
+
+def test_the_payment_status_migration_finds_nothing_wrong_with_valid_rows(db_session, order_graph):
+    assert _migration(STATUS_REVISION).find_violations(db_session.connection()) == []
 
 
 def _offline_sql(*args):

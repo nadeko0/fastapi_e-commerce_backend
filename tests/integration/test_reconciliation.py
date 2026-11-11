@@ -138,7 +138,10 @@ def test_a_payment_the_provider_does_not_know(shop, provider):
     assert found(shop.db) == [(KIND_PAYMENT_MISSING, "", payment.payment_intent_id, None)]
 
 
-@pytest.mark.parametrize("ours", ["processing", "requires_action", "failed", "canceled"])
+# Every Payment.status but succeeded. ("canceled" is never written, and
+# ck_payment_attempt_status refuses it; compare() with it is covered in
+# tests/unit/test_reconciliation_compare.py.)
+@pytest.mark.parametrize("ours", ["processing", "requires_action", "unknown", "failed"])
 def test_a_succeeded_payment_we_never_heard_about(shop, provider, ours):
     # The lost webhook: the provider took the money, we still say otherwise.
     _, payment = paid(shop)
@@ -491,12 +494,14 @@ def test_a_difference_another_run_recorded_first_does_not_stop_the_run(shop):
     assert (result.checked, result.errors, result.aborted) == (1, 1, False)
     assert result.error_payment_ids == [second.id]
     assert sorted(d.payment_id for d in rows(shop.db)) == [first.id, second.id]
+    # Rolled back with the rows: the next run takes the second one first.
+    assert first.reconciled_at is not None and second.reconciled_at is None
 
 
 def test_errors_that_are_not_in_a_row_do_not_stop_the_run(shop, monkeypatch):
     monkeypatch.setattr(settings, "RECONCILIATION_MAX_CONSECUTIVE_ERRORS", 2)
     first, second, third = _three_payments(shop)
-    # Newest first: third, second, first. Fail third and first.
+    # Never compared, so in id order: first, second, third. Fail third and first.
     flaky = FlakyProvider(fail_retrieve={third.payment_intent_id, first.payment_intent_id})
 
     result = run(shop.db, flaky)
@@ -518,17 +523,50 @@ def test_a_checkout_attempt_without_a_payment_intent_yet_is_skipped(shop, provid
     assert (result.checked, result.skipped, result.errors) == (1, 0, 0)
 
 
-def test_the_run_is_capped_newest_first(shop, provider, monkeypatch):
+def test_the_run_is_capped_and_takes_the_least_recently_compared_first(shop, monkeypatch):
+    # The window used to be read newest first, so above the cap the older
+    # payments were never compared again (audit C-03). Now each run takes
+    # the never compared, then those compared longest ago.
     monkeypatch.setattr(settings, "RECONCILIATION_MAX_PAYMENTS", 2)
     first, second, third = _three_payments(shop)
-    for payment in (first, second, third):
-        payment.amount = 2600
-    shop.db.commit()
+    ids = {first.payment_intent_id: "first", second.payment_intent_id: "second",
+           third.payment_intent_id: "third"}
+    day_one, day_two, day_three = (_later() + timedelta(days=n) for n in range(3))
 
-    result = run(shop.db, provider)
+    def compared(now):
+        provider = FlakyProvider()
+        result = run(shop.db, provider, now=now)
+        assert (result.checked, result.truncated) == (2, True)
+        return [ids[intent] for intent in provider.calls]
 
-    assert (result.checked, result.truncated) == (2, True)
-    assert {d.payment_id for d in rows(shop.db)} == {second.id, third.id}
+    assert compared(day_one) == ["first", "second"]
+    assert compared(day_two) == ["third", "first"]
+    # Equal stamps go by id.
+    assert compared(day_three) == ["second", "first"]
+    assert [p.reconciled_at for p in (first, second, third)] == [day_three, day_three, day_two]
+
+
+def test_a_payment_is_stamped_only_when_it_was_compared(shop):
+    first, second, third = _three_payments(shop)
+    stamped_before = second.updated_at
+    now = _later()
+
+    result = run(shop.db, FlakyProvider(fail_retrieve={first.payment_intent_id}), now=now)
+
+    assert (result.checked, result.errors) == (2, 1)
+    # The provider could not answer for the first: it keeps its place in the queue.
+    assert [p.reconciled_at for p in (first, second, third)] == [None, now, now]
+    # A comparison is not a change to the payment.
+    assert second.updated_at == stamped_before
+
+
+def test_a_run_for_one_order_stamps_its_payments(shop, provider):
+    (_, mine), (_, other) = paid(shop), paid(shop)
+    now = _later()
+
+    run(shop.db, provider, order_id=mine.order_id, now=now)
+
+    assert (mine.reconciled_at, other.reconciled_at) == (now, None)
 
 
 def test_a_run_that_fits_the_cap_is_not_truncated(shop, provider, monkeypatch):
@@ -772,7 +810,10 @@ def test_reconciliation_cap_warning_log_carries_limit(shop, provider, monkeypatc
         if r.levelname == "WARNING" and "Reconciliation: more than" in r.getMessage()
     )
     assert record.args == (2,)
-    assert record.getMessage() == "Reconciliation: more than 2 payments in the window; the oldest are not checked"
+    assert record.getMessage() == (
+        "Reconciliation: more than 2 payments in the window; "
+        "the most recently compared wait for the next run"
+    )
 
 
 def test_reconciliation_soft_time_limit_logs_warning_and_aborts(shop, caplog):

@@ -6,6 +6,7 @@ under /users or /legal with a bearer requirement is covered without being
 listed here.
 """
 
+import contextlib
 import re
 import time
 import uuid
@@ -13,8 +14,11 @@ from decimal import Decimal
 
 import jwt
 import pytest
+from conftest import TestingSessionLocal, async_engine
 from fastapi.testclient import TestClient
+from sqlalchemy import event, update
 
+from app.api.v1 import users as users_api
 from app.core.config import settings
 from app.core.errors import ProblemType
 from app.core.security import get_password_hash
@@ -208,6 +212,119 @@ def test_an_unknown_or_foreign_address_cannot_be_made_default(client):
         )
         assert response.status_code == 404
     assert _defaults(client, theirs) == [foreign["id"]]
+
+
+@pytest.mark.parametrize("method", ["put", "patch"])
+def test_changing_an_address_into_another_active_one_is_409(client, method):
+    # It answered 500: the commit hit uix_active_user_address unhandled,
+    # while POST answered 409 for the same address.
+    headers = _auth(client)
+    first, second = _create(client, headers), _create(client, headers)
+
+    response = getattr(client, method)(
+        f"{USERS}/addresses/{second['id']}", json={"street": first["street"]}, headers=headers
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == users_api.ADDRESS_CONFLICT
+    shown = client.get(f"{USERS}/addresses/{second['id']}", headers=headers).json()
+    assert shown["street"] == second["street"]
+
+
+def _newer_default_then_older(client, headers):
+    """Two addresses, the newer (higher id) the default."""
+    older = _create(client, headers)
+    newer = _create(client, headers, is_default=True)
+    return older, newer
+
+
+@pytest.mark.parametrize("how", ["patch", "set default", "delete the newer"])
+def test_an_older_address_can_become_the_default(client, how):
+    # uix_user_default_address checks each row as it is written, and a flush
+    # writes the rows in id order: the old default has to be unset first.
+    headers = _auth(client)
+    older, newer = _newer_default_then_older(client, headers)
+
+    if how == "patch":
+        response = client.patch(
+            f"{USERS}/addresses/{older['id']}", json={"is_default": True}, headers=headers
+        )
+    elif how == "set default":
+        response = client.post(
+            f"{USERS}/addresses/default", json={"address_id": older["id"]}, headers=headers
+        )
+    else:
+        response = client.delete(f"{USERS}/addresses/{newer['id']}", headers=headers)
+
+    assert response.status_code in (200, 204), response.text
+    assert _defaults(client, headers) == [older["id"]]
+
+
+def test_unsetting_the_default_leaves_the_user_without_one(client):
+    # Kept as it was: no other address is promoted. An order names its
+    # address, so having no default blocks nothing.
+    headers = _auth(client)
+    only = _create(client, headers)
+
+    response = client.patch(
+        f"{USERS}/addresses/{only['id']}", json={"is_default": False}, headers=headers
+    )
+
+    assert response.status_code == 200
+    assert _defaults(client, headers) == []
+
+
+@contextlib.contextmanager
+def _another_request_makes_default_first(address_id):
+    """Just before the route writes its first change to addresses, another
+    request makes `address_id` its user's default and commits: the race of
+    two requests that both read the old default."""
+    fired = []
+
+    def hook(conn, cursor, statement, *rest):
+        if fired or not re.match(r"\s*(INSERT INTO|UPDATE) addresses\b", statement):
+            return
+        fired.append(statement)
+        with TestingSessionLocal() as other:
+            user_id = other.get(Address, address_id).user_id
+            other.execute(update(Address).where(Address.user_id == user_id).values(is_default=False))
+            other.execute(update(Address).where(Address.id == address_id).values(is_default=True))
+            other.commit()
+
+    event.listen(async_engine.sync_engine, "before_cursor_execute", hook)
+    try:
+        yield fired
+    finally:
+        event.remove(async_engine.sync_engine, "before_cursor_execute", hook)
+
+
+@pytest.mark.parametrize("action", ["create", "patch", "delete"])
+def test_a_default_changed_by_another_request_meanwhile_is_409_not_two_defaults(client, action):
+    headers = _auth(client)
+    first = _create(client, headers)  # the default
+    second, third = _create(client, headers), _create(client, headers)
+
+    with _another_request_makes_default_first(second["id"]) as fired:
+        if action == "create":
+            response = client.post(
+                f"{USERS}/addresses", json=_address(is_default=True), headers=headers
+            )
+        elif action == "patch":
+            response = client.patch(
+                f"{USERS}/addresses/{third['id']}", json={"is_default": True}, headers=headers
+            )
+        else:
+            # Deleting the default promotes the newest remaining one, third.
+            response = client.delete(f"{USERS}/addresses/{first['id']}", headers=headers)
+
+    assert fired, "the other request never ran"
+    assert response.status_code == 409, response.text
+    expected = users_api.DEFAULT_CONFLICT if action == "delete" else users_api.ADDRESS_CONFLICT
+    assert response.json()["detail"] == expected
+    # Nothing of the refused request was kept.
+    listing = client.get(f"{USERS}/addresses", headers=headers).json()
+    assert sorted(item["id"] for item in listing["items"]) == [first["id"], second["id"], third["id"]]
+    assert _defaults(client, headers) == [second["id"]]
 
 
 def test_a_foreign_address_cannot_be_updated(client):

@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     func,
     select,
+    text,
 )
 from sqlalchemy.orm import (
     Mapped,
@@ -134,6 +135,14 @@ class Order(Base):
         Index('idx_order_user_id', 'user_id'),
         Index('idx_order_status', 'status'),
         Index('idx_order_shipping_address_id', 'shipping_address_id'),
+        # The unpaid-order expiry sweep (app/tasks.py): new orders placed
+        # before a cutoff. New orders are few, so the index stays small.
+        Index(
+            'idx_order_new_created_at',
+            'created_at',
+            postgresql_where=text("status = 'new'"),
+            sqlite_where=text("status = 'new'"),
+        ),
         Index(
             'uix_order_user_idempotency_key',
             'user_id', 'idempotency_key',

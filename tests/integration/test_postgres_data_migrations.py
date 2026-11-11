@@ -7,6 +7,10 @@ production database holds, upgrade through it, look at the rows, go back.
 
   ada27dd39537  timestamps -> timestamptz, USING col AT TIME ZONE 'UTC'
   3f6c2a9d1b7e  unique index on lower(email), refusing case-only duplicates
+  d7a3b9e15c28  order snapshots, backfilled from the addresses
+  f180919aaf3b  one default address per user (older duplicates unset), the
+                payment status CHECK (refusing rows that break it), and
+                payments.reconciled_at
 
 Skipped unless TEST_DATABASE_URL names a server; CI's test-postgres job runs it.
 """
@@ -33,6 +37,7 @@ BEFORE_EMAIL_INDEX = "e1959653f4a2"
 EMAIL_INDEX = "3f6c2a9d1b7e"
 BEFORE_ORDER_SNAPSHOTS = "c5e2a8f4b196"
 ORDER_SNAPSHOTS = "d7a3b9e15c28"
+DEFAULT_ADDRESS = "f180919aaf3b"
 
 # A zone far from UTC with a half-hour offset, set on the database so that a
 # conversion that leaned on the session zone instead of 'UTC' would shift.
@@ -264,3 +269,107 @@ def test_order_snapshots_migration_backfills_shipping_address_on_postgres(migrat
             "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'"
         )).scalars().all()
         assert "ship_to_street" not in cols
+
+
+def _insert_address(connection, user_id, street, created_at, *, is_default=True, is_active=True):
+    return connection.execute(text(
+        "INSERT INTO addresses (user_id, street, city, state, postal_code, country, address_type, "
+        "is_default, is_active, created_at, updated_at) VALUES (:user_id, :street, 'Town', 'State', "
+        "'12345', 'DE', 'home', :is_default, :is_active, :created_at, :created_at) RETURNING id"
+    ), {"user_id": user_id, "street": street, "is_default": is_default, "is_active": is_active,
+        "created_at": created_at}).scalar_one()
+
+
+def _insert_payment(connection, user_id, address_id, status):
+    order_id = connection.execute(text(
+        "INSERT INTO orders (user_id, shipping_address_id, total_amount, currency, status, "
+        "payment_status, created_at, updated_at) "
+        "VALUES (:user_id, :address_id, 25.00, 'USD', 'new', 'pending', now(), now()) RETURNING id"
+    ), {"user_id": user_id, "address_id": address_id}).scalar_one()
+    return connection.execute(text(
+        "INSERT INTO payments (order_id, provider, payment_intent_id, amount, amount_refunded, "
+        "currency, status, requires_manual_review, created_at, updated_at) "
+        "VALUES (:order_id, 'stripe', :intent, 2500, 0, 'USD', :status, false, now(), now()) RETURNING id"
+    ), {"order_id": order_id, "intent": f"pi_{uuid.uuid4().hex}", "status": status}).scalar_one()
+
+
+def _active_defaults(connection):
+    return sorted(connection.execute(text(
+        "SELECT id FROM addresses WHERE is_default AND is_active"
+    )).scalars())
+
+
+def _exists(connection, sql):
+    return connection.execute(text(f"SELECT count(*) FROM {sql}")).scalar_one() > 0
+
+
+def test_the_default_address_migration_keeps_each_users_newest_default_and_comes_back(migration_db):
+    url, engine = migration_db
+    _alembic(url, "upgrade", ORDER_SNAPSHOTS)
+    with engine.begin() as connection:
+        many = _insert_user(connection, "many.defaults@example.com")
+        older = _insert_address(connection, many, "1 Old Street", "2026-01-01 00:00:00")
+        newest = _insert_address(connection, many, "2 New Street", "2026-03-01 00:00:00")
+        middle = _insert_address(connection, many, "3 Middle Street", "2026-02-01 00:00:00")
+        # Deleted: outside the index, left as it is although it is newer.
+        deleted = _insert_address(connection, many, "4 Gone Street", "2026-04-01 00:00:00", is_active=False)
+        _insert_address(connection, many, "5 Plain Street", "2026-05-01 00:00:00", is_default=False)
+        single = _insert_user(connection, "one.default@example.com")
+        only = _insert_address(connection, single, "6 Only Street", "2026-01-01 00:00:00")
+        tied = _insert_user(connection, "tied.defaults@example.com")
+        _insert_address(connection, tied, "7 Tie Street", "2026-01-01 00:00:00")
+        tie_winner = _insert_address(connection, tied, "8 Tie Street", "2026-01-01 00:00:00")
+        payment = _insert_payment(connection, single, only, "succeeded")
+
+    _alembic(url, "upgrade", DEFAULT_ADDRESS)
+
+    with engine.connect() as connection:
+        # The newest per user (the higher id when they were made at the same moment).
+        assert _active_defaults(connection) == sorted([newest, only, tie_winner])
+        assert connection.execute(text("SELECT count(*) FROM addresses")).scalar_one() == 8
+        assert connection.execute(text("SELECT is_default FROM addresses WHERE id = :i"), {"i": deleted}).scalar_one()
+        assert connection.execute(text(
+            "SELECT indexdef FROM pg_indexes WHERE indexname = 'uix_user_default_address'"
+        )).scalar_one().endswith("(user_id) WHERE (is_default AND is_active)")
+        assert connection.execute(text("SELECT reconciled_at FROM payments WHERE id = :i"), {"i": payment}).scalar_one() is None
+        assert connection.execute(text(
+            "SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_order_new_created_at'"
+        )).scalar_one().endswith("(created_at) WHERE ((status)::text = 'new'::text)")
+    with engine.begin() as connection, pytest.raises(Exception, match="uix_user_default_address"):
+        connection.execute(text("UPDATE addresses SET is_default = true WHERE id = :i"), {"i": middle})
+    with engine.begin() as connection, pytest.raises(Exception, match="ck_payment_attempt_status"):
+        connection.execute(text("UPDATE payments SET status = 'canceled'"))
+
+    _alembic(url, "downgrade", ORDER_SNAPSHOTS)
+
+    with engine.begin() as connection:
+        assert not _exists(connection, "pg_indexes WHERE indexname = 'uix_user_default_address'")
+        assert not _exists(connection, "pg_indexes WHERE indexname = 'idx_order_new_created_at'")
+        assert not _exists(connection, "pg_constraint WHERE conname = 'ck_payment_attempt_status'")
+        assert not _exists(connection, "information_schema.columns WHERE table_name = 'payments' AND column_name = 'reconciled_at'")
+        # The duplicates are not brought back, but two defaults are allowed again.
+        assert _active_defaults(connection) == sorted([newest, only, tie_winner])
+        connection.execute(text("UPDATE addresses SET is_default = true WHERE id = :i"), {"i": older})
+
+
+def test_the_default_address_migration_refuses_a_payment_status_the_check_would_reject(migration_db):
+    url, engine = migration_db
+    _alembic(url, "upgrade", ORDER_SNAPSHOTS)
+    with engine.begin() as connection:
+        user = _insert_user(connection, "odd.status@example.com")
+        first = _insert_address(connection, user, "1 First Street", "2026-01-01 00:00:00")
+        second = _insert_address(connection, user, "2 Second Street", "2026-02-01 00:00:00")
+        _insert_payment(connection, user, first, "canceled")
+        _insert_payment(connection, user, first, "succeeded")
+
+    refused = _alembic(url, "upgrade", DEFAULT_ADDRESS, check=False)
+
+    assert refused.returncode != 0
+    output = refused.stdout + refused.stderr
+    assert "payments: 1 row break ck_payment_attempt_status" in output
+    assert "nothing was changed" in output
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == ORDER_SNAPSHOTS
+        # The upgrade stopped before resolving the defaults.
+        assert _active_defaults(connection) == [first, second]
+        assert not _exists(connection, "pg_indexes WHERE indexname = 'uix_user_default_address'")

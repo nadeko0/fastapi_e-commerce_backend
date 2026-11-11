@@ -6,6 +6,7 @@ from sqlalchemy import (
     Column,
     ForeignKey,
     Index,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -51,6 +52,15 @@ class Address(Base):
             'user_id', 'street', 'city', 'state', 'postal_code', 'country', 'is_active',
             unique=True,
             postgresql_where=Column('is_active')
+        ),
+        # At most one active default per user: two requests that each make an
+        # address the default cannot both commit (the routes answer 409).
+        Index(
+            'uix_user_default_address',
+            'user_id',
+            unique=True,
+            postgresql_where=text('is_default AND is_active'),
+            sqlite_where=text('is_default AND is_active'),
         ),
     )
 

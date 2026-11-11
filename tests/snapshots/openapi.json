@@ -15382,7 +15382,7 @@
                 }
               }
             },
-            "description": "This address already exists for the current user (same street, city, state, postal code and country as an active address)",
+            "description": "This address already exists for the current user (same street, city, state, postal code and country as an active address), or another request made a different address the default at the same time",
             "headers": {
               "X-Request-ID": {
                 "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
@@ -15659,7 +15659,7 @@
                 }
               }
             },
-            "description": "Address is not active (it was deleted)",
+            "description": "Address is not active (it was deleted), or another request made a different address the default at the same time",
             "headers": {
               "X-Request-ID": {
                 "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
@@ -15897,6 +15897,24 @@
               }
             },
             "description": "Address not found, or already deleted",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "It was the default, and another request made a different address the default at the same time; nothing was deleted",
             "headers": {
               "X-Request-ID": {
                 "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
@@ -16347,7 +16365,7 @@
                 }
               }
             },
-            "description": "Address is not active (it was deleted)",
+            "description": "Address is not active (it was deleted); or the change makes it the same as another active address of the current user (street, city, state, postal code and country); or another request made a different address the default at the same time",
             "headers": {
               "X-Request-ID": {
                 "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
@@ -16505,7 +16523,7 @@
         ]
       },
       "put": {
-        "description": "Update fields on one of the current user's addresses. Sending\n`is_default` true makes it the default and unsets the previous one. An\norder keeps the address it was placed with: a later change does not\nalter it.",
+        "description": "Update fields on one of the current user's addresses. Sending\n`is_default` true makes it the default and unsets the previous one;\n`is_default` false on the default leaves the user with no default (no\nother address is promoted). An order keeps the address it was placed\nwith: a later change does not alter it.",
         "operationId": "update_address_put",
         "parameters": [
           {
@@ -16635,7 +16653,7 @@
                 }
               }
             },
-            "description": "Address is not active (it was deleted)",
+            "description": "Address is not active (it was deleted); or the change makes it the same as another active address of the current user (street, city, state, postal code and country); or another request made a different address the default at the same time",
             "headers": {
               "X-Request-ID": {
                 "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",

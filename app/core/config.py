@@ -500,7 +500,8 @@ class Settings(BaseSettings):
     # last RECONCILIATION_WINDOW_DAYS days, except those younger than
     # RECONCILIATION_MIN_AGE_MINUTES (an attempt still being paid or
     # confirmed by webhook is not a difference yet). At most
-    # RECONCILIATION_MAX_PAYMENTS are checked per run (newest first), two
+    # RECONCILIATION_MAX_PAYMENTS are checked per run (those checked longest
+    # ago first, so above the cap the rest come round on later runs), two
     # provider calls each, so a run stays inside the Celery time limit and
     # the provider's rate limit; the run stops early after
     # RECONCILIATION_MAX_CONSECUTIVE_ERRORS provider failures in a row

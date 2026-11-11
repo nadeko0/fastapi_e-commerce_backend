@@ -661,6 +661,26 @@ async def update_current_user(
         ) from e
 
 ADDRESS_SORT_COLUMNS = {"id": Address.id, "created_at": Address.created_at}
+
+# Saving an address meets two unique indexes: uix_active_user_address (the
+# same address twice) and uix_user_default_address (two defaults, when
+# another request made a different address the default since this one read
+# them). Both are a 409; PostgreSQL names the index but SQLite does not, so
+# one message covers both.
+ADDRESS_CONFLICT = (
+    "This address already exists for the current user, or another request "
+    "changed the default address at the same time"
+)
+DEFAULT_CONFLICT = "Another request changed the default address at the same time; try again"
+
+
+async def _commit_address_change(db: AsyncSession, conflict: str) -> None:
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict) from e
+
 ORDER_SORT_COLUMNS = {"id": Order.id, "created_at": Order.created_at, "total_amount": Order.total_amount}
 if TYPE_CHECKING:
     AddressListParams = PaginationParams
@@ -745,7 +765,8 @@ async def get_address(
     responses={
         201: {"description": "Address created; Location is its URL", "headers": LOCATION_HEADER},
         409: {"description": "This address already exists for the current user (same street, city, state, "
-                             "postal code and country as an active address)"},
+                             "postal code and country as an active address), or another request made a "
+                             "different address the default at the same time"},
         422: {"description": "Invalid address data"},
     },
 )
@@ -794,7 +815,7 @@ async def create_address(
         )
 
         db.add(address)
-        await db.commit()
+        await _commit_address_change(db, ADDRESS_CONFLICT)
         # address_type has a server default the INSERT does not read back.
         await db.refresh(address)
 
@@ -813,12 +834,14 @@ async def create_address(
             detail="Invalid address data",
             errors=sanitized_errors(e.errors()),
         ) from None
-    except IntegrityError as e:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This address already exists for the current user"
-        ) from e
+
+
+_UPDATE_CONFLICTS = (
+    "Address is not active (it was deleted); or the change makes it the same as another active "
+    "address of the current user (street, city, state, postal code and country); or another "
+    "request made a different address the default at the same time"
+)
+
 
 # PATCH shares the PUT handler: same schema, checks, side effects, response.
 @router.patch(
@@ -829,7 +852,7 @@ async def create_address(
     openapi_extra=merge_patch_body("AddressUpdate"),
     responses={
         404: {"description": "Address not found (or not the current user's)"},
-        409: {"description": "Address is not active (it was deleted)"},
+        409: {"description": _UPDATE_CONFLICTS},
     },
 )
 @router.put(
@@ -837,7 +860,7 @@ async def create_address(
     response_model=AddressResponse,
     responses={
         404: {"description": "Address not found (or not the current user's)"},
-        409: {"description": "Address is not active (it was deleted)"},
+        409: {"description": _UPDATE_CONFLICTS},
     },
 )
 async def update_address(
@@ -847,9 +870,10 @@ async def update_address(
     db: DbSession,
 ):
     """Update fields on one of the current user's addresses. Sending
-    `is_default` true makes it the default and unsets the previous one. An
-    order keeps the address it was placed with: a later change does not
-    alter it."""
+    `is_default` true makes it the default and unsets the previous one;
+    `is_default` false on the default leaves the user with no default (no
+    other address is promoted). An order keeps the address it was placed
+    with: a later change does not alter it."""
 
     address = (await db.execute(
         select(Address).where(
@@ -886,12 +910,16 @@ async def update_address(
         )).scalars().first()
         if existing_default:
             existing_default.is_default = False
+            # Written before this address becomes the default: the flush
+            # orders the UPDATEs by id, and uix_user_default_address checks
+            # each row as it is written.
+            await db.flush()
 
 
     for field, value in address_in.model_dump(exclude_unset=True).items():
         setattr(address, field, value)
 
-    await db.commit()
+    await _commit_address_change(db, ADDRESS_CONFLICT)
     await db.refresh(address)
 
     return AddressResponse.model_validate(address)
@@ -900,7 +928,11 @@ async def update_address(
     "/addresses/{address_id:sint}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
-    responses={404: {"description": "Address not found, or already deleted"}},
+    responses={
+        404: {"description": "Address not found, or already deleted"},
+        409: {"description": "It was the default, and another request made a different address the "
+                             "default at the same time; nothing was deleted"},
+    },
 )
 async def delete_address(
     address_id: Int32,
@@ -934,6 +966,8 @@ async def delete_address(
 
 
     if address.is_default:
+        # Written before another address becomes the default (see update_address).
+        await db.flush()
         new_default = (await db.execute(
             select(Address).where(
                 Address.user_id == current_user.id,
@@ -944,14 +978,15 @@ async def delete_address(
         if new_default:
             new_default.is_default = True
 
-    await db.commit()
+    await _commit_address_change(db, DEFAULT_CONFLICT)
 
 @router.post(
     "/addresses/default",
     response_model=Message,
     responses={
         404: {"description": "Address not found (or not the current user's)"},
-        409: {"description": "Address is not active (it was deleted)"},
+        409: {"description": "Address is not active (it was deleted), or another request made a "
+                             "different address the default at the same time"},
     },
 )
 async def set_default_address(
@@ -983,9 +1018,8 @@ async def set_default_address(
         )
 
 
-    address.is_default = True
-
-
+    # The others first: uix_user_default_address checks each row as it is
+    # written, and this address's change is only written by the commit.
     await db.execute(
         update(Address)
         .where(
@@ -996,8 +1030,9 @@ async def set_default_address(
         .values(is_default=False)
         .execution_options(synchronize_session=False)
     )
+    address.is_default = True
 
-    await db.commit()
+    await _commit_address_change(db, DEFAULT_CONFLICT)
 
     return Message(message="Default address updated successfully")
 

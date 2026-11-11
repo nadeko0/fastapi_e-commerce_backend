@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 
 
 # Payment.status values, every one the code ever writes (app/api/v1/orders.py,
-# app/services/stripe_events.py). The column is free text and stays so; this
-# is the vocabulary the OpenAPI document publishes.
+# app/services/stripe_events.py): the vocabulary the OpenAPI document
+# publishes, and what ck_payment_attempt_status lets into the column.
 #   processing       the provider is being asked (the row is written first)
 #   unknown          the provider did not answer in time; it may or may not have acted
 #   requires_action  3D Secure / SCA is pending
@@ -77,6 +77,10 @@ class Payment(Base):
     requires_manual_review: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+    # When the reconciliation last compared this payment with the provider
+    # (app/services/reconciliation.py); NULL: never. Each run takes the
+    # least recently compared first.
+    reconciled_at: Mapped[datetime | None]
 
     @hybrid_property
     def review_open(self) -> bool:
@@ -101,6 +105,8 @@ class Payment(Base):
         CheckConstraint("amount >= 0", name="ck_payment_amount_non_negative"),
         CheckConstraint("amount_refunded >= 0", name="ck_payment_refunded_non_negative"),
         CheckConstraint("amount_refunded <= amount", name="ck_payment_refunded_within_amount"),
+        # Not ck_payment_status: that is the name of orders.payment_status's.
+        CheckConstraint(f"status IN {PAYMENT_STATUSES}", name="ck_payment_attempt_status"),
         UniqueConstraint(
             "order_id", "idempotency_key", name="uix_payment_order_idempotency_key"
         ),

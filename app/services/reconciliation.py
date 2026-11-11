@@ -21,6 +21,10 @@ payment and the order's refunded state stop following its refunds, so
 setting it on the charge that did pay the order would make it unrefundable.
 The discrepancy rows (GET /admin/reconciliation/discrepancies) are the flag.
 
+A run compares at most RECONCILIATION_MAX_PAYMENTS payments, those compared
+longest ago first (Payment.reconciled_at, NULL first): above the cap the rest
+of the window comes round on the next runs instead of never.
+
 Idempotent: a difference is one row per (payment, kind, subject); seeing it
 again updates the row, a difference that is gone is marked resolved, and one
 that comes back reopens its row.
@@ -37,7 +41,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from celery.exceptions import SoftTimeLimitExceeded
-from sqlalchemy import Row, func, select
+from sqlalchemy import Row, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -130,7 +134,9 @@ class ReconciliationResult:
     errors: int = 0           # payments the provider could not answer for
     opened: int = 0           # differences newly found or found again
     resolved: int = 0         # differences that are gone
-    truncated: bool = False   # more payments in the window than RECONCILIATION_MAX_PAYMENTS
+    # More payments in the window than RECONCILIATION_MAX_PAYMENTS: the run
+    # took the least recently compared, the rest wait for a later run.
+    truncated: bool = False
     aborted: bool = False     # stopped early: too many provider failures in a row
     error_payment_ids: list[int] = field(default_factory=list)
 
@@ -214,8 +220,9 @@ def compare(
 def record(
     db: Session, payment_id: int, found: list[Difference], now: datetime
 ) -> tuple[int, int]:
-    """Bring the payment's discrepancy rows in line with `found`; commits.
-    Returns (opened, resolved): rows created or reopened, rows closed."""
+    """Bring the payment's discrepancy rows in line with `found`, stamp the
+    payment's reconciled_at, and commit. Returns (opened, resolved): rows
+    created or reopened, rows closed."""
     rows = {
         (d.kind, d.subject): d
         for d in db.scalars(
@@ -244,6 +251,15 @@ def record(
         if key not in seen and row.resolved_at is None:
             row.resolved_at = now
             resolved += 1
+    # Written after the rows and committed with them, so a payment whose rows
+    # were not written (IntegrityError) keeps its place in the queue.
+    # updated_at is kept: a comparison is not a change to the payment.
+    db.flush()
+    db.execute(
+        update(Payment)
+        .where(Payment.id == payment_id)
+        .values(reconciled_at=now, updated_at=Payment.updated_at)
+    )
     db.commit()
     return opened, resolved
 
@@ -288,7 +304,10 @@ def reconcile_payments(
     now: datetime | None = None,
 ) -> ReconciliationResult:
     """Reconcile the payments of the window (see the RECONCILIATION_*
-    settings), or every payment of `order_id` whatever its age. Stripe
+    settings), or every payment of `order_id` whatever its age, at most
+    RECONCILIATION_MAX_PAYMENTS of them, least recently compared first. A
+    payment compared and recorded gets reconciled_at = `now`; one the
+    provider could not answer for keeps its place for the next run. Stripe
     errors for one payment are counted and the run goes on with the next."""
     now = now or utc_now()
     query = select(Payment.id)
@@ -302,14 +321,19 @@ def reconcile_payments(
     query = query.where(
         ~(Payment.payment_intent_id.startswith(PENDING_INTENT_ID_PREFIX) & Payment.checkout_session_id.is_(None))
     )
+    # Least recently compared first (never compared before all), so above the
+    # cap every payment of the window still comes round on a later run.
     # One more than the cap, to know whether the cap cut anything off.
     limit = settings.RECONCILIATION_MAX_PAYMENTS
-    ids = list(db.scalars(query.order_by(Payment.id.desc()).limit(limit + 1)))
+    ids = list(db.scalars(
+        query.order_by(Payment.reconciled_at.asc().nulls_first(), Payment.id).limit(limit + 1)
+    ))
 
     result = ReconciliationResult(truncated=len(ids) > limit)
     if result.truncated:
         logger.warning(
-            "Reconciliation: more than %s payments in the window; the oldest are not checked",
+            "Reconciliation: more than %s payments in the window; "
+            "the most recently compared wait for the next run",
             limit,
         )
     consecutive_errors = 0

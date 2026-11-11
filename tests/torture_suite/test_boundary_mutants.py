@@ -904,7 +904,8 @@ def test_reconciliation_cap_truncates_only_beyond_it(db_session, buyer_row, monk
     payments = [_payment(db_session, order, now - timedelta(days=1)) for _ in range(count)]
     result = reconcile_payments(db_session, _FailingProvider(), now=now)
     assert result.truncated is truncated
-    assert result.error_payment_ids == [p.id for p in reversed(payments)][:3]
+    # None compared yet: in id order.
+    assert result.error_payment_ids == [p.id for p in payments][:3]
 
 
 @pytest.mark.parametrize("failures,aborted", [(2, False), (3, True), (4, True)])

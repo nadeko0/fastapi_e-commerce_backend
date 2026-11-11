@@ -2,8 +2,9 @@
 
 The rest of the suite is written to pass on SQLite and on PostgreSQL alike;
 these tests check what SQLite cannot show: that the order row lock in the pay
-path really makes a second payment wait, that the CHECK constraints and the
-unique index on lower(email) are enforced by the database itself, and that the
+path really makes a second payment wait, that the CHECK constraints, the
+unique index on lower(email) and the one default address per user are
+enforced by the database itself, and that the
 Alembic migrations run forward, back to nothing and forward again.
 
 They are skipped unless TEST_DATABASE_URL points at a server (see
@@ -30,8 +31,11 @@ from payment_support import Shop
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
+from test_check_constraints import (
+    STATUS_REVISION,
+    order_graph,  # noqa: F401  (fixture)
+)
 from test_check_constraints import _migration as _check_constraints_migration
-from test_check_constraints import order_graph  # noqa: F401  (fixture)
 from test_payment import (
     ORDERS_PREFIX,
     _create_verified_buyer_with_order,
@@ -41,6 +45,7 @@ from test_payment import (
 )
 
 from app.main import app
+from app.models.address import Address
 from app.models.base import Base
 from app.models.user import User
 from app.services.payment.stripe_provider import StripePaymentProvider
@@ -335,6 +340,7 @@ def test_a_cancellation_and_an_order_with_the_same_products_in_opposite_order_do
         ("UPDATE order_items SET quantity = 0", "ck_order_item_quantity_positive"),
         ("UPDATE orders SET total_amount = -1", "ck_order_total_non_negative"),
         ("UPDATE payments SET amount_refunded = amount + 1", "ck_payment_refunded_within_amount"),
+        ("UPDATE payments SET status = 'canceled'", "ck_payment_attempt_status"),
     ],
 )
 def test_the_database_rejects_a_bad_row_and_names_the_constraint(db_session, order_graph, statement, constraint):  # noqa: F811
@@ -351,8 +357,40 @@ def test_every_check_constraint_the_migration_adds_exists_and_is_validated(db_se
         "SELECT conname, convalidated FROM pg_constraint WHERE contype = 'c'"
     )).all()
     present = dict(rows)
-    for _table, name, _condition in _check_constraints_migration().CONSTRAINTS:
+    added = [
+        *_check_constraints_migration().CONSTRAINTS,
+        *_check_constraints_migration(STATUS_REVISION).CONSTRAINTS,
+    ]
+    for _table, name, _condition in added:
         assert present.get(name) is True, name
+
+
+def _address_row(user_id, street, *, is_default=True, is_active=True):
+    return Address(
+        user_id=user_id, street=street, city="Town", state="State", postal_code="12345",
+        country="DE", is_default=is_default, is_active=is_active,
+    )
+
+
+def test_a_second_active_default_address_is_refused_by_its_index(db_session):
+    user = _new_user("defaults@example.com")
+    db_session.add(user)
+    db_session.flush()
+    # A deleted default and any number of non-defaults are outside the index.
+    db_session.add_all([
+        _address_row(user.id, "1 Kept Street"),
+        _address_row(user.id, "2 Deleted Street", is_active=False),
+        _address_row(user.id, "3 Other Street", is_default=False),
+    ])
+    db_session.commit()
+
+    db_session.add(_address_row(user.id, "4 Second Street"))
+    with pytest.raises(IntegrityError) as error:
+        db_session.commit()
+    db_session.rollback()
+
+    assert error.value.orig.sqlstate == "23505"
+    assert error.value.orig.diag.constraint_name == "uix_user_default_address"
 
 
 def _new_user(email):
@@ -386,6 +424,17 @@ def test_lower_email_lookup_is_served_by_the_unique_index(db_session):
     )).scalars())
     db_session.rollback()
     assert "uq_users_email_lower" in plan
+
+
+def test_the_expiry_sweep_can_be_served_by_the_new_order_index(db_session):
+    # The shape of cancel_expired_unpaid_orders' query (app/tasks.py).
+    db_session.execute(text("SET enable_seqscan = off"))
+    plan = "\n".join(db_session.execute(text(
+        "EXPLAIN SELECT id FROM orders WHERE status = 'new' "
+        "AND payment_status IN ('pending', 'failed') AND created_at < now()"
+    )).scalars())
+    db_session.rollback()
+    assert "idx_order_new_created_at" in plan
 
 
 # -- The migrations ----------------------------------------------------------
