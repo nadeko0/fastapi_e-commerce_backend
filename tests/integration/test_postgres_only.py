@@ -280,6 +280,39 @@ def test_placing_an_order_waits_for_another_placement_by_the_same_user(client, d
     assert shop.stock(product) == 4
 
 
+def test_changing_the_default_address_waits_for_another_address_change_of_the_user(
+    client, db_session
+):
+    # Two requests moving the default each updated the other's rows and could
+    # deadlock (40P01, a 500). The user's row puts them in line.
+    shop = Shop(client, db_session)
+    buyer = shop.buyer()
+    second = client.post("/api/v1/users/addresses", headers=buyer.headers, json={
+        "street": "2 Side St", "city": "Town", "state": "ST", "postal_code": "10002",
+        "country": "US",
+    })
+    assert second.status_code == 201, second.text
+
+    holder = TestingSessionLocal()
+    holder.execute(text("SELECT id FROM users WHERE id = :id FOR NO KEY UPDATE"),
+                   {"id": buyer.user_id})
+    results = {}
+    thread = threading.Thread(target=lambda: results.update(r=client.post(
+        "/api/v1/users/addresses/default", headers=buyer.headers,
+        json={"address_id": second.json()["id"]})))
+    thread.start()
+    try:
+        assert _wait_until(lambda: _blocked_on_a_lock() >= 1), "set-default never waited"
+        time.sleep(0.3)
+        assert thread.is_alive(), "set-default went on while another change held the user"
+    finally:
+        holder.commit()
+        holder.close()
+    thread.join(timeout=30)
+
+    assert results["r"].status_code == 200, results["r"].text
+
+
 def _cart_with(shop, buyer, products):
     for product in products:
         assert shop.add_to_cart(buyer, product).status_code == 200
@@ -426,15 +459,16 @@ def test_lower_email_lookup_is_served_by_the_unique_index(db_session):
     assert "uq_users_email_lower" in plan
 
 
-def test_the_expiry_sweep_can_be_served_by_the_new_order_index(db_session):
-    # The shape of cancel_expired_unpaid_orders' query (app/tasks.py).
-    db_session.execute(text("SET enable_seqscan = off"))
-    plan = "\n".join(db_session.execute(text(
-        "EXPLAIN SELECT id FROM orders WHERE status = 'new' "
-        "AND payment_status IN ('pending', 'failed') AND created_at < now()"
-    )).scalars())
-    db_session.rollback()
-    assert "idx_order_new_created_at" in plan
+def test_the_expiry_sweep_has_a_partial_index_on_new_orders_by_age(db_session):
+    # cancel_expired_unpaid_orders (app/tasks.py) asks for new orders older
+    # than a cutoff. Which index the planner picks depends on the table's
+    # statistics (on a near-empty test table it may take idx_order_status), so
+    # the index is checked by its definition, as PostgreSQL reports it.
+    definition = db_session.execute(text(
+        "SELECT pg_get_indexdef('idx_order_new_created_at'::regclass)"
+    )).scalar_one()
+    assert "ON public.orders USING btree (created_at)" in definition
+    assert "WHERE ((status)::text = 'new'::text)" in definition
 
 
 # -- The migrations ----------------------------------------------------------

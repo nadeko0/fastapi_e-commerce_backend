@@ -674,6 +674,15 @@ ADDRESS_CONFLICT = (
 DEFAULT_CONFLICT = "Another request changed the default address at the same time; try again"
 
 
+async def _lock_user_addresses(db: AsyncSession, user_id: int) -> None:
+    """One change to a user's addresses at a time, until the transaction
+    ends: two requests moving the default (set-default, create or update with
+    is_default, deleting the default) each updated the other's rows and
+    could deadlock (SQLSTATE 40P01, a 500). The user's row is the lock, as in
+    POST /orders; FOR NO KEY UPDATE leaves foreign-key checks on it free."""
+    await db.execute(select(User.id).where(User.id == user_id).with_for_update(key_share=True))
+
+
 async def _commit_address_change(db: AsyncSession, conflict: str) -> None:
     try:
         await db.commit()
@@ -785,7 +794,7 @@ async def create_address(
     There is no limit on the number of addresses."""
 
     try:
-
+        await _lock_user_addresses(db, current_user.id)
         active_addresses = (await db.execute(
             select(Address).where(
                 Address.user_id == current_user.id,
@@ -875,6 +884,7 @@ async def update_address(
     other address is promoted). An order keeps the address it was placed
     with: a later change does not alter it."""
 
+    await _lock_user_addresses(db, current_user.id)
     address = (await db.execute(
         select(Address).where(
             Address.id == address_id,
@@ -946,6 +956,7 @@ async def delete_address(
     with it keep it. If it was the default, the most recently created
     remaining address becomes the default."""
 
+    await _lock_user_addresses(db, current_user.id)
     address = (await db.execute(
         select(Address).where(
             Address.id == address_id,
@@ -996,6 +1007,7 @@ async def set_default_address(
 ):
     """Mark one of the current user's addresses as the default shipping address."""
 
+    await _lock_user_addresses(db, current_user.id)
     address = (await db.execute(
         select(Address).where(
             Address.id == default_address.address_id,
