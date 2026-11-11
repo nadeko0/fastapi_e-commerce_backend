@@ -410,9 +410,10 @@ class AsyncRedisService:
             family_key = f"refresh_family:{family_id}"
             await self._redis.sadd(family_key, jti)
             await self._redis.expire(family_key, ttl_seconds)
+            # See RedisService.register_refresh_token for this TTL.
             user_key = f"refresh_user:{user_id}"
             await self._redis.sadd(user_key, family_id)
-            await self._redis.expire(user_key, ttl_seconds)
+            await self._redis.expire(user_key, settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400)
             return True
         except RedisError as e:
             self._handle_redis_error(f"register_refresh_token: {str(e)}")

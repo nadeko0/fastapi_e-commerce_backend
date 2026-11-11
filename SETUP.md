@@ -50,6 +50,15 @@ The application uses Pydantic Settings (`app/core/config.py`). The following set
 | `EMAILS_FROM_EMAIL` | Sender address on transactional emails | `noreply@example.com` |
 | `EMAILS_FROM_NAME` | Sender display name | `Store Support` |
 
+Token lifetimes have defaults and are listed in `.env.example`:
+
+| Setting Name | Purpose | Default |
+|---|---|---|
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Lifetime of an access token | `15` |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Lifetime of one refresh token; each refresh hands out a new one | `7` |
+| `REFRESH_SESSION_MAX_DAYS` | Longest a login's session lasts, however often it is refreshed; after it `POST /api/v1/users/refresh` answers 401 and the user logs in again. At least 1 and at least `REFRESH_TOKEN_EXPIRE_DAYS` | `30` |
+| `PASSWORD_RESET_TOKEN_EXPIRE_MINUTES` | Lifetime of a password-reset link (at least 1) | `60` |
+
 #### Environment Modes (`ENVIRONMENT`)
 
 The `ENVIRONMENT` variable dictates security constraints and runtime behavior:

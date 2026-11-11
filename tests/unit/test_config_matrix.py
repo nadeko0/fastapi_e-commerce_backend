@@ -107,6 +107,19 @@ def test_a_password_reset_link_lives_an_hour_by_default():
     assert _settings().PASSWORD_RESET_TOKEN_EXPIRE_MINUTES == 60
 
 
+def test_a_refresh_session_lasts_at_most_thirty_days_by_default():
+    assert _settings().REFRESH_SESSION_MAX_DAYS == 30
+
+
+def test_a_refresh_session_cannot_be_shorter_than_one_refresh_token():
+    with pytest.raises(ValidationError, match="REFRESH_SESSION_MAX_DAYS"):
+        _settings(REFRESH_TOKEN_EXPIRE_DAYS=7, REFRESH_SESSION_MAX_DAYS=6)
+    with pytest.raises(ValidationError):
+        _settings(REFRESH_TOKEN_EXPIRE_DAYS=1, REFRESH_SESSION_MAX_DAYS=0)
+    assert _settings(REFRESH_TOKEN_EXPIRE_DAYS=7, REFRESH_SESSION_MAX_DAYS=7).REFRESH_SESSION_MAX_DAYS == 7
+    assert _settings(REFRESH_TOKEN_EXPIRE_DAYS=1, REFRESH_SESSION_MAX_DAYS=1).REFRESH_SESSION_MAX_DAYS == 1
+
+
 def test_development_forces_one_worker_debug_and_reload():
     development = _settings(ENVIRONMENT="development", WORKERS=8, DEBUG=False, RELOAD=False)
     assert (development.WORKERS, development.DEBUG, development.RELOAD) == (1, True, True)

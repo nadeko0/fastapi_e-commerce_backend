@@ -18737,7 +18737,7 @@
     },
     "/api/v1/users/refresh": {
       "post": {
-        "description": "Exchange a refresh token for a new access token, rotating the refresh\ntoken in the process. Does not require a valid (or even present) access\ntoken - that's the whole point of a refresh token. The presented refresh\ntoken is single-use: redeeming it a second time is treated as a\nstolen-token signal and revokes the rest of its token family, forcing\nre-login.",
+        "description": "Exchange a refresh token for a new access token, rotating the refresh\ntoken in the process. Does not require a valid (or even present) access\ntoken - that's the whole point of a refresh token. The presented refresh\ntoken is single-use: redeeming it a second time is treated as a\nstolen-token signal and revokes the rest of its token family, forcing\nre-login.\n\nThe new refresh token lives REFRESH_TOKEN_EXPIRE_DAYS (7 by default),\nbut never past REFRESH_SESSION_MAX_DAYS (30 by default) from the login\nthat started the session: from then on the refresh is refused (401, as\nfor an expired token) and the user logs in again.",
         "operationId": "refresh_access_token",
         "requestBody": {
           "content": {
@@ -18794,7 +18794,7 @@
                 }
               }
             },
-            "description": "Invalid, expired, or already-used refresh token (reuse also revokes the token's family: log in again)",
+            "description": "Invalid, expired, or already-used refresh token (reuse also revokes the token's family: log in again), or a session older than REFRESH_SESSION_MAX_DAYS (log in again)",
             "headers": {
               "X-Request-ID": {
                 "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",

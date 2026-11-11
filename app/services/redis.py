@@ -458,10 +458,13 @@ class RedisService:
             self._redis.expire(family_key, ttl_seconds)
             # Every family of the user, so that a logout without a refresh
             # token can end all of their sessions (revoke_user_refresh_families).
-            # Its expiry follows the newest family: none outlives it.
+            # Not the token's TTL, which is shorter for a family near its
+            # maximum age (REFRESH_SESSION_MAX_DAYS) and would cut short the
+            # set's other families: no token lives longer than
+            # REFRESH_TOKEN_EXPIRE_DAYS from its issue, so none outlives this.
             user_key = f"refresh_user:{user_id}"
             self._redis.sadd(user_key, family_id)
-            self._redis.expire(user_key, ttl_seconds)
+            self._redis.expire(user_key, settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400)
             return True
         except RedisError as e:
             self._handle_redis_error(f"register_refresh_token: {str(e)}")

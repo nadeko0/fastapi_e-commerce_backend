@@ -24,9 +24,13 @@ Tokens require explicit claims on decode via PyJWT `require` options. PyJWT vali
 | Token Type | Lifetime | Required Claims (`options={"require": ...}`) | Revocation Mechanism |
 |---|---|---|---|
 | Access Token | 15 minutes | `["exp", "sub", "type", "jti"]` | Blacklisted in Redis by unique `jti` upon logout (TTL rounded up). |
-| Refresh Token | 7 days | `["exp", "sub"]` (`type`, `jti`, `family` checked during rotation) | Consumed atomically; family revocation on reuse. |
+| Refresh Token | 7 days, and never past the family's maximum age (30 days) | `["exp", "sub"]` (`type`, `jti`, `family` checked during rotation) | Consumed atomically; family revocation on reuse; refused once the family is `REFRESH_SESSION_MAX_DAYS` old. |
 | Password Reset | 60 minutes | `["exp", "sub", "type", "pwd"]` | Bound to password fingerprint (`pwd`); single-use; evicts in-flight sessions and ends all families. |
 | Email Verification | 48 hours | `["exp", "sub", "type"]` | Single-use; idempotent upon repeated verification (EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS). |
+
+### Absolute Session Lifetime
+
+Every refresh rotates the token and the new one lives `REFRESH_TOKEN_EXPIRE_DAYS` (7), so without a cap a session refreshed at least weekly, a stolen one included, would never end. A login's refresh token carries the login time as `auth_time` (the OpenID Connect claim), each rotated token copies it, and no token of the family expires later than `auth_time` + `REFRESH_SESSION_MAX_DAYS` (30 by default, at least `REFRESH_TOKEN_EXPIRE_DAYS`). A refresh after that is refused with the same 401 as an expired token, and the user logs in again. The Redis entries of the token and its family expire with the token. A refresh token issued before `auth_time` existed counts from its own `iat`, the latest its family can have started, so its family ends at most `REFRESH_SESSION_MAX_DAYS` after it; a token with neither claim is refused.
 
 The signature algorithm is strictly constrained by a Pydantic literal to `HS256`, `HS384`, or `HS512` (`settings.JWT_ALGORITHM`). Algorithms such as `none` or asymmetric confusion attacks are rejected at schema validation time.
 

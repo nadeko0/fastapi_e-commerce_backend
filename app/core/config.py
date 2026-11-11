@@ -165,6 +165,20 @@ class Settings(BaseSettings):
     BCRYPT_MAX_CONCURRENCY: int | None = Field(None, ge=1)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # How long a login's session lasts at most, however often its refresh
+    # token is rotated: every rotated token expires by then, and a refresh
+    # after it is refused like an expired token (log in again). Without it a
+    # session refreshed at least every REFRESH_TOKEN_EXPIRE_DAYS, a stolen
+    # one included, never ended. At least REFRESH_TOKEN_EXPIRE_DAYS.
+    REFRESH_SESSION_MAX_DAYS: int = Field(30, ge=1)
+
+    @field_validator("REFRESH_SESSION_MAX_DAYS")
+    @classmethod
+    def session_outlasts_one_refresh_token(cls, v: int, info: ValidationInfo) -> int:
+        token_days = info.data.get("REFRESH_TOKEN_EXPIRE_DAYS")
+        if token_days is not None and v < token_days:
+            raise ValueError("REFRESH_SESSION_MAX_DAYS must be at least REFRESH_TOKEN_EXPIRE_DAYS")
+        return v
     # How long a password-reset link works. It was 24 hours, hard-coded: a
     # day for a link that travels in a URL (proxy logs, browser history,
     # Referer) to be found and used. An hour is enough to open an email;

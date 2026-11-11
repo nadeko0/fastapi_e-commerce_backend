@@ -231,13 +231,30 @@ def create_access_token(subject: str | int) -> str:
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
-def create_refresh_token(subject: str | int, jti: str | None = None, family: str | None = None) -> str:
+def _refresh_session_end(started_at: float) -> int:
+    """When a refresh token family started at `started_at` (epoch seconds)
+    ends, however often it is rotated: whole seconds, like `exp`."""
+    return int(started_at) + settings.REFRESH_SESSION_MAX_DAYS * 24 * 60 * 60
+
+
+def create_refresh_token(
+    subject: str | int,
+    jti: str | None = None,
+    family: str | None = None,
+    auth_time: float | None = None,
+) -> str:
     issued_at, expire = _issued_at_and_expiry(
         timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     )
+    # auth_time: when the login that started the family happened (the
+    # registered claim of OpenID Connect Core 1.0, section 2). Set here at
+    # login and copied on every rotation, like `family`, so that the family
+    # ends REFRESH_SESSION_MAX_DAYS after it: no token of it expires later.
+    started_at = issued_at if auth_time is None else auth_time
     to_encode = {
-        "exp": expire,
+        "exp": min(expire, _refresh_session_end(started_at)),
         "iat": issued_at,
+        "auth_time": started_at,
         "sub": str(subject),
         "type": "refresh",
         # jti: identifies this specific token so it can be single-use
@@ -467,20 +484,29 @@ def _blacklist_id(payload: dict) -> str:
 async_redis_service = AsyncRedisService()
 
 
-async def issue_refresh_token(user_id: int, family: str | None = None) -> str:
+async def issue_refresh_token(
+    user_id: int, family: str | None = None, auth_time: float | None = None
+) -> str:
     """Create a refresh token and register its jti with Redis so it can
-    later be validated, rotated, and reuse-detected. `family` is passed when
-    rotating an existing chain (login omits it, which starts a new chain).
+    later be validated, rotated, and reuse-detected. `family` and
+    `auth_time` (when the family started) are passed when rotating an
+    existing chain (login omits them, which starts a new chain).
 
     Raises TokenStateUnavailable when Redis cannot record it: a token that is
     not registered is refused at its first use (401, the client logs the user
     out), so it must not be handed out."""
-    token = create_refresh_token(user_id, family=family)
+    token = create_refresh_token(user_id, family=family, auth_time=auth_time)
+    # verify_exp off: a rotation that passed the family's age check a moment
+    # before the family's end mints a token that ends then, and may be read
+    # here just after. It is handed out and refused at its next use, like
+    # any token that has run out; decoding it must not be a 500.
     payload = decode_token(
         token,
-        options={"require": REFRESH_TOKEN_REQUIRED_CLAIMS},
+        options={"verify_exp": False, "require": REFRESH_TOKEN_REQUIRED_CLAIMS},
     )
-    ttl_seconds = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    # As long as the token lives and no longer: near the family's end that
+    # is less than REFRESH_TOKEN_EXPIRE_DAYS.
+    ttl_seconds = max(math.ceil(payload["exp"] - time.time()), 1)
     if not await async_redis_service.register_refresh_token(payload["jti"], user_id, payload["family"], ttl_seconds):
         raise TokenStateUnavailable
     return token
@@ -521,6 +547,17 @@ async def rotate_refresh_token(token: str, db: AsyncSession) -> tuple[str, str]:
     if user_id is None or jti is None or family is None:
         raise RefreshTokenError("Could not validate refresh token")
 
+    # The family's absolute lifetime: refused once REFRESH_SESSION_MAX_DAYS
+    # have passed since its login, like an expired token (the route answers
+    # the same 401), so the client logs in again. A token issued before
+    # auth_time existed has none, and its own iat stands in: the family
+    # started no later than that, so it ends REFRESH_SESSION_MAX_DAYS after
+    # it at the latest, and the rotated token carries that start from then
+    # on. A token with neither has no start to count from and is refused.
+    started_at = payload.get("auth_time", issued_at)
+    if not isinstance(started_at, (int, float)) or time.time() >= _refresh_session_end(started_at):
+        raise RefreshTokenError("Refresh session reached its maximum age")
+
     # Asked before the token is redeemed, so that a Redis that stops answering
     # between the two cannot leave the client with a spent token and a 503
     # (TokenStateUnavailable, which propagates: the route answers 503 and the
@@ -536,7 +573,7 @@ async def rotate_refresh_token(token: str, db: AsyncSession) -> tuple[str, str]:
     # redemption then fails, the user turns out to be gone, or the old token
     # is a replay; its jti sits in the family, so the revocation of a replay
     # removes it, and nobody but this server has it.
-    new_refresh_token = await issue_refresh_token(user_id, family=family)
+    new_refresh_token = await issue_refresh_token(user_id, family=family, auth_time=started_at)
 
     consumed = await async_redis_service.consume_refresh_token(jti)
     if consumed is None:

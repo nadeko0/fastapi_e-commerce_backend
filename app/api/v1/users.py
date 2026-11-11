@@ -463,7 +463,8 @@ async def login(
     response_model=Token,
     responses={
         401: {"description": "Invalid, expired, or already-used refresh token (reuse also revokes the "
-                             "token's family: log in again)"},
+                             "token's family: log in again), or a session older than "
+                             "REFRESH_SESSION_MAX_DAYS (log in again)"},
         503: {"description": "The token cannot be checked right now (Retry-After: 30); keep the refresh "
                              "token and retry"},
     },
@@ -478,6 +479,11 @@ async def refresh_access_token(
     token is single-use: redeeming it a second time is treated as a
     stolen-token signal and revokes the rest of its token family, forcing
     re-login.
+
+    The new refresh token lives REFRESH_TOKEN_EXPIRE_DAYS (7 by default),
+    but never past REFRESH_SESSION_MAX_DAYS (30 by default) from the login
+    that started the session: from then on the refresh is refused (401, as
+    for an expired token) and the user logs in again.
     """
     try:
         new_access_token, new_refresh_token = await rotate_refresh_token(

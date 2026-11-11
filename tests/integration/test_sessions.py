@@ -4,7 +4,7 @@ does not already walk through."""
 
 import asyncio
 import time
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
@@ -117,6 +117,8 @@ def test_the_tokens_handed_out_are_what_they_say(client, db_session):
     assert (refresh["sub"], refresh["type"]) == (str(user_id), "refresh")
     assert refresh["exp"] - int(refresh["iat"]) == settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400
     assert refresh["jti"] and refresh["family"] and access["jti"]
+    # The login starts the family: its time is the family's start.
+    assert refresh["auth_time"] == refresh["iat"]
 
 
 # --- token claims (properties) --------------------------------------------
@@ -216,6 +218,130 @@ def test_a_refresh_token_never_registered_burns_nothing_else(client, db_session)
     assert client.post(
         f"{USERS}/refresh", json={"refresh_token": tokens["refresh_token"]}
     ).status_code == 200
+
+
+# --- absolute session lifetime (REFRESH_SESSION_MAX_DAYS) -----------------
+# Rotated every few days, a family would otherwise live for ever: each new
+# token gets REFRESH_TOKEN_EXPIRE_DAYS of its own.
+
+DAY = 86400
+T0 = "2026-01-01 12:00:00"
+
+
+def _claims(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+def _refresh(client, token):
+    return client.post(f"{USERS}/refresh", json={"refresh_token": token})
+
+
+def _rotate_every(client, clock, token, days, times):
+    """Refresh `times` times, `days` apart; the last refresh token."""
+    for _ in range(times):
+        clock.tick(timedelta(days=days))
+        response = _refresh(client, token)
+        assert response.status_code == 200, response.text
+        token = response.json()["refresh_token"]
+    return token
+
+
+def _without_request_id(response):
+    return {k: v for k, v in response.json().items() if k != "request_id"}
+
+
+def test_a_session_rotated_often_still_ends_at_its_maximum_age(client, fake_redis):
+    max_age = settings.REFRESH_SESSION_MAX_DAYS * DAY
+    with freeze_time(T0) as clock:
+        login = _tokens(client)["refresh_token"]
+        started = _claims(login)["auth_time"]
+        # Six days apart, four times: day 24, when a full lifetime would
+        # reach past the family's end.
+        near = _rotate_every(client, clock, login, days=6, times=4)
+        claims = _claims(near)
+        assert claims["auth_time"] == started
+        assert claims["exp"] == int(started) + max_age
+        assert claims["exp"] - int(claims["iat"]) < settings.REFRESH_TOKEN_EXPIRE_DAYS * DAY
+        # The Redis entries live as long as the token, not a full lifetime.
+        for key in (f"refresh_active:{claims['jti']}", f"refresh_family:{claims['family']}"):
+            assert 0 < fake_redis.ttl(key) <= claims["exp"] - int(claims["iat"])
+
+        # A second before the end it still works, and the new token ends then too.
+        clock.move_to(datetime.fromtimestamp(int(started) + max_age - 1, UTC))
+        last = _refresh(client, near)
+        assert last.status_code == 200
+        assert _claims(last.json()["refresh_token"])["exp"] == int(started) + max_age
+
+        clock.move_to(datetime.fromtimestamp(int(started) + max_age, UTC))
+        ended = _refresh(client, last.json()["refresh_token"])
+
+    # Refused exactly like an expired token.
+    with freeze_time(T0) as clock:
+        expired = _tokens(client, "expired.session@example.com")["refresh_token"]
+        clock.tick(timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS, seconds=1))
+        refused_as_expired = _refresh(client, expired)
+    assert ended.status_code == refused_as_expired.status_code == 401
+    assert _without_request_id(ended) == _without_request_id(refused_as_expired)
+    assert ended.headers["WWW-Authenticate"] == refused_as_expired.headers["WWW-Authenticate"]
+
+
+def test_the_age_is_checked_even_for_a_token_that_has_not_expired(client, monkeypatch):
+    # A token can outlive its family when REFRESH_SESSION_MAX_DAYS is
+    # lowered after it was issued: its own exp is not the end.
+    with freeze_time(T0) as clock:
+        token = _tokens(client)["refresh_token"]
+        monkeypatch.setattr(settings, "REFRESH_SESSION_MAX_DAYS", settings.REFRESH_TOKEN_EXPIRE_DAYS - 1)
+        clock.tick(timedelta(days=settings.REFRESH_SESSION_MAX_DAYS))
+
+        response = _refresh(client, token)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Could not validate refresh token"
+
+
+def _registered_old_style_refresh_token(user_id, **claims):
+    """A refresh token as issued before auth_time existed, registered in Redis."""
+    issued_at = time.time()
+    payload = {
+        "exp": int(issued_at) + settings.REFRESH_TOKEN_EXPIRE_DAYS * DAY,
+        "iat": issued_at,
+        "sub": str(user_id),
+        "type": "refresh",
+        "jti": "old-jti",
+        "family": "old-family",
+        **claims,
+    }
+    RedisService().register_refresh_token(
+        "old-jti", user_id, "old-family", settings.REFRESH_TOKEN_EXPIRE_DAYS * DAY
+    )
+    return jwt.encode(payload, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
+
+
+def test_an_old_token_without_auth_time_counts_from_its_own_iat(client, db_session):
+    max_age = settings.REFRESH_SESSION_MAX_DAYS * DAY
+    with freeze_time(T0) as clock:
+        _register(client)
+        old = _registered_old_style_refresh_token(_user(db_session).id)
+        issued = _claims(old)["iat"]
+
+        rotated = _rotate_every(client, clock, old, days=6, times=1)
+        assert _claims(rotated)["auth_time"] == issued
+
+        near = _rotate_every(client, clock, rotated, days=6, times=3)
+        assert _claims(near)["exp"] == int(issued) + max_age
+        clock.move_to(datetime.fromtimestamp(int(issued) + max_age, UTC))
+
+        assert _refresh(client, near).status_code == 401
+
+
+def test_an_old_token_without_auth_time_or_iat_is_refused(client, db_session):
+    _register(client)
+    old = _registered_old_style_refresh_token(_user(db_session).id)
+    claims = _claims(old)
+    del claims["iat"]
+    no_start = jwt.encode(claims, settings.JWT_SECRET_KEY.get_secret_value(), algorithm=settings.JWT_ALGORITHM)
+
+    assert _refresh(client, no_start).status_code == 401
 
 
 # --- logout ---------------------------------------------------------------
