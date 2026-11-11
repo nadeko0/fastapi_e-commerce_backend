@@ -16,15 +16,18 @@ updates:
     groups:
       python-minor-patch:
         update-types: ["minor", "patch"]
+  # The app image (/Dockerfile) and the database and Redis images that
+  # docker-compose.yml builds (docker/postgres, docker/redis). Compose itself
+  # pulls no image any more, so it needs no entry. A major PostgreSQL or Python
+  # version, and a Redis release past what redis-py supports (8.8 for 8.1), is
+  # adopted by hand (docs/LIMITATIONS.md); patch updates of the pinned digests
+  # come here, and CI tests the new base (test-postgres, test-redis).
   - package-ecosystem: "docker"
-    directory: "/"
+    directories: ["/", "/docker/postgres", "/docker/redis"]
     schedule:
       interval: "weekly"
     cooldown: {default-days: 14}
-    ignore: [{dependency-name: "python", update-types: ["version-update:semver-major"]}]
-  - package-ecosystem: "docker-compose"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    cooldown: {default-days: 14}
-    ignore: [{dependency-name: "postgres", update-types: ["version-update:semver-major"]}]
+    ignore:
+      - {dependency-name: "python", update-types: ["version-update:semver-major", "version-update:semver-minor"]}
+      - {dependency-name: "postgres", update-types: ["version-update:semver-major"]}
+      - {dependency-name: "redis", update-types: ["version-update:semver-major", "version-update:semver-minor"]}
