@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from fastapi import HTTPException, Request
+from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -175,7 +175,17 @@ class GDPRService:
             "refunds": [_row(r, _REFUND_FIELDS) for r in refunds],
         }
 
-    async def process_data_export(self, user: User) -> str:
+    # The mails of both requests are queued on the route's BackgroundTasks,
+    # as the order routes queue theirs: they go out after the response, in a
+    # worker thread (Starlette runs a sync task in the threadpool). The
+    # request's outcome is its commit. Sent inside the handler, as they
+    # were, the client waited for SMTP (about 0.8 s a mail against a real
+    # server), and a mail that raised answered 500 for a request already
+    # recorded; the providers are written never to raise, but the answer no
+    # longer depends on it. A task that raises is logged by the server
+    # after the response and the tasks queued after it are not run.
+
+    async def process_data_export(self, user: User, background_tasks: BackgroundTasks) -> str:
         """
         Process a GDPR data export request
         Returns a request ID that can be used to track the export status
@@ -184,16 +194,6 @@ class GDPRService:
         request_id = f"export_{user.id}_{utc_now().timestamp()}"
 
         try:
-            # Send initial confirmation email. In a worker thread, like every
-            # send below: these functions are synchronous SMTP (connect,
-            # STARTTLS, login, send - about 0.8 s against a real server), and
-            # this method runs on the event loop. Called inline, as they were,
-            # each one stopped the whole worker for that long; this was the
-            # only route still sending mail from inside a handler (found by
-            # tracing an end-to-end run, docs/reports/load-testing-3x.md).
-            from app.services.email import send_gdpr_request_received
-            await run_in_threadpool(send_gdpr_request_received, user.email, "export", request_id)
-
             # `user` may be the request's detached snapshot: the row is written
             # through this session.
             db = self.db
@@ -205,9 +205,8 @@ class GDPRService:
             row.data_export_requests = requests
             await db.commit()
 
-            # The export goes to the account's own address, inline. A large
-            # account would rather get a signed, expiring download link.
-            from app.services.email import send_gdpr_export_email
+            # The export goes to the account's own address, in the mail. A
+            # large account would rather get a signed, expiring download link.
             export_data = GDPRExport(
                 request_id=request_id,
                 request_date=utc_now(),
@@ -215,17 +214,20 @@ class GDPRService:
                 status="completed",
                 data=await self.collect_export(user.id),
             )
-            await run_in_threadpool(send_gdpr_export_email, user.email, export_data)
-
-            return request_id
-
         except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail="Failed to process data export request"
             ) from e
 
-    async def process_data_deletion(self, user: User, cache: AsyncRedisService) -> str:
+        from app.services.email import send_gdpr_export_email, send_gdpr_request_received
+        background_tasks.add_task(send_gdpr_request_received, user.email, "export", request_id)
+        background_tasks.add_task(send_gdpr_export_email, user.email, export_data)
+        return request_id
+
+    async def process_data_deletion(
+        self, user: User, cache: AsyncRedisService, background_tasks: BackgroundTasks
+    ) -> str:
         """
         Process a GDPR data deletion request
         Returns a request ID that can be used to track the deletion status
@@ -280,8 +282,8 @@ class GDPRService:
 
             # After the commit, as the cancel routes do (_drop_product_details,
             # close_attempts_at_provider). Inline rather than as a background
-            # task: a mail failure below answers 500, and a response that is
-            # not the route's own drops its background tasks.
+            # task like the mails below: the orders are unpayable by the time
+            # the erasure is answered.
             for product_id in restocked:
                 await cache.invalidate_product_cache(product_id)
             if attempts:
@@ -289,24 +291,21 @@ class GDPRService:
                     close_attempts_at_provider, get_payment_provider(), attempts
                 )
 
-            # Send emails after commit (2D-03)
-            from app.services.email import (
-                send_gdpr_deletion_confirmation,
-                send_gdpr_request_received,
-            )
-            await run_in_threadpool(
-                send_gdpr_request_received, user.email, "deletion", request_id
-            )
-            await run_in_threadpool(send_gdpr_deletion_confirmation, user.email, request_id)
-
-            return request_id
-
         except Exception as e:
             await db.rollback()
             raise HTTPException(
                 status_code=500,
                 detail="Failed to process deletion request"
             ) from e
+
+        # After the commit (2D-03), queued (see the note above process_data_export).
+        from app.services.email import (
+            send_gdpr_deletion_confirmation,
+            send_gdpr_request_received,
+        )
+        background_tasks.add_task(send_gdpr_request_received, user.email, "deletion", request_id)
+        background_tasks.add_task(send_gdpr_deletion_confirmation, user.email, request_id)
+        return request_id
 
     def get_consent_status(self, user: User) -> dict:
         """

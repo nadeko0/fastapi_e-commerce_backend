@@ -2,7 +2,7 @@ import asyncio
 from datetime import timedelta
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from app.core import database
 from app.core.clock import utc_now
@@ -92,11 +92,17 @@ def test_process_data_export_returns_request_id_and_sends_emails(monkeypatch):
 
     async def scenario(session):
         user = await _make_user(session)
-        return user.id, await GDPRService(session).process_data_export(user)
+        tasks = BackgroundTasks()
+        request_id = await GDPRService(session).process_data_export(user, tasks)
+        # Queued, not sent: they go out after the response.
+        queued = list(sent)
+        await tasks()
+        return user.id, request_id, queued
 
-    user_id, request_id = _run(scenario)
+    user_id, request_id, queued = _run(scenario)
 
     assert request_id.startswith(f"export_{user_id}_")
+    assert queued == []
     assert sent == ["received", "export"]
 
 
@@ -113,14 +119,20 @@ def test_process_data_deletion_deactivates_user_and_sends_emails(monkeypatch):
 
     async def scenario(session):
         user = await _make_user(session)
-        request_id = await GDPRService(session).process_data_deletion(user, AsyncRedisService())
-        return user.id, request_id, user.is_active, user.data_deletion_requested
+        tasks = BackgroundTasks()
+        request_id = await GDPRService(session).process_data_deletion(
+            user, AsyncRedisService(), tasks
+        )
+        queued = list(sent)
+        await tasks()
+        return user.id, request_id, user.is_active, user.data_deletion_requested, queued
 
-    user_id, request_id, is_active, requested = _run(scenario)
+    user_id, request_id, is_active, requested, queued = _run(scenario)
 
     assert request_id.startswith(f"deletion_{user_id}_")
     assert is_active is False
     assert requested is True
+    assert queued == []
     assert sent == ["received", "confirmed"]
 
 
@@ -215,22 +227,20 @@ def test_a_consent_update_that_cannot_be_stored_is_rolled_back_and_a_500(monkeyp
     assert rolled_back == [True]
 
 
-def test_an_export_request_whose_mail_fails_is_a_500(monkeypatch):
-    def broken(*args):
-        raise OSError("smtp down")
-
-    monkeypatch.setattr("app.services.email.send_gdpr_request_received", broken)
-
+def test_an_export_request_that_cannot_be_stored_is_a_500_and_sends_nothing(monkeypatch):
     async def scenario(session):
         user = await _make_user(session)
+        _commit_fails(monkeypatch, session)
+        tasks = BackgroundTasks()
         with pytest.raises(HTTPException) as error:
-            await GDPRService(session).process_data_export(user)
-        return error.value
+            await GDPRService(session).process_data_export(user, tasks)
+        return error.value, tasks.tasks
 
-    error = _run(scenario)
+    error, queued = _run(scenario)
 
     assert error.status_code == 500
     assert error.detail == "Failed to process data export request"
+    assert queued == []
 
 
 def test_a_deletion_request_that_cannot_be_stored_leaves_the_account_as_it_was(monkeypatch):
@@ -241,7 +251,9 @@ def test_a_deletion_request_that_cannot_be_stored_leaves_the_account_as_it_was(m
         user_id = user.id
         rolled_back = _commit_fails(monkeypatch, session)
         with pytest.raises(HTTPException) as error:
-            await GDPRService(session).process_data_deletion(user, AsyncRedisService())
+            await GDPRService(session).process_data_deletion(
+                user, AsyncRedisService(), BackgroundTasks()
+            )
         # The rollback expired the user; a fresh read shows what is stored.
         stored = await session.get(User, user_id, populate_existing=True)
         return error.value, rolled_back, stored.is_active, stored.data_deletion_requested

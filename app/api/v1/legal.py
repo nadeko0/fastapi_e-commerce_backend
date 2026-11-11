@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import utc_now
@@ -351,6 +351,7 @@ async def request_personal_data(
     db: DbSession,
     current_user: CurrentUser,
     redis: Cache,
+    background_tasks: BackgroundTasks,
 ):
     """
     Handle GDPR data access and deletion requests.
@@ -372,12 +373,16 @@ async def request_personal_data(
     are cancelled with it, their stock returned and their open payment
     attempts closed at the provider; paid orders are kept. Limited per client address by
     RATE_LIMIT_AUTH (20/minute by default).
+
+    The mails (the confirmation, and the export itself) are sent after the
+    response: once the request is recorded, a mail that cannot be sent does
+    not turn the answer into an error.
     """
     gdpr_service = GDPRService(db)
 
     if request_data.request_type == "export":
         # Reads user.id and user.email only - the detached snapshot will do.
-        request_id = await gdpr_service.process_data_export(current_user)
+        request_id = await gdpr_service.process_data_export(current_user, background_tasks)
     else:
         # "deletion", the schema's only other value. Re-authentication. The
         # schema has already refused a deletion request without a password
@@ -396,7 +401,7 @@ async def request_personal_data(
         # Deactivates the user and commits `db`, so it needs the row loaded
         # through `db` (see _load_user).
         request_id = await gdpr_service.process_data_deletion(
-            await _load_user(db, current_user.id), redis
+            await _load_user(db, current_user.id), redis, background_tasks
         )
 
     return DataRequestResponse(

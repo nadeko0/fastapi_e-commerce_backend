@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from app.core.security import blacklist_token
 
 USERS_PREFIX = "/api/v1/users"
@@ -551,6 +553,52 @@ def test_a_deletion_request_with_the_password_sends_both_mails(client, monkeypat
 
     assert response.status_code == 200
     assert sent == [("received", "deletion"), ("confirmed", "deletion")]
+
+
+class _RaisingEmailProvider:
+    def __init__(self, sent):
+        self.sent = sent
+
+    def send(self, to_email, subject, html_content):
+        self.sent.append(subject)
+        raise OSError("smtp down")
+
+
+@pytest.mark.parametrize("request_type", ["export", "deletion"])
+def test_a_mail_provider_that_raises_does_not_fail_a_recorded_data_request(
+    fake_redis, db_session, monkeypatch, request_type
+):
+    # The providers are written never to raise; this one does. The request
+    # is recorded by its commit and answered 200; the mail is attempted
+    # after the response. raise_server_exceptions=False because the server
+    # does see the task's exception, after the response has gone out.
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    payload = _valid_registration_payload()
+    attempted = []
+    with TestClient(app, raise_server_exceptions=False) as lenient:
+        token = _register_and_login(lenient, payload)
+        monkeypatch.setattr(
+            "app.services.email.get_email_provider", lambda: _RaisingEmailProvider(attempted)
+        )
+
+        response = lenient.post(
+            f"{LEGAL_PREFIX}/data-request",
+            json={"request_type": request_type, "password": payload["password"]},
+            headers=_auth_headers(token),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["request_id"].startswith(f"{request_type}_")
+    assert len(attempted) == 1
+    stored = _stored_user(db_session)
+    if request_type == "export":
+        assert [r["request_id"] for r in stored.data_export_requests] == [response.json()["request_id"]]
+        assert stored.is_active is True
+    else:
+        assert (stored.is_active, stored.data_deletion_requested) == (False, True)
 
 
 def test_a_password_is_not_needed_for_an_unknown_request_type_to_be_refused(client):
