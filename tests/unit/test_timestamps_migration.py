@@ -61,9 +61,19 @@ def test_it_follows_the_previous_one_in_a_single_chain():
     assert _migration().down_revision == "d4e9a1c7b265"
 
 
+# DateTime columns added by later revisions, created as TIMESTAMP WITH TIME
+# ZONE from the start (the next test checks every model column is): this
+# migration converted the columns that existed when it was written.
+ADDED_LATER = {"payments": {"reconciled_at"}}  # f180919aaf3b
+
+
 def test_it_covers_exactly_the_datetime_columns_of_the_models():
     migrated = {t: set(c) for t, c in _migration().TIMESTAMP_COLUMNS.items()}
-    assert migrated == _model_timestamp_columns()
+    expected = {
+        table: columns - ADDED_LATER.get(table, set())
+        for table, columns in _model_timestamp_columns().items()
+    }
+    assert migrated == {table: columns for table, columns in expected.items() if columns}
 
 
 def test_every_model_datetime_column_is_time_zone_aware():
