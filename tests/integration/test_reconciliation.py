@@ -466,8 +466,10 @@ def test_a_difference_another_run_recorded_first_does_not_stop_the_run(shop):
     from conftest import TestingSessionLocal
     from sqlalchemy import event
 
-    first, second = paid(shop)[1], paid(shop)[1]
-    for payment in (first, second):
+    # The race hits the middle payment of three, after an earlier error, so
+    # the run must count on (not reset) its errors and go on to the third.
+    first, second, third = _three_payments(shop)
+    for payment in (second, third):
         payment.amount = 2600
     shop.db.commit()
     second_id = second.id
@@ -489,13 +491,13 @@ def test_a_difference_another_run_recorded_first_does_not_stop_the_run(shop):
             other.close()
 
     event.listen(shop.db, "before_flush", other_run_first)
-    result = run(shop.db, StripePaymentProvider())
+    result = run(shop.db, FlakyProvider(fail_retrieve={first.payment_intent_id}))
 
-    assert (result.checked, result.errors, result.aborted) == (1, 1, False)
-    assert result.error_payment_ids == [second.id]
-    assert sorted(d.payment_id for d in rows(shop.db)) == [first.id, second.id]
+    assert (result.checked, result.errors, result.aborted) == (1, 2, False)
+    assert result.error_payment_ids == [first.id, second.id]
+    assert sorted(d.payment_id for d in rows(shop.db)) == [second.id, third.id]
     # Rolled back with the rows: the next run takes the second one first.
-    assert first.reconciled_at is not None and second.reconciled_at is None
+    assert third.reconciled_at is not None and second.reconciled_at is None
 
 
 def test_errors_that_are_not_in_a_row_do_not_stop_the_run(shop, monkeypatch):

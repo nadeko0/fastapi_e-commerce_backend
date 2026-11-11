@@ -399,7 +399,8 @@ class CartWorld(RuleBasedStateMachine):
         if had_cart:
             for key, quantity in self.guest_cart.items():
                 if key in self.user_cart:
-                    self.user_cart[key] += quantity
+                    # Capped like the stored quantity (Cart.merge).
+                    self.user_cart[key] = min(self.user_cart[key] + quantity, INT32_MAX)
                 elif len(self.user_cart) < CART_MAX_LINES:
                     self.user_cart[key] = quantity
             self.guest_cart = None

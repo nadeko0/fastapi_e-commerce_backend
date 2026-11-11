@@ -143,7 +143,7 @@ def _pi_object(intent_id, order_id):
     return {
         "id": intent_id, "object": "payment_intent", "amount": 1000, "amount_received": 1000,
         "currency": "eur", "status": "succeeded", "receipt_email": "jane@example.com",
-        "metadata": {"order_id": str(order_id), "note": "Jane Roe"},
+        "metadata": {"order_id": str(order_id), "payment_id": "7", "note": "Jane Roe"},
         "shipping": {"name": "Jane Roe", "address": {"line1": "Main 1"}},
     }
 
@@ -195,7 +195,8 @@ def test_retention_purge_redacts_the_events_of_the_erased_account_only(db_sessio
         "data": {"object": {
             "id": "pi_gone", "object": "payment_intent", "amount": 1000,
             "amount_received": 1000, "currency": "eur", "status": "succeeded",
-            "metadata": {"order_id": str(order.id)},
+            # payment_id stays: a payment_intent.* event finds its Checkout attempt by it.
+            "metadata": {"order_id": str(order.id), "payment_id": "7"},
         }},
         "redacted": True,
     }

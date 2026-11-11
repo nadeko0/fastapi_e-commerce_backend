@@ -187,6 +187,7 @@ def test_consent_changes_are_limited_per_user_across_both_routes(
 
     blocked = _consent(client, alice, False)
     assert blocked.status_code == 429
+    assert blocked.json()["detail"] == "Too many consent changes"
     assert int(blocked.headers["Retry-After"]) > 0
     blocked = client.put(f"{API}/users/me", json={"marketing_consent": False}, headers=alice)
     assert blocked.status_code == 429

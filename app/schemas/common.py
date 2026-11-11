@@ -514,7 +514,8 @@ class Cart(BaseModel):
         account's, at login). `other` is not changed.
 
         A line present in both: the quantities are added up, as if the
-        customer had added the guest quantity to the account cart. Like an
+        customer had added the guest quantity to the account cart, capped at
+        the int32 maximum the quantity column and schemas allow. Like an
         add, it re-records the price, name and image - those of the guest
         line, the one the customer has just been looking at - and keeps the
         earlier added_at. Stock is not looked at: this must never be a
