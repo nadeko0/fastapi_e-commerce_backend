@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import redis
 from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -24,7 +25,9 @@ def _forbid_blocking_checks(monkeypatch):
         raise AssertionError("/health used a blocking client")
 
     monkeypatch.setattr(main_module.engine, "connect", _blocking)
-    monkeypatch.setattr(main_module.redis_service._redis, "ping", _blocking)
+    # Every synchronous client (fakeredis' too, which subclasses it); the
+    # asyncio client is another class and is left alone.
+    monkeypatch.setattr(redis.Redis, "ping", _blocking)
 
 
 def test_health_check_reports_healthy_when_everything_is_up(client, monkeypatch):

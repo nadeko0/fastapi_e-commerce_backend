@@ -18,11 +18,6 @@ EXPECTED_BEAT_SCHEDULE = {
         "schedule": crontab(hour=2, minute=30),
         "kind": crontab,
     },
-    "update-product-stats": {
-        "task": "update_product_stats",
-        "schedule": timedelta(hours=1),
-        "kind": (timedelta, schedule),
-    },
     "check-low-stock": {
         "task": "check_low_stock",
         "schedule": timedelta(hours=4),

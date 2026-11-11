@@ -188,8 +188,10 @@ def test_the_amount_of_an_unpaid_intent_is_what_it_asks_for(shop, provider):
     # Not succeeded: there is no amount received yet to compare with.
     buyer = shop.buyer()
     order = shop.order_of(buyer, shop.product(price="25.00"))
+    # With its payment method, as /pay creates every intent (the token is
+    # required): Stripe then holds it in requires_confirmation.
     intent = provider.create_payment_intent(
-        amount=2500, currency="USD", idempotency_key=uuid.uuid4().hex)
+        amount=2500, currency="USD", idempotency_key=uuid.uuid4().hex, payment_method=PAY_OK)
     _direct_payment(shop.db, order["id"], intent.id, status="processing")
 
     run(shop.db, provider)
@@ -656,9 +658,8 @@ def test_beat_runs_it_daily_at_a_quiet_hour():
 
 
 def test_the_existing_beat_entries_are_unchanged():
-    assert list(tasks.celery.conf.beat_schedule)[:4] == [
-        "cleanup-inactive-accounts", "update-product-stats", "check-low-stock",
-        "cancel-expired-unpaid-orders",
+    assert list(tasks.celery.conf.beat_schedule)[:3] == [
+        "cleanup-inactive-accounts", "check-low-stock", "cancel-expired-unpaid-orders",
     ]
 
 

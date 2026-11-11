@@ -14,7 +14,7 @@ from celery.signals import (
     worker_process_init,
     worker_process_shutdown,
 )
-from sqlalchemy import String, cast, create_engine, exists, func, literal, or_, select, update
+from sqlalchemy import String, cast, create_engine, exists, literal, or_, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import selectinload, sessionmaker
 
@@ -25,12 +25,11 @@ from app.core.database import _build_connect_args
 from app.core.logging_config import setup_logging
 from app.core.security import get_password_hash
 from app.models.order import Order
-from app.models.order_items import OrderItem
 from app.models.payment import Payment
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute
 from app.models.product import Product
 from app.models.user import User
-from app.schemas.order import OrderStatus, PaymentStatus
+from app.schemas.order import OrderStatus
 from app.services import stripe_events
 from app.services.email import (
     send_gdpr_deletion_completed,
@@ -125,7 +124,6 @@ celery.conf.update(
     # decorator, and the rate limits were never applied at all.
     task_routes={
         'cleanup_*': {'queue': 'cleanup'},
-        'update_*': {'queue': 'stats'},
         'check_*': {'queue': 'stats'},
     },
     # No glob patterns here: task_annotations is looked up by exact task
@@ -594,53 +592,6 @@ def sweep_stripe_events() -> int:
         return stripe_events.enqueue_stuck_events(db)
 
 @celery.task(
-    name="update_product_stats",
-    queue="stats",
-)
-def update_product_stats() -> None:
-    redis = RedisService()
-
-    with task_session() as db:
-        popular_products = db.execute(
-            select(
-                Product.id,
-                Product.name,
-                func.sum(OrderItem.quantity).label('total_quantity'),
-                func.sum(OrderItem.quantity * OrderItem.price_at_time).label('total_revenue')
-            )
-            .select_from(Product)
-            .join(OrderItem)
-            .join(Order)
-            .where(
-                Order.created_at >= utc_now() - timedelta(days=30),
-                Order.status != OrderStatus.CANCELLED,
-                Order.payment_status == PaymentStatus.PAID
-            )
-            .group_by(Product.id)
-            .order_by(func.sum(OrderItem.quantity).desc())
-            .limit(20)
-        ).all()
-
-    stats = {
-        "popular_products": [
-            {
-                "id": p.id,
-                "name": p.name,
-                "total_quantity": p.total_quantity,
-                "total_revenue": float(p.total_revenue)
-            }
-            for p in popular_products
-        ],
-        "updated_at": utc_now().isoformat()
-    }
-
-    # RedisService has no set_product_stats method (never did) - this
-    # always raised AttributeError, so update_product_stats has never
-    # completed successfully. Use the generic setex it does provide,
-    # matching the caching pattern already used by admin.get_statistics.
-    redis.setex("product_stats", 3600, stats)
-
-@celery.task(
     name="check_low_stock",
     queue="stats",
 )
@@ -677,10 +628,6 @@ celery.conf.beat_schedule = {
     'cleanup-inactive-accounts': {
         'task': 'cleanup_inactive_accounts',
         'schedule': crontab(hour=2, minute=30),
-    },
-    'update-product-stats': {
-        'task': 'update_product_stats',
-        'schedule': timedelta(hours=1),
     },
     'check-low-stock': {
         'task': 'check_low_stock',

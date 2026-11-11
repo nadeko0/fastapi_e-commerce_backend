@@ -1,12 +1,8 @@
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from conftest import TestingSessionLocal
-from freezegun import freeze_time
-from hypothesis import HealthCheck, given
-from hypothesis import settings as settings_hypothesis
-from hypothesis import strategies as st
 from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 
@@ -64,7 +60,6 @@ def _make_category_and_product(db_session, stock=10):
 def _make_order_with_item(
     db_session, user, product, quantity=2, status="new", payment_status="paid"
 ):
-    from app.models.address import Address
 
     address = Address(
         user_id=user.id,
@@ -141,19 +136,11 @@ def test_no_periodic_task_sweeps_the_cart_keyspace():
     assert "cleanup_expired_carts" not in tasks.celery.conf.task_annotations
 
 
-def test_update_product_stats_caches_popular_products(db_session, tasks_db, fake_redis):
-    user = _make_verified_user(db_session)
-    _, product = _make_category_and_product(db_session)
-    _make_order_with_item(
-        db_session, user, product, quantity=4, status="confirmed", payment_status="paid"
-    )
-
-    tasks.update_product_stats()
-
-    cached = RedisService().get("product_stats")
-    assert cached is not None
-    assert cached["popular_products"][0]["id"] == product.id
-    assert cached["popular_products"][0]["total_quantity"] == 4
+def test_no_task_writes_a_product_stats_key_nothing_reads():
+    """update_product_stats cached the 20 best sellers in Redis every hour
+    under a key no route, task or admin view ever read: removed in 6.0.0."""
+    assert "update_product_stats" not in _registered_task_names()
+    assert "update-product-stats" not in tasks.celery.conf.beat_schedule
 
 
 def test_check_low_stock_sends_alert_when_products_below_threshold(
@@ -213,9 +200,6 @@ def test_beat_schedule_registers_all_periodic_tasks():
 
     assert schedule["cleanup-inactive-accounts"]["task"] == "cleanup_inactive_accounts"
     assert schedule["cleanup-inactive-accounts"]["schedule"] == tasks.crontab(hour=2, minute=30)
-
-    assert schedule["update-product-stats"]["task"] == "update_product_stats"
-    assert schedule["update-product-stats"]["schedule"] == tasks.timedelta(hours=1)
 
     assert schedule["check-low-stock"]["task"] == "check_low_stock"
     assert schedule["check-low-stock"]["schedule"] == tasks.timedelta(hours=4)
@@ -299,10 +283,9 @@ def test_tasks_close_their_database_session(db_session, tasks_db, monkeypatch):
     monkeypatch.setattr("app.tasks.send_low_stock_alert_email", lambda *a, **k: True)
 
     tasks.cleanup_inactive_accounts()
-    tasks.update_product_stats()
     tasks.check_low_stock()
 
-    assert len(closed) == 3, "each task that opens a session must close it"
+    assert len(closed) == 2, "each task that opens a session must close it"
     for session in closed:
         assert not session.in_transaction()
 
@@ -407,136 +390,6 @@ def test_low_stock_alert_lists_every_low_product_in_one_email(
     assert to_email == tasks.settings.ADMIN_EMAIL
     for product in low:
         assert product.name in body
-
-
-# --- update_product_stats ------------------------------------------------------
-
-STATS_NOW = datetime(2026, 10, 20, 12, 0, 0, tzinfo=UTC)
-
-
-def _stats_fixture(db_session):
-    user = db_session.query(User).first() or _make_verified_user(db_session)
-    address = db_session.query(Address).first()
-    if address is None:
-        address = Address(
-            user_id=user.id, street="1 Main St", city="Town", state="ST",
-            postal_code="10001", country="US",
-        )
-        db_session.add(address)
-        db_session.commit()
-    products = db_session.query(Product).order_by(Product.id).all() or _products(
-        db_session, [10, 10, 10]
-    )
-    return user, address, products
-
-
-def _stats_order(db_session, user, address, lines, *, status, payment_status, created_at):
-    order = Order(
-        user_id=user.id, shipping_address_id=address.id, status=status,
-        payment_status=payment_status, created_at=created_at,
-        total_amount=sum(Decimal(price) * qty for _, qty, price in lines),
-    )
-    db_session.add(order)
-    db_session.commit()
-    for product, qty, price in lines:
-        db_session.add(OrderItem(
-            order_id=order.id, product_id=product.id, quantity=qty, price_at_time=Decimal(price),
-        ))
-    db_session.commit()
-
-
-@settings_hypothesis(
-    max_examples=30,
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
-@given(
-    orders=st.lists(
-        st.tuples(
-            st.integers(min_value=0, max_value=2),  # which product
-            st.integers(min_value=1, max_value=9),  # quantity
-            st.integers(min_value=1, max_value=10_000),  # unit price in cents
-            st.sampled_from(["confirmed", "delivered", "cancelled"]),
-            st.sampled_from(["paid", "pending", "refunded"]),
-            st.integers(min_value=0, max_value=40 * 24),  # age in hours
-        ),
-        max_size=12,
-    )
-)
-def test_update_product_stats_aggregates_exactly_the_qualifying_lines(
-    db_session, tasks_db, fake_redis, orders
-):
-    """Popular products are the sum of quantity and of quantity *
-    price_at_time per product, over paid, non-cancelled orders of the last
-    30 days - compared against the same rule computed here in Python."""
-    db_session.query(OrderItem).delete()
-    db_session.query(Order).delete()
-    db_session.commit()
-    user, address, products = _stats_fixture(db_session)
-    expected = {}
-    for index, qty, cents, status, payment_status, age_hours in orders:
-        product, price = products[index], Decimal(cents) / 100
-        created_at = STATS_NOW - timedelta(hours=age_hours)
-        _stats_order(
-            db_session, user, address, [(product, qty, str(price))],
-            status=status, payment_status=payment_status, created_at=created_at,
-        )
-        if status != "cancelled" and payment_status == "paid" and age_hours <= 30 * 24:
-            quantity, revenue = expected.get(product.id, (0, Decimal(0)))
-            expected[product.id] = (quantity + qty, revenue + price * qty)
-
-    # Read inside the frozen clock: fakeredis dates the 1-hour TTL from it.
-    with freeze_time(STATS_NOW):
-        tasks.update_product_stats()
-        popular = RedisService().get("product_stats")["popular_products"]
-
-    assert {p["id"]: (p["total_quantity"], p["total_revenue"]) for p in popular} == {
-        pid: (q, float(r)) for pid, (q, r) in expected.items()
-    }
-    quantities = [p["total_quantity"] for p in popular]
-    assert quantities == sorted(quantities, reverse=True)
-
-
-def test_update_product_stats_window_includes_exactly_thirty_days(
-    db_session, tasks_db, fake_redis
-):
-    user, address, (inside, outside, _) = _stats_fixture(db_session)
-    paid = {"status": "confirmed", "payment_status": "paid"}
-    _stats_order(db_session, user, address, [(inside, 1, "1.00")],
-                 created_at=STATS_NOW - timedelta(days=30), **paid)
-    _stats_order(db_session, user, address, [(outside, 1, "1.00")],
-                 created_at=STATS_NOW - timedelta(days=30, seconds=1), **paid)
-
-    with freeze_time(STATS_NOW):
-        tasks.update_product_stats()
-        stats = RedisService().get("product_stats")
-        ttl = fake_redis.ttl("product_stats")
-
-    assert [p["id"] for p in stats["popular_products"]] == [inside.id]
-    assert stats["updated_at"] == STATS_NOW.isoformat()
-    assert 0 < ttl <= 3600
-
-
-def test_update_product_stats_keeps_the_top_twenty(db_session, tasks_db, fake_redis):
-    user, address, _ = _stats_fixture(db_session)
-    many = _products(db_session, [10] * 22)
-    for qty, product in enumerate(many, start=1):
-        _stats_order(db_session, user, address, [(product, qty, "1.00")],
-                     status="confirmed", payment_status="paid", created_at=utc_now())
-
-    tasks.update_product_stats()
-
-    popular = RedisService().get("product_stats")["popular_products"]
-    assert len(popular) == 20
-    assert [p["total_quantity"] for p in popular] == list(range(22, 2, -1))
-
-
-def test_update_product_stats_with_no_sales_caches_an_empty_list(
-    db_session, tasks_db, fake_redis
-):
-    tasks.update_product_stats()
-
-    assert RedisService().get("product_stats")["popular_products"] == []
 
 
 # -- No database transaction is open while an email is handed to SMTP --------

@@ -20,7 +20,6 @@ from app.core.rate_limit import rate_limit
 from app.core.request_context import RequestContextMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware, server_error_handler
 from app.core.text_input import reject_unusable_text
-from app.services.redis import RedisService
 from app.services.redis_async import close_async_redis
 
 setup_logging()
@@ -155,10 +154,6 @@ app.add_exception_handler(Exception, server_error_handler)
 telemetry.setup(app, engines=[engine, async_engine.sync_engine])
 
 
-logger.info("Initializing service connections")
-redis_service = RedisService()
-logger.info("Redis service initialized")
-
 def cleanup():
     logger.info("Starting graceful shutdown...")
 
@@ -169,16 +164,6 @@ def cleanup():
         logger.info("Database connections closed successfully")
     except Exception as e:
         logger.error(f"Error closing database connections: {e}")
-
-
-    global redis_service
-    if redis_service:
-        try:
-            logger.info("Closing Redis connections...")
-            redis_service._redis.close()
-            logger.info("Redis connections closed successfully")
-        except Exception as e:
-            logger.error(f"Error closing Redis connections: {e}")
 
     logger.info("Graceful shutdown completed")
 
