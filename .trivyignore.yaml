@@ -1,10 +1,7 @@
 # Trivy ignore list (experimental YAML form; Trivy only reads it when named with
 # --ignorefile .trivyignore.yaml, see the image-scan job in .github/workflows/ci.yml).
 #
-# Two cases. The second (krb5-libs, libxslt) is at the end of the file and
-# expires on its own.
-#
-# 1. Permanent until a newer gosu build: the Go standard library inside
+# Every entry is the same case: the Go standard library inside
 # /usr/local/bin/gosu of the official postgres images, which tianon/gosu builds
 # with an old Go toolchain (go1.24.6) and no newer postgres image fixes. gosu's
 # SECURITY.md asks for scanner reports to be checked with govulncheck for
@@ -127,70 +124,3 @@ vulnerabilities:
     paths:
       - "usr/local/bin/gosu"
     statement: "GO-2026-6607: govulncheck (binary mode, 2026-10-25, v1.9.0) finds no call to the vulnerable symbol in gosu; gosu only drops privileges at container start (tianon/gosu SECURITY.md). Re-check when the postgres digest changes."
-
-# 2. Temporary, expiring 2026-11-24: Alpine packages of postgres:18.6-alpine
-# (digest of 2026-11-05) that Alpine has already fixed (krb5-libs 1.22.3-r0,
-# libxslt 1.1.43-r4) but the official image has not been rebuilt with yet.
-# Checked in the image on 2026-11-10:
-# - krb5-libs: the image has no Kerberos server (no krb5kdc, no kadmind); the
-#   libraries are linked into postgres for GSSAPI only, and this deployment
-#   authenticates with scram-sha-256 on a port bound to 127.0.0.1 and the
-#   backend network. The listed IDs are KDC and kadmind issues by their titles.
-# - libxslt: only /usr/local/lib/postgresql/pgxml.so (the xml2 extension) links
-#   it, and nothing here runs CREATE EXTENSION xml2.
-# On expiry the scan fails again: move the digest to a rebuilt image (the scan
-# then no longer reports these) or re-check and extend with a reason.
-  - id: CVE-2026-107364
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; no KDC in the image, GSSAPI not used (scram-sha-256)."
-  - id: CVE-2026-112315
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; kadmind is not in the image."
-  - id: CVE-2026-112316
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; kadmind is not in the image."
-  - id: CVE-2026-112317
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; no KDC in the image."
-  - id: CVE-2026-112318
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; kadmind is not in the image."
-  - id: CVE-2026-112319
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; kadmind is not in the image."
-  - id: CVE-2026-112320
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; kadmind is not in the image."
-  - id: CVE-2026-112321
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; kadmind is not in the image."
-  - id: CVE-2026-112322
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; kadmind is not in the image."
-  - id: CVE-2026-112323
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; kadmind is not in the image."
-  - id: CVE-2026-118380
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; kadmind is not in the image."
-  - id: CVE-2026-119079
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; no KDC in the image."
-  - id: CVE-2026-40355
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; GSSAPI not used (scram-sha-256, port on 127.0.0.1 and the backend network)."
-  - id: CVE-2026-40356
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; GSSAPI not used (scram-sha-256, port on 127.0.0.1 and the backend network)."
-  - id: CVE-2026-71199
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; CAMMAC handling is KDC code, no KDC in the image."
-  - id: CVE-2026-71200
-    expired_at: 2026-11-24
-    statement: "krb5-libs 1.22.2-r1 in postgres:18.6-alpine, fixed in 1.22.3-r0, image not rebuilt yet; no KDC in the image."
-  - id: CVE-2026-87636
-    expired_at: 2026-11-24
-    statement: "libxslt 1.1.43-r3 in postgres:18.6-alpine, fixed in 1.1.43-r4, image not rebuilt yet; only pgxml.so (xml2 extension) links it, and the extension is never created."
-  - id: CVE-2026-9947
-    expired_at: 2026-11-24
-    statement: "libxslt 1.1.43-r3 in postgres:18.6-alpine, fixed in 1.1.43-r4, image not rebuilt yet; only pgxml.so (xml2 extension) links it, and the extension is never created."

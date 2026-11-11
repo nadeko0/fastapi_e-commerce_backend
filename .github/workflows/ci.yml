@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Weekly, with no change to the code: a new CVE with a fix in a dependency
+  # or an image package fails the audit or the image scan here instead of on
+  # the next unrelated push.
+  schedule:
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: read
@@ -351,7 +356,9 @@ jobs:
     # .github/scripts/benchmark_ab.sh). A baseline saved by an earlier run is
     # not used: it came from another runner, and runner CPU models alone
     # moved the same commit by more than 2x. It catches a blocking call or a
-    # quadratic loop, not a few percent.
+    # quadratic loop, not a few percent. The weekly scheduled run has no base
+    # to compare with and skips it.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -446,21 +453,24 @@ jobs:
             VERSION=${{ steps.meta.outputs.version }}
             REVISION=${{ github.sha }}
             CREATED=${{ steps.meta.outputs.created }}
-      # A scan of the image that ships, not of the lockfile alone: audit covers
+      # A scan of the images that ship, not of the lockfile alone: audit covers
       # the Python dependencies, this covers the OS packages and every binary in
       # the app image and in the postgres and redis images docker-compose.yml
-      # runs (read from it, so a re-pin there is scanned here). Only findings
-      # with a fix fail the job (one without cannot be acted on yet). The ignore
-      # list holds the gosu findings shown unreachable and, until they expire,
-      # fixed Alpine packages the postgres image has not been rebuilt with
-      # (see .trivyignore.yaml).
-      - name: Scan the app image and the compose images (Trivy)
+      # builds (docker/postgres, docker/redis: the official images with Alpine's
+      # security updates applied, so a fix is not waited for until Docker
+      # Library rebuilds them). Only findings with a fix fail the job (one
+      # without cannot be acted on yet). The ignore list holds only the gosu
+      # findings shown unreachable (see .trivyignore.yaml).
+      - name: Build the postgres and redis images
+        run: |
+          docker build --pull -t ecommerce-postgres:ci docker/postgres
+          docker build --pull -t ecommerce-redis:ci docker/redis
+      - name: Scan the app, postgres and redis images (Trivy)
         env:
           # Trivy 0.76.1 by digest, as the other tools in this workflow.
           TRIVY: aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
         run: |
-          images="fastapi-ecommerce-backend:ci $(tr -d '\r' < docker-compose.yml | sed -n 's/^ *image: \(postgres:.*\|redis:.*\)$/\1/p')"
-          test "$(echo $images | wc -w)" = 3
+          images="fastapi-ecommerce-backend:ci ecommerce-postgres:ci ecommerce-redis:ci"
           status=0
           for image in $images; do
             echo "::group::trivy $image"

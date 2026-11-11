@@ -93,7 +93,6 @@ All recurring jobs run strictly on UTC clocks:
 | Task Name | Registered Task | Schedule | Purpose |
 |---|---|---|---|
 | `cleanup-inactive-accounts` | `cleanup_inactive_accounts` | Daily at 02:30 UTC | Executes GDPR Art. 17 erasures past `DATA_DELETION_GRACE_PERIOD_DAYS`. |
-| `update-product-stats` | `update_product_stats` | Every 1 hour | Caches the 20 best-selling products of the last 30 days (quantity, revenue) in Redis `product_stats`. |
 | `check-low-stock` | `check_low_stock` | Every 4 hours | Dispatches low-inventory notification emails to `ADMIN_EMAIL`. |
 | `cancel-expired-unpaid-orders` | `cancel_expired_unpaid_orders` | Every 5 minutes | Cancels orders unpaid after `UNPAID_ORDER_EXPIRE_MINUTES` (default 30 min) whose attempts have aged past `CHECKOUT_SESSION_EXPIRE_MINUTES`, closes older attempts at Stripe, and returns reserved inventory. An attempt Stripe refuses to close is read back: if it is paid or being paid (its webhook late or failed), the order is left for the webhook and for reconciliation. |
 | `check-payment-reconciliation` | `check_payment_reconciliation` | Daily at 03:15 UTC | Reconciles local payment records against the Stripe API for discrepancy detection. |
@@ -142,11 +141,11 @@ CI checks every migration's downgrade and upgrade against the PostgreSQL catalog
 
 ### PostgreSQL Major Upgrades (PostgreSQL 15 to 18)
 
-Since 6.0.0 `docker-compose.yml` runs `postgres:18.6-alpine` and mounts the `postgres_data` volume on `/var/lib/postgresql`. The official 18 image keeps cluster data in `/var/lib/postgresql/18/docker` (PGDATA) and declares `/var/lib/postgresql` as its volume; 15 used `/var/lib/postgresql/data`. A volume created by a 15 container is refused at start (the entrypoint reports the old layout), so an existing deployment moves its data with a logical dump and restore:
+Since 6.0.0 `docker-compose.yml` builds the database from `docker/postgres/Dockerfile` (`postgres:18.6-alpine` with Alpine security updates) and mounts the `postgres_data` volume on `/var/lib/postgresql`. The official 18 image keeps cluster data in `/var/lib/postgresql/18/docker` (PGDATA) and declares `/var/lib/postgresql` as its volume; 15 used `/var/lib/postgresql/data`. A volume created by a 15 container is refused at start (the entrypoint reports the old layout), so an existing deployment moves its data with a logical dump and restore:
 
 1. With the 5.x stack still running: `docker compose exec db pg_dumpall -U "$POSTGRES_USER" > backup.sql`.
 2. `docker compose down`, then remove the old volume (`docker volume rm <DOCKER_NETWORK_NAME>-postgres-data`, `ecommerce-postgres-data` by default) once the dump is checked.
-3. Start the 6.x stack (`docker compose up -d db`): the 18 container initialises an empty cluster and runs `docker/postgres/initdb` (it creates `APP_DB_USER`).
+3. Start the 6.x stack (`docker compose up -d --build db`): the 18 container initialises an empty cluster and runs `docker/postgres/initdb` (it creates `APP_DB_USER`).
 4. Restore: `docker compose exec -T db psql -U "$POSTGRES_USER" -d postgres < backup.sql` (the role already created by the init script makes `pg_dumpall`'s CREATE ROLE for it fail harmlessly), then start the rest.
 
 A later major (18 to 19) can use `pg_upgrade --link` inside the one volume, which is what the new layout is for.

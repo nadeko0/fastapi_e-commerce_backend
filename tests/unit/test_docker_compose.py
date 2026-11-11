@@ -32,6 +32,13 @@ def _without_comments(text):
     return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
 
 
+def _base_image(service):
+    """The official image a compose service is built from: the FROM of
+    docker/<service>/Dockerfile, which docker-compose.yml builds."""
+    dockerfile = _read(f"docker/{service}/Dockerfile")
+    return re.search(r"^FROM (\S+)\s*$", dockerfile, re.M).group(1)
+
+
 def test_redis_memory_is_capped_and_never_evicted():
     # Without maxmemory a flood of guest carts grows Redis until the kernel
     # kills the container, taking the Celery queue, the token blacklist and
@@ -156,7 +163,7 @@ def test_base_images_are_pinned_by_digest_on_their_current_majors():
     references += [
         ref for ref in re.findall(r"^COPY --from=(\S+)", dockerfile, re.M) if ref not in stages
     ]
-    references += re.findall(r"^\s*image: (\S+)", _read("docker-compose.yml"), re.M)
+    references += [_base_image("postgres"), _base_image("redis")]
     expected_tags = [
         "python:3.13-slim", "python:3.13-slim", "ghcr.io/astral-sh/uv:0.13.6",
         "postgres:18.6-alpine", "redis:8.8-alpine",
@@ -166,6 +173,19 @@ def test_base_images_are_pinned_by_digest_on_their_current_majors():
         assert re.search(_PINNED, ref), ref
     ci_uv = re.search(r'^\s*UV_VERSION: "([\d.]+)"', _read(".github/workflows/ci.yml"), re.M)
     assert ci_uv and ci_uv.group(1) == "0.13.6", "CI and the image use the same uv"
+
+
+def test_postgres_and_redis_are_built_with_alpine_security_updates():
+    # The official images ship packages Alpine has already fixed until Docker
+    # Library rebuilds them; the CI image scan fails on those. The compose
+    # services build thin images that apply the updates, and CI scans those.
+    for service, compose_name in (("postgres", "db"), ("redis", "redis")):
+        block = _without_comments(service_block(compose_name))
+        assert re.search(rf"^\s*build: \./docker/{service}\s*$", block, re.M), block
+        assert re.search(r"^RUN apk upgrade --no-cache\s*$", _read(f"docker/{service}/Dockerfile"), re.M)
+    build = _read(".github/workflows/ci.yml")
+    assert "docker build --pull -t ecommerce-postgres:ci docker/postgres" in build
+    assert "docker build --pull -t ecommerce-redis:ci docker/redis" in build
 
 
 def test_postgres_data_volume_follows_the_18_layout():
@@ -183,7 +203,7 @@ def test_ci_tests_against_the_postgres_image_production_runs():
     # image, tag and digest: a Postgres-only behaviour is only worth testing
     # on the server that is deployed. Bumping one without the other fails
     # here. The other majors are pinned by digest as well.
-    compose_image = re.search(r"^\s*image: (postgres:\S+)", service_block("db"), re.M).group(1)
+    compose_image = _base_image("postgres")
     ci = _read(".github/workflows/ci.yml")
     job = _ci_job(ci, "test-postgres")
     assert re.search(r"^\s*image: \$\{\{ matrix\.image \}\}\s*$", job, re.M), job
@@ -198,7 +218,7 @@ def test_ci_tests_against_the_postgres_image_production_runs():
 
 def test_ci_checks_migration_compatibility_on_the_deployed_postgres_image():
     # Old code on new migrations matters on the server that is deployed.
-    compose_image = re.search(r"^\s*image: (postgres:\S+)", service_block("db"), re.M).group(1)
+    compose_image = _base_image("postgres")
     ci = _read(".github/workflows/ci.yml")
     job = _ci_job(ci, "migration-compat")
     assert re.findall(r"^\s+image: (\S+)\s*$", job, re.M) == [compose_image]
@@ -213,7 +233,7 @@ def _ci_job(ci, name):
 
 
 def test_ci_runs_the_real_redis_tests_on_the_redis_image_production_runs():
-    compose_image = re.search(r"^\s*image: (redis:\S+)", service_block("redis"), re.M).group(1)
+    compose_image = _base_image("redis")
     ci = _read(".github/workflows/ci.yml")
     job = _ci_job(ci, "test-redis")
     assert re.search(rf"^\s*image: {re.escape(compose_image)}\s*$", job, re.M)
