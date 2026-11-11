@@ -75,7 +75,7 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
 A full code review found these. Each was judged low impact and is accepted as it is.
 
 - **Stale Product Detail in the Cache:**
-  - *Why not:* A reader can load a product row, a writer can commit and delete the cache key, and the reader then stores the old row under that key. `GET /products/{id}` serves it until `REDIS_PRODUCT_CACHE_TTL_HOURS` (1 by default) runs out. This is display only: carts and checkout price from the database.
+  - *Why not:* A reader can load a product row, a writer can commit and delete the cache key, and the reader then stores the old row under that key. `GET /products/{id}` serves it until the entry expires, at most 5 minutes later (`PRODUCT_CACHE_TTL` in `app/services/redis_codec.py`; `REDIS_PRODUCT_CACHE_TTL_HOURS` is the category tree's lifetime). This is display only: carts and checkout price from the database.
   - *Where to start:* Store a version (for example `updated_at`) with the entry and refuse to overwrite a newer one, or shorten the TTL.
 - **In-Flight Limit Counts Requests Still Sending Their Body:**
   - *Why not:* `InFlightLimitMiddleware` counts a request for its whole ASGI call, which includes receiving the body, so `MAX_IN_FLIGHT_REQUESTS` slow uploads can hold every slot of a worker and the rest get 503. A reverse proxy that buffers request bodies (the nginx default) hands the application only complete requests, so it is not reachable there; Compose has no proxy, so a deployment without one is exposed.

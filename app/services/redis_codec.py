@@ -38,7 +38,6 @@ CATEGORY_TREE_KEY = "category:tree"
 # the staleness when that drop is lost (Redis unreachable at that moment) or
 # a reader re-caches the old row just before the commit.
 PRODUCT_CACHE_TTL = timedelta(minutes=5)
-SESSION_TTL = timedelta(hours=24)
 
 
 class InsufficientStockError(Exception):

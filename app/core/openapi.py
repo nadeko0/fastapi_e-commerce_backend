@@ -159,8 +159,6 @@ FORBIDDEN = {"description": "Not allowed for this account", "model": Problem}
 # What an account that was deactivated while its token is still valid gets
 # from get_current_active_user, on top of whatever else a route's 403 means.
 ACCOUNT_INACTIVE_NOTE = "the account is inactive (problem type account-inactive)"
-NOT_FOUND = {"description": "Not found", "model": Problem}
-CONFLICT = {"description": "Conflicts with the current state", "model": Problem}
 PAYLOAD_TOO_LARGE = {"description": "Request body is too large (MAX_REQUEST_BODY_BYTES, 1 MiB by default)", "model": Problem}
 UNSUPPORTED_MEDIA_TYPE = {
     "description": "The request body is not sent as JSON",
