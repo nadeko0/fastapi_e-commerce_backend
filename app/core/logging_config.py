@@ -97,10 +97,9 @@ def setup_logging(config=settings):
 
     startup_logger = logging.getLogger(__name__)
     startup_logger.info(
-        f"Starting application in {config.ENVIRONMENT} environment "
-        f"(Version: {config.VERSION})"
+        "Starting application in %s environment (Version: %s)", config.ENVIRONMENT, config.VERSION
     )
     if log_file:
-        startup_logger.info(f"Log file: {Path(log_file).absolute()} (rotation: 100MB max, 5 backups)")
+        startup_logger.info("Log file: %s (rotation: 100MB max, 5 backups)", Path(log_file).absolute())
     else:
         startup_logger.info("Log file disabled (LOG_FILE is not set); logging to stdout only")

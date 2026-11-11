@@ -1,5 +1,6 @@
 import html
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -162,7 +163,7 @@ def send_order_cancellation_email(
         html_content
     )
 
-def send_low_stock_alert_email(to_email: str, products: list[Product]) -> bool:
+def send_low_stock_alert_email(to_email: str, products: Sequence[Product]) -> bool:
     # product.name is admin-entered and unvalidated for markup; escape it
     # before rendering into the HTML alert email (defense in depth, mirrors
     # the order-confirmation and welcome emails).

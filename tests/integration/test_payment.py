@@ -98,7 +98,7 @@ def _stub_order_confirmation_email(monkeypatch):
     # not the payment code), so it's stubbed out here rather than fixed, to
     # let these payment tests get past order setup.
     monkeypatch.setattr("app.api.v1.orders.send_order_confirmation_email", lambda *a, **k: True)
-    yield
+    return
 
 
 @pytest.fixture

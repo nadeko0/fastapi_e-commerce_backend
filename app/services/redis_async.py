@@ -143,7 +143,7 @@ async def is_token_blacklisted(token_id: str) -> bool:
     try:
         return bool(await get_async_redis().exists(f"{BLACKLIST_KEY_PREFIX}{token_id}"))
     except RedisError as e:
-        logger.error(f"Redis operation failed: is_token_blacklisted: {str(e)}")
+        logger.error("Redis operation failed: is_token_blacklisted: %s", e)
         raise TokenStateUnavailable from e
 
 
@@ -164,7 +164,7 @@ async def is_token_superseded(user_id: str | int, issued_at: Any | None) -> bool
     try:
         data = await get_async_redis().get(f"{PASSWORD_CHANGED_KEY_PREFIX}{user_id}")
     except RedisError as e:
-        logger.error(f"Redis operation failed: is_token_superseded: {str(e)}")
+        logger.error("Redis operation failed: is_token_superseded: %s", e)
         raise TokenStateUnavailable from e
     if not data:
         return False
@@ -172,7 +172,7 @@ async def is_token_superseded(user_id: str | int, issued_at: Any | None) -> bool
         # Stored by AsyncRedisService.setex, which JSON-encodes every value.
         changed_at = json.loads(data)
     except (json.JSONDecodeError, TypeError) as e:
-        logger.error(f"Unreadable password-change watermark, token refused: {str(e)}")
+        logger.error("Unreadable password-change watermark, token refused: %s", e)
         return True
     if isinstance(changed_at, bool) or not isinstance(changed_at, (int, float)):
         logger.error("Unreadable password-change watermark, token refused: not a timestamp")
@@ -433,7 +433,7 @@ class AsyncRedisService:
                 data, deleted = await pipe.execute()
             if not data or not deleted:
                 return None
-            payload = json.loads(data)
+            payload: dict[str, Any] = json.loads(data)
             # A family revoked while this token was being rotated: the
             # revocation may have read the family's members before the new
             # jti was added to it (revoke_refresh_family). Refused, so the
@@ -478,7 +478,7 @@ class AsyncRedisService:
 
     # -- Cache -------------------------------------------------------------
 
-    async def cache_product(self, product_id: int, data: dict) -> bool:
+    async def cache_product(self, product_id: int, data: dict[str, Any]) -> bool:
         try:
             return bool(await self._redis.set(
                 f"product:{product_id}", codec.serialize(data), ex=codec.PRODUCT_CACHE_TTL
@@ -511,12 +511,13 @@ class AsyncRedisService:
             if not codec.is_category_tree_payload_valid(data):
                 await self._redis.delete(codec.CATEGORY_TREE_KEY)
                 return None
-            return codec.deserialize(data, CategoryTreeResponse)
+            tree: CategoryTreeResponse | None = codec.deserialize(data, CategoryTreeResponse)
+            return tree
         except RedisError as e:
             self._handle_redis_error(f"get_cached_category_tree: {str(e)}")
             return None
 
-    async def get_cached_product(self, product_id: int) -> dict | None:
+    async def get_cached_product(self, product_id: int) -> dict[str, Any] | None:
         try:
             data = cast(str | None, await self._redis.get(f"product:{product_id}"))
             return codec.deserialize(data) if data else None

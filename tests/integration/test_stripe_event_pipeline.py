@@ -76,6 +76,8 @@ class _Countdowns:
     def __eq__(self, other):
         return self._asked() == other
 
+    __hash__ = None  # mutable view, compared by value
+
     def __repr__(self):
         return repr(self._asked())
 

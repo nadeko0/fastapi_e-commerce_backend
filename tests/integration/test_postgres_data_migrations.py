@@ -44,6 +44,7 @@ def _alembic(url, *args, check=True):
         [sys.executable, "-m", "alembic", *args],
         cwd=_ROOT, env={**os.environ, "DATABASE_URI": url},
         capture_output=True, text=True, timeout=300,
+                                        check=False,
     )
     if check:
         assert result.returncode == 0, f"alembic {' '.join(args)} failed:\n{result.stderr[-2000:]}"
@@ -210,7 +211,7 @@ def test_the_offline_script_makes_the_same_refusal_on_a_database_with_duplicates
     raw = engine.raw_connection()
     try:
         cursor = raw.cursor()
-        with pytest.raises(Exception) as refused:
+        with pytest.raises(Exception, match="belong to more than one account") as refused:
             cursor.execute(script)
         raw.rollback()
         message = str(refused.value)

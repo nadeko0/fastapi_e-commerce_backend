@@ -128,14 +128,16 @@ def _ip(text: str):
 
 
 @lru_cache(maxsize=8)
-def _trusted_networks(entries: tuple) -> tuple:
+def _trusted_networks(
+    entries: tuple[str, ...],
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
     networks = []
     for entry in entries:
         try:
             # strict=False: "10.0.0.5/8" means the network it lies in.
             networks.append(ipaddress.ip_network(entry, strict=False))
         except ValueError:
-            logger.warning(f"TRUSTED_PROXIES entry {entry!r} is not an address or network; ignored")
+            logger.warning("TRUSTED_PROXIES entry %r is not an address or network; ignored", entry)
     return tuple(networks)
 
 
@@ -289,7 +291,7 @@ async def seconds_until_allowed(key: str, rate: Rate) -> int:
         # except must only ever wrap the Redis call: the 429 is raised by
         # the callers, outside it. (An earlier version raised it inside an
         # `except Exception` and so swallowed its own rejections.)
-        logger.error(f"Rate limiting error, request allowed: {e}")
+        logger.error("Rate limiting error, request allowed: %s", e)
         return 0
 
 
@@ -328,7 +330,7 @@ class RateLimiter:
             count, ttl_ms = await _hit(f"rl:{operation[0]} {operation[1]}:{caller}", rate)
         except RedisError as e:
             # Fail open, and say nothing about a state that is not known.
-            logger.error(f"Rate limiting error, request allowed: {e}")
+            logger.error("Rate limiting error, request allowed: %s", e)
             return
         headers = rate_limit_headers(
             setting.removeprefix("RATE_LIMIT_").lower(), rate, count, ttl_ms
@@ -450,7 +452,7 @@ async def check_login_attempt(email: str, request: Request) -> None:
                 email_key, parse_rate(settings.RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL)
             )
     except RedisError as e:
-        logger.error(f"Rate limiting error, login refused: {e}")
+        logger.error("Rate limiting error, login refused: %s", e)
         raise login_unavailable() from e
     if retry_after:
         raise too_many_requests("Too many failed login attempts", retry_after)
@@ -465,4 +467,4 @@ async def clear_login_failures(email: str, request: Request) -> None:
     try:
         await get_async_redis().delete(*_login_keys(email, request))
     except RedisError as e:
-        logger.error(f"Rate limiting error, failed-login count not cleared: {e}")
+        logger.error("Rate limiting error, failed-login count not cleared: %s", e)

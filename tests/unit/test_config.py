@@ -31,15 +31,15 @@ def _construct_settings(env_var, raw_value):
         env[env_var] = raw_value
     else:
         env.pop(env_var, None)
-    result = subprocess.run(
+    return subprocess.run(
         [sys.executable, "-c", f"from app.core.config import settings; print(settings.{env_var})"],
         cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         env=env,
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,
     )
-    return result
 
 
 # Regression tests: pydantic-settings' default env-var handling for any
@@ -95,6 +95,7 @@ def test_unknown_env_vars_from_shared_env_file_do_not_crash_settings():
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
 
@@ -107,6 +108,7 @@ def _run_with_env(env, code):
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,
     )
 
 

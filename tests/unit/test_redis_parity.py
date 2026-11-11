@@ -425,7 +425,7 @@ def test_non_redis_errors_still_propagate_out_of_a_transaction(svc, monkeypatch)
 
     monkeypatch.setattr(codec, "plan_cart_mutation", boom)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="bug"):
         _add(svc, 7)
 
 

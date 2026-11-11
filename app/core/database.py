@@ -1,7 +1,7 @@
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import contextmanager, suppress
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, status
 from psycopg.errors import QueryCanceled
@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 # has no such session-level option, so this only applies when the configured
 # DATABASE_URI is actually a Postgres URL - passing `options=...` connect
 # args to sqlite3 would fail outright rather than being ignored.
-def _build_connect_args(database_uri: str) -> dict:
+def _build_connect_args(database_uri: str) -> dict[str, Any]:
     if database_uri.startswith(("postgresql", "postgres")):
         return {
             "options": (
@@ -70,18 +70,18 @@ _database_uri = settings.DATABASE_URI
 
 _connect_args = _build_connect_args(_database_uri.get_secret_value())
 
-_engine_kwargs = dict(
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW,
-    pool_timeout=settings.DB_POOL_TIMEOUT,
-    pool_pre_ping=settings.DB_POOL_PRE_PING,
-    pool_recycle=settings.DB_POOL_RECYCLE,
-    connect_args=_connect_args,
-    echo=settings.SQL_DEBUG,
-    echo_pool=False,
-    logging_name=None,
-    hide_parameters=not settings.SQL_DEBUG,
-)
+_engine_kwargs = {
+    "pool_size": settings.DB_POOL_SIZE,
+    "max_overflow": settings.DB_MAX_OVERFLOW,
+    "pool_timeout": settings.DB_POOL_TIMEOUT,
+    "pool_pre_ping": settings.DB_POOL_PRE_PING,
+    "pool_recycle": settings.DB_POOL_RECYCLE,
+    "connect_args": _connect_args,
+    "echo": settings.SQL_DEBUG,
+    "echo_pool": False,
+    "logging_name": None,
+    "hide_parameters": not settings.SQL_DEBUG,
+}
 
 engine = create_engine(_database_uri.get_secret_value(), **_engine_kwargs)
 

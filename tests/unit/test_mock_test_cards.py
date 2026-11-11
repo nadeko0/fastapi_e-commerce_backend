@@ -257,7 +257,7 @@ def test_a_refund_with_nothing_left_to_happen_cannot_be_settled(token):
     if token == TOKEN_PENDING_REFUND:
         StripePaymentProvider.settle_refund(refund.id)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="has nothing left to settle"):
         StripePaymentProvider.settle_refund(refund.id)
 
 

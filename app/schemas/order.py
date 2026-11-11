@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -316,11 +316,11 @@ class PaymentResponse(ResponseBody):
     # PaymentIntent.client_secret / next_action shape.
     client_secret: str | None = None
     requires_action: bool = False
-    next_action: dict | None = None
+    next_action: dict[str, Any] | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
-def _url_origin(url: str) -> tuple | None:
+def _url_origin(url: str) -> tuple[str, str, int] | None:
     """(scheme, host, port) of an http(s) URL, the port filled in from the
     scheme when absent; None for anything else, including a URL carrying
     userinfo or a port that is not a number."""

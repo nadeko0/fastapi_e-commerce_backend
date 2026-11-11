@@ -51,8 +51,8 @@ async def lifespan(app: FastAPI):
     try:
         await close_async_redis()
         logger.info("Async Redis connections closed successfully")
-    except Exception as e:
-        logger.error(f"Error closing async Redis connections: {e}")
+    except Exception as e:  # noqa: BLE001 - shutdown goes on whatever one step raises
+        logger.error("Error closing async Redis connections: %s", e)
 
 
 logger.info("Initializing FastAPI application with rate limiting")
@@ -116,13 +116,13 @@ app.add_middleware(ForwardedClientMiddleware)
 # Outside everything but CORS, request-id, security headers (and OTel): a request
 # that is going to be shed should cost nothing - no rate-limit Redis call.
 if settings.MAX_IN_FLIGHT_REQUESTS:
-    logger.info(f"Limiting in-flight requests to {settings.MAX_IN_FLIGHT_REQUESTS} per worker")
+    logger.info("Limiting in-flight requests to %s per worker", settings.MAX_IN_FLIGHT_REQUESTS)
     app.add_middleware(InFlightLimitMiddleware, limit=settings.MAX_IN_FLIGHT_REQUESTS)
 
 # Just outside the in-flight limit, so the shed 503 carries the CORS headers: a
 # browser client would otherwise see an opaque network error, not the 503 and its
 # Retry-After. A shed request still costs only this layer's origin check.
-logger.debug(f"Configuring CORS with origins: {settings.BACKEND_CORS_ORIGINS}")
+logger.debug("Configuring CORS with origins: %s", settings.BACKEND_CORS_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
@@ -162,8 +162,8 @@ def cleanup():
         logger.info("Closing database connections...")
         engine.dispose()
         logger.info("Database connections closed successfully")
-    except Exception as e:
-        logger.error(f"Error closing database connections: {e}")
+    except Exception as e:  # noqa: BLE001 - shutdown goes on whatever one step raises
+        logger.error("Error closing database connections: %s", e)
 
     logger.info("Graceful shutdown completed")
 
@@ -207,7 +207,7 @@ async def health_check(request: Request):
     }
 
     status_code = 200 if health_status["status"] == "healthy" else 503
-    logger.info(f"Health check completed with status: {health_status['status']}")
+    logger.info("Health check completed with status: %s", health_status['status'])
     return probes.probe_response(
         request, health_status, status_code,
         headers={"Retry-After": "5"} if status_code == 503 else None,

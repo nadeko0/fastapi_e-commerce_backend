@@ -215,6 +215,8 @@ async def register_user(
         }]
     )
     db.add(user)
+    new_full_name: str | None = None
+    new_user_id: int | None = None
     try:
         await db.commit()
         existing_email = None
@@ -233,14 +235,14 @@ async def register_user(
 
     if new_email:
         verification_token = generate_email_verification_token(new_email)
-        logger.info(f"Queuing welcome email for user {new_user_id}")
+        logger.info("Queuing welcome email for user %s", new_user_id)
         background_tasks.add_task(
             send_welcome_email,
             new_email,
             new_full_name,
             verification_token
         )
-        logger.info(f"Welcome email task queued for user {new_user_id}")
+        logger.info("Welcome email task queued for user %s", new_user_id)
     elif existing_email:
         # To the address on the account, which may differ in case from
         # the one typed.
@@ -316,13 +318,13 @@ async def resend_verification_email(
         )
 
     verification_token = generate_email_verification_token(current_user.email)
-    logger.info(f"Queuing verification email resend for user {current_user.id}")
+    logger.info("Queuing verification email resend for user %s", current_user.id)
     background_tasks.add_task(
         send_email_verification,
         current_user.email,
         verification_token
     )
-    logger.info(f"Verification email resend task queued for user {current_user.id}")
+    logger.info("Verification email resend task queued for user %s", current_user.id)
 
     return Message(message="Verification email sent")
 
@@ -420,7 +422,7 @@ async def login(
     )
     await db.commit()
 
-    logger.info(f"Generating tokens for user {user_id}")
+    logger.info("Generating tokens for user %s", user_id)
     access_token = create_access_token(user_id)
     try:
         refresh_token = await issue_refresh_token(user_id)
@@ -442,7 +444,7 @@ async def login(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    logger.info(f"Tokens generated for user {user_id}")
+    logger.info("Tokens generated for user %s", user_id)
 
     # The cart the visitor filled before logging in becomes part of the
     # account's cart. Last, and Redis only: the password is verified, the
@@ -599,7 +601,7 @@ async def update_current_user(
     # Field names only, never their values: names and phone numbers are
     # personal data, and the logs are kept apart from the account and not
     # scrubbed when it is erased.
-    logger.info(f"Updating profile for user {current_user.id}")
+    logger.info("Updating profile for user %s", current_user.id)
 
     update_data = user_in.model_dump(exclude_unset=True)
     if not update_data:
@@ -608,7 +610,7 @@ async def update_current_user(
             detail="No fields to update"
         )
 
-    logger.info(f"Fields to update: {list(update_data.keys())}")
+    logger.info("Fields to update: %s", list(update_data.keys()))
 
     user = await db.get(User, current_user.id)
     if not user:
@@ -642,8 +644,7 @@ async def update_current_user(
 
         await db.commit()
         logger.info(
-            f"Profile updated successfully for user {user.id}. "
-            f"Updated fields: {list(update_data.keys())}"
+            "Profile updated successfully for user %s. Updated fields: %s", user.id, list(update_data.keys())
         )
 
 
@@ -653,7 +654,7 @@ async def update_current_user(
     except Exception as e:
         await db.rollback()
         # The exception's type only: its message can quote the values.
-        logger.error(f"Failed to update profile for user {current_user.id}: {type(e).__name__}")
+        logger.error("Failed to update profile for user %s: %s", current_user.id, type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update profile"
@@ -797,11 +798,11 @@ async def create_address(
         # address_type has a server default the INSERT does not read back.
         await db.refresh(address)
 
-        logger.info(f"Created address with ID: {address.id} for user {current_user.id}")
+        logger.info("Created address with ID: %s for user %s", address.id, current_user.id)
 
 
         created = await db.get(Address, address.id)
-        logger.info(f"Verified address exists: {created and created.id} for user {current_user.id}")
+        logger.info("Verified address exists: %s for user %s", created and created.id, current_user.id)
 
         set_location(request, response, "get_address", address_id=address.id)
         return AddressResponse.model_validate(address)
@@ -857,7 +858,7 @@ async def update_address(
         ).limit(1)
     )).scalars().first()
 
-    logger.info(f"Found address {address_id} for update request from user {current_user.id}")
+    logger.info("Found address %s for update request from user %s", address_id, current_user.id)
 
     if not address:
         raise HTTPException(
@@ -920,7 +921,7 @@ async def delete_address(
         ).limit(1)
     )).scalars().first()
 
-    logger.info(f"Processing deletion request for address {address_id} from user {current_user.id}")
+    logger.info("Processing deletion request for address %s from user %s", address_id, current_user.id)
 
     if not address or not address.is_active:
         raise HTTPException(
@@ -967,7 +968,7 @@ async def set_default_address(
         ).limit(1)
     )).scalars().first()
 
-    logger.info(f"Processing set default request for address {default_address.address_id} from user {current_user.id}")
+    logger.info("Processing set default request for address %s from user %s", default_address.address_id, current_user.id)
 
     if not address:
         raise HTTPException(
@@ -1066,13 +1067,13 @@ async def request_password_reset(
     user = await _user_by_email(db, reset_request.email)
     if user:
         token = generate_password_reset_token(user.email, user.hashed_password)
-        logger.info(f"Queuing password reset email for user {user.id}")
+        logger.info("Queuing password reset email for user %s", user.id)
         background_tasks.add_task(
             send_password_reset_email,
             user.email,
             token
         )
-        logger.info(f"Password reset email task queued for user {user.id}")
+        logger.info("Password reset email task queued for user %s", user.id)
 
 
     return Message(message="If the email exists, a password reset link will be sent")
@@ -1212,9 +1213,9 @@ async def reset_password(
     # hash was changing, and every refresh family is ended. Best effort:
     # the password has already changed, the first watermark stands.
     if not await invalidate_tokens_issued_before_now(user_id):
-        logger.error(f"Password reset of user {user_id}: second watermark not recorded")
+        logger.error("Password reset of user %s: second watermark not recorded", user_id)
     if not await async_redis_service.revoke_user_refresh_families(user_id):
-        logger.error(f"Password reset of user {user_id}: refresh families not revoked")
+        logger.error("Password reset of user %s: refresh families not revoked", user_id)
 
     # The way out of a login refused for too many failed attempts: the
     # new password starts with a clean record - the email's own count

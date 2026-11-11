@@ -21,6 +21,7 @@ def _engines(**env):
     result = subprocess.run(
         [sys.executable, "-c", code], cwd=_ROOT, env={**os.environ, **env},
         capture_output=True, text=True, timeout=60,
+                                        check=False,
     )
     assert result.returncode == 0, result.stderr
     return result.stdout.split()
@@ -48,6 +49,7 @@ def _parameters_hidden(**env):
     result = subprocess.run(
         [sys.executable, "-c", code], cwd=_ROOT, env={**os.environ, **env},
         capture_output=True, text=True, timeout=60,
+                                        check=False,
     )
     assert result.returncode == 0, result.stderr
     return result.stdout.split()

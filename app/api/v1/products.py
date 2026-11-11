@@ -2,7 +2,7 @@ import inspect
 import json
 from collections.abc import Sequence
 from functools import partial
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -49,7 +49,7 @@ router = APIRouter(tags=["catalog"], route_class=DocumentedRoute)
 #     the loop.
 
 
-async def _count(db: AsyncSession, stmt: Select) -> int:
+async def _count(db: AsyncSession, stmt: Select[Any]) -> int:
     # Same SQL the legacy Query.count() produced: SELECT count(*) FROM (<stmt>).
     # order_by(None) because ordering a subquery that is only counted is
     # wasted work for Postgres.
@@ -142,12 +142,13 @@ def _matches_text(text: str):
     )
 
 
-def _characteristics_filter(raw: str | None) -> dict | None:
+def _characteristics_filter(raw: str | None) -> dict[str, Any] | None:
     """The `characteristics` query parameter: a JSON object, {"color": "red"}.
     Anything else is a 422 like any other bad query parameter."""
     if raw is None:
         return None
     problem = None
+    parsed: Any = None
     try:
         parsed = json.loads(raw)
     except ValueError:
@@ -164,7 +165,8 @@ def _characteristics_filter(raw: str | None) -> dict | None:
     unusable = first_unusable_text(parsed, ("query", "characteristics"))
     if unusable:
         raise RequestValidationError([unusable])
-    return parsed
+    characteristics: dict[str, Any] = parsed
+    return characteristics
 
 
 def _product_filter(**params) -> ProductFilter:

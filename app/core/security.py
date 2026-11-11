@@ -8,7 +8,7 @@ import time
 import uuid
 import weakref
 from datetime import timedelta
-from typing import Annotated, NamedTuple
+from typing import Annotated, Any, NamedTuple
 
 import bcrypt
 import jwt
@@ -185,7 +185,7 @@ RESET_TOKEN_REQUIRED_CLAIMS = ["exp", "sub", "type", "pwd"]
 VERIFY_TOKEN_REQUIRED_CLAIMS = ["exp", "sub", "type"]
 
 
-def decode_token(token: str, *, options: dict) -> dict:
+def decode_token(token: str, *, options: dict[str, Any]) -> dict[str, Any]:
     """jwt.decode with this application's key and algorithm. Every way a token
     can fail to decode is a jwt.PyJWTError, which each caller already turns
     into "invalid token" - except a string that is not valid Unicode: PyJWT
@@ -462,7 +462,7 @@ async def get_optional_active_user(
     current_user = await get_current_user(db=db, token=token)
     return await get_current_active_user(current_user=current_user)
 
-def _blacklist_id(payload: dict) -> str:
+def _blacklist_id(payload: dict[str, Any]) -> str:
     """What the logout blacklist knows a verified access token by.
 
     Not the token string: one token has more than one spelling (PyJWT also
@@ -755,6 +755,7 @@ def verify_email_token(token: str) -> str | None:
         )
         if payload["type"] != "verify_email":
             return None
-        return payload["sub"]
+        subject: str = payload["sub"]
+        return subject
     except jwt.PyJWTError:
         return None

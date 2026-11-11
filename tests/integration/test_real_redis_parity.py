@@ -363,7 +363,7 @@ def test_racing_adds_all_land(svc, raw):
         try:
             barrier.wait()
             _add(svc, 7, quantity=1, stock=100)
-        except Exception as e:  # pragma: no cover - surfaced by the assert below
+        except Exception as e:  # noqa: BLE001  # pragma: no cover - worker thread, surfaced by the assert below
             errors.append(e)
 
     threads = [threading.Thread(target=add) for _ in range(8)]

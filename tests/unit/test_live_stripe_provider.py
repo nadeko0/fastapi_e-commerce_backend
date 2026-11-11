@@ -57,16 +57,16 @@ class _Recorder:
 
 
 def _intent(**overrides):
-    values = dict(id="pi_123", amount=1999, currency="usd", status="succeeded",
-                  client_secret="pi_123_secret", payment_method="pm_1")
+    values = {"id": "pi_123", "amount": 1999, "currency": "usd", "status": "succeeded",
+                  "client_secret": "pi_123_secret", "payment_method": "pm_1"}
     values.update(overrides)
     return _SdkObject(**values)
 
 
 def _session(**overrides):
-    values = dict(id="cs_123", url="https://checkout.stripe.com/c/cs_123", status="open",
-                  payment_status="unpaid", amount_total=1999, currency="usd",
-                  payment_intent=None, metadata={"order_id": "7"})
+    values = {"id": "cs_123", "url": "https://checkout.stripe.com/c/cs_123", "status": "open",
+                  "payment_status": "unpaid", "amount_total": 1999, "currency": "usd",
+                  "payment_intent": None, "metadata": {"order_id": "7"}}
     values.update(overrides)
     return _SdkObject(**values)
 
@@ -99,7 +99,7 @@ def sdk(monkeypatch):
 
 
 def test_requires_a_key():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="requires a real Stripe secret key"):
         LiveStripePaymentProvider(api_key="")
 
 

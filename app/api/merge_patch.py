@@ -12,6 +12,8 @@ Request media types: FastAPI parses any ``application/json`` or
 naming both (app/core/errors.py); the OpenAPI document lists both JSON types.
 """
 
+from typing import Any
+
 MERGE_PATCH_MEDIA_TYPE = "application/merge-patch+json"
 
 PATCH_DESCRIPTION = (
@@ -21,7 +23,7 @@ PATCH_DESCRIPTION = (
 )
 
 
-def merge_patch_body(schema_name: str) -> dict:
+def merge_patch_body(schema_name: str) -> dict[str, Any]:
     """``openapi_extra`` that documents the merge-patch media type next to JSON."""
     return {
         "requestBody": {

@@ -487,7 +487,7 @@ class RedisService:
             data, deleted = pipe.execute()
             if not data or not deleted:
                 return None
-            payload = json.loads(data)
+            payload: dict[str, Any] = json.loads(data)
             # A family revoked while this token was being rotated: the
             # revocation may have read the family's members before the new
             # jti was added to it (revoke_refresh_family). Refused, so the
@@ -538,7 +538,7 @@ class RedisService:
             return False
 
 
-    def cache_product(self, product_id: int, data: dict) -> bool:
+    def cache_product(self, product_id: int, data: dict[str, Any]) -> bool:
         try:
             key = f"product:{product_id}"
             return bool(self._redis.set(
@@ -584,12 +584,13 @@ class RedisService:
                 self._redis.delete("category:tree")
                 return None
 
-            return self._deserialize(data, CategoryTreeResponse)
+            tree: CategoryTreeResponse | None = self._deserialize(data, CategoryTreeResponse)
+            return tree
         except RedisError as e:
             self._handle_redis_error(f"get_cached_category_tree: {str(e)}")
             return None
 
-    def get_cached_product(self, product_id: int) -> dict | None:
+    def get_cached_product(self, product_id: int) -> dict[str, Any] | None:
         try:
             data = cast(str | None, self._redis.get(f"product:{product_id}"))
             return self._deserialize(data) if data else None

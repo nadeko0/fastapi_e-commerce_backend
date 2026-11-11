@@ -40,17 +40,17 @@ def _jti(token):
 
 
 def _make_user(db_session, email="async.tokens@example.com", **overrides):
-    defaults = dict(
-        email=email,
-        hashed_password="hashed",
-        full_name="Async Tokens",
-        gdpr_consent=True,
-        privacy_policy_accepted=True,
-        marketing_consent=False,
-        consent_history=[],
-        is_active=True,
-        created_at=utc_now(),
-    )
+    defaults = {
+        "email": email,
+        "hashed_password": "hashed",
+        "full_name": "Async Tokens",
+        "gdpr_consent": True,
+        "privacy_policy_accepted": True,
+        "marketing_consent": False,
+        "consent_history": [],
+        "is_active": True,
+        "created_at": utc_now(),
+    }
     defaults.update(overrides)
     user = User(**defaults)
     db_session.add(user)

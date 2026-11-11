@@ -158,7 +158,7 @@ def check_responses(responses, allowed):
             assert r.headers["content-type"].startswith(PROBLEM_JSON), (r.status_code, r.text)
             body = r.json()
             assert body["status"] == r.status_code
-    print(f"HIST {histogram(responses)}")  # shown with -s; the torture log quotes these
+    print(f"HIST {histogram(responses)}")  # noqa: T201 - shown with -s; the torture log quotes these
     return histogram(responses)
 
 

@@ -91,7 +91,8 @@ def cart_ttl(user_id: CartOwnerRef | None = None) -> timedelta:
 
 def serialize(data: Any) -> str:
     if isinstance(data, (Cart, CartItem)) or hasattr(data, 'model_dump'):
-        return data.model_dump_json()
+        dumped: str = data.model_dump_json()
+        return dumped
     return json.dumps(data, default=str)
 
 
@@ -132,12 +133,12 @@ def deserialize(data: str, model_class=None) -> Any:
         # app/services/email/smtp_provider.py's module docstring. Only
         # the exception string is logged, never the raw stored payload,
         # to avoid leaking cart/session contents into logs.
-        logger.warning(f"Deserialization error: {str(e)}")
+        logger.warning("Deserialization error: %s", e)
         return None
 
 
 def log_redis_error(operation: str) -> None:
-    logger.error(f"Redis operation failed: {operation}")
+    logger.error("Redis operation failed: %s", operation)
 
 
 def load_cart(owner: CartOwner, cart_data: str | None) -> Cart | None:

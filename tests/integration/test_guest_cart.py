@@ -152,7 +152,7 @@ def _set_cookie(response):
 def _assert_cookie_cleared(response):
     header = _set_cookie(response)
     assert header is not None
-    assert header.startswith(f'{COOKIE}="";') or header.startswith(f"{COOKIE}=;")
+    assert header.startswith((f'{COOKIE}="";', f"{COOKIE}=;"))
     assert "Max-Age=0" in header
 
 

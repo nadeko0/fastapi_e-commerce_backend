@@ -78,7 +78,7 @@ def _race(first, second, hold_after):
         try:
             with TestClient(app, raise_server_exceptions=False) as c:
                 results[name] = action(c)
-        except BaseException as exc:  # surfaced in the main thread
+        except BaseException as exc:  # noqa: BLE001 - worker thread: surfaced in the main thread
             errors.append(exc)
             holding.set()
 

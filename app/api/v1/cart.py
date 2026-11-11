@@ -154,7 +154,7 @@ def guest_cart_cookie_name() -> str:
     return _GUEST_CART_COOKIE
 
 
-def _guest_cart_cookie_attributes() -> dict:
+def _guest_cart_cookie_attributes() -> dict[str, Any]:
     return {
         "path": "/",
         "secure": settings.GUEST_CART_COOKIE_SECURE,
@@ -415,7 +415,7 @@ async def get_cart(
     try:
         cart = await redis.get_cart(owner)
     except RedisError:
-        _cart_or_503(None)
+        cart = _cart_or_503(None)
     return cart or redis.empty_cart(owner)
 
 CurrentCart = Annotated[Cart, Depends(get_cart)]
@@ -496,22 +496,22 @@ async def add_to_cart(
 
     stock_quantity = variant.stock_quantity if variant else product.stock_quantity
 
-    line: dict[str, Any] = dict(
-        product_id=product.id,
-        quantity=quantity,
+    line: dict[str, Any] = {
+        "product_id": product.id,
+        "quantity": quantity,
         # Recorded on the line as what the customer is being shown now,
         # so a later response can say the price has changed. Not what
         # the cart displays: the response below is priced live.
-        price=cart_unit_price(product, variant),
-        name=product.name,
+        "price": cart_unit_price(product, variant),
+        "name": product.name,
         # "" rather than None when there is no image, as before: a
         # worker still running the previous code during a deploy (or
         # after a rollback) requires a string here and would otherwise
         # read the whole cart as unreadable.
-        image=product.images[0] if product.images else "",
-        stock_quantity=stock_quantity,
-        variant_id=variant.id if variant else None,
-    )
+        "image": product.images[0] if product.images else "",
+        "stock_quantity": stock_quantity,
+        "variant_id": variant.id if variant else None,
+    }
 
     try:
         cart = None

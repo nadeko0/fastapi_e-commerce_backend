@@ -11,6 +11,7 @@ imported from there.
 """
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -23,6 +24,7 @@ from app.api.v1.orders import (
     _MANUAL_REVIEW_RESPONSE,
     _PENDING_CHECKOUT_ID_PREFIX,
     _PENDING_INTENT_ID_PREFIX,
+    TaskQueue,
     _apply_payment_failure,
     _apply_payment_success,
     _apply_refund_object,
@@ -55,7 +57,7 @@ class PaymentAttemptNotRecorded(Exception):
     applied; the event must be tried again later."""
 
 
-def _attempt_still_storing_its_id(db: Session, object_data: dict) -> bool:
+def _attempt_still_storing_its_id(db: Session, object_data: dict[str, Any]) -> bool:
     """
     Whether an event that matched no Payment row is nevertheless for an
     attempt of ours that has not stored its provider id yet: the object's
@@ -92,7 +94,7 @@ def _attempt_still_storing_its_id(db: Session, object_data: dict) -> bool:
     ).first() is not None
 
 
-def _checkout_attempt_named_by_metadata(db: Session, object_data: dict) -> Payment | None:
+def _checkout_attempt_named_by_metadata(db: Session, object_data: dict[str, Any]) -> Payment | None:
     """
     The Checkout Session attempt a payment_intent.* event is about, for an
     event whose PaymentIntent id is not stored on any Payment row. Such an
@@ -138,7 +140,7 @@ _DISPUTE_EVENT_TYPES = (
 )
 
 
-def _apply_dispute_event(db: Session, object_data: dict) -> dict:
+def _apply_dispute_event(db: Session, object_data: dict[str, Any]) -> dict[str, Any]:
     """
     Record a dispute of one of our charges (PaymentDispute, by dispute id)
     under the order's lock. While it is open the order is on hold (see
@@ -187,7 +189,7 @@ def _apply_dispute_event(db: Session, object_data: dict) -> dict:
         db.add(dispute)
     # created and funds_withdrawn (and updated) report the same status for
     # one dispute: logged when the dispute is first seen or its status moves.
-    status_changed = dispute.status is None or dispute.status != status
+    status_changed = dispute.status is None or dispute.status != status  # type: ignore[redundant-expr]  # None on a dispute just created above
     dispute.status = status
     is_closed = status in DISPUTE_CLOSED_STATUSES
     if is_closed:
@@ -206,7 +208,7 @@ def _apply_dispute_event(db: Session, object_data: dict) -> dict:
     return {"status": "processed", "applied": True, "requires_manual_review": True}
 
 
-def _object_id(value) -> str | None:
+def _object_id(value: Any) -> str | None:
     """An object reference in an event payload: an id string, or the
     expanded object carrying one."""
     if isinstance(value, dict):
@@ -221,7 +223,7 @@ def _object_id(value) -> str | None:
 _REFUND_EVENT_TYPES = ("refund.created", "refund.updated", "refund.failed", "charge.refunded")
 
 
-def _apply_refund_event(db: Session, event_type: str, object_data: dict) -> dict:
+def _apply_refund_event(db: Session, event_type: str, object_data: dict[str, Any]) -> dict[str, Any]:
     """
     A refund reported by the provider, applied to the charge's Payment row
     (found by the PaymentIntent it refunds) under the order's lock. A
@@ -263,8 +265,8 @@ def _apply_refund_event(db: Session, event_type: str, object_data: dict) -> dict
 
 
 def apply_event(
-    db: Session, event_type: str, event_data: Any, background_tasks, event_id: str | None = None
-) -> dict:
+    db: Session, event_type: str, event_data: Any, background_tasks: TaskQueue, event_id: str | None = None
+) -> dict[str, Any]:
     """
     Apply one verified event to the order/payment state and commit. The
     caller's transaction may already hold what must be committed together
@@ -497,7 +499,7 @@ def enqueue_event(event_id: str) -> bool:
     try:
         # No publish retries: the caller is a request Stripe is waiting on.
         tasks.process_stripe_event.apply_async(args=[event_id], retry=False)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - the broker can fail in any way; the sweeper re-queues the event
         logger.warning(
             "Could not enqueue Stripe event %s: %s: %s; the sweeper re-queues it",
             event_id,
@@ -512,10 +514,9 @@ def retry_delay_seconds(attempts: int) -> int:
     """Seconds to wait before retrying an event that has failed `attempts`
     times: STRIPE_EVENT_RETRY_BASE_SECONDS, doubling each time, up to
     STRIPE_EVENT_RETRY_MAX_SECONDS."""
-    return min(
-        settings.STRIPE_EVENT_RETRY_BASE_SECONDS * 2 ** (attempts - 1),
-        settings.STRIPE_EVENT_RETRY_MAX_SECONDS,
-    )
+    # `2 ** int` is typed Any (a negative exponent gives a float); attempts >= 1.
+    delay: int = settings.STRIPE_EVENT_RETRY_BASE_SECONDS * 2 ** (attempts - 1)
+    return min(delay, settings.STRIPE_EVENT_RETRY_MAX_SECONDS)
 
 
 @dataclass
@@ -526,7 +527,7 @@ class EventOutcome:
     seconds from now) or "failed" (out of retries)."""
 
     state: str
-    result: dict | None = None
+    result: dict[str, Any] | None = None
     retry_in: int | None = None
 
 
@@ -537,9 +538,9 @@ class _AfterCommit:
     applied."""
 
     def __init__(self) -> None:
-        self._calls: list = []
+        self._calls: list[tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]]] = []
 
-    def add_task(self, func, *args, **kwargs) -> None:
+    def add_task(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
         self._calls.append((func, args, kwargs))
 
     def run(self, event_id: str) -> None:
@@ -597,7 +598,7 @@ def process_stored_event(db: Session, event_id: str) -> EventOutcome:
         row.processed_at = utc_now()
         result = apply_event(db, row.event_type, data, after_commit, event_id=row.event_id)
         db.commit()
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - any failure is recorded as a failed attempt and retried
         db.rollback()
         return _record_failure(db, event_id, error)
     after_commit.run(event_id)
@@ -695,7 +696,7 @@ _KEPT_OBJECT_FIELDS = (
 _KEPT_EVENT_FIELDS = ("id", "object", "type", "created", "api_version", "livemode")
 
 
-def _redact_object(obj: dict) -> dict:
+def _redact_object(obj: dict[str, Any]) -> dict[str, Any]:
     kept = {key: obj[key] for key in _KEPT_OBJECT_FIELDS if key in obj}
     if "payment_intent" in kept:
         kept["payment_intent"] = _object_id(kept["payment_intent"])
@@ -725,7 +726,7 @@ def redact_event_payload(payload: str) -> str:
     return json.dumps(kept)
 
 
-def _event_references(payload: dict) -> set[str]:
+def _event_references(payload: dict[str, Any]) -> set[str]:
     data = payload.get("data")
     obj = data.get("object") if isinstance(data, dict) else None
     if not isinstance(obj, dict):

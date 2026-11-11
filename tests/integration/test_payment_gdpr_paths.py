@@ -225,7 +225,7 @@ def test_send_gdpr_deletion_completed_no_retained_records(monkeypatch):
             outbox.append((to_email, subject, html_content))
             return True
 
-    monkeypatch.setattr("app.services.email.get_email_provider", lambda: DummyEmailProvider())
+    monkeypatch.setattr("app.services.email.get_email_provider", DummyEmailProvider)
 
     result = send_gdpr_deletion_completed("erased@example.com", retained_records=None)
     assert result is True

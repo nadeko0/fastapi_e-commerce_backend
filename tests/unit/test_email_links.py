@@ -22,7 +22,7 @@ def _sent(monkeypatch):
             calls.append(html_content)
             return True
 
-    monkeypatch.setattr(email_module, "get_email_provider", lambda: _FakeProvider())
+    monkeypatch.setattr(email_module, "get_email_provider", _FakeProvider)
     return calls
 
 

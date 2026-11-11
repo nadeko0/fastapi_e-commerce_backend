@@ -134,7 +134,7 @@ class ReconciliationResult:
     aborted: bool = False     # stopped early: too many provider failures in a row
     error_payment_ids: list[int] = field(default_factory=list)
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "checked": self.checked, "skipped": self.skipped, "errors": self.errors,
             "opened": self.opened, "resolved": self.resolved,
@@ -317,11 +317,12 @@ def reconcile_payments(
         payment = db.get(Payment, payment_id)
         assert payment is not None, "payment_id was selected from Payment table"
         session_id = None
+        ours_status = payment.status
         if payment.payment_intent_id.startswith(PENDING_INTENT_ID_PREFIX):
             # A Checkout attempt whose checkout.session.completed never arrived
             # still looks pending: the session is the only place that shows it.
             # (A pending row with no session is left out by the query above.)
-            session_id, ours_status = payment.checkout_session_id, payment.status
+            session_id = payment.checkout_session_id
         snapshot = snapshot_payment(payment)
         # End the read transaction: no connection waits on the provider.
         db.commit()

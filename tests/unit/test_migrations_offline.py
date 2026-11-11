@@ -17,6 +17,7 @@ def _alembic(*args):
     return subprocess.run(
         [sys.executable, "-m", "alembic", *args],
         cwd=ROOT, env=dict(os.environ), capture_output=True, text=True, timeout=120,
+                                                                        check=False,
     )
 
 

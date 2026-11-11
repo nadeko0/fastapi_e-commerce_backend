@@ -250,7 +250,7 @@ def _utf8_len(text):
 
 # Characters that stress normalisation, invisibles and astral planes.
 SPECIAL_CHARS = [
-    "‍", "​", "﻿", "‮", "‭", "⁦", "́", "̈",
+    "‍", "\u200b", "﻿", "\u202e", "\u202d", "\u2066", "́", "̈",
     "̧", "Å", "Å", "K", "ﬁ", "Ａ", "²", "Ⅳ",
     "각", "각", "\U0001f510", "\U0001f469‍\U0001f469‍\U0001f467",
     "\U0001d400", " ", "\t", "　", " ", "İ", "ß", "Σ",
@@ -299,9 +299,9 @@ NORMALISATION_CASES = [
     pytest.param("nbsp Pass Word9", "nbsp Pass Word9", False, id="nbsp-vs-space-nfkc-only"),
     # Invisible characters are part of the password, never stripped.
     pytest.param("zw‍j-Pass-Word9", "zwj-Pass-Word9", False, id="zwj-not-stripped"),
-    pytest.param("zw​sp-Pass-Word9", "zwsp-Pass-Word9", False, id="zwsp-not-stripped"),
+    pytest.param("zw\u200bsp-Pass-Word9", "zwsp-Pass-Word9", False, id="zwsp-not-stripped"),
     pytest.param("﻿bom-Pass-Word9", "bom-Pass-Word9", False, id="bom-not-stripped"),
-    pytest.param("rtl‮9droW-ssaP", "rtl9droW-ssaP", False, id="rtl-override-not-stripped"),
+    pytest.param("rtl\u202e9droW-ssaP", "rtl9droW-ssaP", False, id="rtl-override-not-stripped"),
 ]
 
 

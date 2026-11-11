@@ -273,11 +273,14 @@ def test_an_intent_without_a_payment_method_cannot_be_confirmed(stripe):
 
 @pytest.mark.parametrize("call", ["confirm", "retrieve"])
 def test_an_unknown_intent_is_resource_missing(stripe, call):
+    operation = {
+        "confirm": lambda: stripe.provider.confirm_payment_intent(
+            "pi_unknown", return_url=RETURN_URL
+        ),
+        "retrieve": lambda: stripe.provider.retrieve_payment_intent("pi_unknown"),
+    }[call]
     with pytest.raises(CardError) as missing:
-        if call == "confirm":
-            stripe.provider.confirm_payment_intent("pi_unknown", return_url=RETURN_URL)
-        else:
-            stripe.provider.retrieve_payment_intent("pi_unknown")
+        operation()
     assert missing.value.code == "resource_missing"
 
 
@@ -594,7 +597,7 @@ def test_every_provider_method_has_a_caller_or_an_allowed_reason():
                     all_attrs.add(node.attr)
                 elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                     all_attrs.add(node.func.id)
-        except Exception:
+        except Exception:  # noqa: BLE001 - a file that cannot be parsed contributes no attributes
             pass
 
     methods = [

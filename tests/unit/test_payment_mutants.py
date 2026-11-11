@@ -102,7 +102,7 @@ def test_settling_a_refund_with_nothing_left_to_settle_names_it(provider):
     provider.confirm_payment_intent(intent.id, return_url=RETURN_URL)
     refund = provider.create_refund(payment_intent_id=intent.id)
 
-    with pytest.raises(ValueError) as nothing:
+    with pytest.raises(ValueError, match="has nothing left to settle") as nothing:
         StripePaymentProvider.settle_refund(refund.id)
 
     assert str(nothing.value) == f"Refund {refund.id} has nothing left to settle"
@@ -153,7 +153,7 @@ def live():
 
 
 def test_a_live_provider_without_a_key_says_what_it_needs():
-    with pytest.raises(ValueError) as refused:
+    with pytest.raises(ValueError, match="requires a real Stripe secret key") as refused:
         LiveStripePaymentProvider(api_key="")
     assert str(refused.value) == "LiveStripePaymentProvider requires a real Stripe secret key"
 
@@ -405,7 +405,7 @@ def test_signed_at_reads_an_item_the_way_the_sdk_does():
     # The first item named t, split at its first "=" only: "1=2" is its value,
     # not a number. A reader that split more, or from the right, would skip
     # this item or take "1" / "2" instead.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="invalid literal for int"):
         _signed_at("t=1=2,t=5")
 
 

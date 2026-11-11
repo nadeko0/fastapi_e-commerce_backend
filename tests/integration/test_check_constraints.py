@@ -183,6 +183,7 @@ def _offline_sql(*args):
     result = subprocess.run(
         [sys.executable, "-m", "alembic", *args, "--sql"],
         cwd=_ROOT, env=dict(os.environ), capture_output=True, text=True, timeout=60,
+                                                                         check=False,
     )
     assert result.returncode == 0, result.stderr
     return result.stdout

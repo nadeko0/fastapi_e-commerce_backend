@@ -68,11 +68,11 @@ class OrderItem(Base):
     def product_name(self) -> str:
         if self.product_name_snapshot is not None:
             return self.product_name_snapshot
-        return self.product.name if self.product else ""
+        return self.product.name if self.product else ""  # type: ignore[truthy-bool]  # None on an item not yet flushed
 
     @property
     def product_image(self) -> str:
-        return self.product.images[0] if self.product and self.product.images else ""
+        return self.product.images[0] if self.product and self.product.images else ""  # type: ignore[truthy-bool]  # None on an item not yet flushed
 
     # Mirrors product_name/product_image above: OrderItemResponse exposes a
     # flat variant_sku field (None for the common no-variant line) rather

@@ -33,7 +33,8 @@ def _split_comma_separated(v: str | list[str]) -> list[str]:
             return []
         if v.startswith("["):
             import json
-            return json.loads(v)
+            parsed: list[str] = json.loads(v)
+            return parsed
         return [i.strip() for i in v.split(",") if i.strip()]
     return v
 
@@ -341,7 +342,7 @@ class Settings(BaseSettings):
                 "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS and "
                 "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL; set those instead"
             )
-        return None
+        return
     # New guest carts per client address. Not a limit on requests: adding
     # to a cart that already exists is not counted, only the add that has
     # to open a new one (app/api/v1/cart.py). Each new cart is a Redis key

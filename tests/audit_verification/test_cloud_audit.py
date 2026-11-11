@@ -421,7 +421,7 @@ def test_REG01_registration_without_full_name_sends_verification_mail(
     def recording_send(*args, **kwargs):
         try:
             return real_send(*args, **kwargs)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - collected and asserted on by the test
             errors.append(exc)
             return False
 

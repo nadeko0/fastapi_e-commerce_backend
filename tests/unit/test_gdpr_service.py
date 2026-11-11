@@ -29,17 +29,17 @@ def _run(scenario):
 
 
 async def _make_user(session, email="gdpr.user@example.com", **overrides):
-    defaults = dict(
-        email=email,
-        hashed_password="hashed",
-        full_name="GDPR User",
-        gdpr_consent=True,
-        privacy_policy_accepted=True,
-        marketing_consent=False,
-        consent_history=[],
-        is_active=True,
-        created_at=utc_now(),
-    )
+    defaults = {
+        "email": email,
+        "hashed_password": "hashed",
+        "full_name": "GDPR User",
+        "gdpr_consent": True,
+        "privacy_policy_accepted": True,
+        "marketing_consent": False,
+        "consent_history": [],
+        "is_active": True,
+        "created_at": utc_now(),
+    }
     defaults.update(overrides)
     user = User(**defaults)
     session.add(user)

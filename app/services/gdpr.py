@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -34,7 +35,7 @@ def consent_user_agent(request: Request) -> str | None:
     return None if value is None else value[:CONSENT_USER_AGENT_MAX]
 
 
-def _row(obj, fields: tuple[str, ...]) -> dict:
+def _row(obj, fields: tuple[str, ...]) -> dict[str, Any]:
     """The named columns of `obj`, as JSON-ready values."""
     out = {}
     for name in fields:
@@ -133,7 +134,7 @@ class GDPRService:
                 detail="Failed to update consent preferences"
             ) from e
 
-    async def collect_export(self, user_id: int) -> dict:
+    async def collect_export(self, user_id: int) -> dict[str, Any]:
         """Art. 15/20: the user's account, addresses, orders with their
         lines, payments and refunds. Bounded queries, eager-loaded lines."""
         from sqlalchemy import select
@@ -307,7 +308,7 @@ class GDPRService:
         background_tasks.add_task(send_gdpr_deletion_confirmation, user.email, request_id)
         return request_id
 
-    def get_consent_status(self, user: User) -> dict:
+    def get_consent_status(self, user: User) -> dict[str, Any]:
         """
         Get current consent status for a user
         """
@@ -327,7 +328,7 @@ class GDPRService:
         """
         Validate if user data is within retention period
         """
-        if not user.created_at:
+        if not user.created_at:  # type: ignore[truthy-bool]  # typed non-null; guards a row without a timestamp
             return True
 
         retention_days = user.data_retention_period or settings.USER_DATA_RETENTION_DAYS

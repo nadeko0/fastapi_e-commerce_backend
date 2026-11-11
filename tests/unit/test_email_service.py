@@ -26,7 +26,7 @@ def _no_real_smtp(monkeypatch):
             calls.append((to_email, subject, html_content))
             return True
 
-    monkeypatch.setattr(email_module, "get_email_provider", lambda: _FakeProvider())
+    monkeypatch.setattr(email_module, "get_email_provider", _FakeProvider)
     return calls
 
 

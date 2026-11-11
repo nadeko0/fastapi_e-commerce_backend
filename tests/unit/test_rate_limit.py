@@ -75,7 +75,7 @@ def test_parse_rate(text, expected):
     "text", ["", "10", "ten/minute", "0/minute", "10/fortnight", "10/0 minutes", "-1/minute", "10 / minute"]
 )
 def test_parse_rate_rejects_what_is_not_a_rate(text):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not a rate limit"):
         parse_rate(text)
 
 

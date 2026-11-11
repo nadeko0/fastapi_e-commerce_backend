@@ -381,7 +381,7 @@ def test_low_stock_alert_lists_every_low_product_in_one_email(
             outbox.append((to_email, html_content))
             return True
 
-    monkeypatch.setattr("app.services.email.get_email_provider", lambda: Capture())
+    monkeypatch.setattr("app.services.email.get_email_provider", Capture)
     low = _products(db_session, [1, 2, 3])
 
     tasks.check_low_stock(threshold=5)

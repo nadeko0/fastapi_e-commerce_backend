@@ -244,7 +244,7 @@ class StripePaymentProvider(PaymentProvider):
     def _simulate_network_call(self) -> None:
         """No-op hook standing in for the real HTTP call to api.stripe.com.
         Tests monkeypatch this to raise PaymentProviderTimeoutError."""
-        return None
+        return
 
     # -- PaymentIntent -----------------------------------------------------
 
@@ -441,7 +441,7 @@ class StripePaymentProvider(PaymentProvider):
             )
         if expires_at is not None:
             now = int(time.time())
-            if not isinstance(expires_at, int) or expires_at < now + 1800 or expires_at > now + 86400:
+            if not isinstance(expires_at, int) or expires_at < now + 1800 or expires_at > now + 86400:  # type: ignore[redundant-expr]  # runtime guard for callers that pass an untyped value
                 raise InvalidRequestError(
                     "expires_at must be an integer Unix timestamp between 30 minutes and 24 hours in the future",
                     param="expires_at",

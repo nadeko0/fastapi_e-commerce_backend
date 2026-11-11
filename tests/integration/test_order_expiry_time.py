@@ -44,7 +44,7 @@ LOCAL_OFFSETS = [-12, -5, 0, 1, 5.5, 14]
 
 
 @pytest.fixture(autouse=True)
-def _sent(monkeypatch):
+def sent(monkeypatch):
     sent = []
     monkeypatch.setattr(tasks, "send_order_cancellation_email",
                         lambda email, order: sent.append(order.id))
@@ -78,7 +78,7 @@ def _order(db, created_at, stock_left=5, quantity=2):
 @pytest.mark.parametrize("instant", list(AWKWARD_INSTANTS), ids=list(AWKWARD_INSTANTS))
 @pytest.mark.parametrize("offset", LOCAL_OFFSETS)
 def test_only_orders_older_than_the_window_by_utc_expire(
-    db_session, _sent, monkeypatch, instant, offset
+    db_session, sent, monkeypatch, instant, offset
 ):
     now = AWKWARD_INSTANTS[instant]
     window = timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES)
@@ -99,7 +99,7 @@ def test_only_orders_older_than_the_window_by_utc_expire(
     assert status == {expired: "cancelled", at_cutoff: "new", fresh: "new",
                       hour_older: "cancelled", hour_younger: "new"}
     assert cancelled == 2
-    assert sorted(_sent) == sorted([expired, hour_older])
+    assert sorted(sent) == sorted([expired, hour_older])
     assert db_session.get(Product, expired_product).stock_quantity == 5 + 2
 
 

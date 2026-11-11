@@ -23,7 +23,7 @@ def outbox(monkeypatch):
             sent.append((to_email, subject, html_content))
             return True
 
-    monkeypatch.setattr("app.services.email.get_email_provider", lambda: Capture())
+    monkeypatch.setattr("app.services.email.get_email_provider", Capture)
     return sent
 
 

@@ -313,8 +313,8 @@ def _attempt(db, order_id, **overrides):
         # No such order can exist: the column is a 4-byte integer.
         return None
     _ensure_order(db, order_id)
-    values = dict(order_id=order_id, payment_intent_id=f"pending-{uuid.uuid4().hex[:12]}",
-                  amount=1999, currency="USD", status="processing", checkout_session_id=None)
+    values = {"order_id": order_id, "payment_intent_id": f"pending-{uuid.uuid4().hex[:12]}",
+                  "amount": 1999, "currency": "USD", "status": "processing", "checkout_session_id": None}
     values.update(overrides)
     payment = Payment(**values)
     db.add(payment)

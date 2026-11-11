@@ -46,6 +46,7 @@ def _status_codes(env_overrides):
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     # The app now logs its JSON event stream to stdout too (Twelve-Factor):
@@ -55,7 +56,7 @@ def _status_codes(env_overrides):
 
 def test_production_serves_no_docs_and_no_schema():
     codes = _status_codes(_PRODUCTION_ENV)
-    assert codes == {path: "404" for path in codes}, codes
+    assert codes == dict.fromkeys(codes, "404"), codes
 
 
 def test_development_keeps_the_docs(client):

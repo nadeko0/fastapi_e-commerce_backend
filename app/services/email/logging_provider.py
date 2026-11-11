@@ -14,5 +14,5 @@ logger = logging.getLogger(__name__)
 
 class LoggingEmailProvider(EmailProvider):
     def send(self, to_email: str, subject: str, html_content: str) -> bool:
-        logger.info(f"Email suppressed (LoggingEmailProvider): to={mask_email(to_email)} subject={subject!r}")
+        logger.info("Email suppressed (LoggingEmailProvider): to=%s subject=%r", mask_email(to_email), subject)
         return True

@@ -537,7 +537,7 @@ def test_only_a_well_formed_identifier_is_a_guest_identifier():
     for bad in [None, 1, "", "1", good[:-1], good + "A", good[:-1] + "!", good[:-1] + "\n", "cart:1"]:
         assert is_guest_cart_id(bad) is False
         if isinstance(bad, str):
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match="not a guest cart identifier"):
                 CartOwner.guest(bad)
 
 
@@ -749,7 +749,7 @@ def test_merge_deletes_an_empty_stored_guest_cart_without_touching_the_account()
 def test_merge_refuses_a_malformed_guest_identifier():
     redis = _service()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not a guest cart identifier"):
         redis.merge_guest_cart("1", 1)
 
 

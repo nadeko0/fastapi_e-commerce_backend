@@ -38,7 +38,7 @@ def as_utc(value: datetime) -> datetime:
 UTCDatetime = Annotated[datetime, AfterValidator(as_utc)]
 
 
-class UTCDateTime(TypeDecorator):
+class UTCDateTime(TypeDecorator[datetime]):
     """TIMESTAMP WITH TIME ZONE that reads back as aware UTC on every database."""
 
     impl = DateTime(timezone=True)

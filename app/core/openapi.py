@@ -211,7 +211,7 @@ _MODEL_FOR_EXISTING = {
 }
 
 
-def _merge(responses: dict, code: int, spec: dict) -> None:
+def _merge(responses: dict[int | str, dict[str, Any]], code: int, spec: dict[str, Any]) -> None:
     """Add `spec` as the response for `code`. A route's own entry keeps its
     description, and gains the body and the headers it lacks."""
     own = responses.get(code)

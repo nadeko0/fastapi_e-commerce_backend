@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 _server_rewrite_reported = False
 
 
-def _forwarded_hosts(headers) -> set:
+def _forwarded_hosts(headers) -> set[str]:
     """Every entry of every X-Forwarded-For header, as written and, when it
     carries a port ("1.2.3.4:80", "[2001:db8::1]:443"), without it: the
     forms uvicorn can hand over as the client's host."""
@@ -45,8 +45,8 @@ def _forwarded_hosts(headers) -> set:
     for name, value in headers:
         if name != b"x-forwarded-for":
             continue
-        for hop in value.decode("latin-1").split(","):
-            hop = hop.strip()
+        for raw_hop in value.decode("latin-1").split(","):
+            hop = raw_hop.strip()
             if not hop:
                 continue
             hosts.add(hop)
@@ -57,7 +57,7 @@ def _forwarded_hosts(headers) -> set:
     return hosts
 
 
-def _as_networks(entries: tuple) -> list:
+def _as_networks(entries: tuple[str, ...]) -> list[str]:
     # "10.0.0.5/8" means the network it lies in, as in client_address
     # (app/core/rate_limit.py); uvicorn would take it for a hostname.
     networks = []
@@ -70,7 +70,7 @@ def _as_networks(entries: tuple) -> list:
 
 
 @lru_cache(maxsize=8)
-def _trusting(app, entries: tuple) -> ProxyHeadersMiddleware:
+def _trusting(app, entries: tuple[str, ...]) -> ProxyHeadersMiddleware:
     # uvicorn's own implementation, so the result (rightmost entry that is
     # not a trusted proxy; X-Forwarded-Proto for the scheme) is exactly what
     # main.py's configuration used to produce. Per TRUSTED_PROXIES value,
@@ -108,4 +108,4 @@ class ForwardedClientMiddleware:
                 elif settings.TRUSTED_PROXIES:
                     proxy = _trusting(self.app, tuple(settings.TRUSTED_PROXIES))
                     return await proxy(scope, receive, send)
-        await self.app(scope, receive, send)
+        return await self.app(scope, receive, send)

@@ -107,11 +107,11 @@ AUTHENTICATING = {PAY_3DS, PAY_3DS_DECLINE}
 SEEN = Counter()
 TRANSITIONS = Counter()
 
-_HYPOTHESIS = dict(
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow,
+_HYPOTHESIS = {
+    "deadline": None,
+    "suppress_health_check": [HealthCheck.function_scoped_fixture, HealthCheck.too_slow,
                            HealthCheck.filter_too_much, HealthCheck.data_too_large],
-)
+}
 
 # A flag that is usually False: Hypothesis favours the simplest value of a
 # strategy (0, False) when it generates, so a rare action is gated on True.
@@ -685,7 +685,7 @@ class PaymentWorld(RuleBasedStateMachine):
         self.prices = {(a.id, None): money(price_a), (b.id, None): money(price_b),
                        (c.id, cv.id): money(override if override is not None else price_b)}
         self.initial = {(a.id, None): 12, (b.id, None): 10, (c.id, cv.id): 6}
-        self.adjust = {line: 0 for line in self.lines}
+        self.adjust = dict.fromkeys(self.lines, 0)
         self.buyers = [self.shop.buyer(), self.shop.buyer()]
         self.admin = self.shop.admin()
         self.order_ids = []
@@ -1012,7 +1012,7 @@ class PaymentWorld(RuleBasedStateMachine):
             try:
                 self.provider.confirm_payment_intent(intent.id, return_url="https://shop.test/r")
                 self._enqueue("payment_intent.succeeded", self._intent_object(intent, order_id))
-            except Exception:  # CardError: declined after authentication
+            except Exception:  # noqa: BLE001 - CardError: declined after authentication
                 self._enqueue("payment_intent.payment_failed", self._intent_object(intent, order_id))
         else:
             intent.status = PaymentIntentStatus.CANCELED
@@ -1257,7 +1257,7 @@ class PaymentWorld(RuleBasedStateMachine):
         if not hasattr(self, "lines"):
             return
         db = self._db()
-        held = {line: 0 for line in self.lines}
+        held = dict.fromkeys(self.lines, 0)
         for order_id in self.order_ids:
             order = db.get(Order, order_id)
             if order.status == "cancelled":

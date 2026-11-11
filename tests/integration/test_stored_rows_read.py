@@ -110,10 +110,10 @@ def test_a_category_below_the_input_rules_is_served(client, db_session, name, le
     assert tree["total_categories"] == 1
 
 
-BAD_ADDRESS = dict(
-    street="abc", city="x", state="x", postal_code="12", country="x",
-    delivery_instructions="i" * 501, delivery_phone="123",
-)
+BAD_ADDRESS = {
+    "street": "abc", "city": "x", "state": "x", "postal_code": "12", "country": "x",
+    "delivery_instructions": "i" * 501, "delivery_phone": "123",
+}
 
 
 def test_an_address_below_the_input_rules_is_served(client, db_session):
@@ -219,8 +219,8 @@ def test_a_variant_without_a_sku_is_still_refused(client, db_session):
 ])
 def test_an_address_is_still_refused_below_the_input_rules(client, db_session, field, value):
     user, _ = _customer(db_session)
-    body = dict(street="12 Main Street", city="Springfield", state="IL",
-                postal_code="62701", country="US")
+    body = {"street": "12 Main Street", "city": "Springfield", "state": "IL",
+                "postal_code": "62701", "country": "US"}
 
     response = client.post(f"{USERS}/addresses", json={**body, field: value},
                            headers=_headers(client, user.email))
@@ -311,7 +311,7 @@ def test_a_country_that_outgrows_the_limit_when_cased_is_refused_on_input(schema
     # the input schemas check it again after it.
     body = {"country": "ß" * 100}
     if schema is AddressCreate:
-        body |= dict(street="12 Main Street", city="Springfield", state="IL", postal_code="62701")
+        body |= {"street": "12 Main Street", "city": "Springfield", "state": "IL", "postal_code": "62701"}
 
     with pytest.raises(ValidationError):
         schema(**body)

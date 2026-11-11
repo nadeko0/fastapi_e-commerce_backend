@@ -283,9 +283,12 @@ def cart_unit_price(product: Any, variant: Any | None) -> Decimal:
     price_override when it has one, otherwise the product's price. The same
     rule create_order (app/api/v1/orders.py) charges by; `is not None`
     because an override of 0.00 is a price, not a missing one."""
+    price: Decimal
     if variant is not None and variant.price_override is not None:
-        return variant.price_override
-    return product.price
+        price = variant.price_override
+    else:
+        price = product.price
+    return price
 
 
 def resolve_cart_line(

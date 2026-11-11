@@ -233,7 +233,7 @@ def test_parse_rate_accepts_the_smallest_and_largest_shapes(text, expected):
     "",
 ])
 def test_parse_rate_refuses_just_outside_the_pattern(text):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not a rate limit"):
         parse_rate(text)
 
 

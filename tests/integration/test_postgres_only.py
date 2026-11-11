@@ -60,7 +60,7 @@ def _reset_stripe_mock_state():
 @pytest.fixture(autouse=True)
 def _stub_order_confirmation_email(monkeypatch):
     monkeypatch.setattr("app.api.v1.orders.send_order_confirmation_email", lambda *a, **k: True)
-    yield
+    return
 
 
 # -- The order row lock in the pay path --------------------------------------
@@ -167,7 +167,7 @@ def test_two_concurrent_payments_for_one_order_charge_it_once(client, db_session
         try:
             with TestClient(app) as own_client:
                 _pay(own_client, setup, results, key)
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - worker thread: collected and asserted on by the test
             errors.append(exc)
 
     hooked = async_engine.sync_engine
@@ -350,7 +350,7 @@ def test_every_check_constraint_the_migration_adds_exists_and_is_validated(db_se
     rows = db_session.execute(text(
         "SELECT conname, convalidated FROM pg_constraint WHERE contype = 'c'"
     )).all()
-    present = {name: validated for name, validated in rows}
+    present = dict(rows)
     for _table, name, _condition in _check_constraints_migration().CONSTRAINTS:
         assert present.get(name) is True, name
 
@@ -422,6 +422,7 @@ def _alembic(url, *args):
         [sys.executable, "-m", "alembic", *args],
         cwd=_ROOT, env={**os.environ, "DATABASE_URI": url},
         capture_output=True, text=True, timeout=300,
+                                        check=False,
     )
     assert result.returncode == 0, f"alembic {' '.join(args)} failed:\n{result.stderr[-2000:]}"
 

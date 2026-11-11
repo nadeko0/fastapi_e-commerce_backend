@@ -2,6 +2,7 @@ import re
 import unicodedata
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
@@ -245,7 +246,7 @@ class GDPRExport(BaseModel):
     request_date: datetime = Field(..., description="When the export was requested")
     expires_at: datetime = Field(..., description="When the export data will be deleted")
     status: str = Field(default="processing", description="Current status of the export")
-    data: dict | None = Field(
+    data: dict[str, Any] | None = Field(
         default=None, description="The user's records (Art. 15/20), as JSON-ready values"
     )
 

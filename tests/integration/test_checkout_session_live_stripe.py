@@ -114,7 +114,7 @@ class TestCreateCheckoutSession:
         # stripe.checkout.Session.create in `payment` mode - Stripe itself
         # rejects their absence, not just our own pre-validation.
         # B017: a live-Stripe test; the exact exception type is not pinned here.
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(Exception):  # noqa: B017, PT011
             provider.create_checkout_session(
                 amount=500,
                 currency="usd",

@@ -43,10 +43,10 @@ from app.services.payment.stripe_provider import TOKEN_SUCCESS_DEFAULT, StripePa
 CART = "/api/v1/cart"
 ORDERS = "/api/v1/orders"
 
-_HYPOTHESIS = dict(
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
-)
+_HYPOTHESIS = {
+    "deadline": None,
+    "suppress_health_check": [HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+}
 
 # Prices as the catalog stores them: Numeric(10, 2), positive.
 prices = st.decimals(

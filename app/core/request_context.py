@@ -74,12 +74,12 @@ def get_request_context() -> RequestContext | None:
     return replace(context, trace_id=ids[0], parent_span_id=ids[1])
 
 
-def bind_request_context(context: RequestContext) -> Token:
+def bind_request_context(context: RequestContext) -> Token[RequestContext | None]:
     """Make `context` current; pass the token to reset_request_context."""
     return _context.set(context)
 
 
-def reset_request_context(token: Token) -> None:
+def reset_request_context(token: Token[RequestContext | None]) -> None:
     _context.reset(token)
 
 

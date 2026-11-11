@@ -271,9 +271,9 @@ def test_an_order_survives_its_json_for_a_country_whose_case_changes_its_length(
 @given(st.text(min_size=2, max_size=100))
 def test_a_country_read_twice_is_the_country_read_once(country):
     address = KNOWN["AddressResponse"]
-    fields = dict(street="00000", city="00", state="00", postal_code="000",
-                  created_at=dt.datetime(2000, 1, 1, tzinfo=dt.UTC),
-                  updated_at=dt.datetime(2000, 1, 1, tzinfo=dt.UTC), id=1)
+    fields = {"street": "00000", "city": "00", "state": "00", "postal_code": "000",
+                  "created_at": dt.datetime(2000, 1, 1, tzinfo=dt.UTC),
+                  "updated_at": dt.datetime(2000, 1, 1, tzinfo=dt.UTC), "id": 1}
     try:
         once = address(country=country, **fields)
     except ValidationError:

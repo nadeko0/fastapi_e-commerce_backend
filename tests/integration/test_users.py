@@ -102,7 +102,7 @@ def test_update_profile_returns_404_when_user_deleted_after_token_issued(
 
     async def patched_get(self, *args, **kwargs):
         call_count["n"] += 1
-        return None
+        return
 
     # The route re-loads the user with db.get(); the auth dependency reads
     # it with execute(), so only the route's lookup is affected.

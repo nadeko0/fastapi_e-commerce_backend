@@ -120,7 +120,7 @@ class Problem(HTTPException):
         detail: str | None = None,
         headers: dict[str, str] | None = None,
         retry_after: int | None = None,
-        errors: list[dict] | None = None,
+        errors: list[dict[str, Any]] | None = None,
     ) -> None:
         if retry_after is not None:
             headers = {**(headers or {}), "Retry-After": str(retry_after)}
@@ -175,7 +175,7 @@ _CONSTRAINT_KEYS = frozenset({
 })
 
 
-def _without_input(error: dict) -> dict:
+def _without_input(error: dict[str, Any]) -> dict[str, Any]:
     clean = {key: value for key, value in error.items() if key not in ("input", "ctx")}
     ctx = {k: v for k, v in (error.get("ctx") or {}).items() if k in _CONSTRAINT_KEYS}
     if ctx:
@@ -183,10 +183,11 @@ def _without_input(error: dict) -> dict:
     return clean
 
 
-def sanitized_errors(errors: Sequence[Any]) -> list[dict]:
+def sanitized_errors(errors: Sequence[Any]) -> list[dict[str, Any]]:
     """`errors()` of a RequestValidationError or a pydantic ValidationError,
     without `input` and with `ctx` cut down to the constraint values."""
-    return jsonable_encoder([_without_input(e) for e in errors])
+    encoded: list[dict[str, Any]] = jsonable_encoder([_without_input(e) for e in errors])
+    return encoded
 
 
 def _supported_methods(request: Request) -> list[str]:

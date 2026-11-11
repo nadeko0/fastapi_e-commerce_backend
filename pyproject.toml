@@ -138,6 +138,23 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 strict_equality = true
 no_implicit_optional = true
+# Components of `mypy --strict` (config_file docs); the rest of strict is applied
+# to the payment layer below.
+warn_return_any = true
+warn_unreachable = true
+disallow_any_generics = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined"]
+
+# Payment layer and Celery tasks: fully annotated definitions.
+[[tool.mypy.overrides]]
+module = [
+    "app.tasks",
+    "app.services.payment.*",
+    "app.services.stripe_events",
+    "app.services.reconciliation",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
 
 # Celery ships neither py.typed nor stubs; its objects are Any here.
 [[tool.mypy.overrides]]
@@ -167,14 +184,34 @@ ignore = [
     # SIM300 (yoda conditions) would turn `assert x == expected` into `assert expected == x`
     # in the tests: the actual-then-expected order is the project convention.
     "SIM300",
+    # PT006 (tuple of names in parametrize) and PT018 (split `assert a and b`) are
+    # style-only: 158 and 103 hits across the tests, no defect class behind them.
+    "PT006",
+    "PT018",
+    # PLW0603 (global statement): three lazily built module singletons (compiled Lua
+    # script, trace source, one-shot log flag); the alternative is a holder object.
+    "PLW0603",
 ]
 # Added on top of E/F/I/W: pyupgrade (UP), bugbear (B), async pitfalls (ASYNC),
 # naive datetimes (DTZ), FastAPI (FAST), simplifications (SIM), and the Ruff-specific
 # RUF005 (list/tuple concatenation), RUF012 (mutable class defaults), RUF013
 # (implicit Optional), RUF022 (sorted __all__), RUF100 (stale noqa).
-extend-select = ["UP", "B", "ASYNC", "DTZ", "FAST", "SIM", "RUF005", "RUF012", "RUF013", "RUF022", "RUF100"]
+extend-select = ["UP", "B", "ASYNC", "DTZ", "FAST", "SIM", "RUF005", "RUF012", "RUF013", "RUF022", "RUF100",
+    "G", "LOG", "BLE", "PGH003", "PIE", "C4", "RET", "PT", "T20", "PLE", "PLW", "TID251"]
+# Second batch: logging format (G, LOG), blind except (BLE), type: ignore without code
+# (PGH003), PIE, comprehensions (C4), return statements (RET), pytest style (PT),
+# print (T20), pylint errors and warnings (PLE, PLW).
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"app.services.redis.RedisService".msg = "Use the helpers in app.services.redis or app.tasks; only those two modules may name RedisService."
 
 [tool.ruff.lint.per-file-ignores]
+"app/tasks.py" = ["TID251"]
+# The tests build and patch RedisService directly.
+"tests/**" = ["TID251"]
+# Auth code changes only when a task names it; four `x = jwt.encode(); return x` pairs stay.
+"app/core/security.py" = ["RET504"]
+"app/services/redis.py" = ["TID251"]
 # This file builds throwaway FastAPI apps whose routes are deliberately written in the
 # shapes the architecture guard must catch (default-style Depends, an untyped
 # dependency, time.sleep in an async route); rewriting them would stop testing the guard.

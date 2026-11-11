@@ -1,9 +1,10 @@
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import timedelta
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any, Protocol
 
 from fastapi import (
     APIRouter,
@@ -880,11 +881,18 @@ def _replay_checkout_session(payment_row: Payment, order: Order):
 DISPUTED_CHARGE_CODES = ("charge_disputed", "refund_disputed_payment")
 
 
+class TaskQueue(Protocol):
+    """What the payment helpers need of `background_tasks`: FastAPI's BackgroundTasks, or
+    the after-commit queue the Stripe event worker passes."""
+
+    def add_task(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> None: ...
+
+
 def _apply_payment_success(
     db: Session,
     order: Order,
     payment_row: Payment,
-    background_tasks: BackgroundTasks,
+    background_tasks: TaskQueue,
     notify_email: str,
 ) -> bool:
     """
@@ -1122,7 +1130,7 @@ def _guard_currency_matches_order(requested_currency: str | None, order: Order) 
         )
 
 
-def _reported_charge_matches_order(object_data: dict, amount_field: str, order: Order) -> bool:
+def _reported_charge_matches_order(object_data: dict[str, Any], amount_field: str, order: Order) -> bool:
     """
     Whether a provider success event charged exactly what the order costs,
     in the order's currency. `amount_field` names where the event carries
@@ -1141,7 +1149,7 @@ def _reported_charge_matches_order(object_data: dict, amount_field: str, order: 
     )
 
 
-def _flag_payment_for_manual_review(db: Session, payment_row: Payment, reason: str) -> dict:
+def _flag_payment_for_manual_review(db: Session, payment_row: Payment, reason: str) -> dict[str, Any]:
     """
     A provider reports a payment succeeded, but applying it to the order
     would be wrong (the order was cancelled meanwhile, or the charge is not
@@ -2063,7 +2071,7 @@ async def list_order_payments(
 _REFUND_STATUSES_NOT_RETURNED = ("failed", "canceled")
 
 
-def _apply_refund_object(db: Session, payment_row: Payment, refund_object: dict) -> bool:
+def _apply_refund_object(db: Session, payment_row: Payment, refund_object: dict[str, Any]) -> bool:
     """
     Bring one recorded refund up to date with the provider's report of it.
     Returns True when the refund turned out not to return the money - it

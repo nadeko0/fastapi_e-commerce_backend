@@ -378,7 +378,7 @@ _dirty_tables: set[str] = _state.dirty
 _DDL = re.compile(r"^\s*(?:CREATE|DROP|ALTER)\b", re.I)
 
 # Child tables first, so DELETE never meets a foreign key still pointing at it.
-_TABLES_CHILDREN_FIRST = [t for t in reversed(Base.metadata.sorted_tables)]
+_TABLES_CHILDREN_FIRST = list(reversed(Base.metadata.sorted_tables))
 _ALL_TABLES = {t.name for t in _TABLES_CHILDREN_FIRST}
 
 
@@ -462,7 +462,7 @@ def _reset_database():
     # behind either. lock_timeout turns a session a test forgot to close
     # (it would hold row locks) into an error instead of a hung run.
     _clean_dirty_tables()
-    yield
+    return
 
 
 @pytest.fixture(autouse=True)
@@ -502,7 +502,7 @@ def fake_redis(monkeypatch):
         lambda: fakeredis.FakeAsyncRedis(server=server, decode_responses=True),
     )
     monkeypatch.setattr(redis_async_module, "_clients", {})
-    yield fake
+    return fake
 
 
 @pytest.fixture(autouse=True)

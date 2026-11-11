@@ -111,7 +111,7 @@ def _span_context_ids() -> tuple[str, str] | None:
     return format(span_context.trace_id, "032x"), format(span_context.span_id, "016x")
 
 
-def setup(app=None, engines: Sequence = (), *, span_exporter=None) -> bool:
+def setup(app=None, engines: Sequence[Any] = (), *, span_exporter=None) -> bool:
     """Turn tracing on for this process when configured; True when it is on.
 
     `app`: the FastAPI app to instrument (API process). `engines`: sync

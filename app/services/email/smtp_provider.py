@@ -52,14 +52,17 @@ class SmtpEmailProvider(EmailProvider):
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(message)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - any failure means "not sent"; callers get False, never an exception
             # Not logger.exception: smtplib's errors carry the recipient
             # (SMTPRecipientsRefused is keyed by address), and a traceback
             # would put it in the logs in full. The type and the SMTP code,
             # when there is one, are what diagnosing a failed send needs.
             code = getattr(e, "smtp_code", None)
             logger.error(
-                f"Failed to send email to {mask_email(to_email)} (subject={subject!r}): "
-                f"{type(e).__name__}" + (f" {code}" if code else "")
+                "Failed to send email to %s (subject=%r): %s%s",
+                mask_email(to_email),
+                subject,
+                type(e).__name__,
+                f" {code}" if code else "",
             )
             return False

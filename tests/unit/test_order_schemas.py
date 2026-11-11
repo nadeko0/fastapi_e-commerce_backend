@@ -23,8 +23,8 @@ CREATED = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
 
 def _line(**overrides):
-    values = dict(id=7, order_id=3, product_id=11, variant_id=None, quantity=2,
-                  price_at_time=Decimal("9.50"), created_at=CREATED)
+    values = {"id": 7, "order_id": 3, "product_id": 11, "variant_id": None, "quantity": 2,
+                  "price_at_time": Decimal("9.50"), "created_at": CREATED}
     values.update(overrides)
     return OrderItem(**values)
 

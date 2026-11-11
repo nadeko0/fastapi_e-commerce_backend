@@ -57,7 +57,7 @@ def _problem(text: str) -> tuple[str, str] | None:
     return None
 
 
-def first_unusable_text(value: Any, loc: tuple[str | int, ...] = ()) -> dict | None:
+def first_unusable_text(value: Any, loc: tuple[str | int, ...] = ()) -> dict[str, Any] | None:
     """The first unusable string in `value` (a str, or any nesting of dicts,
     lists and tuples, member names included), as {"type", "loc", "msg"}, or
     None. `loc` is where `value` sits; the error's loc continues it with the
@@ -95,7 +95,7 @@ def _by_name(items: Iterable[tuple[str, Any]]) -> dict[str, Any]:
     """Query or form pairs as {name: value}, a name sent more than once as
     {name: [values]}: the loc of a bad one then reads like FastAPI's own for a
     list parameter, ("query", "tag", 1)."""
-    grouped: dict[str, list] = {}
+    grouped: dict[str, list[Any]] = {}
     for name, value in items:
         grouped.setdefault(name, []).append(value)
     return {name: values[0] if len(values) == 1 else values for name, values in grouped.items()}

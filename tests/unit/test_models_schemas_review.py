@@ -26,7 +26,7 @@ from app.schemas.legal import ConsentUpdate, LegalDocument
 
 
 def _minimal_user(**overrides):
-    defaults = dict(email="a@example.com", hashed_password="x")
+    defaults = {"email": "a@example.com", "hashed_password": "x"}
     defaults.update(overrides)
     return User(**defaults)
 
@@ -41,12 +41,12 @@ def _category_id(db_session):
 
 
 def _minimal_product(**overrides):
-    defaults = dict(
-        name="Widget",
-        description="A widget",
-        price="9.99",
-        category_id=1,
-    )
+    defaults = {
+        "name": "Widget",
+        "description": "A widget",
+        "price": "9.99",
+        "category_id": 1,
+    }
     defaults.update(overrides)
     return Product(**defaults)
 
@@ -119,14 +119,14 @@ class TestStringEnumColumns:
 
 class TestAddressPhoneValidation:
     def _payload(self, **overrides):
-        payload = dict(
-            street="123 Main Street",
-            city="Springfield",
-            state="IL",
-            postal_code="62701",
-            country="US",
-            delivery_phone=None,
-        )
+        payload = {
+            "street": "123 Main Street",
+            "city": "Springfield",
+            "state": "IL",
+            "postal_code": "62701",
+            "country": "US",
+            "delivery_phone": None,
+        }
         payload.update(overrides)
         return payload
 

@@ -1,7 +1,9 @@
 import logging
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -14,9 +16,19 @@ from celery.signals import (
     worker_process_init,
     worker_process_shutdown,
 )
-from sqlalchemy import String, cast, create_engine, exists, literal, or_, select, update
+from sqlalchemy import (
+    Select,
+    String,
+    cast,
+    create_engine,
+    exists,
+    literal,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import selectinload, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.core import celery_context, telemetry
 from app.core.clock import utc_now
@@ -177,7 +189,7 @@ worker_process_shutdown.connect(lambda **_: telemetry.shutdown(), weak=False)
 configure_celery_logging.connect(lambda **_: setup_logging(), weak=False)
 
 @contextmanager
-def task_session():
+def task_session() -> Iterator[Session]:
     # Every task must run its queries inside `with task_session() as db:`.
     # This replaced `db = next(get_db())` on a plain generator, which never
     # closed anything: the generator was discarded right after next(), and
@@ -201,7 +213,7 @@ def task_session():
 # rolled back on every run.
 PURGE_BATCH_SIZE = 100
 
-def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> int:
+def purge_expired_deletion_requests(db: Session, batch_size: int = PURGE_BATCH_SIZE) -> int:
     """
     Anonymizes accounts whose GDPR Article 17 erasure request has passed
     the grace period. This only targets users who explicitly requested
@@ -260,7 +272,7 @@ def purge_expired_deletion_requests(db, batch_size: int = PURGE_BATCH_SIZE) -> i
 ORDER_SNAPSHOT_MAX_HOLD_DAYS = 30
 
 
-def _scrub_retained_order_snapshots(db, batch_size: int = PURGE_BATCH_SIZE) -> int:
+def _scrub_retained_order_snapshots(db: Session, batch_size: int = PURGE_BATCH_SIZE) -> int:
     """Scrubs ship_to_* address snapshots on finished orders of erased accounts,
     and unfinished orders older than ORDER_SNAPSHOT_MAX_HOLD_DAYS, unless a
     payment dispute is open (Art. 17(3)(b)/(e))."""
@@ -315,7 +327,12 @@ def _scrub_retained_order_snapshots(db, batch_size: int = PURGE_BATCH_SIZE) -> i
             break
     return scrubbed
 
-def _anonymise_pending(db, pending, batch_size: int, due=None) -> int:
+def _anonymise_pending(
+    db: Session,
+    pending: Select[User],
+    batch_size: int,
+    due: Callable[[User], bool] | None = None,
+) -> int:
     """Anonymises, batch by batch, the accounts `pending` selects (ordered by
     id), erases the stored Stripe events about their payments, and commits
     after each batch."""
@@ -358,7 +375,7 @@ def _anonymise_pending(db, pending, batch_size: int, due=None) -> int:
             break
     return purged_count
 
-def _anonymise_account(account, unusable_hash: str) -> None:
+def _anonymise_account(account: User, unusable_hash: str) -> None:
     account.email = f"deleted-user-{account.id}@deleted.invalid"
     account.hashed_password = unusable_hash
     account.full_name = None
@@ -395,7 +412,7 @@ def cleanup_inactive_accounts() -> int:
     with task_session() as db:
         return purge_expired_deletion_requests(db)
 
-def purge_expired_retention(db, batch_size: int = PURGE_BATCH_SIZE) -> int:
+def purge_expired_retention(db: Session, batch_size: int = PURGE_BATCH_SIZE) -> int:
     """
     Applies USER_DATA_RETENTION_DAYS (GDPR Art. 5(1)(e), storage limitation).
     The privacy policy (GET /legal/privacy-policy, section 6) says "we keep
@@ -424,7 +441,7 @@ def purge_expired_retention(db, batch_size: int = PURGE_BATCH_SIZE) -> int:
     ).order_by(User.id)
     now = utc_now()
 
-    def retention_has_passed(account) -> bool:
+    def retention_has_passed(account: User) -> bool:
         # The period is per user (their own data_retention_period, the
         # setting's value when unset), so the comparison is made here, not in
         # SQL: the candidates are only the deactivated, not yet anonymised
@@ -449,7 +466,7 @@ def cleanup_expired_retention() -> int:
     with task_session() as db:
         return purge_expired_retention(db)
 
-def expire_unpaid_orders(db) -> int:
+def expire_unpaid_orders(db: Session) -> int:
     """
     Cancels every order still new and unpaid UNPAID_ORDER_EXPIRE_MINUTES
     after it was placed, returning its stock through the same code as an
@@ -556,7 +573,7 @@ def cancel_expired_unpaid_orders() -> int:
     name="check_payment_reconciliation",
     queue="stats",
 )
-def check_payment_reconciliation(order_id: int | None = None) -> dict:
+def check_payment_reconciliation(order_id: int | None = None) -> dict[str, Any]:
     """Compare our payments with the provider's and record the differences
     (app/services/reconciliation.py). Daily from beat; an admin can queue
     it, or run it for one order, through POST /admin/reconciliation/run."""
@@ -572,7 +589,7 @@ def check_payment_reconciliation(order_id: int | None = None) -> dict:
     # admin sees it and a replay resets it.
     max_retries=None,
 )
-def process_stripe_event(self, event_id: str) -> dict:
+def process_stripe_event(self: Any, event_id: str) -> dict[str, Any]:
     """Apply a stored Stripe event (see stripe_events.process_stored_event).
     The webhook route publishes it after storing the event, the sweeper
     publishes it for an event whose message was lost, and it publishes
@@ -665,7 +682,7 @@ celery.conf.beat_schedule = {
 }
 
 
-def clear_expired_idempotency_keys(db, batch_size: int = PURGE_BATCH_SIZE) -> int:
+def clear_expired_idempotency_keys(db: Session, batch_size: int = PURGE_BATCH_SIZE) -> int:
     """
     Expires the Idempotency-Keys of orders older than IDEMPOTENCY_KEY_TTL_HOURS
     (draft-ietf-httpapi-idempotency-key-header-08, section 2.3). The key and

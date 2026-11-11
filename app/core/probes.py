@@ -23,7 +23,7 @@ no-store): a cached 200 would hide an outage from the monitor.
 
 import asyncio
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
@@ -80,7 +80,7 @@ class HealthBody(BaseModel):
 _PROBE_HEADERS = {"Cache-Control": {"description": "Always no-store.", "schema": {"type": "string"}}}
 
 
-def probe_responses(model: type[BaseModel]) -> dict:
+def probe_responses(model: type[BaseModel]) -> dict[int | str, dict[str, Any]]:
     """The `responses=` of a probe that can fail: the 200 and the 503 carry
     the same shape, the 503 with Retry-After."""
     return {
@@ -108,7 +108,7 @@ async def database_is_up(limit_seconds: float | None = None) -> bool:
         async with asyncio.timeout(limit_seconds), database.AsyncSessionLocal() as session:
             await session.execute(text("SELECT 1"))
     except (SQLAlchemyError, OSError, TimeoutError) as e:
-        logger.error(f"Database health check failed: {e!r}")
+        logger.error("Database health check failed: %r", e)
         return False
     return True
 
@@ -119,12 +119,12 @@ async def redis_is_up(limit_seconds: float | None = None) -> bool:
         async with asyncio.timeout(limit_seconds):
             await get_async_redis().ping()
     except (RedisError, OSError, TimeoutError) as e:
-        logger.error(f"Redis health check failed: {e!r}")
+        logger.error("Redis health check failed: %r", e)
         return False
     return True
 
 
-def probe_response(request: Request, content: dict, status_code: int = 200, headers: dict | None = None) -> Response:
+def probe_response(request: Request, content: dict[str, Any], status_code: int = 200, headers: dict[str, Any] | None = None) -> Response:
     """JSON for GET; the same status and headers and no body for HEAD."""
     headers = {**NO_STORE, **(headers or {})}
     if request.method == "HEAD":
