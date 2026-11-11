@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - 2026-11-11
+
+A MAJOR release: three request bodies changed (API clients must update, see "Migrating API clients"), and the Docker Compose stack moves to PostgreSQL 18, whose data volume layout a 15 volume cannot be started with (see "Upgrading a deployment"). It also closes the remaining findings of the 2026-11-10 review, tightens the type and lint configuration, and documents every route's outcomes in the OpenAPI document.
+
+### Migrating API clients
+- `POST /api/v1/orders/{order_id}/pay`: the body is now
+  ```json
+  {"amount": "25.00", "currency": "USD", "payment_method_token": "pm_..."}
+  ```
+  `payment_method_token` is required (a body without it is a 422; Stripe refused a confirm without a payment method anyway, so such a request was never paid in production). `order_id` (the order is the one in the path) and `payment_method` (always Stripe) must no longer be sent: a body with them is a 422 `extra_forbidden`. `currency` stays optional. The response is unchanged and still carries `order_id` and `payment_method` ("stripe").
+- `POST /api/v1/admin/categories`: `metadata` is no longer accepted (it was never stored); category responses no longer carry `metadata`, `product_count` or `children_count` (always `{}` and 0 before).
+- `POST /api/v1/legal/data-request`: `request_type` other than `export` or `deletion` is a 422 from the schema (it was a 400 from the route).
+- Sessions: a refresh token family ends `REFRESH_SESSION_MAX_DAYS` (default 30) after the login that started it, however often it is refreshed. After that `POST /api/v1/users/refresh` answers the same 401 as for an expired refresh token, and the client logs in again. Before, a session refreshed at least weekly never ended.
+
+### Upgrading a deployment
+- PostgreSQL 15 to 18: `docker-compose.yml` builds the database from `docker/postgres/Dockerfile` (`postgres:18.6-alpine` plus Alpine security updates) and mounts the volume on `/var/lib/postgresql`. An existing 15 volume is refused at start; move the data with a dump and restore, step by step in [docs/OPERATIONS.md](docs/OPERATIONS.md#postgresql-major-upgrades-postgresql-15-to-18). Supported servers are now PostgreSQL 16, 17 and 18.
+- Redis 7 to 8.8, built from `docker/redis/Dockerfile` (`redis:8.8-alpine` plus Alpine security updates). 8.8 is the newest release redis-py 8.1 supports.
+- Run the migrations (`docker compose --profile migrate run --rm migrate`): revision `f180919aaf3b` adds a CHECK on `payments.status`, a partial unique index allowing one active default address per user (older duplicate defaults are resolved first, the newest kept), `payments.reconciled_at`, and a partial index for the unpaid-order sweep. It stops without changing anything if a payment row has a status outside the known values.
+- `docker compose up -d --build`: the db and redis images are built locally now.
+- New setting `REFRESH_SESSION_MAX_DAYS` (default 30, at least `REFRESH_TOKEN_EXPIRE_DAYS`).
+
+### Fixed
+- An erasure request cancels the account's new, unpaid orders, returns their stock and closes their open payment attempts at Stripe. The deactivated owner could still pay one and get an order behind 403 on every route.
+- An erasure request no longer deadlocks against an order being placed by the same account: it takes the user's row lock first, as `POST /orders` does.
+- GDPR request mails are sent after the response: a mail failure can no longer turn a recorded request into a 500, and the client does not wait for SMTP.
+- Changing the default address: two concurrent changes of one user's addresses could deadlock on PostgreSQL (a 500); they now run one after the other. Updating an address so that it equals another active one is a 409 (it was a 500), and the database allows one active default address per user.
+- Reconciliation checks the window's payments least recently reconciled first (`payments.reconciled_at`), so above `RECONCILIATION_MAX_PAYMENTS` attempts in the window the older ones are no longer skipped for ever.
+- `payments.status` is checked by the database against the values the code writes.
+- `POST /admin/payments/{id}/refund` no longer returns Stripe's refusal text to the client; it is logged, as on the order refund route.
+- The mock payment provider refuses to confirm a PaymentIntent without a payment method, as Stripe does; it used to pay with a default card.
+
+### Changed
+- The OpenAPI document states every status code each route answers with its cause, the limits and defaults a client meets (payment window, minimum charge, unpaid-order cap, rate limits, token lifetimes, cart limits, sorting values), and the 6.0.0 changes on the routes concerned. `docs/API.md` has a table of these limits.
+- Images: the app image applies Debian security updates at build time, and the database and Redis images Alpine's, so a fix is not waited for until the official images are rebuilt; Docker Compose builds every image without layer cache (`no_cache`), so those updates run on each `--build` instead of being taken from a cached layer. CI scans the three built images with Trivy 0.76.1 and runs weekly on a schedule as well; uv 0.13.6.
+- CI tests PostgreSQL 16, 17 and 18 (the whole suite on 18) and Redis 8.8. Dependabot watches the three Dockerfiles and holds Python to 3.13.
+- Stricter mypy (`warn_return_any`, `warn_unreachable`, `disallow_any_generics`, extra error codes, fully typed payment layer and tasks) and ruff (logging, broad-except, comprehension, return, pytest-style and pylint rules, a ban on the sync Redis client outside the worker) settings; the code was fixed to pass them.
+- Dependencies: FastAPI 0.162.0, alembic 1.20.1, stripe 16.0.1, ruff 0.17.3, hypothesis 6.170.12, httpx2 2.16.0.
+- Documentation: accepted limitations of the 2026-11-10 review, the GDPR scope, reconciliation and rate-limiter limits are recorded in `docs/LIMITATIONS.md`; `docs/OPERATIONS.md` has going-live notes for Stripe and the 6.0.0 upgrade.
+
+### Removed
+- The `update_product_stats` task and its schedule: it cached best sellers in Redis under a key nothing read.
+- The unused synchronous Redis client the API process created at start.
+
 ## [5.1.0] - 2026-11-10
 
 A MINOR release: fixes from a full review of payments, orders, configuration and the catalog, with new settings (`RATE_LIMIT_CONSENT`, `SMTP_TLS_VERIFY`, `DOCKER_API_BIND`) and two refund statuses newly published in the OpenAPI document. No route, field or parameter was removed.
@@ -507,6 +550,7 @@ Three independent audits of 4.0.3 reviewed the code, ran it under load and fuzzi
 - Structured JSON logging across all application components.
 - Automated CI pipeline with linting, unit/integration testing (85% coverage gate), and Docker container builds.
 
+[6.0.0]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v5.1.0...v6.0.0
 [5.1.0]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.2...v5.0.0
 [4.1.2]: https://github.com/nadeko0/fastapi_e-commerce_backend/compare/v4.1.1...v4.1.2

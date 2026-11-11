@@ -16,7 +16,7 @@ flowchart TD
 3. **Property and State-Machine Tests:** Hypothesis generates pseudo-random inputs to find boundary bugs. Stateful tests (`PaymentChain`) exercise arbitrary sequences of orders, payments, cancellations, and refunds. One property test discovered that normalizing the German letter "ß" expands "0ß" into two characters ("0SS"), quietly invalidating ISO country code length invariants.
 4. **Contract and Fuzz Testing:** Schemathesis was run against the 4.0.0 OpenAPI document (54 paths), outside this suite. It uncovered unhandled 500 errors on NUL bytes (`\x00`) and lone surrogates, prompting global input sanitization.
 5. **E2E Tests (Stripe Test Mode):** Black-box tests driven against real Stripe test-mode endpoints (`api.stripe.com`) with webhook forwarding via the Stripe CLI.
-6. **Mutation Testing:** Automated fault injection with `mutmut 3.8.0` across the payment, webhook, reconciliation, idempotency, order, rate-limit and error modules, run on 4.0.2 and 4.0.3 (see reports/T10-mutation.md) and again on 4.1.1. On 4.1.1: 3,434 mutants, 3,088 killed and 272 timed out on the first run, 74 survived; 31 of those were gaps in the tests and are now killed by named tests (tests/unit/test_mutants_4_1.py, tests/unit/test_payment_mutants.py, tests/integration/test_reconciliation.py), each proven by rerunning its mutant; the other 43 are equivalent (log wording, messages of assertions that cannot fail, join conditions inferred from the foreign key, defaults every caller overrides). Mutation testing runs by hand, not in CI: one run takes about 90 minutes on four cores.
+6. **Mutation Testing:** Automated fault injection with `mutmut 3.8.0` across the payment, webhook, reconciliation, idempotency, order, rate-limit and error modules, run on 4.0.2 and 4.0.3 (see reports/T10-mutation.md) and again on 4.1.1. On 4.1.1: 3,434 mutants, 3,088 killed and 272 timed out on the first run, 74 survived; 31 of those were gaps in the tests and are now killed by named tests (tests/unit/test_mutants_4_1.py, tests/unit/test_payment_mutants.py, tests/integration/test_reconciliation.py), each proven by rerunning its mutant; the other 43 are equivalent (log wording, messages of assertions that cannot fail, join conditions inferred from the foreign key, defaults every caller overrides). On 6.0.0: 3,669 mutants, 3,338 killed and 279 timed out, 52 survived; 8 of those were gaps (the 429 message of a consent change, `metadata.payment_id` kept by redaction, the error count and the `continue` of a reconciliation run that lost a race) and are now killed by assertions in tests/integration/test_rate_limit_api.py, test_data_retention.py and test_reconciliation.py, each proven by rerunning its mutant; the other 44 are equivalent in the same ways, plus checks the code repeats after the SDK (the webhook tolerance) and SQL pre-filters whose rows are checked again in Python. The 279 timeouts are all in the error handlers and the rate limiter, which nearly every test passes through, so mutmut selects thousands of tests for each; run in order with `-x`, the first failing one comes minutes in, past mutmut's limit. One or two from each of the 8 functions concerned, 12 mutants, were run by hand without the limit: every one was killed by a failing test (after 3 to 13 minutes in sequence, or in a minute when its test file is run directly), and none hung. Mutation testing runs by hand, not in CI: one run takes about 2.5 hours on four cores.
 
 ## Continuous Integration Pipeline
 
@@ -155,19 +155,20 @@ The CI comparison, base commit against HEAD on this machine (Linux or WSL):
 bash .github/scripts/benchmark_ab.sh origin/main
 ```
 
-## Verified Metrics for Release v4.1.1
+## Verified Metrics for Release v6.0.0
 
-Verification results on release v4.1.1; a row measured on an earlier release says which:
+Verification results on release v6.0.0; a row measured on an earlier release says which:
 
 | Metric | Measured Value | Standard / Target |
 |---|---|---|
-| SQLite Test Suite | 6,416 passed, 68 skipped without their services (+ 30 timing), random order | 0 failures, 0 warnings |
-| PostgreSQL Test Suite (v4.1.0) | 6,362 passed on 15 (+ 103 timing); 4,061 database-sensitive on 16 and 18 | Full migration and constraint parity |
-| Migration Round Trip | every revision on PostgreSQL 15, 16 and 18; v4.0.3 tests on the current migrations: 1,795 passed | Previous release keeps working on the new schema |
+| SQLite Test Suite | 6,601 passed, 78 skipped without their services (+ 30 timing), random order | 0 failures, 0 warnings |
+| PostgreSQL Test Suite | 6,618 passed on PostgreSQL 18.6 with Redis 8.8 under WSL Linux (+ 124 timing); 16, 17 and 18 in CI | Full migration and constraint parity |
+| Hypothesis `explore` profile | 2 runs of the 1,540 property and state-machine cases on PostgreSQL 18.6, new random inputs each run; one falsifying example, a false positive in the test itself (fixed) | No falsifying example in the code |
+| Migration Round Trip | every revision on PostgreSQL 16, 17 and 18 (CI) | Previous release keeps working on the new schema |
 | Live Stripe Test Suite (v4.1.0) | 52 passed, 2 skipped | api.stripe.com sandbox |
 | Payment Layer Coverage | 100.0% line and branch on the listed payment-layer files (the mock provider file is excluded) | Zero uncovered branches in financial path |
-| Overall Coverage (lines and branches combined) | 98.7% (source: `app`) | Fail-under gate set to 85% |
-| Mutation Score (mutmut 3.8.0) | 98.7% of 3,434 mutants detected (3,119 killed, 272 timed out) | The 43 survivors reviewed as equivalent |
+| Overall Coverage (lines and branches combined) | 98.9% (source: `app`) | Fail-under gate set to 85% |
+| Mutation Score (mutmut 3.8.0) | 98.8% of 3,669 mutants detected (3,346 killed, 279 over the time limit; a sample of 12 of these run without it: all killed by a failing test) | The 44 survivors reviewed as equivalent |
 | CI Execution Time | ~10 minutes across 19 jobs | Fully automated GitHub Actions workflow |
 
 ## Campaign Reports

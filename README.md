@@ -3,15 +3,15 @@
 [![CI](https://github.com/nadeko0/fastapi_e-commerce_backend/actions/workflows/ci.yml/badge.svg)](https://github.com/nadeko0/fastapi_e-commerce_backend/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/nadeko0/fastapi_e-commerce_backend?sort=semver)](https://github.com/nadeko0/fastapi_e-commerce_backend/releases)
 ![Python](https://img.shields.io/badge/python-3.13-3776AB)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.153-009688)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.162-009688)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017%20%7C%2018-4169E1)
 ![Redis](https://img.shields.io/badge/Redis-7.2%20to%208.8-DC382D)
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 
 ![tests](https://img.shields.io/badge/tests-6%2C803%20cases-brightgreen)
-![coverage](https://img.shields.io/badge/coverage-98.7%25-brightgreen)
+![coverage](https://img.shields.io/badge/coverage-98.9%25-brightgreen)
 ![payment layer](https://img.shields.io/badge/payment%20layer-100%25%20lines%20%2B%20branches-brightgreen)
-![mutation score](https://img.shields.io/badge/mutation%20score%20(4.1.1)-98.7%25-brightgreen)
+![mutation score](https://img.shields.io/badge/mutation%20score%20(6.0.0)-98.8%25-brightgreen)
 
 A backend for an online shop: catalog, carts, orders, Stripe payments, refunds and disputes, an admin API and GDPR tooling. It is a **foundation to build a store on**, not a demo: the catalog is product-neutral, and there is deliberately no frontend.
 
@@ -89,8 +89,8 @@ Each row says which release it was measured on; the test count is the number of 
 | | |
 |---|---|
 | Tests | 6,803 cases from 2,718 test functions on SQLite and PostgreSQL, 54 live Stripe tests, 0 warnings |
-| Coverage | 98.7 % overall, lines and branches combined; 100 % on the payment-layer files, the mock provider excluded (enforced in CI) |
-| Mutation testing | 98.7 % of 3,434 mutants detected (3,119 killed, 272 timed out; measured on 4.1.1); the 43 survivors reviewed as equivalent |
+| Coverage | 98.9 % overall (measured on 6.0.0), lines and branches combined; 100 % on the payment-layer files, the mock provider excluded (enforced in CI) |
+| Mutation testing | 98.8 % of 3,669 mutants detected (measured on 6.0.0): 3,346 killed by a failing test, 279 over mutmut's time limit (a sample of 12 of those, run without the limit, were all killed by a failing test, none hung); the 44 survivors reviewed as equivalent |
 | CI | lint (Ruff, mypy), sast (Bandit), benchmarks, migration-compat, tests, 7 time zones, PostgreSQL 16/17/18 with migration round-trip checks, real Redis, pip-audit, gitleaks, Trivy; also run weekly on a schedule |
 | Load (4-core host, app on 3 cores, 200 users, mock payments, rate limits raised, measured on 4.0.1) | p95 57 to 68 ms; overload answers fast 503s instead of stalling |
 | Chaos (measured on 4.0.x) | Redis or PostgreSQL down: 503 with Retry-After, recovery on its own, no webhook lost or applied twice |

@@ -15,7 +15,7 @@
 # is byte for byte the binary analysed above (sha256 52c8749d0142edd2...,
 # gosu 1.19, go1.24.6), and Trivy reports the same 26 IDs without this file.
 #
-# Re-check when the postgres digest in docker-compose.yml changes, and drop
+# Re-check when the postgres digest in docker/postgres/Dockerfile changes, and drop
 # every entry whose fixed Go version a newer gosu build carries (the scan then
 # no longer reports it): run `govulncheck -mode=binary` on the extracted
 # /usr/local/bin/gosu again and `trivy image --ignorefile` without this file.
