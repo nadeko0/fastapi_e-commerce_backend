@@ -142,8 +142,11 @@ def test_no_session_is_left_idle_in_transaction_after_requests(client, monkeypat
     ],
 )
 def test_a_connection_the_server_closed_for_a_transaction_timeout_answers_503(
-    monkeypatch, setting, server_error
+    monkeypatch, admin, setting, server_error
 ):
+    server_version = int(admin.execute(text("SHOW server_version_num")).scalar_one())
+    if setting == "transaction_timeout" and server_version < 170000:
+        pytest.skip("transaction_timeout exists from PostgreSQL 17")
     # The server ends the session with FATAL 25P03 or 25P04, and psycopg 3.3
     # raises that error itself on the next statement: both are InternalError,
     # not OperationalError. The connection is gone all the same (psycopg
