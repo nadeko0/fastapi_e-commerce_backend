@@ -181,8 +181,14 @@ def test_postgres_and_redis_are_built_with_alpine_security_updates():
     # services build thin images that apply the updates, and CI scans those.
     for service, compose_name in (("postgres", "db"), ("redis", "redis")):
         block = _without_comments(service_block(compose_name))
-        assert re.search(rf"^\s*build: \./docker/{service}\s*$", block, re.M), block
+        assert re.search(rf"^\s*context: \./docker/{service}\s*$", block, re.M), block
         assert re.search(r"^RUN apk upgrade --no-cache\s*$", _read(f"docker/{service}/Dockerfile"), re.M)
+    # The updates are a RUN layer: a cached one would keep the packages of the
+    # first build for good. Every service built here is built without cache.
+    for compose_name in ("api", "celery-worker", "celery-beat", "migrate", "db", "redis"):
+        block = _without_comments(service_block(compose_name))
+        assert re.search(r"^\s*build:\s*$", block, re.M), compose_name
+        assert re.search(r"^\s*no_cache: true\s*$", block, re.M), compose_name
     build = _read(".github/workflows/ci.yml")
     assert "docker build --pull -t ecommerce-postgres:ci docker/postgres" in build
     assert "docker build --pull -t ecommerce-redis:ci docker/redis" in build

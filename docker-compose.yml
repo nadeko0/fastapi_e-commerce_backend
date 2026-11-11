@@ -11,9 +11,11 @@ x-logging: &default-logging
 
 services:
   api:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
+      # See the note on the db service: every build applies today's updates.
+      no_cache: true
     ports:
       # Host-exposed port (DOCKER_API_PORT) is deliberately a separate
       # variable from the app's own PORT setting: PORT also controls what
@@ -74,6 +76,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # See the note on the db service: every build applies today's updates.
+      no_cache: true
     command: ["celery", "-A", "app.tasks", "worker", "--loglevel=info"]
     # `docker stop` sends SIGTERM, a Celery warm shutdown: running tasks
     # finish. After stop_grace_period (default 10 s) Docker sends SIGKILL,
@@ -114,6 +118,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # See the note on the db service: every build applies today's updates.
+      no_cache: true
     # --schedule: beat keeps its last-run times in a file, by default
     # "celerybeat-schedule" in the working directory. /app is owned by root
     # in the image and the process runs as appuser, so the default location
@@ -161,6 +167,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # See the note on the db service: every build applies today's updates.
+      no_cache: true
     profiles:
       - migrate
     command: ["alembic", "upgrade", "head"]
@@ -184,7 +192,14 @@ services:
     # known CRITICAL/HIGH findings may be pinned earlier; the 2026-11-05 base
     # is under it (the 15-alpine digest it replaced carried musl
     # CVE-2026-107891 and zlib CVE-2026-85091, HIGH; Trivy 0.76.1, 2026-11-10).
-    build: ./docker/postgres
+    # no_cache: the security updates are a RUN layer (apk/apt upgrade), and a
+    # cached layer would keep the packages of the first build for good. Every
+    # `docker compose build` / `up --build` runs it again; the base images are
+    # pinned by digest, so nothing else changes. The app's dependencies come
+    # from uv's cache mount, which the builder keeps across uncached builds.
+    build:
+      context: ./docker/postgres
+      no_cache: true
     image: ecommerce-postgres:18.6
     # max_connections: each API worker can open up to 2 x (DB_POOL_SIZE +
     # DB_MAX_OVERFLOW) connections (a sync and an async pool), so 4 workers
@@ -234,7 +249,9 @@ services:
     # has one password user and no ACL rules. The 2026-11-05 base is under
     # the security exception (Trivy 0.76.1 finds no fixable HIGH or CRITICAL
     # in it, 2026-11-10).
-    build: ./docker/redis
+    build:
+      context: ./docker/redis
+      no_cache: true
     image: ecommerce-redis:8.8
     # One Redis holds the Celery broker queues, the token blacklist and
     # password-change watermarks, the rate-limit counters and every cart.
