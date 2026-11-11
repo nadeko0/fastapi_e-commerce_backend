@@ -591,6 +591,10 @@ def test_a_patch_document_that_is_not_an_object_is_refused(world, target, body):
     st.lists(st.integers(), max_size=3), st.dictionaries(st.text(max_size=3), st.integers(), max_size=2)))
 def test_unknown_members_are_422_and_never_applied(world, target, name, value):
     assume(name not in target[3].model_fields)
+    # The 422 names the unknown member in `loc` (the client's own key, by
+    # design); a name like "psycopg" would then trip the leak check, which
+    # looks for the server's internals. Found by HYPOTHESIS_PROFILE=explore.
+    assume(not _LEAK_ANYCASE.search(name))
     response = no_5xx(_patch(world, target, {name: value}))
     assert response.status_code == 422, response.text
 
