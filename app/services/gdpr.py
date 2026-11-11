@@ -259,6 +259,14 @@ class GDPRService:
             # DATA_DELETION_GRACE_PERIOD_DAYS has passed. Committed before any
             # mail is sent: SMTP inside the open transaction (2D-03) could
             # outlast idle_in_transaction_session_timeout.
+            # The user's row first, in the order POST /orders takes its locks
+            # (user, then the stock rows): this request ends by updating the
+            # user, and taking that lock last, after the stock rows of the
+            # restock below, deadlocked against an order being placed
+            # (40P01, seen in test_erasure_racing_the_accounts_activity).
+            await db.execute(
+                select(User.id).where(User.id == user.id).with_for_update(key_share=True)
+            )
             # Locked in id order like the cancel routes' read, so the expiry
             # sweep or an admin cancel cannot restock the same order again.
             orders = (await db.scalars(

@@ -1176,7 +1176,12 @@ def test_erasure_racing_the_accounts_activity(shop, fake_redis, round_):
     with fresh() as db:
         statuses = {e.status for e in db.scalars(select(WebhookEvent))}
         assert statuses == {"processed"}, statuses
-        assert db.get(Order, order_3ds["id"]).payment_status == "paid"
+        # The erasure cancelled the unpaid 3DS order and closed its attempt
+        # (6.0.0); the success applied afterwards is flagged for a refund,
+        # never applied to the cancelled order.
+        assert db.get(Order, order_3ds["id"]).status == "cancelled"
+        assert db.get(Order, order_3ds["id"]).payment_status == "pending"
+        assert db.get(Payment, attempt.id).requires_manual_review is True
         anonymised = db.get(User, buyer.user_id)
         assert anonymised.email == f"deleted-user-{buyer.user_id}@deleted.invalid"
         assert anonymised.full_name is None and anonymised.phone is None
