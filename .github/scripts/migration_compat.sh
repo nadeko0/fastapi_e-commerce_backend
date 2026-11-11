@@ -51,10 +51,14 @@ export EMAILS_FROM_EMAIL="${EMAILS_FROM_EMAIL:-ci@example.com}" EMAILS_FROM_NAME
 
 # The behaviour tests of the old release that touch the database. Its tests
 # about the migrations themselves (the head, drift between its models and the
-# schema) fail by definition on a newer chain and are left out by name.
+# schema) fail by definition on a newer chain and are left out by name. So
+# is one case of 5.1.0 that writes payments.status = 'canceled' by hand, a
+# value no release's code writes (app.models.payment.PAYMENT_STATUSES) and
+# ck_payment_attempt_status (6.0.0) refuses.
 uv run pytest -p no:cacheprovider -n auto \
     -m "db_sensitive and not timing_sensitive" \
     -k "order or payment or checkout or cart or refund or user or address" \
+    --deselect "tests/integration/test_reconciliation.py::test_a_succeeded_payment_we_never_heard_about[canceled]" \
     --deselect tests/integration/test_postgres_only.py::test_migrations_round_trip_and_agree_with_the_session_schema \
     --deselect tests/integration/test_reconciliation_migration.py::test_the_migration_builds_the_table_of_the_model \
     --deselect tests/integration/test_reconciliation_migration.py::test_the_migration_can_be_undone \
