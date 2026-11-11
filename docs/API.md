@@ -1,6 +1,6 @@
 # REST API Reference and Conventions
 
-Every API contract in release v5.1.0 is designed around standard HTTP semantics and deterministic data representations. Clients communicate with a uniform interface where resources, errors, authentication lifecycles, and caching rules follow RFC standards rather than framework idiosyncrasies.
+Every API contract in release v6.0.0 is designed around standard HTTP semantics and deterministic data representations. Clients communicate with a uniform interface where resources, errors, authentication lifecycles, and caching rules follow RFC standards rather than framework idiosyncrasies.
 
 Interactive OpenAPI documentation and Swagger UI are accessible at `/api/v1/docs` (with ReDoc at `/redoc` and OpenAPI JSON at `/api/v1/openapi.json`) in non-production environments. When `ENVIRONMENT=production`, all documentation endpoints answer 404 to avoid leaking internal route structures.
 
@@ -34,11 +34,13 @@ sequenceDiagram
     participant Redis as Redis Cache
 
     Client->>Auth: OAuth2 form: username, password
-    Auth->>Client: 200 OK: access_token (15m), refresh_token (7d)
+    Auth->>Client: 200 OK: access_token (15m), refresh_token (7d, family starts: auth_time)
     Client->>Refresh: POST body: {refresh_token}
-    alt Valid and Unused
+    alt Family older than REFRESH_SESSION_MAX_DAYS (30d from auth_time)
+        Refresh-->>Client: 401 Unauthorized (log in again)
+    else Valid and Unused
         Refresh->>Redis: Mark presented refresh jti consumed
-        Refresh->>Client: 200 OK: new access_token, new rotated refresh_token
+        Refresh->>Client: 200 OK: new access_token, new rotated refresh_token (same auth_time)
     else Reused Token (Replay Detected)
         Refresh->>Redis: Revoke entire token family
         Refresh-->>Client: 401 Unauthorized (family revoked)
@@ -219,18 +221,19 @@ sequenceDiagram
     actor Stripe as Stripe Gateway
 
     Customer->>API: POST /orders (Idempotency-Key: k1)
-    API->>DB: Deduct inventory & persist Order (PENDING)
+    API->>DB: Deduct inventory & persist Order (status: new)
     API-->>Customer: 201 Created (Location: /orders/42)
-    Customer->>API: POST /orders/42/pay (Idempotency-Key: k2)
-    API->>Stripe: Create & Confirm PaymentIntent (pay-order-42:k2)
-    Stripe-->>API: Status: requires_action or succeeded
+    Customer->>API: POST /orders/42/pay (Idempotency-Key: k2, amount, payment_method_token)
+    API->>Stripe: Create PaymentIntent (pay-order-42:k2)
+    API->>Stripe: Confirm PaymentIntent (pay-order-42:k2:confirm)
+    Stripe-->>API: Status: requires_action, processing or succeeded
     API-->>Customer: 200 OK: Payment details & client_secret
     Stripe->>API: POST /orders/webhooks/stripe (HMAC Signature)
     Note over API: Verify signature & store event
     API->>DB: INSERT INTO webhook_events (event_id)
     API->>Worker: Enqueue process_stripe_event
     API-->>Stripe: 200 OK: {"status": "received"}
-    Worker->>DB: Transition Order to PAID & insert ledger record
+    Worker->>DB: Mark the payment paid, confirm the Order & insert ledger record
 ```
 
 The webhook endpoint (`POST /api/v1/orders/webhooks/stripe`) operates without Bearer authentication. It verifies payload authenticity via the `Stripe-Signature` header and HMAC-SHA256 secret. Valid events are inserted into the `webhook_events` database table. Duplicate event deliveries are acknowledged with 200 OK (`{"status": "already_processed"}`). An asynchronous Celery task executes state reconciliation and updates the payment ledger. Each stored delivery writes one log line, `Stripe event <id> (<type>) stored`, carrying the request id.

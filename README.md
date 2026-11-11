@@ -43,6 +43,7 @@ flowchart LR
     Stripe -. webhooks .-> API
     Redis --> Worker[Celery worker and beat<br/>webhooks · e-mails · expiry · reconciliation]
     Worker --> DB
+    Worker --> Stripe
 ```
 
 The full picture, the payment flow, the order state machine and the reasoning behind the main design choices are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -99,7 +100,7 @@ Details and the conditions behind each number: [docs/reports/final-test-campaign
 
 ## 🧱 Tech stack
 
-Python 3.13 · FastAPI 0.153 and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and Alembic · PostgreSQL 16, 17 or 18 (Compose runs 18) · Redis 7.2 to 8.8 (Compose runs 8.8; redis-py 8.1) · Celery 5.6 · Stripe (SDK 16) · PyJWT and bcrypt · uv · pytest and Hypothesis in the suite; Schemathesis, mutmut and Locust for the release campaign · Docker · GitHub Actions.
+Python 3.13 · FastAPI 0.162 and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and Alembic · PostgreSQL 16, 17 or 18 (Compose runs 18) · Redis 7.2 to 8.8 (Compose runs 8.8; redis-py 8.1) · Celery 5.6 · Stripe (SDK 16) · PyJWT and bcrypt · uv · pytest and Hypothesis in the suite; Schemathesis, mutmut and Locust for the release campaign · Docker · GitHub Actions.
 
 ## 📌 About this project
 

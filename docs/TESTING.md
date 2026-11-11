@@ -27,16 +27,16 @@ flowchart TD
     subgraph Parallel Checks
         lint["lint (Ruff & mypy)"]
         sast["sast (Bandit)"]
-        benchmark["benchmark (pytest-benchmark)"]
+        benchmark["benchmark (pytest-benchmark, not in the weekly run)"]
         audit["audit (pip-audit & CycloneDX)"]
         secrets["secrets (gitleaks)"]
         test["test (SQLite & Coverage Gate)"]
         test_tz["test-timezones (7 Timezones)"]
-        test_pg["test-postgres (PG 16, 17, 18)"]
+        test_pg["test-postgres (PG 18 whole suite, 16 and 17 database-sensitive)"]
         migration_compat["migration-compat (Previous Release)"]
-        test_redis["test-redis (Real Redis Parity)"]
+        test_redis["test-redis (Real Redis 8.8 Parity)"]
     end
-    lint --> docker_build["docker-build (Image Build & Trivy Scan)"]
+    lint --> docker_build["docker-build (app, postgres and redis images: build & Trivy scan)"]
     sast --> docker_build
     audit --> docker_build
     secrets --> docker_build
@@ -57,7 +57,7 @@ flowchart TD
 - **test-postgres:** Runs the whole suite on PostgreSQL 18 (the deployed image) and the database-sensitive subset on 16 and 17, including schema round-trip tests (`tests/integration/test_postgres_migration_roundtrip.py`) across every revision.
 - **migration-compat:** Runs the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses against the current migrations on PostgreSQL 18 (`.github/scripts/migration_compat.sh`); that release's tests about the migrations themselves are left out. It ends at once when `migrations/` is unchanged since the tag.
 - **test-redis:** Tests Redis Lua scripts, token revocation, and concurrency on a real Redis 8.8 container (the deployed image).
-- **docker-build:** Builds the production container image and runs Trivy vulnerability scanning across the app and compose images.
+- **docker-build:** Builds the production app image and the `docker/postgres` and `docker/redis` images that Compose builds, and scans all three with Trivy. It needs every job above except `benchmark`.
 
 ## Test Markers and Isolation
 

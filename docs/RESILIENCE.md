@@ -52,7 +52,7 @@ sequenceDiagram
     end
 
     opt Background Sweeper (Runs every 5 minutes)
-        Worker->>DB: Query events stuck in 'received' > STRIPE_EVENT_SWEEP_AFTER_MINUTES
+        Worker->>DB: Query events stuck in 'received' or 'retrying' > STRIPE_EVENT_SWEEP_AFTER_MINUTES
         Worker->>Redis: Re-publish unacknowledged event IDs
     end
 

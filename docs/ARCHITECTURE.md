@@ -1,6 +1,6 @@
 # Architecture and System Design
 
-Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v5.1.0.
+Architecture is the art of deciding which trade-offs you would prefer to defend at 3 a.m. This document describes the structural boundaries, data flows, and design principles of the FastAPI e-commerce backend in release v6.0.0.
 
 ## System Overview and Boundaries
 
@@ -64,15 +64,18 @@ sequenceDiagram
     participant SMTP as SMTP Server
 
     Customer->>API: POST /api/v1/orders (Idempotency-Key, shipping_address_id)
-    API->>DB: Lock stock rows FOR NO KEY UPDATE, insert order (status: new, payment: pending)
+    API->>DB: Lock the user's row, then stock rows, FOR NO KEY UPDATE, and insert order (status: new, payment: pending)
     DB-->>API: Commit successful
     API-->>Customer: 201 Created (OrderResponse, Location: /api/v1/orders/{id})
 
-    Customer->>API: POST /api/v1/orders/{id}/pay (Idempotency-Key, amount, payment_method_token)
+    Customer->>API: POST /api/v1/orders/{id}/pay (Idempotency-Key, amount, currency, payment_method_token)
     API->>DB: Commit Payment row (placeholder intent id, status: processing)
-    API->>Stripe: Create & confirm PaymentIntent (amount, currency, idempotency_key), no transaction open
+    API->>Stripe: Create PaymentIntent (amount, currency, payment method), no transaction open
+    Stripe-->>API: PaymentIntent id
+    API->>DB: Commit payment_intent_id
+    API->>Stripe: Confirm PaymentIntent (own idempotency key derived from the first)
     Stripe-->>API: PaymentIntent (status: succeeded, requires_action or processing)
-    API->>DB: Store payment_intent_id, and on succeeded mark paid and confirm the order
+    API->>DB: On succeeded mark the payment paid and confirm the order
     API-->>Customer: 200 OK (PaymentResponse)
 
     Note over Stripe,API: Asynchronous Webhook Notification (settles requires_action and processing attempts, a no-op for one already settled)
@@ -200,7 +203,7 @@ Because computers excel at arithmetic until asked to add 0.1 and 0.2, and time z
 - **Consequence:** A request whose key belongs to an attempt still in flight receives HTTP 409 `idempotency-key-in-use`, with `Retry-After: 5` while that attempt is being processed.
 
 ### 7. Store-Then-Process Webhooks with Reconciliation
-- **Decision:** Incoming Stripe webhooks are verified via HMAC signature and persisted to `webhook_events` (`status: received`) before returning HTTP 200 to Stripe. Processing runs asynchronously in Celery (`process_stripe_event`). Daily scheduled jobs reconcile local ledgers against the Stripe API.
+- **Decision:** Incoming Stripe webhooks are verified via HMAC signature and persisted to `webhook_events` (`status: received`) before returning HTTP 200 to Stripe. Processing runs asynchronously in Celery (`process_stripe_event`). A daily scheduled job reconciles local payments against the Stripe API, taking those compared longest ago first (`payments.reconciled_at`) so that above `RECONCILIATION_MAX_PAYMENTS` the older ones come round on later runs.
 - **Alternatives:** Synchronous webhook execution inside the route handler; transient Redis queue ingestion without database persistence; relying entirely on external provider retries.
 - **Reason:** Webhook routes must respond within seconds to avoid provider timeouts. Synchronous execution risks event loop stalls. Persisting to PostgreSQL guarantees zero event loss during broker downtime. Daily reconciliation detects drift from unhandled edge events or administrative portal adjustments.
 - **Consequence:** Financial confirmation is eventually consistent. Webhook processing must handle race conditions where an event arrives before the API finishes recording the payment attempt. A Checkout attempt is found by `order_id` and `payment_id` in the PaymentIntent metadata, so `payment_intent.succeeded` alone settles it and `checkout.session.completed` is then a no-op. A decline on the hosted page is only logged, because the session stays open for a retry. A lost dispute only flags the order (`dispute_status`, payment status `refunded`): it neither cancels it nor restocks, and the manager corrects stock by hand in the admin API.
