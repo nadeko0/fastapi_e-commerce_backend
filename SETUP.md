@@ -30,7 +30,7 @@ Copy the template configuration to create a local `.env`:
 cp .env.example .env
 ```
 
-The application uses Pydantic Settings (`app/core/config.py`). The following settings have no defaults and **must** be defined in `.env`:
+The application uses Pydantic Settings (`app/core/config.py`). The following settings have no default and **must** be defined in `.env`; the two exceptions, `EMAIL_PROVIDER` and `SMTP_TLS_VERIFY`, have defaults but are listed because local work usually changes them:
 
 | Setting Name | Purpose | Example Value for Local Development |
 |---|---|---|
@@ -42,6 +42,7 @@ The application uses Pydantic Settings (`app/core/config.py`). The following set
 | `POSTGRES_DB` | PostgreSQL database name | `ecommerce` |
 | `APP_DB_USER`, `APP_DB_PASSWORD` | Application's restricted database role, required by Docker Compose | See `.env.example` |
 | `REDIS_HOST` | Redis server hostname or IP | `localhost` (or `redis` inside Docker Compose) |
+| `REDIS_PASSWORD` | Redis password. Optional for the application in development, but Docker Compose refuses to start without it, and `staging` and `production` require at least 16 bytes | See `.env.example` |
 | `EMAIL_PROVIDER` | `smtp` (default) sends mail; `logging` only logs and is refused in `staging` and `production` | `logging` for local work without a mail server |
 | `SMTP_HOST` | Mail transfer agent hostname. The connection is upgraded with STARTTLS (port 587; port 465 is not supported) and the server certificate is verified against the system CAs. For a relay with a private CA, set `SSL_CERT_FILE` (or `SSL_CERT_DIR`) in the environment of the api and worker processes | `localhost` |
 | `SMTP_TLS_VERIFY` | `true` (default) verifies the SMTP server certificate and host name; `false` skips the check for a local mail catcher with a self-signed certificate and is refused in `staging` and `production` | `false` with Mailpit |
@@ -99,6 +100,8 @@ Docker Compose provides a complete, isolated environment matching production top
 ### 1. Compose Configuration and Roles
 
 `docker-compose.yml` does not set the service host names. In `.env`, set `POSTGRES_SERVER=db` and `REDIS_HOST=redis` before `docker compose up`; the `localhost` values are for running on the host. `REDIS_PASSWORD` is strictly required (`:?` expansion prevents starting unauthenticated).
+
+The `db` and `redis` services are built locally from `docker/postgres/Dockerfile` and `docker/redis/Dockerfile`: the official PostgreSQL 18 and Redis 8.8 Alpine images (pinned by digest) with `apk upgrade` applied, so `docker compose up --build` is the way to start them. A PostgreSQL data volume created by a 5.x stack (PostgreSQL 15) is refused by the 18 image; the dump-and-restore procedure is in "PostgreSQL Major Upgrades" in [docs/OPERATIONS.md](docs/OPERATIONS.md#postgresql-major-upgrades-postgresql-15-to-18).
 
 PostgreSQL implements role separation via `docker/postgres/initdb/10-app-role.sh`:
 - `POSTGRES_USER`: Superuser and schema owner. Owns the tables and executes schema migrations.
@@ -197,7 +200,7 @@ Standard Stripe test payment method tokens (send these `pm_card_*` ids to the AP
 
 ## Running Tests
 
-The test suite includes 6,711 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
+The test suite includes 6,803 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
 
 To run the full suite locally:
 

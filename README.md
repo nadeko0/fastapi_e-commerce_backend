@@ -5,25 +5,26 @@
 ![Python](https://img.shields.io/badge/python-3.13-3776AB)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.153-009688)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017%20%7C%2018-4169E1)
+![Redis](https://img.shields.io/badge/Redis-7.2%20to%208.8-DC382D)
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 
-![tests](https://img.shields.io/badge/tests-6%2C711%20cases-brightgreen)
+![tests](https://img.shields.io/badge/tests-6%2C803%20cases-brightgreen)
 ![coverage](https://img.shields.io/badge/coverage-98.7%25-brightgreen)
 ![payment layer](https://img.shields.io/badge/payment%20layer-100%25%20lines%20%2B%20branches-brightgreen)
 ![mutation score](https://img.shields.io/badge/mutation%20score%20(4.1.1)-98.7%25-brightgreen)
 
 A backend for an online shop: catalog, carts, orders, Stripe payments, refunds and disputes, an admin API and GDPR tooling. It is a **foundation to build a store on**, not a demo: the catalog is product-neutral, and there is deliberately no frontend.
 
-What makes it worth a look is less the feature list than how it was checked. The test suite runs 6,711 cases from 2,668 test functions on SQLite and PostgreSQL, and the final 4.0 line went through a full release campaign: fuzzing from the OpenAPI schema, end-to-end runs against Stripe's test mode, load and soak tests, chaos experiments (pull the plug on Redis, freeze PostgreSQL, kill a worker mid-payment), a DAST scan, mutation testing and a deployment on a real server. Defects found were fixed or are listed in docs/LIMITATIONS.md, and the reports are in this repository.
+What makes it worth a look is less the feature list than how it was checked. The test suite runs 6,803 cases from 2,718 test functions on SQLite and PostgreSQL, and the final 4.0 line went through a full release campaign: fuzzing from the OpenAPI schema, end-to-end runs against Stripe's test mode, load and soak tests, chaos experiments (pull the plug on Redis, freeze PostgreSQL, kill a worker mid-payment), a DAST scan, mutation testing and a deployment on a real server. Defects found were fixed or are listed in docs/LIMITATIONS.md, and the reports are in this repository.
 
 ## ✨ Features
 
-- **Accounts:** registration (name optional) with email verification and normalised email, JWT access tokens with rotating refresh tokens (reuse revokes the whole family), password reset evicting in-flight sessions, admin role, login lockout, a password policy after NIST 800-63B-4 (8-character minimum).
+- **Accounts:** registration (name optional) with email verification and normalised email, JWT access tokens with rotating refresh tokens (reuse revokes the whole family; a session ends after `REFRESH_SESSION_MAX_DAYS`, 30 by default, however often it is refreshed), password reset evicting in-flight sessions, admin role, login lockout, a password policy after NIST 800-63B-4 (8-character minimum).
 - **Catalog:** nested categories, products with variants (bought through a variant when active, SKU, attributes, own price and stock; the product page lists them and the lists carry `has_variants`), search, sorting, ETag and conditional requests, JSON Merge Patch for edits.
 - **Carts and orders:** guest carts that merge on login, stock reserved under FOR NO KEY UPDATE row locks, order total limit, MAX_PENDING_ORDERS_PER_USER cap, immutable line and shipping snapshots, an order state machine, automatic expiry of unpaid orders bounded by checkout session lifetime.
 - **Payments:** Stripe PaymentIntents and Checkout Sessions, 3-D Secure, refunds and disputes (a dispute shows as `dispute_status` on the order; a lost one only flags it, stock is corrected by hand in the admin API). Admin payment queue and refunds for flagged attempts. Webhooks are stored first and processed by Celery with retries, and a daily reconciliation checks the books against Stripe. Idempotency-Key on every money-moving request.
 - **API hygiene:** problem details (RFC 9457) for every error, correct status codes (201 + Location, 409 for conflicts, 503 with Retry-After), strict input, money as decimal strings, RateLimit headers, request ids and optional OpenTelemetry tracing. The OpenAPI document is a typed contract for generated clients: short operationIds, required fields, response headers (ETag, Set-Cookie of the guest cart, X-Request-ID, Retry-After on 429), checked by `tests/unit/test_openapi_contract.py`.
-- **Privacy:** GDPR export assembled and mailed inline as JSON, erasure with active order and dispute protections, consent records, retention jobs.
+- **Privacy:** GDPR export assembled and mailed inline as JSON, erasure with active order and dispute protections (a deletion request cancels the account's unpaid orders; paid orders are kept), consent records, retention jobs. What is not covered is listed in [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
 ## 🧭 Architecture
 
@@ -80,14 +81,16 @@ uv run pytest tests/ -n 2 -m "not timing_sensitive"   # the fast local run
 | [docs/reports/](docs/reports/README.md) | The test reports: each stage, its numbers and the fixes |
 | [docs/HOW-THIS-WAS-BUILT.md](docs/HOW-THIS-WAS-BUILT.md) | Who did what, where the decisions came from, what went wrong |
 
-## 📊 At a glance (v5.0.0)
+## 📊 At a glance
+
+Each row says which release it was measured on; the test count is the number of cases pytest collects on the current code.
 
 | | |
 |---|---|
-| Tests | 6,711 cases from 2,668 test functions on SQLite and PostgreSQL, 54 live Stripe tests, 0 warnings |
+| Tests | 6,803 cases from 2,718 test functions on SQLite and PostgreSQL, 54 live Stripe tests, 0 warnings |
 | Coverage | 98.7 % overall, lines and branches combined; 100 % on the payment-layer files, the mock provider excluded (enforced in CI) |
 | Mutation testing | 98.7 % of 3,434 mutants detected (3,119 killed, 272 timed out; measured on 4.1.1); the 43 survivors reviewed as equivalent |
-| CI | lint (Ruff, mypy), sast (Bandit), benchmarks, migration-compat, tests, 7 time zones, PostgreSQL 16/17/18 with migration round-trip checks, real Redis, pip-audit, gitleaks, Trivy |
+| CI | lint (Ruff, mypy), sast (Bandit), benchmarks, migration-compat, tests, 7 time zones, PostgreSQL 16/17/18 with migration round-trip checks, real Redis, pip-audit, gitleaks, Trivy; also run weekly on a schedule |
 | Load (4-core host, app on 3 cores, 200 users, mock payments, rate limits raised, measured on 4.0.1) | p95 57 to 68 ms; overload answers fast 503s instead of stalling |
 | Chaos (measured on 4.0.x) | Redis or PostgreSQL down: 503 with Retry-After, recovery on its own, no webhook lost or applied twice |
 | Security (measured on 4.0.3) | ZAP and a manual OWASP API Top 10 review: no open high or medium issues |
@@ -96,7 +99,7 @@ Details and the conditions behind each number: [docs/reports/final-test-campaign
 
 ## 🧱 Tech stack
 
-Python 3.13 · FastAPI and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and Alembic · PostgreSQL · Redis · Celery · Stripe · PyJWT and bcrypt · uv · pytest and Hypothesis in the suite; Schemathesis, mutmut and Locust for the release campaign · Docker · GitHub Actions.
+Python 3.13 · FastAPI 0.153 and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and Alembic · PostgreSQL 16, 17 or 18 (Compose runs 18) · Redis 7.2 to 8.8 (Compose runs 8.8; redis-py 8.1) · Celery 5.6 · Stripe (SDK 16) · PyJWT and bcrypt · uv · pytest and Hypothesis in the suite; Schemathesis, mutmut and Locust for the release campaign · Docker · GitHub Actions.
 
 ## 📌 About this project
 

@@ -63,6 +63,7 @@ Without concurrency control, overloading this application does not degrade it gr
 - Responses include IETF draft headers: `RateLimit-Policy` (e.g. `"default";q=300;w=60`) and `RateLimit` (e.g. `"default";r=285;t=42`).
 - Rejections return HTTP 429 Too Many Requests with `Retry-After` set to seconds remaining in the window.
 - Fail-open policy: if Redis is unreachable, standard routes permit requests rather than causing an outage (auth failed-login counting fails closed).
+- Residuals: a fixed window allows up to twice the limit across a window boundary, mail-sending routes are limited per requesting address and not per target mailbox, and there is no ceiling while Redis is down. Smoothing belongs to the proxy (for example nginx `limit_req`); see [LIMITATIONS.md](LIMITATIONS.md#payment-reconciliation-and-rate-limiting).
 
 ## Tuning Settings
 

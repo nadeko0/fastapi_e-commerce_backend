@@ -7,8 +7,8 @@ Software that processes money cannot rely on good intentions or manual smoke tes
 ```mermaid
 flowchart TD
     E2E["E2E Tests (Stripe Test Mode, Stripe CLI, 54 live Stripe tests)"] --> Fuzz["Contract & Fuzz (Schemathesis, Hypothesis State Machines)"]
-    Fuzz --> Integration["Integration Tests (PostgreSQL 16/17/18, SQLite WAL, Real Redis, 2,752 cases)"]
-    Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, 2,707 cases)"]
+    Fuzz --> Integration["Integration Tests (PostgreSQL 16/17/18, SQLite WAL, Real Redis, 2,868 cases)"]
+    Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, 2,771 cases)"]
 ```
 
 1. **Unit Tests:** Fast, isolated tests covering models, services, schema serialization, and money calculations. All external I/O (Stripe, Redis, SMTP) is mocked deterministically.
@@ -20,7 +20,7 @@ flowchart TD
 
 ## Continuous Integration Pipeline
 
-GitHub Actions runs 19 job instances on ubuntu-latest: 11 jobs, expanded by 7 time zones and 3 PostgreSQL versions.
+GitHub Actions runs 19 job instances on ubuntu-latest: 11 jobs, expanded by 7 time zones and 3 PostgreSQL versions. It runs on pushes and pull requests to `main` and, since 6.0.0, every Monday at 06:00 UTC (the `benchmark` job is skipped then, as a scheduled run has no base commit to compare with), so a newly published CVE with a fix fails the `audit` or the image scan without waiting for a push.
 
 ```mermaid
 flowchart TD
@@ -47,7 +47,7 @@ flowchart TD
     test_redis --> docker_build
 ```
 
-- **lint:** Runs Ruff across `app` and `tests`, and static type checking with `mypy`.
+- **lint:** Runs Ruff across `app` and `tests` (the pycodestyle, Pyflakes, isort and warning rules plus pyupgrade, bugbear, async, naive-datetime, FastAPI, simplify, logging, return, pytest and print rule sets; the full list is in `pyproject.toml`), and static type checking with `mypy` over `app` (`warn_return_any`, `warn_unreachable`, `disallow_any_generics` and extra error codes everywhere; fully annotated definitions in the payment layer and `app/tasks.py`).
 - **sast:** Runs Bandit offline (`-r app --severity-level medium`) for static application security testing.
 - **benchmark:** Times hot execution paths with `pytest-benchmark` on the base commit (the pull request's base, or the previous head of `main`) and on HEAD, one after the other on the same runner, and fails when a median on HEAD is more than 35% slower (`.github/scripts/benchmark_ab.sh`). Both sides share one machine because runners differ: six runs of one commit landed on three AMD EPYC models (7763, 9V74, 9V45) whose medians differed by up to 2.26 times. On one runner, six runs of unchanged code put HEAD within 6% of the base on the CPU benchmarks and within 22% on the request benchmarks, which the 35% leaves room for.
 - **audit:** Exports locked dependencies to check against the PyPI Advisory Database using `pip-audit`, producing a CycloneDX SBOM.
@@ -116,7 +116,7 @@ HYPOTHESIS_PROFILE=explore uv run pytest tests/integration/test_payment_state_ma
 ```
 
 ### OpenAPI Contract Snapshot
-`tests/unit/test_openapi_contract.py` (27 tests) checks what the OpenAPI document promises beyond its shape: the operation ids, the values of free-text response fields, the response fields that are always present, the 429 response and the admin marker. The snapshot test, which pins the shape (including the cookie and response headers), prevents accidental API contract drift against `tests/snapshots/openapi.json`:
+`tests/unit/test_openapi_contract.py` (30 tests) checks what the OpenAPI document promises beyond its shape: the operation ids, the values of free-text response fields, the response fields that are always present, the 429 response and the admin marker. The snapshot test, which pins the shape (including the cookie and response headers), prevents accidental API contract drift against `tests/snapshots/openapi.json`:
 ```bash
 # Verify schema matches snapshot:
 uv run pytest tests/unit/test_openapi_snapshot.py

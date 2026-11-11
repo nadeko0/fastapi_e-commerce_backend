@@ -84,7 +84,7 @@ Background tasks and periodic maintenance are managed by Celery (`app/tasks.py`)
 - **Worker Execution:** `celery -A app.tasks worker --loglevel=info`. Configure container managers with `stop_grace_period: 330s` (SIGTERM initiates warm shutdown; Celery tasks enforce `task_time_limit=300s` and `task_soft_time_limit=240s`).
 - **Scheduler Execution:** `celery -A app.tasks beat --loglevel=info --schedule=/tmp/celerybeat-schedule`.
 - **Reliability Invariants:** Configured with `task_acks_late=True`, `task_reject_on_worker_lost=True`, `worker_cancel_long_running_tasks_on_connection_loss=True`, and `broker_transport_options['visibility_timeout']=3600`.
-- **Order Emails:** Order confirmation emails are dispatched in-process via `BackgroundTasks` after transaction commit. They are not retried; an application process crash after commit loses the email.
+- **Order and GDPR Emails:** Order confirmation emails and the mails of data requests (export, deletion) are dispatched in-process via `BackgroundTasks`, after the transaction commits and after the response is sent. They are not retried; an application process crash after commit loses the email.
 
 ### Celery Beat Schedule (All Times in UTC)
 
@@ -139,9 +139,17 @@ docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d restored --ex
 
 CI checks every migration's downgrade and upgrade against the PostgreSQL catalogs, and runs the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses on the new migrations. A rolling deploy (migrate first, then roll the app) relies on that old code keeping working on the new schema; those tests are the evidence for it, as far as they reach.
 
+### Upgrading the Schema to 6.0.0
+
+Take a backup first (above), then run the `migrate` service. Revision `f180919aaf3b` adds `ck_payment_attempt_status` (a CHECK on `payments.status`), `uix_user_default_address` (a partial unique index: one active default address per user), `payments.reconciled_at` and `idx_order_new_created_at` (a partial index on new orders for the expiry sweep).
+
+- If an existing `payments` row has a status outside the allowed set, the migration stops before changing anything and names the number of rows; correct them and run it again.
+- Users who already have several active default addresses are fixed without asking: the newest default stays, the others stop being default. The downgrade does not bring them back.
+- The indexes are built in the migration's own transaction and block writes to `orders` and `addresses` while they build, which is short at the size of a shop.
+
 ### PostgreSQL Major Upgrades (PostgreSQL 15 to 18)
 
-Since 6.0.0 `docker-compose.yml` builds the database from `docker/postgres/Dockerfile` (`postgres:18.6-alpine` with Alpine security updates) and mounts the `postgres_data` volume on `/var/lib/postgresql`. The official 18 image keeps cluster data in `/var/lib/postgresql/18/docker` (PGDATA) and declares `/var/lib/postgresql` as its volume; 15 used `/var/lib/postgresql/data`. A volume created by a 15 container is refused at start (the entrypoint reports the old layout), so an existing deployment moves its data with a logical dump and restore:
+PostgreSQL 16, 17 and 18 are supported: CI runs the database-sensitive tests on all three, and the whole suite on 18, the version Compose deploys. PostgreSQL 15 is no longer tested. Since 6.0.0 `docker-compose.yml` builds the database from `docker/postgres/Dockerfile` (`postgres:18.6-alpine` with Alpine security updates) and mounts the `postgres_data` volume on `/var/lib/postgresql`. The official 18 image keeps cluster data in `/var/lib/postgresql/18/docker` (PGDATA) and declares `/var/lib/postgresql` as its volume; 15 used `/var/lib/postgresql/data`. A volume created by a 15 container is refused at start (the entrypoint reports the old layout), so an existing deployment moves its data with a logical dump and restore:
 
 1. With the 5.x stack still running: `docker compose exec db pg_dumpall -U "$POSTGRES_USER" > backup.sql`.
 2. `docker compose down`, then remove the old volume (`docker volume rm <DOCKER_NETWORK_NAME>-postgres-data`, `ecommerce-postgres-data` by default) once the dump is checked.
@@ -154,9 +162,25 @@ A later major (18 to 19) can use `pg_upgrade --link` inside the one volume, whic
 
 Redis serves as the Celery message broker, token revocation store, password-change watermark tracker, rate limit window engine, and shopping cart cache:
 
+- **Supported Versions:** Redis 7.2 to 8.8, the range the redis-py 8.1 client lists as supported. Compose builds 8.8 from `docker/redis/Dockerfile` (the official `redis:8.8-alpine`, pinned by digest, with `apk upgrade`); CI runs the Redis-semantics tests on the same base image.
 - **Persistence Configuration:** Redis runs with Append-Only File persistence (`--appendonly yes`, `--appendfsync everysec`) alongside RDB snapshots.
 - **Memory Ceiling:** Memory is capped via `REDIS_MAXMEMORY` (default 256 MB) with `--maxmemory-policy noeviction`. When full, Redis refuses writes rather than evicting keys. Evicting volatile keys would invalidate token blacklists and password watermarks, resurrecting revoked sessions.
 - **Resilience Under Outage:** When Redis is unavailable, public catalog browsing succeeds (200 OK) and rate limiting fails open. Authenticated routes and cart writes fail closed with HTTP 503 (`Retry-After: 30` and `Retry-After: 5`). See [RESILIENCE.md](RESILIENCE.md) for chaos test recovery profiles.
+
+## Going Live with Stripe
+
+Development setup (test keys, Stripe CLI) is in [SETUP.md](../SETUP.md#real-stripe-development). For live mode, `PAYMENT_PROVIDER=stripe` is already required by startup validation; the rest is configuration on the Stripe side.
+
+- **Restricted API key.** Put a restricted key (`rk_live_...`, see [Stripe: restricted API keys](https://docs.stripe.com/keys/restricted-api-keys)) in `STRIPE_SECRET_KEY` instead of an unrestricted secret key. The application calls only these Stripe endpoints (all in `app/services/payment/live_stripe_provider.py`, through one `StripeClient`):
+  - PaymentIntents: create, confirm, cancel and retrieve;
+  - Checkout Sessions: create, retrieve and expire;
+  - Refunds: create and list.
+
+  Grant Write on those three resources and no permission on anything else (no Customers, Payouts, Disputes or account settings). A call the key may not make fails with a Stripe permission error, which the provider answers as a 503 and logs at critical level ("Stripe refused our API key"). Try the exact key set in test mode first (an `rk_test_` key with the same permissions: place an order, pay, refund, run the reconciliation) and read Stripe's request logs for 403 responses before switching to live keys. The key needs no permission to receive webhooks: they are verified with `STRIPE_WEBHOOK_SECRET` only.
+- **Rotating the API key.** Rotate in the Dashboard with a delayed expiry (Stripe keeps the old key valid for up to 7 days), put the new value in `STRIPE_SECRET_KEY` in `.env` and recreate the services that read it, `docker compose up -d --force-recreate api celery-worker` (a plain `restart` does not re-read `.env`), then confirm in Stripe's request logs that the old key is idle before it expires.
+- **Rotating the webhook secret.** The signing secret belongs to one webhook endpoint and is separate from the API key. Use "Roll secret" on the endpoint in the Dashboard with a delayed expiry: until then Stripe signs each delivery with both secrets, so deliveries keep verifying while you set the new `STRIPE_WEBHOOK_SECRET` and recreate `api`. Live and test mode have different secrets. The value must pass the deployment check (at least 32 bytes, not a placeholder).
+- **Webhook events.** Register the endpoint `https://<your-host>/api/v1/orders/webhooks/stripe` and subscribe to exactly the 16 event types listed in [SETUP.md](../SETUP.md#real-stripe-development); the application handles no other type, so subscribing to more only adds load. Stripe retries a failed delivery for up to three days; the stored-first design means a 503 from the application during an outage is retried, not lost (see [RESILIENCE.md](RESILIENCE.md)).
+- **Optional: restrict the webhook route to Stripe's addresses.** Stripe lists the addresses it sends webhooks from at <https://docs.stripe.com/ips> and recommends allowing only those, in addition to signature verification. The application does not enforce this; do it at the reverse proxy for `POST /api/v1/orders/webhooks/stripe` only, taking the ranges from that page (they can change, so keep them in configuration you can update; the signature check stays the authority either way). Behind a proxy, check the address Stripe connects from, not an `X-Forwarded-For` value a client could send.
 
 ## Time, DST, and GDPR Retention
 
