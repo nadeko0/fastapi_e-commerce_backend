@@ -215,20 +215,7 @@ async def process_payment(
             )
         retried_attempt = existing_payment
 
-    _guard_order_payable(order)
-    if retried_attempt is None:
-        _guard_payment_window_open(order)
-    await db.run_sync(
-        _guard_no_attempt_in_flight, order,
-        except_payment_id=retried_attempt.id if retried_attempt else None,
-    )
-
-    if payment.amount != order.total_amount:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Payment amount does not match order total"
-        )
-    _guard_currency_matches_order(payment.currency, order)
+    await _check_request(db, order, payment, retried_attempt)
 
     amount_cents = _decimal_to_cents(payment.amount)
     provider_idempotency_key = _provider_idempotency_key("pay", order, idempotency_key)
@@ -268,6 +255,37 @@ async def process_payment(
                 return _replay_payment(existing_payment, order)
             raise
 
+    intent = await _charge(
+        db, provider, order, payment_row, payment, amount_cents, provider_idempotency_key
+    )
+
+    return await _answer(
+        db, order, payment_row, payment, intent, background_tasks, current_user.email
+    )
+
+
+async def _check_request(db, order, payment, retried_attempt) -> None:
+    """Validate that the order and payment parameters accept a new or retried attempt."""
+    _guard_order_payable(order)
+    if retried_attempt is None:
+        _guard_payment_window_open(order)
+    await db.run_sync(
+        _guard_no_attempt_in_flight, order,
+        except_payment_id=retried_attempt.id if retried_attempt else None,
+    )
+
+    if payment.amount != order.total_amount:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment amount does not match order total"
+        )
+    _guard_currency_matches_order(payment.currency, order)
+
+
+async def _charge(
+    db, provider, order, payment_row, payment, amount_cents, provider_idempotency_key
+):
+    """Create and confirm the payment intent with the provider."""
     # Every provider call in this module goes through run_in_threadpool.
     # The provider is synchronous (the Stripe SDK makes blocking HTTP calls:
     # measured 0.4 s for a create and 0.7 s for a confirm against Stripe's
@@ -372,6 +390,13 @@ async def process_payment(
             detail=e.message,
         ) from e
 
+    return intent
+
+
+async def _answer(
+    db, order, payment_row, payment, intent, background_tasks, user_email
+) -> PaymentResponse:
+    """Handle the PaymentIntent outcome and build the payment response."""
     if intent.status == PaymentIntentStatus.REQUIRES_ACTION:
         # 3D Secure / SCA required: a distinct, non-terminal state - must
         # not be conflated with either success or failure. The order is
@@ -417,7 +442,7 @@ async def process_payment(
         )
 
     applied = await db.run_sync(
-        _apply_payment_success, order, payment_row, background_tasks, current_user.email
+        _apply_payment_success, order, payment_row, background_tasks, user_email
     )
     if not applied:
         raise Problem(
