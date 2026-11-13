@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 # under_review).
 DISPUTE_CLOSED_STATUSES = ("won", "lost", "warning_closed", "prevented")
 
-# The values below are Stripe's own (stripe-python 16.0.0, Refund.status,
+# The values below are Stripe's own (stripe-python 16.1.0, Refund.status,
 # Dispute.status and Dispute.reason), stored as received. Stripe documents them
 # as open sets, so the columns stay free text; these are the values published
 # in the OpenAPI document.
@@ -44,6 +44,10 @@ DISPUTE_STATUSES = (
     "warning_closed",
     "needs_response",
     "under_review",
+    # A chargeback being appealed (API 2026-09-30.endive and later, appeals
+    # enabled in the Dashboard): still open, it ends won or lost.
+    "appeal_needs_response",
+    "appeal_under_review",
     "won",
     "lost",
     "prevented",

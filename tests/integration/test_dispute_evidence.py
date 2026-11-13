@@ -133,3 +133,21 @@ def test_a_closed_dispute_keeps_its_last_evidence_state(shop, payment):
 
     assert _evidence(shop) == (
         datetime.fromtimestamp(DUE_BY, UTC), True, False, 1, "manual")
+
+
+@pytest.mark.parametrize("status", ["appeal_needs_response", "appeal_under_review"])
+def test_an_appealed_dispute_is_still_open_and_holds_the_order(shop, payment, status):
+    # Stripe's appeal stage (under_review -> appeal_needs_response ->
+    # appeal_under_review -> won or lost): the dispute is not over, so the
+    # charge stays unrefundable and the appeal deadline is stored.
+    shop.webhook("charge.dispute.created", _dispute(payment, "needs_response"))
+    shop.webhook("charge.dispute.updated", _dispute(payment, status, {
+        "due_by": DUE_BY, "has_evidence": status == "appeal_under_review", "past_due": False,
+        "submission_count": 1, "submission_method": "manual"}))
+
+    shop.db.expire_all()
+    dispute = shop.db.query(PaymentDispute).one()
+    assert (dispute.status, dispute.closed_at) == (status, None)
+    refund = shop.refund(shop.admin(), payment.order_id)
+    assert refund.status_code == 409, refund.text
+    assert "disput" in refund.json()["detail"]

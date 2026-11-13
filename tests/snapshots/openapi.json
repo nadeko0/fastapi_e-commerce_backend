@@ -2050,6 +2050,8 @@
               "warning_closed",
               "needs_response",
               "under_review",
+              "appeal_needs_response",
+              "appeal_under_review",
               "won",
               "lost",
               "prevented"
@@ -2193,6 +2195,8 @@
                   "warning_closed",
                   "needs_response",
                   "under_review",
+                  "appeal_needs_response",
+                  "appeal_under_review",
                   "won",
                   "lost",
                   "prevented"
