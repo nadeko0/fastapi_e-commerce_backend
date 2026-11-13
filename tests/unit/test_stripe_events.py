@@ -1,6 +1,6 @@
 import json
 
-from app.services.stripe_events import _event_references, redact_event_payload
+from app.services.stripe_event_redaction import _event_references, redact_event_payload
 
 
 def test_event_references_extracts_object_id():

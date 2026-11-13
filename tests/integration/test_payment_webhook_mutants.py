@@ -28,7 +28,8 @@ from app.models.order import Order
 from app.models.payment import Payment
 from app.models.payment_ledger import PaymentDispute, PaymentRefund
 from app.models.user import User
-from app.services.stripe_events import _attempt_still_storing_its_id, _object_id
+from app.services.stripe_event_redaction import _object_id
+from app.services.stripe_events import _attempt_still_storing_its_id
 
 ORDERS_LOGGER = "app.services.stripe_events"
 PROCESSED = {"status": "processed", "applied": True}

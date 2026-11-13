@@ -20,7 +20,7 @@ from app.models.address import Address
 from app.models.order import Order
 from app.models.payment import Payment, WebhookEvent
 from app.models.user import User
-from app.services import stripe_events
+from app.services import stripe_event_redaction
 
 RETENTION = settings.USER_DATA_RETENTION_DAYS
 
@@ -232,24 +232,24 @@ def test_redaction_is_idempotent_and_skips_pending_placeholders(db_session):
     order = _order_with_payment(db_session, user, "pending-abc")
     row = _event(db_session, "evt_a", {"id": "pi_a", "metadata": {"order_id": str(order.id)}})
 
-    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    assert stripe_event_redaction.redact_users_events(db_session, [user.id]) == 1
     first = db_session.get(WebhookEvent, row.id).payload
-    assert stripe_events.redact_users_events(db_session, [user.id]) == 0
+    assert stripe_event_redaction.redact_users_events(db_session, [user.id]) == 0
     assert db_session.get(WebhookEvent, row.id).payload == first
-    assert stripe_events.redact_event_payload(first) == first
+    assert stripe_event_redaction.redact_event_payload(first) == first
 
 
 def test_redaction_without_payments_or_users_does_nothing(db_session):
     user = _user(db_session, "n@example.com", idle_days=1)
     _event(db_session, "evt_n", {"id": "pi_n"})
 
-    assert stripe_events.redact_users_events(db_session, []) == 0
-    assert stripe_events.redact_users_events(db_session, [user.id]) == 0
+    assert stripe_event_redaction.redact_users_events(db_session, []) == 0
+    assert stripe_event_redaction.redact_users_events(db_session, [user.id]) == 0
     assert "redacted" not in db_session.query(WebhookEvent).one().payload
 
 
 def test_redacting_a_payload_without_an_object():
-    assert json.loads(stripe_events.redact_event_payload('{"id": "e", "data": {}}')) == {
+    assert json.loads(stripe_event_redaction.redact_event_payload('{"id": "e", "data": {}}')) == {
         "id": "e", "data": {"object": {}}, "redacted": True,
     }
 
@@ -287,7 +287,7 @@ def test_redact_users_events_redacts_by_checkout_session_id(db_session):
     _order_with_payment(db_session, user, "pending-cs1", session_id="cs_user_123")
     evt = _event(db_session, "evt_cs_123", {"id": "cs_user_123"})
 
-    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    assert stripe_event_redaction.redact_users_events(db_session, [user.id]) == 1
     db_session.commit()
     assert _payload(db_session, evt)["redacted"] is True
 
@@ -298,7 +298,7 @@ def test_redact_users_events_handles_null_payment_intent_id(db_session, monkeypa
             return [(None, "cs_abc", 1)]
 
     monkeypatch.setattr(db_session, "execute", lambda *args, **kwargs: StubResult())
-    assert stripe_events.redact_users_events(db_session, [1]) == 0
+    assert stripe_event_redaction.redact_users_events(db_session, [1]) == 0
 
 
 def test_redact_users_events_matches_compact_json_order_id(db_session):
@@ -323,7 +323,7 @@ def test_redact_users_events_matches_compact_json_order_id(db_session):
     db_session.add(row)
     db_session.commit()
 
-    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    assert stripe_event_redaction.redact_users_events(db_session, [user.id]) == 1
     db_session.commit()
     assert _payload(db_session, row)["redacted"] is True
 
@@ -340,7 +340,7 @@ def test_redact_users_events_applies_sql_needle_filter(db_session, monkeypatch):
         return orig_scalars(statement, *args, **kwargs)
 
     monkeypatch.setattr(db_session, "scalars", spy_scalars)
-    stripe_events.redact_users_events(db_session, [user.id])
+    stripe_event_redaction.redact_users_events(db_session, [user.id])
 
     assert len(captured) == 1
     compiled = str(captured[0].compile(compile_kwargs={"literal_binds": True}))
@@ -360,7 +360,7 @@ def test_redact_users_events_continues_past_malformed_json_row(db_session):
     db_session.commit()
     good = _event(db_session, "evt_good_json", {"id": "pi_corrupt"})
 
-    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    assert stripe_event_redaction.redact_users_events(db_session, [user.id]) == 1
     db_session.commit()
     assert _payload(db_session, good)["redacted"] is True
 
@@ -378,7 +378,7 @@ def test_redact_users_events_continues_past_already_redacted_row(db_session):
     db_session.commit()
     unredacted = _event(db_session, "evt_unredacted", {"id": "pi_already"})
 
-    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    assert stripe_event_redaction.redact_users_events(db_session, [user.id]) == 1
     db_session.commit()
     assert _payload(db_session, unredacted)["redacted"] is True
 
@@ -396,7 +396,7 @@ def test_redact_users_events_continues_past_non_dict_json_row(db_session):
     db_session.commit()
     valid_row = _event(db_session, "evt_valid_after_nondict", {"id": "pi_nondict"})
 
-    assert stripe_events.redact_users_events(db_session, [user.id]) == 1
+    assert stripe_event_redaction.redact_users_events(db_session, [user.id]) == 1
     db_session.commit()
     assert _payload(db_session, valid_row)["redacted"] is True
 
@@ -407,7 +407,7 @@ def test_redact_users_events_counts_multiple_redactions(db_session):
     e1 = _event(db_session, "evt_multi_1", {"id": "pi_multi_1"})
     e2 = _event(db_session, "evt_multi_2", {"id": "cs_multi_2"})
 
-    assert stripe_events.redact_users_events(db_session, [user.id]) == 2
+    assert stripe_event_redaction.redact_users_events(db_session, [user.id]) == 2
     db_session.commit()
     assert _payload(db_session, e1)["redacted"] is True
     assert _payload(db_session, e2)["redacted"] is True

@@ -134,7 +134,7 @@ uv run pytest tests/ -q -m timing_sensitive --cov=app --cov-append --cov-report=
 
 # Enforce 100% payment layer gate:
 uv run coverage report --fail-under=100 \
-  --include="app/api/v1/orders.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py,app/services/stripe_events.py,app/services/reconciliation.py,app/models/payment_discrepancy.py,app/schemas/webhook_event.py" \
+  --include="app/api/v1/orders/*.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py,app/services/stripe_events.py,app/services/stripe_event_redaction.py,app/services/reconciliation.py,app/models/payment_discrepancy.py,app/schemas/webhook_event.py" \
   --omit="app/services/payment/stripe_provider.py"
 ```
 

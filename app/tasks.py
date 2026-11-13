@@ -42,7 +42,7 @@ from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.order import OrderStatus
-from app.services import stripe_events
+from app.services import stripe_event_redaction, stripe_events
 from app.services.email import (
     send_gdpr_deletion_completed,
     send_low_stock_alert_email,
@@ -370,7 +370,7 @@ def _anonymise_pending(
         for account in erased:
             assert unusable_hash is not None, "unusable_hash is computed when erased is non-empty"
             _anonymise_account(account, unusable_hash)
-        stripe_events.redact_users_events(db, [a.id for a in erased])
+        stripe_event_redaction.redact_users_events(db, [a.id for a in erased])
         purged_count += len(erased)
         db.commit()
         for recipient in recipients:

@@ -35,6 +35,13 @@ jobs:
         run: uv sync --locked --group dev
       - name: Ruff lint
         run: uv run ruff check app tests
+      - name: Module length (app/ at most 800 lines; aim for 500)
+        # A module past 800 lines has usually taken on a second job: split it
+        # by job (as app/api/v1/orders/ and app/services/stripe_event_redaction.py
+        # were), not by line count. Tests are not checked.
+        run: |
+          long=$(find app -name '*.py' -print0 | xargs -0 wc -l | awk '$2 != "total" && $1 > 800')
+          if [ -n "$long" ]; then echo "Modules over 800 lines:"; echo "$long"; exit 1; fi
       - name: Type check (mypy, configured in pyproject.toml)
         run: uv run mypy
 
@@ -109,7 +116,7 @@ jobs:
       - name: Payment layer coverage gate (100% lines and branches)
         run: >-
           uv run coverage report --fail-under=100
-          --include="app/api/v1/orders/*.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py,app/services/stripe_events.py,app/services/reconciliation.py,app/models/payment_discrepancy.py,app/schemas/webhook_event.py"
+          --include="app/api/v1/orders/*.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py,app/services/stripe_events.py,app/services/stripe_event_redaction.py,app/services/reconciliation.py,app/models/payment_discrepancy.py,app/schemas/webhook_event.py"
           --omit="app/services/payment/stripe_provider.py"
       - name: Upload coverage report
         if: always()

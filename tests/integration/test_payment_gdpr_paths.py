@@ -3,7 +3,7 @@ Integration tests covering GDPR erasure, webhook redaction, and sweep branches
 required for the 100 percent line and branch payment coverage gate:
 - app/api/v1/orders.py: anonymised-recipient guards on status update and cancel
 - app/services/email/messages.py: GDPR deletion completed mail with no retained records
-- app/services/stripe_events.py: _redact_if_owner_erased edge cases and branch coverage
+- app/services/stripe_event_redaction.py: _redact_if_owner_erased edge cases and branch coverage
 - app/tasks.py: snapshot scrub batching, deletion-completed mail failure, sweep anonymised guard
 """
 import json
@@ -27,7 +27,7 @@ from app.models.product import Product
 from app.models.user import User
 from app.schemas.order import OrderStatus, PaymentStatus
 from app.services.email.messages import send_gdpr_deletion_completed
-from app.services.stripe_events import _redact_if_owner_erased
+from app.services.stripe_event_redaction import _redact_if_owner_erased
 
 
 def _make_verified_user(db_session, email="buyer@example.com"):
