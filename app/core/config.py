@@ -440,7 +440,7 @@ class Settings(BaseSettings):
     # no currency of their own; each order records this value when it is
     # placed (Order.currency) and is only ever charged in it, whatever a
     # payment request says. Amounts are converted to the smallest unit by
-    # multiplying by 100 (_decimal_to_cents in app/api/v1/orders.py) and
+    # multiplying by 100 (_decimal_to_cents in app/api/v1/orders/) and
     # prices are stored with two decimals, so only a currency with exactly
     # two decimals works: validate_store_currency refuses the others.
     STORE_CURRENCY: str = Field("USD", pattern=r"^[A-Z]{3}$")

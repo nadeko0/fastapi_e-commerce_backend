@@ -3,7 +3,7 @@ Small data classes mirroring the shape of the real Stripe SDK's resource
 objects (stripe.PaymentIntent, stripe.Refund, stripe.Event). Amounts are
 always integers in the smallest currency unit (cents for USD/EUR), matching
 Stripe's actual API - never Decimal dollars. Converting to/from Decimal
-dollars is the caller's (app/api/v1/orders.py's) responsibility, done once
+dollars is the caller's responsibility (app/api/v1/orders/), done once
 at the API boundary.
 """
 from dataclasses import dataclass, field

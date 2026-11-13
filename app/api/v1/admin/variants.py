@@ -32,7 +32,7 @@ logger = logging.getLogger("app.api.v1.admin")
 #
 # ProductVariant (app/models/product.py) is additive: a Product with no
 # variants still works exactly as before, using its own price/stock_quantity.
-# Cart (app/api/v1/cart.py) and checkout (app/api/v1/orders.py) are
+# Cart (app/api/v1/cart.py) and checkout (app/api/v1/orders/) are
 # variant-aware: an optional variant_id on a cart line prices and checks
 # stock against that variant instead of the parent product, and
 # decrements/restocks ProductVariant.stock_quantity independently of

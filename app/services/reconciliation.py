@@ -72,7 +72,7 @@ from app.services.payment.types import (
 logger = logging.getLogger(__name__)
 
 # Payment.payment_intent_id of a Checkout Session attempt before the customer
-# completed the hosted page (app/api/v1/orders.py, _PENDING_INTENT_ID_PREFIX):
+# completed the hosted page (app/api/v1/orders/, _PENDING_INTENT_ID_PREFIX):
 # there is no PaymentIntent to ask about yet.
 PENDING_INTENT_ID_PREFIX = "pending-"
 

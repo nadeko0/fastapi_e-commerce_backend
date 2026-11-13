@@ -47,7 +47,7 @@ def _utc_text(moment: datetime) -> str:
 
 def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool:
     # order is always an OrderResponse (Pydantic), not the SQLAlchemy Order
-    # model: the caller in app/api/v1/orders.py snapshots it via
+    # model: the caller in app/api/v1/orders/ snapshots it via
     # OrderResponse.model_validate(order) before handing off to a FastAPI
     # BackgroundTask, since by the time that task runs the request's DB
     # session is already closed and lazy-loading order.items[i].product
@@ -109,7 +109,7 @@ def send_order_status_update_email(
     to_email: str, order: "Order | OrderResponse | SimpleNamespace"
 ) -> bool:
     # order.status.value assumed order.status is always an OrderStatus enum
-    # member. True for every real call site (app/api/v1/orders.py always
+    # member. True for every real call site (app/api/v1/orders/ always
     # passes OrderResponse, whose Pydantic field coerces the DB string into
     # the enum) but not for the raw SQLAlchemy Order this function is
     # type-hinted to accept: Order.status is a bare String column (see

@@ -103,7 +103,7 @@ class CartOwner:
 
 # What the cart methods of RedisService take as their first argument: a
 # CartOwner, or a bare user id from the callers that only ever deal with
-# accounts (checkout in app/api/v1/orders.py).
+# accounts (checkout in app/api/v1/orders/).
 CartOwnerRef = int | CartOwner
 
 

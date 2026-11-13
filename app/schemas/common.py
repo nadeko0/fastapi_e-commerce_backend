@@ -281,7 +281,7 @@ CART_LINE_INSUFFICIENT_STOCK = "insufficient_stock"
 def cart_unit_price(product: Any, variant: Any | None) -> Decimal:
     """The current price of one unit of a cart line: the variant's
     price_override when it has one, otherwise the product's price. The same
-    rule create_order (app/api/v1/orders.py) charges by; `is not None`
+    rule create_order (app/api/v1/orders/) charges by; `is not None`
     because an override of 0.00 is a price, not a missing one."""
     price: Decimal
     if variant is not None and variant.price_override is not None:

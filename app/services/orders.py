@@ -1,5 +1,5 @@
 """
-Order state rules shared by the HTTP routes (app/api/v1/orders.py) and the
+Order state rules shared by the HTTP routes (app/api/v1/orders/) and the
 Celery worker (app/tasks.py): which status transitions are allowed, and how
 an order is cancelled with its stock returned.
 

@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 # priced here, on the server, from the catalog as it is at that moment
 # (_priced_cart): two queries, one for all the products and one for all the
 # variants, whatever the number of lines. An order charges the live price
-# too (create_order in app/api/v1/orders.py), by the same rule
+# too (create_order in app/api/v1/orders/), by the same rule
 # (cart_unit_price), so what the cart shows is what an order placed now
 # would charge.
 #

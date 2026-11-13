@@ -79,7 +79,7 @@ class ProductVariant(Base):
     free-form JSON (not fixed columns like `size`/`color`) so this stays
     usable for any product domain, not just apparel.
 
-    Cart/checkout (app/api/v1/cart.py, app/api/v1/orders.py) are
+    Cart/checkout (app/api/v1/cart.py, app/api/v1/orders/) are
     variant-aware: an optional variant_id on a cart line/OrderItem prices
     and decrements/restocks stock against this ProductVariant instead of
     the parent Product.

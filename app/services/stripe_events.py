@@ -6,7 +6,7 @@ mutation-tested, on their own. The webhook route verifies, stores and
 enqueues an event; the process_stripe_event task (app/tasks.py) loads the
 stored event and calls apply_event. The payment helpers that /pay and
 /refund share (the order lock, the success and failure transitions, the
-manual-review flag, the refund ledger) stay in app/api/v1/orders.py and are
+manual-review flag, the refund ledger) stay in app/api/v1/orders/ and are
 imported from there.
 """
 import json

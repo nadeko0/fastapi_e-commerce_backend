@@ -18,7 +18,7 @@ as the mock: same method signatures, same dataclass return types
 (CardError/InvalidRequestError/IdempotencyError/SignatureVerificationError/
 PaymentProviderTimeoutError) - achieved by translating the real `stripe`
 SDK's exceptions (stripe.CardError etc.) onto our exceptions at the boundary of
-every method, so callers (app/api/v1/orders.py) never need to know or care
+every method, so callers (app/api/v1/orders/) never need to know or care
 which provider is in use.
 
 Every call goes through a stripe.StripeClient built with the provider's own
@@ -380,7 +380,7 @@ class LiveStripePaymentProvider(PaymentProvider):
             # Mandatory Stripe-side params for a hosted Checkout Session -
             # see base.py's create_checkout_session docstring. Callers
             # without their own success/cancel page get the frontend's
-            # (FRONTEND_URL) at the API boundary (app/api/v1/orders.py), not
+            # (FRONTEND_URL) at the API boundary (app/api/v1/orders/), not
             # here - this method always requires both, matching real
             # Stripe's own requirement.
             "success_url": success_url,

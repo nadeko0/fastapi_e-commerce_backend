@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from app.models.payment_ledger import PaymentDispute, PaymentRefund
 
 
-# Payment.status values, every one the code ever writes (app/api/v1/orders.py,
+# Payment.status values, every one the code ever writes (app/api/v1/orders/,
 # app/services/stripe_events.py): the vocabulary the OpenAPI document
 # publishes, and what ck_payment_attempt_status lets into the column.
 #   processing       the provider is being asked (the row is written first)

@@ -309,7 +309,7 @@ class StripePaymentProvider(PaymentProvider):
         # sent with, endpoint included: a key already used to *create* a
         # PaymentIntent cannot be reused to *confirm* one. Mirrored here
         # because the mock used to accept it, which hid a bug that made
-        # every /pay fail against the real API (see app/api/v1/orders.py).
+        # every /pay fail against the real API (see app/api/v1/orders/).
         if idempotency_key is not None and idempotency_key in self._intents_by_key:
             raise IdempotencyError(
                 f"Idempotency key '{idempotency_key}' has already been used "
