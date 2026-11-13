@@ -186,7 +186,21 @@ SessionLocal = sessionmaker(autoflush=False, bind=engine)
 # in the parent, because the exporter's background thread does not survive fork().
 worker_process_init.connect(lambda **_: telemetry.setup(engines=[engine]), weak=False)
 worker_process_shutdown.connect(lambda **_: telemetry.shutdown(), weak=False)
-configure_celery_logging.connect(lambda **_: setup_logging(), weak=False)
+
+
+def _configure_logging(loglevel: int | None = None, **_: object) -> None:
+    # Connected to Celery's setup_logging signal, so Celery leaves logging to
+    # the application's JSON setup - and with it its own loggers, which then
+    # inherited the root level (WARNING outside development): a worker
+    # started with --loglevel=info printed no "Task ... received/succeeded"
+    # and beat no "Sending due task". The command's --loglevel is for
+    # Celery's loggers ("celery.*"), as Celery itself would apply it.
+    setup_logging()
+    if loglevel:
+        logging.getLogger("celery").setLevel(loglevel)
+
+
+configure_celery_logging.connect(_configure_logging, weak=False)
 
 @contextmanager
 def task_session() -> Iterator[Session]:

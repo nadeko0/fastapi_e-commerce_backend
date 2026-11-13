@@ -718,6 +718,8 @@ def test_BUGNEW1_redis_blip_on_cart_read_answers_503_with_retry_after(client, db
     during = shop.place_order(buyer)
     assert during.status_code == 503
     assert "retry-after" in during.headers
+    # The body member as well, though the route set only the header.
+    assert during.json()["retry_after"] == int(during.headers["retry-after"])
 
     monkeypatch.setattr(redis_async.codec, "load_cart", real_load)
     assert shop.place_order(buyer).status_code == 201

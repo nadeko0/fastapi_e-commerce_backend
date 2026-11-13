@@ -258,7 +258,7 @@ def _order_with_country(country):
     )
 
 
-@pytest.mark.parametrize("country", ["0ß", "ß1", "ŉa", "ﬁa", "US", "germany", "0SS"])
+@pytest.mark.parametrize("country", ["0ß", "ß1", "ŉa", "ﬁa", "US", "germany", "0SS", "ß", "ﬀ"])
 def test_an_order_survives_its_json_for_a_country_whose_case_changes_its_length(country):
     model = MODELS["OrderResponse"]
     once = model.model_validate_json(_order_with_country(country).model_dump_json())
@@ -268,7 +268,11 @@ def test_an_order_survives_its_json_for_a_country_whose_case_changes_its_length(
 @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
 @example("0ß")
 @example("ß1")
-@given(st.text(min_size=2, max_size=100))
+# One character cannot be sent (AddressCreate), but a stored row is read
+# without the input limits: "ß" title-cases to "Ss", which a second read
+# upper-cased to "SS" (found by the round trip above, November 2026).
+@example("ß")
+@given(st.text(min_size=1, max_size=100))
 def test_a_country_read_twice_is_the_country_read_once(country):
     address = KNOWN["AddressResponse"]
     fields = {"street": "00000", "city": "00", "state": "00", "postal_code": "000",

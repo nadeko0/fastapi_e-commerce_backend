@@ -7,7 +7,7 @@ a half-open connection through a NAT or a frozen container looks like to the
 client). Nothing here is mocked below the socket.
 
 - The clients give up with redis.exceptions.TimeoutError after the
-  configured socket_timeout (redis-py 8 default, 5 s), not never. Both
+  configured socket_timeout (REDIS_SOCKET_TIMEOUT, 1 s by default), not never. Both
   clients, each with the pool settings the application builds.
 - The application turns that into its documented answers: a token that
   cannot be checked is refused with 503 and Retry-After (never served, and
@@ -15,7 +15,7 @@ client). Nothing here is mocked below the socket.
   answers 503 with Retry-After, and the services degrade the way their
   docstrings say.
 
-The first two tests wait the real 5 s each. The rest shorten the socket
+The first two tests wait the configured timeout each. The rest shorten the socket
 timeout of the already-built client (the pool's connection kwargs) to a
 fraction of a second, which changes how long they wait and nothing else.
 """
@@ -47,7 +47,7 @@ from app.services.redis_async import (
 
 API = settings.API_V1_STR
 SHORT = 0.3  # seconds: the socket timeout of the fast tests
-CONFIGURED = 5  # seconds: redis-py 8's default, pinned in tests/unit/test_redis_timeouts.py
+CONFIGURED = settings.REDIS_SOCKET_TIMEOUT  # seconds; tests/unit/test_redis_timeouts.py pins it
 # A timeout fires at its time, never before; scheduling and the Windows timer
 # add a little. The upper bound only has to separate "gave up" from "hung".
 MARGIN = 2.5

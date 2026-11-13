@@ -125,11 +125,13 @@ async def redis_is_up(limit_seconds: float | None = None) -> bool:
 
 
 def probe_response(request: Request, content: dict[str, Any], status_code: int = 200, headers: dict[str, Any] | None = None) -> Response:
-    """JSON for GET; the same status and headers and no body for HEAD."""
-    headers = {**NO_STORE, **(headers or {})}
+    """JSON for GET; the same status and headers, Content-Length included
+    (RFC 9110 9.3.2), and no body for HEAD."""
+    response = JSONResponse(content, status_code=status_code, headers={**NO_STORE, **(headers or {})})
     if request.method == "HEAD":
-        return Response(status_code=status_code, headers=headers, media_type="application/json")
-    return JSONResponse(content, status_code=status_code, headers=headers)
+        # The headers were rendered with the body above; only the body goes.
+        response.body = b""
+    return response
 
 
 # HEAD is served but kept out of the schema: one documented operation per

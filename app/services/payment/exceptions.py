@@ -81,7 +81,23 @@ class PaymentProviderTimeoutError(PaymentProviderError):
     Mirrors stripe.APIConnectionError. This is a transport-level
     failure, distinct from a CardError (which means the provider *did*
     respond, with a decline).
+
+    The live provider fills in what Stripe said about the failure (the SDK
+    error's class, its Request-Id, HTTP status and error code) so the route
+    can log the cause; each is None when not known.
     """
 
-    def __init__(self, message: str = "Could not connect to payment provider"):
+    def __init__(
+        self,
+        message: str = "Could not connect to payment provider",
+        *,
+        error_class: str | None = None,
+        request_id: str | None = None,
+        http_status: int | None = None,
+        provider_code: str | None = None,
+    ):
         super().__init__(message, code="api_connection_error")
+        self.error_class = error_class
+        self.request_id = request_id
+        self.http_status = http_status
+        self.provider_code = provider_code

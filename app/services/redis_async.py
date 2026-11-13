@@ -96,6 +96,8 @@ def _create_client() -> Redis:
         decode_responses=True,
         max_connections=settings.REDIS_POOL_SIZE,
         timeout=settings.REDIS_POOL_TIMEOUT,
+        socket_timeout=settings.REDIS_SOCKET_TIMEOUT,
+        socket_connect_timeout=settings.REDIS_SOCKET_CONNECT_TIMEOUT,
     )
     # from_pool: the client owns the pool, so aclose() also disconnects it.
     return Redis.from_pool(pool)

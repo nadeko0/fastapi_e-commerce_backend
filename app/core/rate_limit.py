@@ -17,9 +17,10 @@ How it works, top to bottom:
    expires when its window ends. Checking and counting are one small Lua
    script, so one atomic round trip per request, whatever the load on a key.
 4. OVER THE LIMIT: 429 with Retry-After = seconds until the window ends.
-   Every counted response, 429 included, also carries RateLimit-Policy and
-   RateLimit (IETF httpapi ratelimit-headers draft), built from the
-   counter and TTL the script returned.
+   Every counted response, 4xx and 429 included, also carries
+   RateLimit-Policy and RateLimit (IETF httpapi ratelimit-headers draft),
+   built from the counter and TTL the script returned and put on the
+   response by RateLimitFieldsMiddleware.
 
 Wired in once, in app/main.py, as an application-wide FastAPI dependency
 (`rate_limit`). A dependency rather than a middleware because it runs after
@@ -53,9 +54,11 @@ from functools import lru_cache
 from typing import NamedTuple
 
 import jwt
-from fastapi import Request, Response
+from fastapi import Request
 from redis.exceptions import RedisError
+from starlette.datastructures import MutableHeaders
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS, HTTP_503_SERVICE_UNAVAILABLE
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import RATE_LIMIT_PATTERN, settings
 from app.core.errors import Problem, ProblemType
@@ -310,8 +313,9 @@ class RateLimiter:
     """Holds no state. A class only so that the check has one patchable
     name: the load-test tracer wraps RateLimiter.check_rate_limit."""
 
-    async def check_rate_limit(self, request: Request, response: Response | None = None) -> None:
-        """Return if the request may proceed; raise the 429 if not."""
+    async def check_rate_limit(self, request: Request) -> None:
+        """Return if the request may proceed; raise the 429 if not. Either
+        way the RateLimit fields go on the response (RateLimitFieldsMiddleware)."""
         if not settings.RATE_LIMIT_ENABLED:
             return
         route = request.scope.get("route")
@@ -332,16 +336,12 @@ class RateLimiter:
             # Fail open, and say nothing about a state that is not known.
             logger.error("Rate limiting error, request allowed: %s", e)
             return
-        headers = rate_limit_headers(
+        request.state.rate_limit_fields = rate_limit_headers(
             setting.removeprefix("RATE_LIMIT_").lower(), rate, count, ttl_ms
         )
         retry_after = _wait(count, ttl_ms, rate)
         if retry_after:
-            error = too_many_requests("Rate limit exceeded", retry_after)
-            error.headers = {**(error.headers or {}), **headers}
-            raise error
-        if response is not None:
-            response.headers.update(headers)
+            raise too_many_requests("Rate limit exceeded", retry_after)
 
 
 limiter = RateLimiter()
@@ -361,10 +361,44 @@ async def check_consent_change(user_id: int) -> None:
         raise too_many_requests("Too many consent changes", retry_after)
 
 
-async def rate_limit(request: Request, response: Response) -> None:
-    """The FastAPI dependency: FastAPI(dependencies=[Depends(rate_limit)]).
-    Headers set on `response` are merged into the route's own response."""
-    await limiter.check_rate_limit(request, response)
+async def rate_limit(request: Request) -> None:
+    """The FastAPI dependency: FastAPI(dependencies=[Depends(rate_limit)])."""
+    await limiter.check_rate_limit(request)
+
+
+class RateLimitFieldsMiddleware:
+    """Puts the RateLimit-Policy and RateLimit fields of a counted request on
+    its response, whatever produced it: the route, a 4xx from an
+    HTTPException or the validation handler, the 429. FastAPI merges headers
+    a dependency sets on its Response only into a response the route
+    returns, so 404, 422, 401, 409 ... went out without them. A field the
+    response already has is kept: the failed-login 429 names its own
+    policy. The 500 of an unhandled exception is written outside the
+    middleware stack and has none.
+
+    Plain ASGI. The fields travel in the scope's state (check_rate_limit
+    writes request.state): one dict, made by RequestContextMiddleware further
+    out, so every copy of the scope below shares it."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_fields(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                fields = scope.get("state", {}).get("rate_limit_fields")
+                if fields:
+                    headers = MutableHeaders(scope=message)
+                    for name, value in fields.items():
+                        if name not in headers:
+                            headers[name] = value
+            await send(message)
+
+        await self.app(scope, receive, send_with_fields)
 
 
 # --- 5. Failed logins, per account ----------------------------------------
@@ -444,18 +478,26 @@ async def check_login_attempt(email: str, request: Request) -> None:
         return
     pair_key, email_key = _login_keys(email, request)
     try:
-        retry_after = await _count(
-            pair_key, parse_rate(settings.RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS)
-        )
-        if not retry_after:
-            retry_after = await _count(
-                email_key, parse_rate(settings.RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL)
-            )
+        setting = "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS"
+        rate = parse_rate(getattr(settings, setting))
+        count, ttl_ms = await _hit(pair_key, rate)
+        if not _wait(count, ttl_ms, rate):
+            setting = "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL"
+            rate = parse_rate(getattr(settings, setting))
+            count, ttl_ms = await _hit(email_key, rate)
     except RedisError as e:
         logger.error("Rate limiting error, login refused: %s", e)
         raise login_unavailable() from e
+    retry_after = _wait(count, ttl_ms, rate)
     if retry_after:
-        raise too_many_requests("Too many failed login attempts", retry_after)
+        error = too_many_requests("Too many failed login attempts", retry_after)
+        # The policy that refused it, not the route's (RateLimitFieldsMiddleware
+        # keeps fields the response already has).
+        error.headers = {
+            **(error.headers or {}),
+            **rate_limit_headers(setting.removeprefix("RATE_LIMIT_").lower(), rate, count, ttl_ms),
+        }
+        raise error
 
 
 async def clear_login_failures(email: str, request: Request) -> None:

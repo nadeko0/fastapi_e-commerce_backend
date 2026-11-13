@@ -63,12 +63,17 @@ def _normalise_country(v: str) -> str:
     runs on input and again on every read of the stored row, so the rule has
     to give the same answer the second time: a value that upper-cases to more
     than two characters is title-cased in the same step, which is what the
-    second pass would have done to it."""
+    second pass would have done to it. The other way round, title-casing can
+    lengthen a value to two characters ("ß" to "Ss"), which the second pass
+    would upper-case, so that is done here too."""
     if len(v) == 2:
-        v = v.upper()
-        if len(v) == 2:
-            return v
-    return v.title()
+        upper = v.upper()
+        if len(upper) == 2:
+            return upper
+    v = v.title()
+    if len(v) == 2 and len(v.upper()) == 2:
+        return v.upper()
+    return v
 
 
 class AddressBase(BaseModel):

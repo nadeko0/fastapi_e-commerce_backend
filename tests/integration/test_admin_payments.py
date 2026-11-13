@@ -254,3 +254,48 @@ def test_another_provider_refusal_stays_a_400(client, db_session, monkeypatch, c
     assert "ch_secret_123" not in response.text
     assert any("ch_secret_123" in r.getMessage() and "charge_already_refunded" in r.getMessage()
                for r in caplog.records)
+
+
+def _refund_taken_by_a_concurrent_request(payment):
+    """The state the loser of two concurrent refunds sees: the provider has
+    already refunded the whole payment for the other request, which has not
+    recorded it here yet."""
+    StripePaymentProvider().create_refund(
+        payment_intent_id=payment.payment_intent_id, amount=payment.amount,
+        idempotency_key="the-other-admins-key",
+    )
+
+
+def test_the_loser_of_two_concurrent_refunds_gets_409(client, db_session):
+    shop = Shop(client, db_session)
+    admin = shop.admin()
+    _, payment = _setup_cancelled_order_with_flagged_payment(shop, amount=2500, flagged=True)
+    _refund_taken_by_a_concurrent_request(payment)
+
+    response = client.post(
+        f"{ADMIN}/payments/{payment.id}/refund",
+        headers={**admin, "Idempotency-Key": "concurrent-loser-1"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "This payment has already been fully refunded"
+    shop.db.expire_all()
+    assert shop.db.query(PaymentRefund).filter(PaymentRefund.payment_id == payment.id).count() == 0
+
+
+def test_a_refusal_whose_refunds_cannot_be_read_stays_a_400(client, db_session, monkeypatch):
+    shop = Shop(client, db_session)
+    admin = shop.admin()
+    _, payment = _setup_cancelled_order_with_flagged_payment(shop, amount=2500, flagged=True)
+    _refund_taken_by_a_concurrent_request(payment)
+
+    def unreachable(self, payment_intent_id):
+        raise PaymentProviderTimeoutError("Connection dropped")
+
+    monkeypatch.setattr(StripePaymentProvider, "list_refunds", unreachable)
+    response = client.post(
+        f"{ADMIN}/payments/{payment.id}/refund",
+        headers={**admin, "Idempotency-Key": "concurrent-loser-2"},
+    )
+
+    assert response.status_code == 400, response.text

@@ -3,6 +3,7 @@ import sys
 import uvicorn
 
 from app.core.config import settings
+from app.core.http_protocol import NoDelayH11Protocol
 
 if __name__ == "__main__":
     uvicorn.run(
@@ -19,6 +20,15 @@ if __name__ == "__main__":
         # (app/core/forwarded.py). uvicorn's own handling would rewrite the
         # client address first, by a list of its own.
         proxy_headers=False,
+        # h11 with TCP_NODELAY on each connection: with workers > 1 uvicorn
+        # 0.54's shared listener left Nagle on, +40 ms per keep-alive
+        # request (app/core/http_protocol.py).
+        http=NoDelayH11Protocol,
+        # The application writes one JSON access line per request
+        # (app/core/access_log.py); uvicorn's plain-text one would repeat it.
+        access_log=False,
+        # No "Server: uvicorn" on responses: it names the stack for nothing.
+        server_header=False,
         # On SIGTERM, wait this long for requests in flight, then cancel them.
         # The longest wait is a Stripe call: (5 s connect + 20 s read) x 3
         # tries + 1.5 s SDK backoff = 76.5 s with the default STRIPE_*

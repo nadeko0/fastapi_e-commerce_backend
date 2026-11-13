@@ -73,7 +73,13 @@ def _provider_unavailable(error: stripe.StripeError) -> PaymentProviderTimeoutEr
             "Stripe refused our API key (%s); payments cannot be taken until it is fixed",
             type(error).__name__,
         )
-    return PaymentProviderTimeoutError(str(error.user_message or error))
+    return PaymentProviderTimeoutError(
+        str(error.user_message or error),
+        error_class=type(error).__name__,
+        request_id=error.request_id,
+        http_status=error.http_status,
+        provider_code=error.code,
+    )
 
 
 # Real Stripe PaymentIntent.status values this codebase doesn't otherwise

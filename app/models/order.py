@@ -82,11 +82,18 @@ class Order(Base):
         # ORDER BY ... LIMIT 1: the order list's own ORDER BY stays the only one).
         # (A table alias, not aliased(): that would configure the mappers
         # while the models are still being imported.)
+        # The inner select is nested two levels below the order's, and
+        # auto-correlation only looks at the select directly around it (FROM
+        # payment_disputes): without correlate_except it put `orders` into its
+        # own FROM, and every order showed the newest dispute of any order.
+        # Both lookups use an index (idx_payment_order_id,
+        # idx_payment_dispute_payment_id).
         latest = PaymentDispute.__table__.alias("latest_dispute")
         latest_id = (
             select(func.max(latest.c.id))
             .join(Payment, Payment.id == latest.c.payment_id)
             .where(Payment.order_id == cls.id)
+            .correlate_except(latest, Payment.__table__)
             .scalar_subquery()
         )
         return column_property(
@@ -101,7 +108,10 @@ class Order(Base):
     @property
     def shipping_address_shown(self):
         """The address the order was placed with, copied at checkout: editing or
-        erasing the customer's address must not rewrite a past order. An order
+        erasing the customer's address must not rewrite a past order. The
+        fields the copy does not hold are fixed, not read from the live row
+        (which changes when the customer switches their default): a snapshot
+        is never the default, and it was made when the order was. An order
         older than these columns shows its live address row."""
         live = self.shipping_address
         if self.ship_to_street is None:
@@ -116,9 +126,9 @@ class Order(Base):
             address_type=self.ship_to_address_type or live.address_type,
             delivery_phone=self.ship_to_delivery_phone,
             delivery_instructions=self.ship_to_delivery_instructions,
-            is_default=live.is_default,
-            created_at=live.created_at,
-            updated_at=live.updated_at,
+            is_default=False,
+            created_at=self.created_at,
+            updated_at=self.created_at,
         )
 
     __table_args__ = (

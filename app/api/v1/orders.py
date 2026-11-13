@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import uuid
@@ -1116,6 +1117,35 @@ def _guard_no_attempt_in_flight(
         )
 
 
+def _log_attempt_left_unknown(
+    error: PaymentProviderTimeoutError, flow: str, payment_row: Payment, provider_key: str
+) -> None:
+    """One WARNING line when a /pay or /checkout-session attempt is left
+    "unknown" because the provider could not be reached or answered with an
+    error: without it the client's 503 had no cause anywhere in the logs (a
+    Stripe 429 could not be told from a dropped connection). Stripe's
+    Request-Id finds the request in the Dashboard. The idempotency key is
+    logged only as a short SHA-256 prefix: enough to match the retries of
+    one attempt, not the key."""
+    details = {
+        "flow": flow,
+        "order_id": payment_row.order_id,
+        "payment_id": payment_row.id,
+        "error_class": error.error_class or type(error).__name__,
+        "stripe_request_id": error.request_id,
+        "http_status": error.http_status,
+        "provider_code": error.provider_code,
+        "idempotency_key_sha256": hashlib.sha256(provider_key.encode()).hexdigest()[:16],
+    }
+    logger.warning(
+        "Payment attempt %s of order %s left unknown: provider unavailable "
+        "(%s, Stripe request %s, HTTP %s, code %s)",
+        payment_row.id, payment_row.order_id, details["error_class"],
+        error.request_id, error.http_status, error.provider_code,
+        extra=details,
+    )
+
+
 def _guard_currency_matches_order(requested_currency: str | None, order: Order) -> None:
     """
     Shared by /pay and /checkout-session: the order is charged in its own
@@ -1424,6 +1454,7 @@ async def process_payment(
         # order half-updated.
         payment_row.status = "unknown"
         await db.commit()
+        _log_attempt_left_unknown(e, "pay", payment_row, provider_idempotency_key)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",
@@ -1734,6 +1765,7 @@ async def create_checkout_session(
         # settles it, and it blocks other attempts meanwhile.
         payment_row.status = "unknown"
         await db.commit()
+        _log_attempt_left_unknown(e, "checkout_session", payment_row, provider_idempotency_key)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider unavailable, please retry",

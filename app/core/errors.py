@@ -162,6 +162,9 @@ def problem_response(scope: Scope, exc: StarletteHTTPException) -> ProblemRespon
     if errors is not None:
         body["errors"] = errors
     retry_after = getattr(exc, "retry_after", None)
+    if retry_after is None and exc.headers and exc.headers.get("Retry-After", "").isdigit():
+        # A plain HTTPException that sets only the header.
+        retry_after = int(exc.headers["Retry-After"])
     if retry_after is not None:
         body["retry_after"] = retry_after
     return ProblemResponse(body, status_code=exc.status_code, headers=exc.headers)

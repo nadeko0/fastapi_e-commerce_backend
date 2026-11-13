@@ -238,6 +238,19 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
     REDIS_POOL_SIZE: int = 50
     REDIS_POOL_TIMEOUT: int = 20
+    # Seconds a Redis command may wait for its answer, and for the connection
+    # to open, in both application clients (app/services/redis.py,
+    # app/services/redis_async.py). Without them redis-py 8's default of 5 s
+    # applied: with Redis frozen, every request that touched it waited 5 s per
+    # command while holding its database transaction open (chaos run
+    # 2026-11, F-CHAOS-1). Every command the application sends is O(1) or a
+    # short Lua script, answered in well under a millisecond on a healthy
+    # Redis, so 1 s is far above a slow answer and short enough that a dead
+    # Redis is noticed before callers pile up. Celery's broker connection has
+    # its own (longer) timeouts in app/tasks.py: its worker polls with a 1 s
+    # blocking read.
+    REDIS_SOCKET_TIMEOUT: float = Field(1.0, gt=0)
+    REDIS_SOCKET_CONNECT_TIMEOUT: float = Field(1.0, gt=0)
 
     # How long a cart lives after its last write. The only source of the
     # TTL (RedisService._cart_ttl). It was 7 while a cart displayed the
@@ -471,8 +484,15 @@ class Settings(BaseSettings):
     # a hung Stripe held threads (about 4 minutes with the SDK's retries)
     # until the pool was used up. STRIPE_MAX_NETWORK_RETRIES is how many
     # times the SDK repeats a call that failed on the network (same
-    # idempotency key, so safe); worst case per call is
-    # (connect + read) x (retries + 1) plus backoff.
+    # idempotency key, so safe). The theoretical bound per call is
+    # (connect + read) x (retries + 1) plus the SDK's backoff: 76.5 s with
+    # these defaults, reached only by a Stripe that completes every TLS
+    # handshake and then sends nothing for the whole read timeout. In the
+    # 2026-11 chaos run (Stripe delayed past the read timeout, or dropping
+    # everything) the TLS handshake of each new connection was what hung, and
+    # it counts against the connect timeout: calls failed after about 16 s
+    # (3 tries x 5 s plus backoff), or about 31 s when the first try reused a
+    # kept-alive connection (one read timeout plus two connect timeouts).
     STRIPE_CONNECT_TIMEOUT_SECONDS: float = Field(5.0, gt=0)
     STRIPE_READ_TIMEOUT_SECONDS: float = Field(20.0, gt=0)
     STRIPE_MAX_NETWORK_RETRIES: int = Field(2, ge=0)

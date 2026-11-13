@@ -80,6 +80,25 @@ def test_429_and_503_document_retry_after(spec):
     assert _ref(_op(spec, "post", "/users/login")["responses"]["429"]) == "Problem"
 
 
+def test_every_429_documents_the_rate_limit_fields_and_every_401_the_challenge(spec):
+    for path, item in spec["paths"].items():
+        for method, operation in item.items():
+            responses = operation.get("responses", {})
+            if "429" in responses:
+                assert {"RateLimit", "RateLimit-Policy"} <= set(responses["429"]["headers"]), (method, path)
+            if "401" in responses:
+                assert "WWW-Authenticate" in responses["401"]["headers"], (method, path)
+
+
+def test_a_routes_own_description_keeps_the_causes_every_route_shares(spec):
+    # The cart's own 503 (its store) does not hide the in-flight limit.
+    assert "at capacity (Retry-After: 1)" in _op(spec, "get", "/cart")["responses"]["503"]["description"]
+    # A wrong password on a deletion request does not hide the bad token.
+    unauthorized = _op(spec, "post", "/legal/data-request")["responses"]["401"]["description"]
+    assert unauthorized.startswith("Incorrect password")
+    assert "invalid, expired or revoked access token" in unauthorized
+
+
 def test_500_is_a_problem(spec):
     content = _op(spec, "get", "/products")["responses"]["500"]["content"]
     assert list(content) == ["application/problem+json"]

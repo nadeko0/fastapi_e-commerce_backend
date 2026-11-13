@@ -82,6 +82,18 @@ RETRY_AFTER_HEADER = {
         "schema": {"type": "integer", "minimum": 0},
     }
 }
+# IETF draft-ietf-httpapi-ratelimit-headers (app/core/rate_limit.py,
+# rate_limit_headers).
+RATE_LIMIT_HEADERS = {
+    "RateLimit-Policy": {
+        "description": 'The limit: "<policy>";q=<requests>;w=<window seconds>.',
+        "schema": {"type": "string"},
+    },
+    "RateLimit": {
+        "description": 'What is left of it: "<policy>";r=<remaining>;t=<seconds until the window ends>.',
+        "schema": {"type": "string"},
+    },
+}
 # On the 201 of a POST (app/core/location.py).
 LOCATION_HEADER = {
     "Location": {
@@ -175,10 +187,14 @@ TOO_MANY_REQUESTS = {
         "address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for "
         "product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a "
         "checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, "
-        "password reset, email verification and data requests (defaults shown)"
+        "password reset, email verification and data requests (defaults shown). Every counted response, "
+        "a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a "
+        "narrower limit is decided by Retry-After: the failed-login one names its own policy in these "
+        "fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes "
+        "(RATE_LIMIT_CONSENT) carry the route's"
     ),
     "model": Problem,
-    "headers": RETRY_AFTER_HEADER,
+    "headers": {**RETRY_AFTER_HEADER, **RATE_LIMIT_HEADERS},
 }
 SERVICE_UNAVAILABLE = {
     "description": (
@@ -191,6 +207,16 @@ SERVICE_UNAVAILABLE = {
     "headers": RETRY_AFTER_HEADER,
 }
 SERVER_ERROR = {"description": "Server error", "model": Problem}
+
+# Added to a route's own description of these codes: the general cause still
+# applies to the route (a route's 503 for its cart store does not stop the
+# in-flight limit from answering 503).
+_ALSO_UNAUTHORIZED = "or a missing, invalid, expired or revoked access token"
+_ALSO_BAD_REQUEST = "or a body that is not valid JSON (problem type malformed-request)"
+_ALSO_SERVICE_UNAVAILABLE = (
+    "or, as on any route: the server is at capacity (Retry-After: 1), or the token check or the "
+    "database cannot answer (Retry-After 5 to 30)"
+)
 
 # The status codes the model of a response with no body of its own gets
 # when a route lists only a description.
@@ -209,13 +235,18 @@ _MODEL_FOR_EXISTING = {
 }
 
 
-def _merge(responses: dict[int | str, dict[str, Any]], code: int, spec: dict[str, Any]) -> None:
+def _merge(
+    responses: dict[int | str, dict[str, Any]], code: int, spec: dict[str, Any], also: str | None = None
+) -> None:
     """Add `spec` as the response for `code`. A route's own entry keeps its
-    description, and gains the body and the headers it lacks."""
+    description, followed by `also` when given, and gains the body and the
+    headers it lacks."""
     own = responses.get(code)
     if own is None:
         responses[code] = spec
         return
+    if also:
+        own["description"] = f"{own['description']}; {also}"
     for key, value in spec.items():
         if key != "description":
             own.setdefault(key, value)
@@ -269,7 +300,7 @@ class DocumentedRoute(APIRoute):
             kwargs["openapi_extra"] = {**(kwargs.get("openapi_extra") or {}), "x-admin-only": True}
         merged = {code: dict(spec) for code, spec in (self.responses or {}).items()}
         if schemes:
-            _merge(merged, 401, UNAUTHORIZED)
+            _merge(merged, 401, UNAUTHORIZED, _ALSO_UNAUTHORIZED)
         if _depends_on(self.dependant, get_current_active_user) or _depends_on(
             self.dependant, get_optional_active_user
         ):
@@ -292,17 +323,21 @@ class DocumentedRoute(APIRoute):
         if self.body_field is not None and not isinstance(self.body_field.field_info, params.Form):
             # A JSON body: a text that is not JSON is a 400, another
             # Content-Type a 415 (app/core/errors.py).
-            _merge(merged, 400, BAD_REQUEST)
+            _merge(merged, 400, BAD_REQUEST, _ALSO_BAD_REQUEST)
             _merge(merged, 415, UNSUPPORTED_MEDIA_TYPE)
         if self.body_field is not None or _has_parameters(self.dependant):
             _merge(merged, 422, VALIDATION_ERROR)
-        _merge(merged, 503, SERVICE_UNAVAILABLE)
+        _merge(merged, 503, SERVICE_UNAVAILABLE, _ALSO_SERVICE_UNAVAILABLE)
         _merge(merged, 500, SERVER_ERROR)
         for code, model in _MODEL_FOR_EXISTING.items():
             if code in merged:
                 merged[code].setdefault("model", model)
         if 429 in merged:
             merged[429].setdefault("headers", RETRY_AFTER_HEADER)
+        if 401 in merged:
+            # Every 401 carries the challenge, a wrong password included
+            # (app/core/security.py, and the routes that check one).
+            merged[401].setdefault("headers", _WWW_AUTHENTICATE)
         # A second pass with the full list: FastAPI builds the response
         # fields (the models) in the constructor.
         super().__init__(path, endpoint, responses=merged, **kwargs)

@@ -564,6 +564,54 @@ def test_ratelimit_fields_follow_the_counter_on_200_and_429(client, limits):
         assert blocked.headers["RateLimit"] == '"default";r=0;t=50'
 
 
+def test_counted_4xx_answers_carry_the_ratelimit_fields(client, limits):
+    # They are counted like any other request, so they say so: an exception
+    # handler's response used to go out without the fields.
+    limits(RATE_LIMIT_DEFAULT="50/minute", RATE_LIMIT_AUTH="20/minute")
+    with freeze_time("2026-01-01 00:00:00"):
+        answers = [
+            client.get(f"{API}/products/999999"),  # 404 from the route
+            client.get(f"{API}/products/not-a-number"),  # 422 from validation
+            client.get(f"{API}/users/me"),  # 401 from the auth dependency
+            client.post(f"{API}/users/login", data={}),  # 422 on an auth route
+        ]
+    assert [answer.status_code for answer in answers] == [404, 422, 401, 422]
+    assert answers[0].headers["RateLimit-Policy"] == '"default";q=50;w=60'
+    assert answers[0].headers["RateLimit"] == '"default";r=49;t=60'
+    assert answers[1].headers["RateLimit"] == '"default";r=48;t=60'  # same route, same count
+    assert answers[2].headers["RateLimit"] == '"default";r=49;t=60'
+    assert answers[3].headers["RateLimit-Policy"] == '"auth";q=20;w=60'
+    assert answers[3].headers["RateLimit"] == '"auth";r=19;t=60'
+    for answer in answers:
+        assert len(answer.headers.get_list("RateLimit")) == 1
+
+
+def test_the_failed_login_429_names_the_policy_that_refused_it(client, limits, valid_registration_payload):
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS="2/15 minutes")
+    with freeze_time("2026-01-01 00:00:00") as clock:
+        assert [login(client, payload["email"], "wrong").status_code for _ in range(2)] == [401, 401]
+        clock.tick(60)
+        refused = login(client, payload["email"], "wrong")
+
+    assert refused.status_code == 429
+    assert refused.headers["Retry-After"] == "840"
+    policy = "login_failures_per_email_and_address"
+    assert refused.headers["RateLimit-Policy"] == f'"{policy}";q=2;w=900'
+    assert refused.headers["RateLimit"] == f'"{policy}";r=0;t=840'
+    assert len(refused.headers.get_list("RateLimit")) == 1
+
+
+def test_the_per_email_failed_login_429_names_its_own_policy(client, limits, valid_registration_payload):
+    payload = register(client, valid_registration_payload)
+    limits(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL="1/hour")
+    login(client, payload["email"], "wrong")
+    refused = login(client, payload["email"], "wrong")
+
+    assert refused.status_code == 429
+    assert refused.headers["RateLimit-Policy"] == '"login_failures_per_email";q=1;w=3600'
+
+
 def test_no_ratelimit_fields_on_exempt_routes(client, limits):
     response = client.get("/health")
     assert "RateLimit" not in response.headers

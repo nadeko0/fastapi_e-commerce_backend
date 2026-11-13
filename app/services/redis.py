@@ -70,7 +70,9 @@ class RedisService:
                 # Because redis-py stubs declare Redis without type arguments and annotate
                 # outputs as bytes | str, callers narrow reads via typing.cast at read sites.
                 decode_responses=True,
-                max_connections=settings.REDIS_POOL_SIZE
+                max_connections=settings.REDIS_POOL_SIZE,
+                socket_timeout=settings.REDIS_SOCKET_TIMEOUT,
+                socket_connect_timeout=settings.REDIS_SOCKET_CONNECT_TIMEOUT,
             )
         return cls._instance
 

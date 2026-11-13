@@ -15,6 +15,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.merge_patch import PATCH_DESCRIPTION, merge_patch_body
 from app.api.v1.orders import (
+    _REFUND_STATUSES_NOT_RETURNED,
     DISPUTED_CHARGE_CODES,
     REFUND_KEY_HEADER_DESCRIPTION,
     _cents_to_decimal,
@@ -90,6 +91,7 @@ from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
     InvalidRequestError,
+    PaymentProviderError,
     PaymentProviderTimeoutError,
 )
 from app.services.reconciliation import open_discrepancies, reconcile_payments
@@ -1292,8 +1294,9 @@ async def list_payments(
         403: {"description": "Admin privileges required"},
         404: {"description": "Payment or its order not found"},
         409: {"description": "Only a succeeded payment flagged for manual review can be refunded; the payment is "
-                             "disputed; it has already been fully refunded; or the idempotency key was already "
-                             "used with different refund parameters"},
+                             "disputed; it has already been fully refunded (also when another refund of it was "
+                             "taken at the same time); or the idempotency key was already used with different "
+                             "refund parameters"},
         503: {"description": "Payment provider unavailable or timed out (Retry-After: 5); retry with the same "
                              "Idempotency-Key",
               "headers": RETRY_AFTER_HEADER},
@@ -1396,6 +1399,24 @@ async def refund_flagged_payment(
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail="This payment is disputed; it cannot be refunded while the dispute is open",
+            ) from e
+        # Two admins refunding the same flagged payment at once both pass the
+        # guards above (nothing is locked across the provider call); the
+        # provider takes the first refund and refuses the second, whose
+        # winner may not be recorded here yet. The provider's own refunds
+        # tell that conflict apart from a refusal of another kind.
+        try:
+            provider_refunds = await run_in_threadpool(provider.list_refunds, payment_intent_id)
+        except PaymentProviderError:
+            provider_refunds = []
+        refunded_at_provider = sum(
+            r.amount for r in provider_refunds
+            if (r.provider_status or r.status.value) not in _REFUND_STATUSES_NOT_RETURNED
+        )
+        if refunded_at_provider >= payment.amount:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail="This payment has already been fully refunded",
             ) from e
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,

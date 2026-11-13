@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import admin, cart, legal, orders, products, users
 from app.core import probes, telemetry
+from app.core.access_log import AccessLogMiddleware
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.database import async_engine, engine
@@ -16,7 +17,7 @@ from app.core.head import HeadMiddleware
 from app.core.logging_config import setup_logging
 from app.core.openapi import install_problem_media_type, operation_id
 from app.core.overload import InFlightLimitMiddleware
-from app.core.rate_limit import rate_limit
+from app.core.rate_limit import RateLimitFieldsMiddleware, rate_limit
 from app.core.request_context import RequestContextMiddleware
 from app.core.security_headers import SecurityHeadersMiddleware, server_error_handler
 from app.core.text_input import reject_unusable_text
@@ -102,6 +103,10 @@ install_problem_media_type(app)
 # HEAD runs as GET without a body (RFC 9110 9.3.2); innermost (app/core/head.py).
 app.add_middleware(HeadMiddleware)
 
+# The RateLimit fields of a counted request on every response it gets, 4xx
+# included (app/core/rate_limit.py).
+app.add_middleware(RateLimitFieldsMiddleware)
+
 # Registered right after HeadMiddleware, so it sits just outside it: the
 # 413 then passes back out through the security-headers and CORS layers like
 # any other response. Nothing outside it reads the body (the rate limiter is
@@ -132,14 +137,16 @@ app.add_middleware(
     # Starlette, listed for the reader. Retry-After (429, 503) is exposed so
     # a browser client can back off. Starlette: credentials and "*" do not mix.
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "If-None-Match"],
-    expose_headers=["Retry-After", "X-Request-ID", "RateLimit", "RateLimit-Policy", "ETag"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "If-None-Match", "X-Request-ID"],
+    expose_headers=["Retry-After", "X-Request-ID", "RateLimit", "RateLimit-Policy", "ETag", "Location"],
 )
 
 # Request id + traceparent, just inside the security headers and outside the
 # CORS and in-flight layers: the shed 503, the 404 and the 413 carry X-Request-ID and
 # every log record has the ids (app/core/request_context.py). The 500 gets
-# it in server_error_handler.
+# it in server_error_handler. Just inside it, the JSON access line of every
+# request, shed and 404 ones included (app/core/access_log.py).
+app.add_middleware(AccessLogMiddleware)
 app.add_middleware(RequestContextMiddleware)
 
 # Security headers on every response, the shed 503 and the 500 for an

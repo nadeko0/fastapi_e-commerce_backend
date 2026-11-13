@@ -137,6 +137,17 @@ def test_probes_answer_head_with_headers_and_no_body(client, path):
     assert response.headers["content-type"].startswith("application/json")
 
 
+@pytest.mark.parametrize("path", PROBES)
+def test_probe_head_declares_the_content_length_of_its_get(client, path):
+    # RFC 9110 9.3.2: HEAD has the GET's header fields; it was 0 here.
+    got = client.get(path)
+    head = client.head(path)
+
+    assert int(got.headers["content-length"]) == len(got.content) > 0
+    assert head.headers["content-length"] == got.headers["content-length"]
+    assert head.content == b""
+
+
 @pytest.mark.parametrize("path", ["/health", "/readyz"])
 def test_failing_probes_keep_no_store_and_answer_head(client, monkeypatch, path):
     _break_redis(monkeypatch)
@@ -144,7 +155,9 @@ def test_failing_probes_keep_no_store_and_answer_head(client, monkeypatch, path)
     for response in (client.get(path), client.head(path)):
         assert response.status_code == 503
         assert response.headers["Cache-Control"] == "no-store"
-    assert client.head(path).content == b""
+    head = client.head(path)
+    assert head.content == b""
+    assert head.headers["content-length"] == client.get(path).headers["content-length"]
 
 
 def test_livez_is_200_without_touching_database_or_redis(client, monkeypatch):

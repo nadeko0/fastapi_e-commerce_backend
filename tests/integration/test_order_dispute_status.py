@@ -123,3 +123,40 @@ def test_a_lost_dispute_only_flags_the_order(shop, paid):
     # the stock the order took is not returned automatically.
     assert order_state(shop, order_id) == ("confirmed", "refunded")
     assert shop.stock(paid["product"]) == 3
+
+
+def _second_paid_order(shop, paid):
+    """A paid order of another customer, for the same product."""
+    buyer = shop.buyer()
+    order = shop.order_of(buyer, paid["product"])
+    assert shop.pay(buyer, order["id"]).status_code == 200
+    return {"order": order, "buyer": buyer, "admin": paid["admin"],
+            "payment": shop.payments(order["id"])[0]}
+
+
+def test_a_dispute_shows_only_on_its_own_order(shop, paid):
+    # The property used to read the newest dispute of any order: one dispute
+    # showed on every order of every customer (load audit 2026-11).
+    other = _second_paid_order(shop, paid)
+
+    shop.webhook("charge.dispute.created", _dispute(paid["payment"], "needs_response"))
+
+    assert _customer_view(shop, paid) == "needs_response"
+    assert _customer_view(shop, other) is None
+    admin_view = _admin_list(shop, paid)
+    assert admin_view[paid["order"]["id"]] == "needs_response"
+    assert admin_view[other["order"]["id"]] is None
+
+
+def test_two_disputed_orders_each_show_their_own_dispute(shop, paid):
+    other = _second_paid_order(shop, paid)
+    shop.webhook("charge.dispute.created", _dispute(paid["payment"], "needs_response"))
+    # The newer dispute (higher id) is the other order's.
+    shop.webhook("charge.dispute.created",
+                 _dispute(other["payment"], "warning_needs_response", dispute_id="du_status_2"))
+
+    assert _customer_view(shop, paid) == "needs_response"
+    assert _customer_view(shop, other) == "warning_needs_response"
+    admin_view = _admin_list(shop, paid)
+    assert admin_view[paid["order"]["id"]] == "needs_response"
+    assert admin_view[other["order"]["id"]] == "warning_needs_response"

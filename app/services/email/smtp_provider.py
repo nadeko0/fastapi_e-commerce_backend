@@ -11,15 +11,101 @@ actually show up in the JSON log pipeline (see app/core/logging_config.py)
 rather than being lost.
 """
 import logging
+import re
 import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
+from html.parser import HTMLParser
 
 from app.core.config import settings
 from app.services.email.base import EmailProvider, mask_email
 
 logger = logging.getLogger(__name__)
+
+
+class _PlainText(HTMLParser):
+    """The text/plain alternative of an HTML mail: block elements end lines,
+    list items get a dash, table cells are separated by " | ", links keep
+    their address, <pre> keeps its layout, and head/style/script are
+    dropped. Not a renderer: the templates (messages.py) are paragraphs,
+    headings, simple tables and lists. Character references are decoded."""
+
+    _SKIPPED = frozenset({"head", "title", "style", "script"})
+    # Set off by a blank line, like paragraphs.
+    _PARAGRAPHS = frozenset({"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol", "pre", "hr"})
+    # Start a new line.
+    _LINES = frozenset({"tr", "li", "br"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._out: list[str] = []
+        self._skipping = 0
+        self._in_pre = 0
+        self._href: str | None = None
+
+    def _at_line_start(self) -> bool:
+        return not self._out or self._out[-1].endswith("\n")
+
+    def _break(self, newlines: int) -> None:
+        """End the current line, and leave `newlines` - 1 blank lines after
+        it, unless the output already ends that way."""
+        text = "".join(self._out).rstrip(" ")
+        if not text:
+            return
+        missing = newlines - (len(text) - len(text.rstrip("\n")))
+        self._out = [text + "\n" * max(0, missing)]
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._SKIPPED:
+            self._skipping += 1
+            return
+        if tag in self._PARAGRAPHS:
+            self._break(2)
+        elif tag in self._LINES:
+            self._break(1)
+        if tag == "li":
+            self._out.append("- ")
+        elif tag in ("td", "th") and not self._at_line_start():
+            self._out[-1] = self._out[-1].rstrip(" ")
+            self._out.append(" | ")
+        elif tag == "pre":
+            self._in_pre += 1
+        elif tag == "a":
+            self._href = dict(attrs).get("href")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIPPED:
+            self._skipping = max(0, self._skipping - 1)
+            return
+        if tag == "pre":
+            self._in_pre = max(0, self._in_pre - 1)
+        elif tag == "a" and self._href:
+            self._out.append(f" ({self._href})")
+            self._href = None
+        if tag in self._PARAGRAPHS:
+            self._break(2)
+
+    def handle_data(self, data: str) -> None:
+        if self._skipping:
+            return
+        if not self._in_pre:
+            data = re.sub(r"\s+", " ", data)
+            if self._at_line_start():
+                data = data.lstrip(" ")
+        if data:
+            self._out.append(data)
+
+    def text(self) -> str:
+        return re.sub(r"\n{3,}", "\n\n", "".join(self._out)).strip() + "\n"
+
+
+def html_to_text(html: str) -> str:
+    parser = _PlainText()
+    parser.feed(html)
+    parser.close()
+    return parser.text()
 
 
 class SmtpEmailProvider(EmailProvider):
@@ -41,6 +127,15 @@ class SmtpEmailProvider(EmailProvider):
         message['Subject'] = subject
         message['From'] = f"{self.from_name} <{self.from_email}>"
         message['To'] = to_email
+        # RFC 5322 3.6: Date is required and Message-ID should be present;
+        # smtplib adds neither, and providers score mail without them as spam.
+        message['Date'] = formatdate(localtime=False)
+        # The sender's domain, not make_msgid's default (this host's name,
+        # looked up by DNS and meaningless outside the container).
+        message['Message-ID'] = make_msgid(domain=self.from_email.rpartition('@')[2])
+        # RFC 2046 5.1.4: the last alternative is the preferred one, so the
+        # plain text goes first, for clients that do not render HTML.
+        message.attach(MIMEText(html_to_text(html_content), 'plain'))
         message.attach(MIMEText(html_content, 'html'))
         return message
 

@@ -88,7 +88,15 @@ def test_preflight_for_patch_is_allowed(client):
     assert "PATCH" in response.headers["access-control-allow-methods"]
 
 
-def test_retry_after_and_the_rate_limit_headers_are_readable_by_the_browser(client):
+def test_retry_after_the_rate_limit_headers_and_location_are_readable_by_the_browser(client):
     response = client.get("/health", headers={"Origin": ORIGIN})
 
-    assert response.headers["access-control-expose-headers"] == "Retry-After, X-Request-ID, RateLimit, RateLimit-Policy, ETag"
+    assert response.headers["access-control-expose-headers"] == (
+        "Retry-After, X-Request-ID, RateLimit, RateLimit-Policy, ETag, Location"
+    )
+
+
+def test_a_browser_may_send_its_own_request_id(client):
+    response = _preflight(client, "POST", "Content-Type, X-Request-ID")
+
+    assert response.status_code == 200
