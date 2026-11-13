@@ -9116,7 +9116,7 @@
     },
     "/api/v1/admin/webhook-events/{event_id}/replay": {
       "post": {
-        "description": "Send a failed Stripe event through the worker again (after the cause of\nits failure is fixed): it becomes \"received\" with its attempts reset and\nis published. If the broker is down it stays received and the sweeper\npublishes it. Only a failed event can be replayed.",
+        "description": "Send a failed Stripe event through the worker again (after the cause of\nits failure is fixed): it becomes \"received\" with its attempts reset and\nis published. If the broker is down it stays received, marked, and the\nsweeper publishes it on its next run. Only a failed event can be replayed.",
         "operationId": "replay_webhook_event",
         "parameters": [
           {

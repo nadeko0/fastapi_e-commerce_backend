@@ -95,7 +95,7 @@ from app.services.payment.exceptions import (
     PaymentProviderTimeoutError,
 )
 from app.services.reconciliation import open_discrepancies, reconcile_payments
-from app.services.stripe_events import enqueue_event
+from app.services.stripe_events import enqueue_event, mark_not_enqueued
 from app.tasks import check_payment_reconciliation
 
 logger = logging.getLogger(__name__)
@@ -1192,8 +1192,8 @@ async def replay_webhook_event(
     """
     Send a failed Stripe event through the worker again (after the cause of
     its failure is fixed): it becomes "received" with its attempts reset and
-    is published. If the broker is down it stays received and the sweeper
-    publishes it. Only a failed event can be replayed.
+    is published. If the broker is down it stays received, marked, and the
+    sweeper publishes it on its next run. Only a failed event can be replayed.
     """
     # Locked, so two admins replaying the same event publish it once: the
     # second finds it received.
@@ -1221,7 +1221,8 @@ async def replay_webhook_event(
     event.status = WEBHOOK_EVENT_RECEIVED
     event.attempts = 0
     await db.commit()
-    await run_in_threadpool(enqueue_event, event.event_id)
+    if not await run_in_threadpool(enqueue_event, event.event_id):
+        await db.run_sync(mark_not_enqueued, event.event_id)
     return WebhookEventResponse.model_validate(event)
 
 

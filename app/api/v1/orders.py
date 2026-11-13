@@ -2334,8 +2334,10 @@ async def stripe_webhook(
     # The one line that ties a delivery to its event: the JSON log formatter
     # adds this request's request_id (app/core/logging_config.py).
     logger.info("Stripe event %s (%s) stored", event.id, event.type)
-    # Publishing to the broker is blocking network IO (apply_async).
-    await run_in_threadpool(stripe_events.enqueue_event, event.id)
+    # Publishing to the broker is blocking network IO (apply_async). Not
+    # published: marked, so the sweeper's next run publishes it.
+    if not await run_in_threadpool(stripe_events.enqueue_event, event.id):
+        await db.run_sync(stripe_events.mark_not_enqueued, event.id)
     return StripeWebhookAck(status="received")
 
 

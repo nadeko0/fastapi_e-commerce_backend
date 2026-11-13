@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Upgrade notes
+- The `sweep_stripe_events` beat task runs every minute instead of every 5. No new setting.
+
+### Fixed
+- A Stripe webhook stored while the Celery broker (Redis) was unreachable was applied only about 20 minutes later: the sweeper re-queued an event only once it had been unchanged for `STRIPE_EVENT_SWEEP_AFTER_MINUTES`, a wait meant for messages lost in other ways and for events backing off between retries. In the November 2026 audit, a payment confirmed during a 75 s Redis freeze reached its order 21 minutes later (F-CHAOS-3). When the webhook route or an admin replay cannot publish an event, the event is now marked (`last_error`: "Not enqueued: ...", visible in the admin's webhook event list) and the sweeper publishes it on its next run, then clears the mark; a payment confirmed that way reaches its order within about a minute of the broker's return. Unmarked events keep the 20-minute wait, so a long queue gets no duplicate messages.
+
+### Documentation
+- `docs/OPERATIONS.md`: a failed `/readyz` check means the dependency did not answer this instance within 2 s (a saturated instance can fail one probe while the database is healthy); remove an instance only after several consecutive failures.
+- Load and chaos audit report: corrections from a re-verification of every numeric claim against the raw data.
+
 ## [6.1.0] - 2026-11-13
 
 A MINOR release: the fixes from an external load, concurrency, chaos and perimeter audit of 6.0.0 on two 2-vCPU servers ([report](docs/reports/load-chaos-audit-2026-11.md)), two new settings (`REDIS_SOCKET_TIMEOUT`, `REDIS_SOCKET_CONNECT_TIMEOUT`), and an OpenAPI document that now names every header and shared cause a client can meet. No route, field or parameter was removed or changed in a way a client must follow. The fixes were tested in the test suite; the servers were not audited again after them.

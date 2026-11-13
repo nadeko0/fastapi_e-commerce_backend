@@ -61,6 +61,8 @@ flowchart LR
 
 All three answer `HEAD` with the status and headers of the `GET`, `Content-Length` included, and no body.
 
+A `"fail"` check means the dependency did not answer this instance within 2 s, not that the dependency is down. The 2 s include waiting for a pooled connection and for the event loop, so a saturated instance can fail one probe while PostgreSQL is healthy: in the November 2026 audit, `/readyz` reported the database down once at 100 % CPU, and 16 times during a Redis freeze, likely because requests waiting on Redis held their pooled connections ([report](reports/load-chaos-audit-2026-11.md#23-seventy-five-seconds-of-frozen-redis-f-chaos-1)). Take an instance out of rotation only after several consecutive failures (Kubernetes `failureThreshold` defaults to 3; with `periodSeconds: 5` that is 15 s), so one slow probe does not move load onto the remaining instances.
+
 ## Structured Logging
 
 Logging is configured in `app/core/logging_config.py` following Twelve-Factor App rule XI:
@@ -100,7 +102,7 @@ All recurring jobs run strictly on UTC clocks:
 | `check-low-stock` | `check_low_stock` | Every 4 hours | Dispatches low-inventory notification emails to `ADMIN_EMAIL`. |
 | `cancel-expired-unpaid-orders` | `cancel_expired_unpaid_orders` | Every 5 minutes | Cancels orders unpaid after `UNPAID_ORDER_EXPIRE_MINUTES` (default 30 min) whose attempts have aged past `CHECKOUT_SESSION_EXPIRE_MINUTES`, closes older attempts at Stripe, and returns reserved inventory. An attempt Stripe refuses to close is read back: if it is paid or being paid (its webhook late or failed), the order is left for the webhook and for reconciliation. |
 | `check-payment-reconciliation` | `check_payment_reconciliation` | Daily at 03:15 UTC | Reconciles local payment records against the Stripe API for discrepancy detection. Compares at most `RECONCILIATION_MAX_PAYMENTS` (200) payments of the last `RECONCILIATION_WINDOW_DAYS` (7) days per run, those compared longest ago first (`payments.reconciled_at`, never-compared first); a payment is stamped when it was compared and recorded, not when Stripe could not answer for it. Above the cap the result says `truncated: true` and the rest of the window comes round on the following runs. |
-| `sweep-stripe-events` | `sweep_stripe_events` | Every 5 minutes | Re-publishes unhandled webhook events stranded by transient broker outages (`STRIPE_EVENT_SWEEP_AFTER_MINUTES`). |
+| `sweep-stripe-events` | `sweep_stripe_events` | Every minute | Re-publishes webhook events whose task message was lost. An event the webhook route or an admin replay could not publish (broker down) is marked in `last_error` ("Not enqueued: ...") and taken on the next run, so a payment it confirms reaches its order within about a minute of the broker's return; any other event still `received` or `retrying` is taken after `STRIPE_EVENT_SWEEP_AFTER_MINUTES` (default 20, longer than the longest retry backoff), so events waiting in a long queue get no duplicate messages. |
 | `cleanup-expired-retention` | `cleanup_expired_retention` | Daily at 02:45 UTC | Anonymises deactivated accounts past `USER_DATA_RETENTION_DAYS` (GDPR Art. 5(1)(e)). |
 | `cleanup-expired-idempotency-keys` | `cleanup_expired_idempotency_keys` | Daily at 03:00 UTC | Clears expired order idempotency keys older than `IDEMPOTENCY_KEY_TTL_HOURS`. |
 

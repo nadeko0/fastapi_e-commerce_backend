@@ -35,7 +35,7 @@ EXPECTED_BEAT_SCHEDULE = {
     },
     "sweep-stripe-events": {
         "task": "sweep_stripe_events",
-        "schedule": timedelta(minutes=5),
+        "schedule": timedelta(minutes=1),
         "kind": (timedelta, schedule),
     },
     "cleanup-expired-retention": {

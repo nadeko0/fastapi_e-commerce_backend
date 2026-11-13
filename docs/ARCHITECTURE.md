@@ -122,7 +122,7 @@ flowchart TD
     Retrying --> Worker
     Retry -->|No| Failed["UPDATE status = 'failed' (Terminal State)"]
 
-    Sweeper["Celery Beat: sweep_stripe_events (Every 5 minutes)"] -->|Find received/retrying untouched for STRIPE_EVENT_SWEEP_AFTER_MINUTES| Enqueue
+    Sweeper["Celery Beat: sweep_stripe_events (Every minute)"] -->|Find received marked Not enqueued, or received/retrying untouched for STRIPE_EVENT_SWEEP_AFTER_MINUTES| Enqueue
     Admin["Admin Replay: POST /admin/webhook-events/{id}/replay"] -->|Reset attempts = 0, status = 'received'| Enqueue
 ```
 

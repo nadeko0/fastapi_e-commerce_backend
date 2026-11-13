@@ -680,7 +680,7 @@ celery.conf.beat_schedule = {
     # down when the webhook route stored them); see STRIPE_EVENT_SWEEP_*.
     'sweep-stripe-events': {
         'task': 'sweep_stripe_events',
-        'schedule': timedelta(minutes=5),
+        'schedule': timedelta(minutes=1),
     },
     # USER_DATA_RETENTION_DAYS (GDPR Art. 5(1)(e)); 02:45, between the
     # erasure purge (02:30) and the reconciliation (03:15).

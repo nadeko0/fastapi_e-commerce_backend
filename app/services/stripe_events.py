@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -461,6 +461,12 @@ def apply_event(
 # Characters of an error kept in WebhookEvent.last_error.
 _LAST_ERROR_MAX_CHARS = 2000
 
+# last_error of a received event whose task could not be published (the
+# broker was down). The sweeper publishes these on its next run instead of
+# waiting STRIPE_EVENT_SWEEP_AFTER_MINUTES, the wait meant for retries; an
+# admin listing stuck events sees why.
+NOT_ENQUEUED = "Not enqueued: the broker could not be reached; the sweeper publishes it"
+
 
 def store_event(db: Session, event_id: str, event_type: str, payload: str) -> bool:
     """
@@ -508,6 +514,18 @@ def enqueue_event(event_id: str) -> bool:
         )
         return False
     return True
+
+
+def mark_not_enqueued(db: Session, event_id: str) -> None:
+    """Record that a received event's task could not be published
+    (enqueue_event returned False), so the sweeper's next run publishes it."""
+    db.execute(
+        update(WebhookEvent)
+        .where(WebhookEvent.event_id == event_id, WebhookEvent.status == WEBHOOK_EVENT_RECEIVED)
+        .values(last_error=NOT_ENQUEUED)
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
 
 
 def retry_delay_seconds(attempts: int) -> int:
@@ -640,21 +658,33 @@ def _record_failure(db: Session, event_id: str, error: Exception) -> EventOutcom
 
 def enqueue_stuck_events(db: Session) -> int:
     """
-    The sweeper: publish the events that are still received or retrying
-    STRIPE_EVENT_SWEEP_AFTER_MINUTES after they last changed - the message
-    to the worker was never published (the broker was down when the route
-    ran) or was lost. Oldest first, at most STRIPE_EVENT_SWEEP_BATCH. The
-    events are not locked while they are published (a worker given the
-    message would skip a locked row); each published event's updated_at is
-    set to now instead, so the next run leaves it for the worker. Stops at
+    The sweeper: publish the received events marked NOT_ENQUEUED (the
+    broker was down when the route ran), and the events that are still
+    received or retrying STRIPE_EVENT_SWEEP_AFTER_MINUTES after they last
+    changed (the message was lost). Only marked events are taken early: a
+    received event without the mark may just be waiting in a long queue,
+    and a second message for it would add work when the queue is longest.
+    Oldest first, at most STRIPE_EVENT_SWEEP_BATCH. The events are not
+    locked while they are published (a worker given the message would skip
+    a locked row); each published event's updated_at is set to now and its
+    mark cleared instead, so the next run leaves it for the worker. Stops at
     the first event the broker refuses. Returns how many were published.
     """
     now = utc_now()
     stuck = db.execute(
         select(WebhookEvent.id, WebhookEvent.event_id)
         .where(
-            WebhookEvent.status.in_((WEBHOOK_EVENT_RECEIVED, WEBHOOK_EVENT_RETRYING)),
-            WebhookEvent.updated_at < now - timedelta(minutes=settings.STRIPE_EVENT_SWEEP_AFTER_MINUTES),
+            or_(
+                and_(
+                    WebhookEvent.status == WEBHOOK_EVENT_RECEIVED,
+                    WebhookEvent.last_error == NOT_ENQUEUED,
+                ),
+                and_(
+                    WebhookEvent.status.in_((WEBHOOK_EVENT_RECEIVED, WEBHOOK_EVENT_RETRYING)),
+                    WebhookEvent.updated_at
+                    < now - timedelta(minutes=settings.STRIPE_EVENT_SWEEP_AFTER_MINUTES),
+                ),
+            )
         )
         .order_by(WebhookEvent.updated_at, WebhookEvent.id)
         .limit(settings.STRIPE_EVENT_SWEEP_BATCH)
@@ -671,7 +701,13 @@ def enqueue_stuck_events(db: Session) -> int:
                 WebhookEvent.id.in_(published),
                 WebhookEvent.status.in_((WEBHOOK_EVENT_RECEIVED, WEBHOOK_EVENT_RETRYING)),
             )
-            .values({WebhookEvent.updated_at: now})
+            .values({
+                WebhookEvent.updated_at: now,
+                WebhookEvent.last_error: case(
+                    (WebhookEvent.last_error == NOT_ENQUEUED, None),
+                    else_=WebhookEvent.last_error,
+                ),
+            })
             .execution_options(synchronize_session=False)
         )
     db.commit()

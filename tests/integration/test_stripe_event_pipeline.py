@@ -32,6 +32,7 @@ from payment_support import (
     reset_provider,
 )
 from sqlalchemy import event as sa_event
+from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -289,12 +290,17 @@ def test_the_sweeper_finds_an_event_the_broker_never_got_and_the_worker_applies_
     shop.webhook_raw("payment_intent.succeeded", _succeeded_object(payment), event_id=event_id)
     monkeypatch.setattr(tasks.process_stripe_event, "apply_async", real_publish)
 
-    # Too recent: the route may still be about to publish it.
-    assert tasks.sweep_stripe_events() == 0
-    assert event_id not in published_ids()
-
-    _backdate(shop, event_id, settings.STRIPE_EVENT_SWEEP_AFTER_MINUTES + 1)
+    # The route knows it could not publish: the event is marked and the
+    # sweeper's next run takes it, not the one 20 minutes on (F-CHAOS-3:
+    # a payment confirmed during a Redis freeze reached its order 21
+    # minutes later).
+    assert _last_error(shop, event_id) == stripe_events.NOT_ENQUEUED
     assert tasks.sweep_stripe_events() == 1
+    assert published_ids().count(event_id) == 1
+    assert _last_error(shop, event_id) is None
+
+    # Published once: the next runs leave it to the worker.
+    assert tasks.sweep_stripe_events() == 0
     assert published_ids().count(event_id) == 1
 
     assert run_event(event_id) == {"status": "processed", "applied": True}
@@ -302,6 +308,50 @@ def test_the_sweeper_finds_an_event_the_broker_never_got_and_the_worker_applies_
     assert [(e[0], e[4]) for e in outbox.take()] == [("status_update", "paid")]
     # Done: the next sweep leaves it alone.
     assert tasks.sweep_stripe_events() == 0
+
+
+def _last_error(shop, event_id):
+    shop.db.expire_all()
+    return shop.db.scalars(
+        select(WebhookEvent.last_error).where(WebhookEvent.event_id == event_id)
+    ).one()
+
+
+def test_a_received_event_waiting_in_a_long_queue_gets_no_second_message(shop):
+    # Published, not yet taken by a busy worker: only the 20-minute rule
+    # applies, so the sweeper adds no duplicates when the queue is longest.
+    waiting = _stored(shop, "received", settings.STRIPE_EVENT_SWEEP_AFTER_MINUTES - 1)
+
+    assert tasks.sweep_stripe_events() == 0
+    assert waiting not in published_ids()
+
+
+def test_only_the_not_enqueued_mark_takes_an_event_early(shop):
+    # A replayed event keeps its last processing error; that text is not
+    # the mark, so it waits like any other received event.
+    replayed = _stored(shop, "received", 1, last_error="ValueError: boom")
+    marked = _stored(shop, "received", 0, last_error=stripe_events.NOT_ENQUEUED)
+
+    assert tasks.sweep_stripe_events() == 1
+    ids = published_ids()
+    assert marked in ids and replayed not in ids
+    assert _last_error(shop, replayed) == "ValueError: boom"
+
+
+def test_a_marked_event_stays_marked_while_the_broker_is_still_down(shop, monkeypatch):
+    event_id = _stored(shop, "received", 0, last_error=stripe_events.NOT_ENQUEUED)
+    real_publish = tasks.process_stripe_event.apply_async
+
+    def _broker_down(*args, **kwargs):
+        raise ConnectionError("broker down")
+
+    monkeypatch.setattr(tasks.process_stripe_event, "apply_async", _broker_down)
+    assert tasks.sweep_stripe_events() == 0
+    assert _last_error(shop, event_id) == stripe_events.NOT_ENQUEUED
+
+    monkeypatch.setattr(tasks.process_stripe_event, "apply_async", real_publish)
+    assert tasks.sweep_stripe_events() == 1
+    assert _last_error(shop, event_id) is None
 
 
 # -- Two workers, one event -------------------------------------------------------
@@ -626,11 +676,11 @@ def test_the_backoff_follows_the_settings(monkeypatch):
 
 # -- The beat schedule -------------------------------------------------------------------
 
-def test_the_sweeper_runs_every_few_minutes_on_the_payments_queue():
+def test_the_sweeper_runs_every_minute_on_the_payments_queue():
     entry = tasks.celery.conf.beat_schedule["sweep-stripe-events"]
 
     assert entry["task"] == "sweep_stripe_events"
-    assert entry["schedule"] == timedelta(minutes=5)
+    assert entry["schedule"] == timedelta(minutes=1)
     assert entry["task"] in tasks.celery.tasks
     assert tasks.celery.tasks["sweep_stripe_events"].queue == "payments"
     assert tasks.celery.tasks["process_stripe_event"].queue == "payments"
@@ -646,10 +696,10 @@ def test_the_retry_limit_is_the_events_own_not_celerys():
 
 # -- The sweeper -------------------------------------------------------------------------
 
-def _stored(shop, status, minutes_old, event_type="payment_intent.created"):
+def _stored(shop, status, minutes_old, event_type="payment_intent.created", last_error=None):
     event_id = _new_id()
     shop.db.add(WebhookEvent(
-        event_id=event_id, event_type=event_type, status=status,
+        event_id=event_id, event_type=event_type, status=status, last_error=last_error,
         payload=json.dumps({"id": event_id, "type": event_type, "data": {"object": {}}}),
         created_at=utc_now() - timedelta(minutes=minutes_old),
         updated_at=utc_now() - timedelta(minutes=minutes_old)))

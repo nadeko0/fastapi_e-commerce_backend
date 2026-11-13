@@ -507,11 +507,14 @@ class Settings(BaseSettings):
     STRIPE_EVENT_MAX_RETRIES: int = Field(10, ge=0)
     STRIPE_EVENT_RETRY_BASE_SECONDS: int = Field(30, ge=1)
     STRIPE_EVENT_RETRY_MAX_SECONDS: int = Field(900, ge=1, le=3000)
-    # The sweeper (every 5 minutes) enqueues the events still "received" or
+    # The sweeper (every minute) enqueues the events still "received" or
     # "retrying" that have not changed for this long - their task message was
-    # lost (broker down when the route enqueued, worker killed). Longer than
+    # lost (worker killed, broker restarted). Longer than
     # STRIPE_EVENT_RETRY_MAX_SECONDS, so it never races a retry still
-    # waiting for its backoff. At most STRIPE_EVENT_SWEEP_BATCH per run.
+    # waiting for its backoff. An event the route could not publish at all
+    # (broker down) is marked and enqueued on the next run instead
+    # (stripe_events.mark_not_enqueued). At most STRIPE_EVENT_SWEEP_BATCH
+    # per run.
     STRIPE_EVENT_SWEEP_AFTER_MINUTES: int = Field(20, ge=1)
     STRIPE_EVENT_SWEEP_BATCH: int = Field(200, ge=1)
 

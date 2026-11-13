@@ -158,6 +158,7 @@ def test_replay_with_the_broker_down_keeps_the_event_for_the_sweeper(
     shop, admin, monkeypatch, caplog
 ):
     event_id = _store(shop, "failed")
+    real_publish = tasks.process_stripe_event.apply_async
 
     def _broker_down(*args, **kwargs):
         raise ConnectionError("broker down")
@@ -170,6 +171,11 @@ def test_replay_with_the_broker_down_keeps_the_event_for_the_sweeper(
     assert response.json()["status"] == "received"
     assert event_id not in published_ids()
     assert any(event_id in r.getMessage() for r in caplog.records)
+
+    # Marked, so the sweeper's next run publishes it.
+    monkeypatch.setattr(tasks.process_stripe_event, "apply_async", real_publish)
+    assert tasks.sweep_stripe_events() == 1
+    assert event_id in published_ids()
 
 
 # -- The whole path ------------------------------------------------------------------
