@@ -170,7 +170,7 @@ def test_a_verification_link_for_an_account_that_is_gone_is_404(client):
 def test_resend_queues_a_fresh_link_for_an_unverified_account(client, monkeypatch):
     sent = []
     monkeypatch.setattr(
-        "app.api.v1.users.send_email_verification",
+        "app.api.v1.users.auth.send_email_verification",
         lambda to_email, token: sent.append((to_email, token)),
     )
     client.post(f"{USERS}/register", json=_registration())

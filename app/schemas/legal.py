@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Reused rather than redefined: app.schemas.user.ConsentHistory has the
 # identical shape (both were unified to match the one
-# User.consent_history entry format written by app/api/v1/users.py and
+# User.consent_history entry format written by app/api/v1/users/ and
 # app/services/gdpr.py) - two classes with the same name and shape in
 # different modules also collided in the generated OpenAPI schema
 # (FastAPI disambiguates same-named schemas with an ugly

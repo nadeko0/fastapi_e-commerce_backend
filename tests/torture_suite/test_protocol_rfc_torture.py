@@ -146,8 +146,8 @@ def api(monkeypatch, fake_redis):
     """The real app, but a server error comes back as the 500 response a
     client would see (so its problem document can be checked) instead of
     being re-raised into the test."""
-    monkeypatch.setattr("app.api.v1.users.send_welcome_email", lambda *a, **k: True)
-    monkeypatch.setattr("app.api.v1.users.send_account_exists_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.users.auth.send_welcome_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.users.auth.send_account_exists_email", lambda *a, **k: True)
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
 

@@ -25,8 +25,8 @@ from app.core.errors import Problem
 logger = logging.getLogger(__name__)
 
 # Defense-in-depth against connection-pool leaks (see the long comments in
-# login()/reset_password() in app/api/v1/users.py and register_user() for the
-# app-level fixes): even with every known code path fixed to release its
+# login() and register_user() in app/api/v1/users/auth.py and reset_password()
+# in app/api/v1/users/password.py for the app-level fixes): even with every known code path fixed to release its
 # connection before an await, FastAPI's own generator-dependency teardown
 # (fastapi.concurrency.contextmanager_in_threadpool) has no `finally` around
 # its yield - a cancellation delivered while a request is suspended anywhere

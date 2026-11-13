@@ -42,7 +42,7 @@ def _login(client):
 
 
 def test_the_account_lifecycle_logs_no_personal_data(client, every_log_line, monkeypatch):
-    monkeypatch.setattr("app.api.v1.users.send_password_reset_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.users.password.send_password_reset_email", lambda *a, **k: True)
     client.post(f"{USERS}/register", json={
         "email": EMAIL, "password": PASSWORD, "full_name": NAME, "phone": PHONE,
         "gdpr_consent": True, "privacy_policy_accepted": True,

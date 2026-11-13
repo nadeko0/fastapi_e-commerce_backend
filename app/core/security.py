@@ -327,7 +327,7 @@ def token_check_unavailable() -> Problem:
 #   the route's own session, filtered by current_user.id.
 # - Changing an attribute changes this object only. To update the user, load
 #   the row in the route's own session (see update_current_user
-#   in app/api/v1/users.py) and change that one.
+#   in app/api/v1/users/profile.py) and change that one.
 async def get_current_user(
     db: DbSession,
     token: Annotated[str, Depends(oauth2_scheme)],

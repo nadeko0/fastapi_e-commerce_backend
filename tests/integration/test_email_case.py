@@ -84,7 +84,7 @@ def test_password_reset_finds_the_account_in_any_case(client, db_session, monkey
     _legacy_account(db_session, "Legacy.User@Example.com")
     sent = []
     monkeypatch.setattr(
-        "app.api.v1.users.send_password_reset_email",
+        "app.api.v1.users.password.send_password_reset_email",
         lambda to_email, token: sent.append((to_email, token)),
     )
 
@@ -148,7 +148,7 @@ def test_password_reset_finds_the_account_by_either_form(client, monkeypatch):
     client.post(f"{USERS}/register", json=_registration(NFC))
     sent = []
     monkeypatch.setattr(
-        "app.api.v1.users.send_password_reset_email",
+        "app.api.v1.users.password.send_password_reset_email",
         lambda to_email, token: sent.append(to_email),
     )
 

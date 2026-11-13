@@ -349,7 +349,7 @@ def test_login_is_refused_while_its_failure_count_cannot_be_kept(
     async def must_not_run(*args, **kwargs):
         raise AssertionError("bcrypt was run while the attempt could not be counted")
 
-    monkeypatch.setattr("app.api.v1.users.verify_password_async", must_not_run)
+    monkeypatch.setattr("app.api.v1.users.auth.verify_password_async", must_not_run)
 
     for password in ["wrong-password"] * 5 + [payload["password"]]:
         refused = login(client, payload["email"], password)
@@ -464,7 +464,7 @@ def test_a_refused_attempt_is_not_judged_at_all(client, limits, monkeypatch, val
     async def must_not_run(*args, **kwargs):
         raise AssertionError("bcrypt was run for a refused attempt")
 
-    monkeypatch.setattr("app.api.v1.users.verify_password_async", must_not_run)
+    monkeypatch.setattr("app.api.v1.users.auth.verify_password_async", must_not_run)
     assert login(client, payload["email"], payload["password"]).status_code == 429
 
 

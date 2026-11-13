@@ -57,11 +57,11 @@ def _registration_mail(monkeypatch):
     account" mails, by recipient."""
     sent = {"welcome": [], "exists": []}
     monkeypatch.setattr(
-        "app.api.v1.users.send_welcome_email",
+        "app.api.v1.users.auth.send_welcome_email",
         lambda to_email, *args: sent["welcome"].append(to_email),
     )
     monkeypatch.setattr(
-        "app.api.v1.users.send_account_exists_email",
+        "app.api.v1.users.auth.send_account_exists_email",
         lambda to_email, *args: sent["exists"].append(to_email),
         raising=False,
     )
@@ -259,7 +259,7 @@ def test_login_runs_bcrypt_even_for_nonexistent_email(client, monkeypatch):
         calls.append(args)
         return await original(*args, **kwargs)
 
-    monkeypatch.setattr("app.api.v1.users.verify_password_async", spy)
+    monkeypatch.setattr("app.api.v1.users.auth.verify_password_async", spy)
 
     response = client.post(
         f"{API_PREFIX}/login",
@@ -292,7 +292,7 @@ def test_login_refuses_a_deactivated_account_like_a_wrong_password(
         calls.append(args)
         return await original(*args, **kwargs)
 
-    monkeypatch.setattr("app.api.v1.users.verify_password_async", spy)
+    monkeypatch.setattr("app.api.v1.users.auth.verify_password_async", spy)
 
     right_password = client.post(
         f"{API_PREFIX}/login",
@@ -448,7 +448,7 @@ def test_password_reset_is_503_and_changes_nothing_when_old_tokens_cannot_be_rev
     async def cannot_record(user_id):
         return False
 
-    monkeypatch.setattr("app.api.v1.users.invalidate_tokens_issued_before_now", cannot_record)
+    monkeypatch.setattr("app.api.v1.users.password.invalidate_tokens_issued_before_now", cannot_record)
     email = valid_registration_payload["email"]
     client.post(f"{API_PREFIX}/register", json=valid_registration_payload)
     reset_token = _reset_token_for(email)
@@ -557,7 +557,7 @@ def _emailed_reset_token(client, monkeypatch, email):
     path (POST /password/reset) rather than minted by the test."""
     sent = []
     monkeypatch.setattr(
-        "app.api.v1.users.send_password_reset_email",
+        "app.api.v1.users.password.send_password_reset_email",
         lambda to_email, token: sent.append(token),
     )
     response = client.post(f"{API_PREFIX}/password/reset", json={"email": email})

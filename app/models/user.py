@@ -67,7 +67,7 @@ class User(Base):
         # is case-sensitive, and "Case@x.com" next to "case@x.com" were two
         # accounts. Created by migration 3f6c2a9d1b7e, which first refuses
         # to run while such duplicates exist. Also what the lookups by email
-        # (lower(email) = ...) in app/api/v1/users.py use.
+        # (lower(email) = ..., app/api/v1/users/_common.py) use.
         Index('uq_users_email_lower', func.lower(email), unique=True),
     )
 

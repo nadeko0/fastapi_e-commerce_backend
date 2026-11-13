@@ -264,7 +264,7 @@ async def _load_user(db: AsyncSession, user_id: int) -> User:
     callable get_current_user uses, so FastAPI's per-request dependency cache
     hands both the same AsyncSession (idle at route start): loading the row
     here attaches it to that session, and the service's commit stores the
-    change. Same pattern as update_current_user in app/api/v1/users.py.
+    change. Same pattern as update_current_user in app/api/v1/users/profile.py.
     """
     user = await db.get(User, user_id)
     if user is None:
@@ -315,7 +315,7 @@ async def update_user_consent(
         # request.client can be None (e.g. some ASGI transports/test
         # clients don't set it) - every other endpoint in this codebase that
         # records an IP address (see register_user in
-        # app/api/v1/users.py) guards against that instead of assuming
+        # app/api/v1/users/auth.py) guards against that instead of assuming
         # .client is always present, which would otherwise raise
         # AttributeError and turn a routine consent update into a 500.
         ip_address=request.client.host if request.client else None,

@@ -22,7 +22,7 @@ from sqlalchemy import event, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 
-import app.api.v1.users as users_mod
+import app.api.v1.users.auth as users_mod
 import app.core.security as sec
 from app import tasks
 from app.core.clock import utc_now

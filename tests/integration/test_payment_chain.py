@@ -161,7 +161,7 @@ def test_guest_to_refund_journey(client, shop, outbox, provider_calls, currency,
 
     # 2. Signs up, verifies the address, logs in: the guest cart is merged.
     tokens = []
-    monkeypatch.setattr("app.api.v1.users.send_welcome_email",
+    monkeypatch.setattr("app.api.v1.users.auth.send_welcome_email",
                         lambda email, name, token: tokens.append(token) or True)
     email = f"journey-{uuid.uuid4().hex[:8]}@example.com"
     registered = visitor.post(f"{USERS}/register", json={

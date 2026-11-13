@@ -201,7 +201,7 @@ def send_low_stock_alert_email(to_email: str, products: Sequence[Product]) -> bo
 def send_welcome_email(to_email: str, full_name: str | None, verification_token: str) -> bool:
     verification_link = _frontend_link(VERIFY_EMAIL_PAGE_PATH, verification_token)
     # full_name is attacker-controlled (the caller-supplied name at
-    # registration, app/api/v1/users.py) and was previously interpolated
+    # registration, app/api/v1/users/auth.py) and was previously interpolated
     # into this HTML email unescaped - a name like
     # `<img src=x onerror=...>` would be embedded verbatim into the HTML
     # body an email client renders. Escaped here at the point of use,

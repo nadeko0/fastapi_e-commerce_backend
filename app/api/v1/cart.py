@@ -198,7 +198,7 @@ def _sync_guest_cart_cookie(response: Response, owner: CartOwner, cart: Cart) ->
 async def merge_guest_cart_on_login_async(
     request: Request, response: Response, user_id: int, redis: AsyncRedisService
 ) -> None:
-    """Called by login (app/api/v1/users.py) once the user is authenticated:
+    """Called by login (app/api/v1/users/auth.py) once the user is authenticated:
     if the request carries a guest cart cookie, merge that cart into the
     account's and retire the identifier.
 

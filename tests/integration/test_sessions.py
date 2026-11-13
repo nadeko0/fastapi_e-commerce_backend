@@ -74,7 +74,7 @@ def test_every_kind_of_refusal_looks_the_same_and_costs_one_bcrypt(
         calls.append(args)
         return await original(*args)
 
-    monkeypatch.setattr("app.api.v1.users.verify_password_async", counting)
+    monkeypatch.setattr("app.api.v1.users.auth.verify_password_async", counting)
 
     answers = [
         _login(client, EMAIL, "Wr0ngPassword"),
@@ -455,7 +455,7 @@ def test_a_reset_with_a_weak_new_password_is_422_and_spends_nothing(client, db_s
 def test_a_reset_request_for_an_unknown_email_looks_like_any_other(client, monkeypatch):
     sent = []
     monkeypatch.setattr(
-        "app.api.v1.users.send_password_reset_email", lambda *args: sent.append(args)
+        "app.api.v1.users.password.send_password_reset_email", lambda *args: sent.append(args)
     )
     _register(client)
 
