@@ -2009,6 +2009,17 @@
             "title": "Currency",
             "type": "string"
           },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderPaymentDisputeEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What Stripe last reported about the dispute's evidence; null until an event carried it (a dispute recorded before evidence was stored shows null until its next event)."
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -2067,9 +2078,90 @@
           "status",
           "reason",
           "closed_at",
-          "created_at"
+          "created_at",
+          "evidence"
         ],
         "title": "OrderPaymentDispute",
+        "type": "object"
+      },
+      "OrderPaymentDisputeEvidence": {
+        "description": "Stripe's Dispute.evidence_details as last reported by a charge.dispute.* event.",
+        "properties": {
+          "due_by": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Deadline for submitting evidence (or, during an appeal, the appeal).",
+            "title": "Due By"
+          },
+          "has_evidence": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evidence has been staged for this dispute.",
+            "title": "Has Evidence"
+          },
+          "past_due": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The deadline passed without a submission.",
+            "title": "Past Due"
+          },
+          "submission_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many times evidence was submitted.",
+            "title": "Submission Count"
+          },
+          "submission_method": {
+            "anyOf": [
+              {
+                "enum": [
+                  "manual",
+                  "smart_disputes",
+                  "not_submitted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How evidence was submitted, as Stripe reports it. Stripe may add values.",
+            "title": "Submission Method"
+          }
+        },
+        "required": [
+          "due_by",
+          "has_evidence",
+          "past_due",
+          "submission_count",
+          "submission_method"
+        ],
+        "title": "OrderPaymentDisputeEvidence",
         "type": "object"
       },
       "OrderPaymentList": {

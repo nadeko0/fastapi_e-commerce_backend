@@ -151,3 +151,31 @@ def test_an_appealed_dispute_is_still_open_and_holds_the_order(shop, payment, st
     refund = shop.refund(shop.admin(), payment.order_id)
     assert refund.status_code == 409, refund.text
     assert "disput" in refund.json()["detail"]
+
+
+def _admin_view_disputes(shop, payment):
+    response = shop.client.get(f"/api/v1/orders/{payment.order_id}/payments",
+                               headers=shop.admin())
+    assert response.status_code == 200, response.text
+    (paid,) = [p for p in response.json()["items"] if p["status"] == "succeeded"]
+    return paid["disputes"]
+
+
+def test_the_admin_payments_view_shows_the_evidence_state(shop, payment):
+    shop.webhook("charge.dispute.created", _dispute(payment, "needs_response", {
+        "due_by": DUE_BY, "has_evidence": True, "past_due": False,
+        "submission_count": 1, "submission_method": "manual"}))
+
+    (dispute,) = _admin_view_disputes(shop, payment)
+
+    assert dispute["evidence"] == {
+        "due_by": "2026-11-18T11:06:40Z", "has_evidence": True, "past_due": False,
+        "submission_count": 1, "submission_method": "manual"}
+
+
+def test_a_dispute_never_reported_with_evidence_shows_null(shop, payment):
+    shop.webhook("charge.dispute.created", _dispute(payment, "needs_response"))
+
+    (dispute,) = _admin_view_disputes(shop, payment)
+
+    assert dispute["evidence"] is None

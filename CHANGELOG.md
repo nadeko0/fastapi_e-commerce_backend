@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Migration `0c86df1cbf98` adds five nullable columns to `payment_disputes` (evidence deadline and state). Run `docker compose --profile migrate run --rm migrate` before starting the new image.
 
 ### Added
-- Each dispute stores what Stripe reports about its evidence (`Dispute.evidence_details`): the deadline (`due_by`), whether evidence was staged and submitted, whether it is past due, how many times it was submitted and how (`manual`, `smart_disputes`, `not_submitted`). Updated on every `charge.dispute.*` event; disputes stored before this release show nothing until their next event.
+- Each dispute stores what Stripe reports about its evidence (`Dispute.evidence_details`): the deadline (`due_by`), whether evidence was staged and submitted, whether it is past due, how many times it was submitted and how (`manual`, `smart_disputes`, `not_submitted`). Updated on every `charge.dispute.*` event; disputes stored before this release show nothing until their next event. The admin payments view (`GET /api/v1/orders/{order_id}/payments`) shows it per dispute as `evidence` (null until reported).
 - OpenAPI: a dispute's `status` lists Stripe's appeal stage, `appeal_needs_response` and `appeal_under_review` (API 2026-09-30.endive and later). Such a dispute was already treated as open (order on hold, no refund); only the published values were missing.
 
 ### Fixed

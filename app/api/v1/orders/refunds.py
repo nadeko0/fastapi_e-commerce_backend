@@ -36,6 +36,7 @@ from app.schemas.common import Int32
 from app.schemas.order import (
     OrderPayment,
     OrderPaymentDispute,
+    OrderPaymentDisputeEvidence,
     OrderPaymentList,
     OrderPaymentRefund,
     PaymentStatus,
@@ -339,6 +340,20 @@ async def list_order_payments(
                     reason=d.reason,
                     closed_at=d.closed_at,
                     created_at=d.created_at,
+                    evidence=(
+                        OrderPaymentDisputeEvidence(
+                            due_by=d.evidence_due_by,
+                            has_evidence=d.evidence_has_evidence,
+                            past_due=d.evidence_past_due,
+                            submission_count=d.evidence_submission_count,
+                            submission_method=d.evidence_submission_method,
+                        )
+                        if any(value is not None for value in (
+                            d.evidence_due_by, d.evidence_has_evidence, d.evidence_past_due,
+                            d.evidence_submission_count, d.evidence_submission_method,
+                        ))
+                        else None
+                    ),
                 )
                 for d in disputes if d.payment_id == p.id
             ],

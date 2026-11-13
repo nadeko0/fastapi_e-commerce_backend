@@ -463,6 +463,21 @@ class OrderPaymentRefund(ResponseBody):
     requires_manual_review: bool
     created_at: datetime
 
+class OrderPaymentDisputeEvidence(ResponseBody):
+    """Stripe's Dispute.evidence_details as last reported by a charge.dispute.* event."""
+    due_by: datetime | None = Field(
+        None, description="Deadline for submitting evidence (or, during an appeal, the appeal)."
+    )
+    has_evidence: bool | None = Field(None, description="Evidence has been staged for this dispute.")
+    past_due: bool | None = Field(None, description="The deadline passed without a submission.")
+    submission_count: int | None = Field(None, description="How many times evidence was submitted.")
+    submission_method: Annotated[
+        str, published_values(("manual", "smart_disputes", "not_submitted"))
+    ] | None = Field(
+        None, description="How evidence was submitted, as Stripe reports it. Stripe may add values."
+    )
+
+
 class OrderPaymentDispute(ResponseBody):
     id: str
     amount: ResponseMoney
@@ -478,6 +493,13 @@ class OrderPaymentDispute(ResponseBody):
     )
     closed_at: datetime | None = None
     created_at: datetime
+    evidence: OrderPaymentDisputeEvidence | None = Field(
+        None,
+        description=(
+            "What Stripe last reported about the dispute's evidence; null until an event carried it "
+            "(a dispute recorded before evidence was stored shows null until its next event)."
+        ),
+    )
 
 class OrderPayment(ResponseBody):
     """One payment attempt of an order with its refunds and disputes (admin view)."""
