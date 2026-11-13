@@ -169,14 +169,7 @@ async def create_checkout_session(
             return _replay_checkout_session(existing_payment, order)
         retried_attempt = existing_payment
 
-    _guard_order_payable(order)
-    if retried_attempt is None:
-        _guard_payment_window_open(order)
-    await db.run_sync(
-        _guard_no_attempt_in_flight, order,
-        except_payment_id=retried_attempt.id if retried_attempt else None,
-    )
-    _guard_currency_matches_order(payload.currency, order)
+    await _check_request(db, order, payload, retried_attempt)
 
     amount_cents = _decimal_to_cents(order.total_amount)
     provider_idempotency_key = _provider_idempotency_key("checkout", order, idempotency_key)
@@ -223,6 +216,35 @@ async def create_checkout_session(
             # index can fail this INSERT.
             raise  # pragma: no cover
 
+    session = await _open_session(
+        db, provider, order, payment_row, retried_attempt, amount_cents,
+        provider_idempotency_key, success_url, cancel_url,
+    )
+
+    payment_row.checkout_session_id = session.id
+    payment_row.checkout_session_url = session.url
+    await db.commit()
+
+    return _checkout_session_row_to_response(payment_row, order)
+
+
+async def _check_request(db, order, payload, retried_attempt) -> None:
+    """Validate that the order and checkout session parameters accept a new or retried attempt."""
+    _guard_order_payable(order)
+    if retried_attempt is None:
+        _guard_payment_window_open(order)
+    await db.run_sync(
+        _guard_no_attempt_in_flight, order,
+        except_payment_id=retried_attempt.id if retried_attempt else None,
+    )
+    _guard_currency_matches_order(payload.currency, order)
+
+
+async def _open_session(
+    db, provider, order, payment_row, retried_attempt, amount_cents,
+    provider_idempotency_key, success_url, cancel_url,
+):
+    """Create a checkout session with the provider."""
     try:
         session = await run_in_threadpool(
             provider.create_checkout_session,
@@ -282,8 +304,4 @@ async def create_checkout_session(
             detail="The checkout session could not be created: the payment details were not accepted",
         ) from e
 
-    payment_row.checkout_session_id = session.id
-    payment_row.checkout_session_url = session.url
-    await db.commit()
-
-    return _checkout_session_row_to_response(payment_row, order)
+    return session

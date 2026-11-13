@@ -109,6 +109,64 @@ async def refund_payment(
             detail="Order not found"
         )
 
+    payment_row = await _refundable_charge(db, order)
+
+    refund_amount_cents = (
+        _decimal_to_cents(refund_request.amount) if refund_request.amount is not None else None
+    )
+
+    # Nothing above wrote anything, but the two reads opened a transaction
+    # and with it checked out a connection. End it before waiting on the
+    # provider (see the note in process_payment): a pooled connection must not sit
+    # idle in a transaction for the length of an external HTTP call.
+    # expire_on_commit is off, so `order` and `payment_row` stay usable.
+    payment_intent_id = payment_row.payment_intent_id
+    await db.commit()
+
+    refund = await _create_refund(
+        provider, order, payment_row, payment_intent_id, refund_amount_cents, idempotency_key
+    )
+
+    # The provider's word on this charge's other refunds, read before taking
+    # the lock. A refund that failed at the provider after being recorded
+    # still counts in amount_refunded until refund.failed is processed;
+    # reconciling here avoids violating ck_payment_refunded_within_amount.
+    try:
+        provider_refunds = await run_in_threadpool(provider.list_refunds, payment_intent_id)
+    except PaymentProviderError:
+        provider_refunds = []
+
+    # Re-read under the order's lock before adding to it: payment_row was
+    # read before the provider call, and another refund of this charge may
+    # have been recorded since. Adding to that stale copy overwrote it - two
+    # refunds taken by the provider, one recorded, and an order whose
+    # refunds covered the charge left "paid".
+    await db.run_sync(_lock_order_and_reload, order, payment_row)
+
+    refund_row = await db.run_sync(
+        _record_and_settle, order, payment_row, refund, provider_refunds
+    )
+    order.updated_at = utc_now()
+    await db.commit()
+
+    return RefundResponse(
+        id=refund.id,
+        order_id=order.id,
+        amount=_cents_to_decimal(refund_row.amount),
+        # The charge's own code, as on the order and the payment: Stripe
+        # reports currencies in lower case and the live provider passes
+        # Refund.currency through as sent, so this answered "usd" for a
+        # USD order.
+        currency=payment_row.currency,
+        # As recorded: a replay, or a request whose refund a webhook has
+        # already reported, says where the refund is now.
+        status=refund_row.status,
+        payment_status=order.payment_status,
+    )
+
+
+async def _refundable_charge(db: DbSession, order: Order) -> Payment:
+    """Find the succeeded payment attempt that can be refunded for this order."""
     if order.payment_status != PaymentStatus.PAID:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
@@ -146,18 +204,13 @@ async def refund_payment(
             detail="This payment is disputed; it cannot be refunded while the dispute is open",
         )
 
-    refund_amount_cents = (
-        _decimal_to_cents(refund_request.amount) if refund_request.amount is not None else None
-    )
+    return payment_row
 
-    # Nothing above wrote anything, but the two reads opened a transaction
-    # and with it checked out a connection. End it before waiting on the
-    # provider (see the note in process_payment): a pooled connection must not sit
-    # idle in a transaction for the length of an external HTTP call.
-    # expire_on_commit is off, so `order` and `payment_row` stay usable.
-    payment_intent_id = payment_row.payment_intent_id
-    await db.commit()
 
+async def _create_refund(
+    provider, order, payment_row, payment_intent_id, refund_amount_cents, idempotency_key
+):
+    """Call the payment provider to create the refund and translate provider errors."""
     try:
         refund = await run_in_threadpool(
             provider.create_refund,
@@ -201,69 +254,40 @@ async def refund_payment(
             detail = "The refund could not be processed: the payment provider refused it"
         raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=detail) from e
 
-    # The provider's word on this charge's other refunds, read before taking
-    # the lock. A refund that failed at the provider after being recorded
-    # still counts in amount_refunded until refund.failed is processed;
-    # reconciling here avoids violating ck_payment_refunded_within_amount.
-    try:
-        provider_refunds = await run_in_threadpool(provider.list_refunds, payment_intent_id)
-    except PaymentProviderError:
-        provider_refunds = []
+    return refund
 
-    # Re-read under the order's lock before adding to it: payment_row was
-    # read before the provider call, and another refund of this charge may
-    # have been recorded since. Adding to that stale copy overwrote it - two
-    # refunds taken by the provider, one recorded, and an order whose
-    # refunds covered the charge left "paid".
-    await db.run_sync(_lock_order_and_reload, order, payment_row)
 
-    def _sync_and_settle(db_session: Session) -> PaymentRefund:
-        recorded = set(db_session.scalars(
-            select(PaymentRefund.refund_id).where(PaymentRefund.payment_id == payment_row.id)
-        ))
-        for other in provider_refunds:
-            # Only what this app counted can be overstated; a failed refund it
-            # never recorded took nothing from amount_refunded.
-            other_status = other.provider_status or other.status.value
-            if (other.id != refund.id and other.id in recorded
-                    and other_status in _REFUND_STATUSES_NOT_RETURNED):
-                _apply_refund_object(db_session, payment_row, {
-                    "id": other.id, "status": other_status, "amount": other.amount,
-                })
-        # Stripe's own status, not the folded one: a refund canceled at once
-        # was recorded as pending and counted as money on its way back.
-        row = _record_refund(
-            db_session, payment_row, refund.id, refund.amount,
-            refund.provider_status or refund.status.value, source="admin",
-        )
-        _settle_refunds(db_session, order, payment_row)
-        if _has_open_dispute(db_session, order.id, payment_row.id):
-            row.requires_manual_review = True
-            logger.warning(
-                "Payment %s has an open dispute after refund %s was issued; "
-                "money has moved, flagging refund for manual review",
-                payment_row.id, refund.id,
-            )
-        return row
-
-    refund_row = await db.run_sync(_sync_and_settle)
-    order.updated_at = utc_now()
-    await db.commit()
-
-    return RefundResponse(
-        id=refund.id,
-        order_id=order.id,
-        amount=_cents_to_decimal(refund_row.amount),
-        # The charge's own code, as on the order and the payment: Stripe
-        # reports currencies in lower case and the live provider passes
-        # Refund.currency through as sent, so this answered "usd" for a
-        # USD order.
-        currency=payment_row.currency,
-        # As recorded: a replay, or a request whose refund a webhook has
-        # already reported, says where the refund is now.
-        status=refund_row.status,
-        payment_status=order.payment_status,
+def _record_and_settle(
+    db_session: Session, order, payment_row, refund, provider_refunds
+) -> PaymentRefund:
+    """Record the refund in the ledger, reconcile any other refunds, and settle the order."""
+    recorded = set(db_session.scalars(
+        select(PaymentRefund.refund_id).where(PaymentRefund.payment_id == payment_row.id)
+    ))
+    for other in provider_refunds:
+        # Only what this app counted can be overstated; a failed refund it
+        # never recorded took nothing from amount_refunded.
+        other_status = other.provider_status or other.status.value
+        if (other.id != refund.id and other.id in recorded
+                and other_status in _REFUND_STATUSES_NOT_RETURNED):
+            _apply_refund_object(db_session, payment_row, {
+                "id": other.id, "status": other_status, "amount": other.amount,
+            })
+    # Stripe's own status, not the folded one: a refund canceled at once
+    # was recorded as pending and counted as money on its way back.
+    row = _record_refund(
+        db_session, payment_row, refund.id, refund.amount,
+        refund.provider_status or refund.status.value, source="admin",
     )
+    _settle_refunds(db_session, order, payment_row)
+    if _has_open_dispute(db_session, order.id, payment_row.id):
+        row.requires_manual_review = True
+        logger.warning(
+            "Payment %s has an open dispute after refund %s was issued; "
+            "money has moved, flagging refund for manual review",
+            payment_row.id, refund.id,
+        )
+    return row
 
 
 @router.get(
