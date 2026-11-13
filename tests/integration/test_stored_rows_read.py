@@ -254,7 +254,7 @@ def test_a_category_create_whose_response_cannot_be_built_stores_nothing(
     client, db_session, monkeypatch
 ):
     headers = _admin_headers(client, db_session)
-    monkeypatch.setattr("app.api.v1.admin.CategoryResponse", _Broken)
+    monkeypatch.setattr("app.api.v1.admin.products.CategoryResponse", _Broken)
 
     with pytest.raises(_ResponseCannotBeBuilt):
         client.post(f"{ADMIN_PREFIX}/categories", json={"name": "Garden"}, headers=headers)
@@ -281,7 +281,7 @@ def test_a_variant_create_whose_response_cannot_be_built_stores_nothing(
 ):
     headers = _admin_headers(client, db_session)
     product, _ = _stored_variant(db_session)
-    monkeypatch.setattr("app.api.v1.admin.ProductVariantResponse", _Broken)
+    monkeypatch.setattr("app.api.v1.admin.variants.ProductVariantResponse", _Broken)
 
     with pytest.raises(_ResponseCannotBeBuilt):
         client.post(f"{ADMIN_PREFIX}/products/{product.id}/variants", json={"sku": "NEW"},
@@ -295,7 +295,7 @@ def test_a_variant_update_whose_response_cannot_be_built_changes_nothing(
 ):
     headers = _admin_headers(client, db_session)
     product, variant = _stored_variant(db_session)
-    monkeypatch.setattr("app.api.v1.admin.ProductVariantResponse", _Broken)
+    monkeypatch.setattr("app.api.v1.admin.variants.ProductVariantResponse", _Broken)
 
     with pytest.raises(_ResponseCannotBeBuilt):
         client.patch(f"{ADMIN_PREFIX}/products/{product.id}/variants/{variant.id}",

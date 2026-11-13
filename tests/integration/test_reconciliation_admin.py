@@ -9,7 +9,7 @@ import pytest
 from kombu.exceptions import OperationalError
 from payment_support import PAY_OK, Shop, reset_provider
 
-from app.api.v1 import admin
+from app.api.v1.admin import reconciliation as admin
 from app.core.clock import utc_now
 from app.models.payment_discrepancy import PaymentDiscrepancy
 

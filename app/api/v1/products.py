@@ -61,7 +61,7 @@ def _to_product_response(product: Product) -> ProductResponse:
     # ProductResponse requires category_name, which is not a Product
     # column - ProductResponse.model_validate(product) always raised a 500
     # ValidationError ("category_name: Field required") for every route
-    # that didn't build the response this way. app/api/v1/admin.py's
+    # that didn't build the response this way. app/api/v1/admin/products.py's
     # create/update endpoints already do this; list_products, get_product,
     # and search_products below did not, and always 500'd.
     return ProductResponse(**product.__dict__, category_name=product.category.name)
@@ -390,7 +390,7 @@ async def list_products(
         # the schema explicitly documents as valid. rsplit from the right
         # with maxsplit=1 always yields exactly (field, order) regardless of
         # how many underscores the field name contains. Mirrors
-        # app/api/v1/admin.py's list_orders, which already uses rsplit for
+        # app/api/v1/admin/orders.py's list_orders, which already uses rsplit for
         # the same reason.
         field, order = filter_params.sort_by.rsplit('_', 1)
         column = getattr(Product, field)

@@ -20,7 +20,7 @@ from test_admin_orders import ADMIN, _admin_headers, _customer, _order
 from test_order_expiry_time import _order as _unpaid_order
 
 from app import tasks
-from app.api.v1 import admin
+from app.api.v1.admin import orders as admin
 from app.core.config import settings
 from app.core.rate_limit import Rate, seconds_until_allowed
 from app.core.security import create_access_token, create_refresh_token

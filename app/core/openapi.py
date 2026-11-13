@@ -45,7 +45,7 @@ class Problem(BaseModel):
         ),
         # Published, not enforced: this model only describes what the
         # handlers in app/core/errors.py send (the same technique as the
-        # status filters in app/api/v1/admin.py).
+        # status filters in app/api/v1/admin/orders.py).
         json_schema_extra={"enum": ["about:blank", *(problem_type.value for problem_type in ProblemType)]},
     )
     title: str = Field(description="The status phrase for about:blank, else a fixed title of the type.")

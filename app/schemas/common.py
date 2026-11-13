@@ -79,7 +79,7 @@ def published_values(values: Iterable[str]) -> Any:
     """A `Field` that lists the values a free-text response field takes in the
     OpenAPI document (`enum`) and checks nothing: a value outside the list
     (a provider adding a status) is still sent, never a 500. The same technique
-    as the status filters of app/api/v1/admin.py. Use as
+    as the status filters of app/api/v1/admin/orders.py. Use as
     `status: Annotated[str, published_values(STATUSES)]`."""
     return Field(json_schema_extra={"enum": list(values)})
 

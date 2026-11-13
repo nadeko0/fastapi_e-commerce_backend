@@ -97,7 +97,7 @@ SessionLocal = sessionmaker(
 #
 # The sync engine, SessionLocal and session_scope above are for code that
 # runs off the event loop and shares sync ORM code with Celery: today the
-# reconciliation thread in app/api/v1/admin.py (session_scope). Celery
+# reconciliation thread in app/api/v1/admin/reconciliation.py (session_scope). Celery
 # (app/tasks.py) and Alembic (migrations/env.py) build their own engines. The
 # two pools here are separate, so a worker can hold up to
 # 2 * (DB_POOL_SIZE + DB_MAX_OVERFLOW) Postgres connections.

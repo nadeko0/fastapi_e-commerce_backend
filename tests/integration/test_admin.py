@@ -663,7 +663,7 @@ def test_admin_create_variant_race_returns_409_not_500(client, db_session, monke
     )
     assert first.status_code == 201
 
-    monkeypatch.setattr("app.api.v1.admin._variant_sku_exists", _sku_never_exists)
+    monkeypatch.setattr("app.api.v1.admin.variants._variant_sku_exists", _sku_never_exists)
 
     second = client.post(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants",
@@ -901,7 +901,7 @@ def test_admin_update_variant_sku_race_returns_409(client, db_session, monkeypat
             headers=_auth_headers(admin_token),
         )
     other = db_session.query(ProductVariant).filter(ProductVariant.sku == "OTHER-SKU").one()
-    monkeypatch.setattr("app.api.v1.admin._variant_sku_exists", _sku_never_exists)
+    monkeypatch.setattr("app.api.v1.admin.variants._variant_sku_exists", _sku_never_exists)
 
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{other.id}",

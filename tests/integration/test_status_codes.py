@@ -633,7 +633,7 @@ def test_reconciliation_run_documents_its_200_and_its_202_apart(client):
 
 
 def test_the_queued_reconciliation_run_answers_202(shop, monkeypatch):
-    from app.api.v1 import admin
+    from app.api.v1.admin import reconciliation as admin
 
     monkeypatch.setattr(admin.check_payment_reconciliation, "apply_async", lambda **kw: None)
 

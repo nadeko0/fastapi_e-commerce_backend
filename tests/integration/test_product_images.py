@@ -87,7 +87,7 @@ def _break_the_response(monkeypatch):
     def broken(*args, **kwargs):
         raise _ResponseCannotBeBuilt
 
-    monkeypatch.setattr("app.api.v1.admin.ProductResponse", broken)
+    monkeypatch.setattr("app.api.v1.admin.products.ProductResponse", broken)
 
 
 def test_a_create_whose_response_cannot_be_built_stores_nothing(client, db_session, monkeypatch):
