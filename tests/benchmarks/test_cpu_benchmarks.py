@@ -6,7 +6,6 @@ and cart money and minor unit calculations.
 """
 from decimal import Decimal
 
-from app.api.v1.orders import _decimal_to_cents
 from app.core.clock import utc_now
 from app.core.etag import etag_for, if_none_match_hits
 from app.core.security import (
@@ -22,6 +21,7 @@ from app.schemas.product import (
     ProductListResponse,
     ProductResponse,
 )
+from app.services.payment.attempts import _decimal_to_cents
 
 
 def _make_sample_product_response(product_id: int) -> ProductResponse:

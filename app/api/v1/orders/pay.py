@@ -14,18 +14,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.orders._payment_helpers import (
-    _PENDING_INTENT_ID_PREFIX,
-    _decimal_to_cents,
     _ensure_same_request_in_flow,
-    _is_checkout_attempt,
     _payment_by_key,
     _payment_row_to_response,
-    _provider_idempotency_key,
     _replay_payment,
 )
 from app.api.v1.orders._payments import (
-    _apply_payment_failure,
-    _apply_payment_success,
     _guard_currency_matches_order,
     _guard_no_attempt_in_flight,
     _guard_order_payable,
@@ -50,11 +44,21 @@ from app.schemas.order import (
     PaymentResponse,
     PaymentStatus,
 )
+from app.services.payment.attempts import (
+    _PENDING_INTENT_ID_PREFIX,
+    _decimal_to_cents,
+    _is_checkout_attempt,
+    _provider_idempotency_key,
+)
 from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
     InvalidRequestError,
     PaymentProviderTimeoutError,
+)
+from app.services.payment.order_state import (
+    _apply_payment_failure,
+    _apply_payment_success,
 )
 from app.services.payment.types import PaymentIntentStatus
 

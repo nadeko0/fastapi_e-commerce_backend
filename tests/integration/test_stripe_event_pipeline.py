@@ -625,7 +625,7 @@ def test_an_email_that_fails_after_the_commit_does_not_undo_the_event(
     def _smtp_down(*args, **kwargs):
         raise RuntimeError("smtp down")
 
-    monkeypatch.setattr("app.api.v1.orders._payments.send_order_status_update_email", _smtp_down)
+    monkeypatch.setattr("app.services.payment.order_state.send_order_status_update_email", _smtp_down)
     event_id = _new_id()
     shop.webhook_raw("payment_intent.succeeded", _succeeded_object(payment), event_id=event_id)
 

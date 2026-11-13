@@ -17,13 +17,13 @@ from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from app.api.v1.orders import _cents_to_decimal, _decimal_to_cents
 from app.core.config import (
     THREE_DECIMAL_CURRENCIES,
     WHOLE_UNITS_ONLY_CURRENCIES,
     ZERO_DECIMAL_CURRENCIES,
 )
 from app.schemas.order import PaymentCreate, RefundCreate
+from app.services.payment.attempts import _cents_to_decimal, _decimal_to_cents
 from app.services.payment.exceptions import InvalidRequestError
 from app.services.payment.stripe_provider import StripePaymentProvider
 

@@ -15,9 +15,9 @@ import pytest
 from conftest import TestingSessionLocal
 from payment_support import Shop, reset_provider
 
-from app.api.v1.orders import _record_refund
 from app.models.payment_ledger import PaymentRefund
 from app.services.payment.exceptions import InvalidRequestError
+from app.services.payment.refund_ledger import _record_refund
 from app.services.payment.stripe_provider import StripePaymentProvider
 from app.services.stripe_events import apply_event
 

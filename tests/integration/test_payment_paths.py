@@ -30,7 +30,7 @@ from payment_support import (
     reset_provider,
 )
 
-import app.api.v1.orders as orders_module
+from app.api.v1.orders import _payments as orders_module
 from app.models.order import Order
 from app.models.payment import Payment
 from app.models.user import User

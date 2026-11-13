@@ -26,7 +26,6 @@ from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
 
 from app import tasks
-from app.api.v1.orders import _cents_to_decimal, _decimal_to_cents
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.currencies import MINIMUM_CHARGE
@@ -38,6 +37,7 @@ from app.models.order_items import OrderItem
 from app.models.product import Product, ProductVariant
 from app.models.user import User
 from app.schemas.order import ORDER_TOTAL_MAX
+from app.services.payment.attempts import _cents_to_decimal, _decimal_to_cents
 from app.services.payment.stripe_provider import TOKEN_SUCCESS_DEFAULT, StripePaymentProvider
 
 CART = "/api/v1/cart"
@@ -61,7 +61,7 @@ def _quiet(monkeypatch):
     for name in (
         "app.api.v1.orders.create.send_order_confirmation_email",
         "app.api.v1.orders.manage.send_order_status_update_email",
-        "app.api.v1.orders._payments.send_order_status_update_email",
+        "app.services.payment.order_state.send_order_status_update_email",
         "app.api.v1.orders.manage.send_order_cancellation_email",
     ):
         monkeypatch.setattr(name, lambda *a, **k: True)

@@ -14,11 +14,12 @@ from conftest import IS_POSTGRES, TestingSessionLocal
 from fastapi import HTTPException
 from payment_support import PAY_3DS, Outbox, Shop, new_key, reset_provider
 
-import app.api.v1.orders as orders_module
+from app.api.v1.orders import _payments as orders_module
 from app.core.idempotency import REUSED_KEY_DETAIL, ensure_same_request, request_fingerprint
 from app.models.address import Address
 from app.models.order import Order
 from app.models.payment import Payment
+from app.services.payment.attempts import _PENDING_CHECKOUT_ID_PREFIX
 from app.services.payment.stripe_provider import StripePaymentProvider
 from app.services.redis_async import AsyncRedisService
 
@@ -329,7 +330,7 @@ def test_checkout_racing_a_twin_with_another_body_answers_422(shop, monkeypatch)
 
     def _twin_records_its_attempt_first(requested_currency, order_row):
         _insert_from_another_session(Payment(
-            order_id=order_row.id, provider="stripe", payment_intent_id=f"{orders_module._PENDING_CHECKOUT_ID_PREFIX}twin",
+            order_id=order_row.id, provider="stripe", payment_intent_id=f"{_PENDING_CHECKOUT_ID_PREFIX}twin",
             idempotency_key=key, idempotency_fingerprint="0" * 64,
             amount=1999, currency="USD", status="processing",
         ))

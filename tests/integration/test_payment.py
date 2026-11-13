@@ -859,7 +859,7 @@ def test_duplicate_webhook_delivery_does_not_double_apply(client, db_session, mo
     # already is) and must not re-send the confirmation email.
     email_calls = []
     monkeypatch.setattr(
-        "app.api.v1.orders._payments.send_order_status_update_email",
+        "app.services.payment.order_state.send_order_status_update_email",
         lambda *a, **k: email_calls.append(a) or True,
     )
 
@@ -1614,7 +1614,7 @@ def test_concurrent_identical_webhook_deliveries_do_not_double_apply(client, db_
     # application) without corrupting the test harness's shared connection.
     email_calls = []
     monkeypatch.setattr(
-        "app.api.v1.orders._payments.send_order_status_update_email",
+        "app.services.payment.order_state.send_order_status_update_email",
         lambda *a, **k: email_calls.append(a) or True,
     )
 
@@ -1760,7 +1760,7 @@ def test_payment_provider_calls_run_off_the_event_loop(client, db_session, monke
     import asyncio
     import threading
 
-    from app.api.v1.orders import _payments as orders_module
+    from app.services.payment import order_state as orders_module
 
     threads = {}
     real_create = StripePaymentProvider.create_payment_intent

@@ -9,8 +9,7 @@ from app.models.payment import Payment
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute, PaymentRefund
 from app.schemas.order import PaymentStatus
 
-# The name the module had before the orders package split: log filters and
-# alerts keep matching.
+# The name the code logged under before it moved: log filters and alerts keep matching.
 logger = logging.getLogger("app.api.v1.orders")
 
 # Refund.status values (Stripe: pending, requires_action, succeeded, failed,

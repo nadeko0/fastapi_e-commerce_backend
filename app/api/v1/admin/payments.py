@@ -7,19 +7,10 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 
 from app.api.v1.admin._router import router
-from app.api.v1.orders import (
-    _REFUND_STATUSES_NOT_RETURNED,
-    DISPUTED_CHARGE_CODES,
-    REFUND_KEY_HEADER_DESCRIPTION,
-    _cents_to_decimal,
-    _has_open_dispute,
-    _lock_order_and_reload,
-    _provider_idempotency_key,
-    _record_refund,
-)
 from app.core.clock import utc_now
 from app.core.dependencies import AdminUser, DbSession, Provider
 from app.core.errors import Problem, ProblemType
+from app.core.idempotency import REFUND_KEY_HEADER_DESCRIPTION
 from app.core.openapi import (
     RETRY_AFTER_HEADER,
 )
@@ -32,12 +23,25 @@ from app.schemas.admin import (
 )
 from app.schemas.common import Int32, PaginationParams, sortable_pagination
 from app.schemas.order import RefundResponse
+from app.services.payment.attempts import (
+    _cents_to_decimal,
+    _provider_idempotency_key,
+)
 from app.services.payment.exceptions import (
     CardError,
     IdempotencyError,
     InvalidRequestError,
     PaymentProviderError,
     PaymentProviderTimeoutError,
+)
+from app.services.payment.order_state import (
+    DISPUTED_CHARGE_CODES,
+    _lock_order_and_reload,
+)
+from app.services.payment.refund_ledger import (
+    _REFUND_STATUSES_NOT_RETURNED,
+    _has_open_dispute,
+    _record_refund,
 )
 
 # The name the module had before the admin package split: log filters and alerts keep matching.

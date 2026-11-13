@@ -36,7 +36,7 @@ def _clean_state(monkeypatch):
     reset_provider()
     monkeypatch.setattr("app.api.v1.orders.create.send_order_confirmation_email", lambda *a, **k: True)
     monkeypatch.setattr("app.api.v1.orders.manage.send_order_status_update_email", lambda *a, **k: True)
-    monkeypatch.setattr("app.api.v1.orders._payments.send_order_status_update_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.services.payment.order_state.send_order_status_update_email", lambda *a, **k: True)
     monkeypatch.setattr("app.tasks.send_order_cancellation_email", lambda *a, **k: True)
     yield
     reset_provider()

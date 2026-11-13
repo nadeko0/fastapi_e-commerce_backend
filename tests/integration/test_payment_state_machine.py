@@ -360,7 +360,7 @@ def _quiet(monkeypatch):
     for name in (
         "app.api.v1.orders.create.send_order_confirmation_email",
         "app.api.v1.orders.manage.send_order_status_update_email",
-        "app.api.v1.orders._payments.send_order_status_update_email",
+        "app.services.payment.order_state.send_order_status_update_email",
         "app.api.v1.orders.manage.send_order_cancellation_email",
     ):
         monkeypatch.setattr(name, lambda *a, **k: True)

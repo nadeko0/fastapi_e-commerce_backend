@@ -72,7 +72,7 @@ def _stub_order_confirmation_email(monkeypatch):
 def status_emails(monkeypatch):
     sent = []
     monkeypatch.setattr(
-        "app.api.v1.orders._payments.send_order_status_update_email",
+        "app.services.payment.order_state.send_order_status_update_email",
         lambda email, order: sent.append(order.payment_status) or True,
     )
     return sent

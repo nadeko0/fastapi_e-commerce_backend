@@ -7,7 +7,6 @@ from decimal import Decimal
 
 import pytest
 
-from app.api.v1.orders import _cents_to_decimal, _decimal_to_cents
 from app.core.currencies import (
     STRIPE_PRESENTMENT_CURRENCIES,
     THREE_DECIMAL_CURRENCIES,
@@ -15,6 +14,7 @@ from app.core.currencies import (
     ZERO_DECIMAL_CURRENCIES,
 )
 from app.schemas.order import ORDER_AMOUNT_DECIMAL_PLACES, ORDER_AMOUNT_MAX_DIGITS
+from app.services.payment.attempts import _cents_to_decimal, _decimal_to_cents
 from app.services.payment.exceptions import InvalidRequestError
 from app.services.payment.stripe_provider import (
     TOKEN_SUCCESS_DEFAULT,

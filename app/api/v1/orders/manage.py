@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from app.api.v1.orders._create import _ORDER_RESPONSE_LOADS, _drop_product_details
-from app.api.v1.orders._refunds import _has_open_dispute
 from app.api.v1.orders._router import router
 from app.core.clock import utc_now
 from app.core.dependencies import AdminUser, Cache, CurrentUser, DbSession
@@ -40,6 +39,7 @@ from app.services.orders import (
     products_with_cached_stock,
 )
 from app.services.payment import get_payment_provider
+from app.services.payment.refund_ledger import _has_open_dispute
 
 # The transition table lives in app/services/orders.py, shared with the
 # Celery worker; kept under this name for the call sites in this module.

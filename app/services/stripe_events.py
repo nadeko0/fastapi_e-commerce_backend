@@ -6,8 +6,8 @@ mutation-tested, on their own. The webhook route verifies, stores and
 enqueues an event; the process_stripe_event task (app/tasks.py) loads the
 stored event and calls apply_event. The payment helpers that /pay and
 /refund share (the order lock, the success and failure transitions, the
-manual-review flag, the refund ledger) stay in app/api/v1/orders/ and are
-imported from there.
+manual-review flag, the refund ledger) live in app/services/payment/
+(order_state, refund_ledger, attempts).
 """
 import json
 import logging
@@ -20,19 +20,6 @@ from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.v1.orders import (
-    _MANUAL_REVIEW_RESPONSE,
-    _PENDING_CHECKOUT_ID_PREFIX,
-    _PENDING_INTENT_ID_PREFIX,
-    TaskQueue,
-    _apply_payment_failure,
-    _apply_payment_success,
-    _apply_refund_object,
-    _flag_payment_for_manual_review,
-    _is_checkout_row,
-    _reported_charge_matches_order,
-    _settle_refunds,
-)
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.models.order import Order
@@ -46,6 +33,23 @@ from app.models.payment import (
 )
 from app.models.payment_ledger import DISPUTE_CLOSED_STATUSES, PaymentDispute
 from app.models.user import User
+from app.services.payment.attempts import (
+    _PENDING_CHECKOUT_ID_PREFIX,
+    _PENDING_INTENT_ID_PREFIX,
+    _is_checkout_row,
+)
+from app.services.payment.order_state import (
+    _MANUAL_REVIEW_RESPONSE,
+    TaskQueue,
+    _apply_payment_failure,
+    _apply_payment_success,
+    _flag_payment_for_manual_review,
+    _reported_charge_matches_order,
+)
+from app.services.payment.refund_ledger import (
+    _apply_refund_object,
+    _settle_refunds,
+)
 
 logger = logging.getLogger(__name__)
 

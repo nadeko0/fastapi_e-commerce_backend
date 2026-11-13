@@ -50,7 +50,7 @@ ORDER_EMAILS = {
     "confirmation": "app.api.v1.orders.create.send_order_confirmation_email",
     "status_update": (
         "app.api.v1.orders.manage.send_order_status_update_email",
-        "app.api.v1.orders._payments.send_order_status_update_email",
+        "app.services.payment.order_state.send_order_status_update_email",
     ),
     "cancellation": "app.api.v1.orders.manage.send_order_cancellation_email",
 }

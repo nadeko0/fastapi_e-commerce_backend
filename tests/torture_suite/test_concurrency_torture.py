@@ -732,7 +732,7 @@ def test_webhook_redeliveries_and_workers_apply_once(shop, round_):
     outbox = Outbox.__new__(Outbox)
     outbox.sent = []
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("app.api.v1.orders._payments.send_order_status_update_email",
+        mp.setattr("app.services.payment.order_state.send_order_status_update_email",
                    outbox._recorder("status_update"))
         body, headers = _intent_event(attempt.payment_intent_id, order["id"], attempt.amount,
                                       attempt.currency, buyer.email)

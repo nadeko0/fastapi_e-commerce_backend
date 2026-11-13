@@ -497,7 +497,7 @@ def test_a_payment_completing_after_erasure_sends_no_mail(client, db_session, mo
     shop.db.commit()
     sent = []
     monkeypatch.setattr(
-        "app.api.v1.orders._payments.send_order_status_update_email", lambda *a, **k: sent.append(a)
+        "app.services.payment.order_state.send_order_status_update_email", lambda *a, **k: sent.append(a)
     )
 
     assert shop.intent_event("payment_intent.succeeded", attempt).status_code == 200
