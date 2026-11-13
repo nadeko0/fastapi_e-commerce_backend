@@ -43,8 +43,9 @@ from app.services.payment.stripe_provider import TOKEN_SUCCESS_DEFAULT, StripePa
 @pytest.fixture(autouse=True)
 def _quiet(monkeypatch):
     StripePaymentProvider.reset_mock_state()
-    monkeypatch.setattr("app.api.v1.orders.send_order_confirmation_email", lambda *a, **k: True)
-    monkeypatch.setattr("app.api.v1.orders.send_order_status_update_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders.create.send_order_confirmation_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders.manage.send_order_status_update_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders._payments.send_order_status_update_email", lambda *a, **k: True)
     yield
     StripePaymentProvider.reset_mock_state()
 

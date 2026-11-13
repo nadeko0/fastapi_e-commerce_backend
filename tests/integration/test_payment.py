@@ -97,7 +97,7 @@ def _stub_order_confirmation_email(monkeypatch):
     # order. Out of this task's scope (email.py/create_order's email step,
     # not the payment code), so it's stubbed out here rather than fixed, to
     # let these payment tests get past order setup.
-    monkeypatch.setattr("app.api.v1.orders.send_order_confirmation_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders.create.send_order_confirmation_email", lambda *a, **k: True)
     return
 
 
@@ -859,7 +859,7 @@ def test_duplicate_webhook_delivery_does_not_double_apply(client, db_session, mo
     # already is) and must not re-send the confirmation email.
     email_calls = []
     monkeypatch.setattr(
-        "app.api.v1.orders.send_order_status_update_email",
+        "app.api.v1.orders._payments.send_order_status_update_email",
         lambda *a, **k: email_calls.append(a) or True,
     )
 
@@ -1614,7 +1614,7 @@ def test_concurrent_identical_webhook_deliveries_do_not_double_apply(client, db_
     # application) without corrupting the test harness's shared connection.
     email_calls = []
     monkeypatch.setattr(
-        "app.api.v1.orders.send_order_status_update_email",
+        "app.api.v1.orders._payments.send_order_status_update_email",
         lambda *a, **k: email_calls.append(a) or True,
     )
 
@@ -1760,7 +1760,7 @@ def test_payment_provider_calls_run_off_the_event_loop(client, db_session, monke
     import asyncio
     import threading
 
-    from app.api.v1 import orders as orders_module
+    from app.api.v1.orders import _payments as orders_module
 
     threads = {}
     real_create = StripePaymentProvider.create_payment_intent

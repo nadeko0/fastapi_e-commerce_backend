@@ -204,7 +204,7 @@ def test_pay_racing_a_twin_with_the_same_key_is_told_the_twin_is_in_flight(
         return real_guard(requested_currency, order_row)
 
     monkeypatch.setattr(
-        orders_module, "_guard_currency_matches_order", _twin_records_its_attempt_first
+        "app.api.v1.orders.pay._guard_currency_matches_order", _twin_records_its_attempt_first
     )
     created = _provider_calls(monkeypatch, "create_payment_intent")
 
@@ -322,7 +322,7 @@ def test_checkout_session_racing_a_twin_with_the_same_key_returns_the_twins_sess
         return real_guard(requested_currency, order_row)
 
     monkeypatch.setattr(
-        orders_module, "_guard_currency_matches_order", _twin_records_its_session_first
+        "app.api.v1.orders.checkout._guard_currency_matches_order", _twin_records_its_session_first
     )
     created = _provider_calls(monkeypatch, "create_checkout_session")
 
@@ -635,7 +635,7 @@ def test_checkout_session_racing_a_twin_still_creating_its_session_answers_409(
         return real_guard(requested_currency, order_row)
 
     monkeypatch.setattr(
-        orders_module, "_guard_currency_matches_order", _twin_records_its_attempt_first
+        "app.api.v1.orders.checkout._guard_currency_matches_order", _twin_records_its_attempt_first
     )
     created = _provider_calls(monkeypatch, "create_checkout_session")
 

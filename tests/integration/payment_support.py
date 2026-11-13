@@ -47,9 +47,12 @@ PAY_3DS = TOKEN_REQUIRES_ACTION
 # The order routes' email senders, by the name the routes import them
 # under, and the one the expiry task uses.
 ORDER_EMAILS = {
-    "confirmation": "app.api.v1.orders.send_order_confirmation_email",
-    "status_update": "app.api.v1.orders.send_order_status_update_email",
-    "cancellation": "app.api.v1.orders.send_order_cancellation_email",
+    "confirmation": "app.api.v1.orders.create.send_order_confirmation_email",
+    "status_update": (
+        "app.api.v1.orders.manage.send_order_status_update_email",
+        "app.api.v1.orders._payments.send_order_status_update_email",
+    ),
+    "cancellation": "app.api.v1.orders.manage.send_order_cancellation_email",
 }
 TASK_CANCELLATION_EMAIL = "app.tasks.send_order_cancellation_email"
 
@@ -70,7 +73,9 @@ class Outbox:
     def __init__(self, monkeypatch):
         self.sent = []
         for kind, target in ORDER_EMAILS.items():
-            monkeypatch.setattr(target, self._recorder(kind))
+            targets = target if isinstance(target, tuple) else (target,)
+            for t in targets:
+                monkeypatch.setattr(t, self._recorder(kind))
         monkeypatch.setattr(TASK_CANCELLATION_EMAIL, self._recorder("cancellation"))
 
     def _recorder(self, kind):

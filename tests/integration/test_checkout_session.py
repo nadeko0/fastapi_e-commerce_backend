@@ -61,7 +61,7 @@ def _reset_stripe_mock_state():
 
 @pytest.fixture(autouse=True)
 def _stub_order_confirmation_email(monkeypatch):
-    monkeypatch.setattr("app.api.v1.orders.send_order_confirmation_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders.create.send_order_confirmation_email", lambda *a, **k: True)
     return
 
 

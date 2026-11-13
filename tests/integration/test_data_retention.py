@@ -275,7 +275,7 @@ def test_no_stripe_customer_is_created_so_nothing_is_erased_there():
     app_dir = pathlib.Path(tasks.__file__).parent
     source = "".join(
         p.read_text(encoding="utf-8")
-        for p in (*(app_dir / "services" / "payment").glob("*.py"), app_dir / "api" / "v1" / "orders.py")
+        for p in (*(app_dir / "services" / "payment").glob("*.py"), *(app_dir / "api" / "v1" / "orders").glob("*.py"))
     )
     assert "customer_email" not in source
     assert "customers.create" not in source

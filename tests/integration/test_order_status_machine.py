@@ -44,7 +44,7 @@ UNPAID_DETAIL = "Order is not paid: it cannot be confirmed, processed, sent or d
 
 @pytest.fixture(autouse=True)
 def _no_email(monkeypatch):
-    monkeypatch.setattr("app.api.v1.orders.send_order_status_update_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders.manage.send_order_status_update_email", lambda *a, **k: True)
 
 
 def _user(db, role):
@@ -198,7 +198,7 @@ def test_an_order_is_moved_on_once_its_payment_has_gone_through(client, db_sessi
     from app.services.payment.stripe_provider import StripePaymentProvider
 
     StripePaymentProvider.reset_mock_state()
-    monkeypatch.setattr("app.api.v1.orders.send_order_confirmation_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders.create.send_order_confirmation_email", lambda *a, **k: True)
     token, order, _, _ = _place(client, db_session)
     admin = _make_admin(db_session)
     headers = {"Authorization": f"Bearer {_login(client, admin.email, 'AdminPass1')}"}

@@ -243,7 +243,7 @@ def test_pay_racing_a_twin_with_another_body_answers_422(shop, monkeypatch):
         return real_guard(requested_currency, order_row)
 
     monkeypatch.setattr(
-        orders_module, "_guard_currency_matches_order", _twin_records_its_attempt_first
+        "app.api.v1.orders.pay._guard_currency_matches_order", _twin_records_its_attempt_first
     )
 
     response = shop.pay(buyer, order["id"], key=key)
@@ -336,7 +336,7 @@ def test_checkout_racing_a_twin_with_another_body_answers_422(shop, monkeypatch)
         return real_guard(requested_currency, order_row)
 
     monkeypatch.setattr(
-        orders_module, "_guard_currency_matches_order", _twin_records_its_attempt_first
+        "app.api.v1.orders.checkout._guard_currency_matches_order", _twin_records_its_attempt_first
     )
 
     response = shop.checkout_session(buyer, order["id"], key=key)

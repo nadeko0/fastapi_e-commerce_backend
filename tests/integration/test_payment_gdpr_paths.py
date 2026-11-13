@@ -160,7 +160,7 @@ def test_admin_status_update_anonymised_recipient_skips_email(client, db_session
 
     sent = []
     monkeypatch.setattr(
-        "app.api.v1.orders.send_order_status_update_email",
+        "app.api.v1.orders.manage.send_order_status_update_email",
         lambda *args, **kwargs: sent.append(args),
     )
 
@@ -195,7 +195,7 @@ def test_cancel_own_order_anonymised_recipient_skips_email(client, db_session, m
 
     sent = []
     monkeypatch.setattr(
-        "app.api.v1.orders.send_order_cancellation_email",
+        "app.api.v1.orders.manage.send_order_cancellation_email",
         lambda *args, **kwargs: sent.append(args),
     )
 
@@ -497,7 +497,7 @@ def test_a_payment_completing_after_erasure_sends_no_mail(client, db_session, mo
     shop.db.commit()
     sent = []
     monkeypatch.setattr(
-        "app.api.v1.orders.send_order_status_update_email", lambda *a, **k: sent.append(a)
+        "app.api.v1.orders._payments.send_order_status_update_email", lambda *a, **k: sent.append(a)
     )
 
     assert shop.intent_event("payment_intent.succeeded", attempt).status_code == 200

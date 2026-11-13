@@ -84,7 +84,7 @@ def buyer_quiet(monkeypatch):
     StripePaymentProvider.reset_mock_state()
     for name in ("send_gdpr_request_received", "send_gdpr_deletion_confirmation"):
         monkeypatch.setattr(f"app.services.email.{name}", lambda *a, **k: True)
-    monkeypatch.setattr("app.api.v1.orders.send_order_confirmation_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders.create.send_order_confirmation_email", lambda *a, **k: True)
     yield
     StripePaymentProvider.reset_mock_state()
 

@@ -42,7 +42,8 @@ from app.services.payment.stripe_provider import StripePaymentProvider
 
 ROOT = Path(__file__).resolve().parents[2]
 PAYMENT_MODULES = [
-    "app/api/v1/orders.py",
+    *sorted(str(p.relative_to(ROOT)).replace("\\", "/")
+            for p in (ROOT / "app/api/v1/orders").glob("*.py")),
     "app/services/orders.py",
     "app/tasks.py",
     "app/models/order.py",
@@ -104,9 +105,13 @@ def _row_clocks_follow_freezegun():
 
 @pytest.fixture
 def shop(client, db_session, monkeypatch, _row_clocks_follow_freezegun):
-    for name in ("send_order_confirmation_email", "send_order_status_update_email",
-                 "send_order_cancellation_email"):
-        monkeypatch.setattr(f"app.api.v1.orders.{name}", lambda *a, **k: True)
+    for name in (
+        "app.api.v1.orders.create.send_order_confirmation_email",
+        "app.api.v1.orders.manage.send_order_status_update_email",
+        "app.api.v1.orders._payments.send_order_status_update_email",
+        "app.api.v1.orders.manage.send_order_cancellation_email",
+    ):
+        monkeypatch.setattr(name, lambda *a, **k: True)
     monkeypatch.setattr("app.tasks.send_order_cancellation_email", lambda *a, **k: True)
     return Shop(client, db_session)
 

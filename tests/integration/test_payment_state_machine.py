@@ -357,9 +357,13 @@ class PaymentChain(RuleBasedStateMachine):
 
 @pytest.fixture(autouse=True)
 def _quiet(monkeypatch):
-    for name in ("send_order_confirmation_email", "send_order_status_update_email",
-                 "send_order_cancellation_email"):
-        monkeypatch.setattr(f"app.api.v1.orders.{name}", lambda *a, **k: True)
+    for name in (
+        "app.api.v1.orders.create.send_order_confirmation_email",
+        "app.api.v1.orders.manage.send_order_status_update_email",
+        "app.api.v1.orders._payments.send_order_status_update_email",
+        "app.api.v1.orders.manage.send_order_cancellation_email",
+    ):
+        monkeypatch.setattr(name, lambda *a, **k: True)
     monkeypatch.setattr("app.tasks.send_order_cancellation_email", lambda *a, **k: True)
     yield
     reset_provider()

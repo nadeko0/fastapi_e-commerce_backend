@@ -21,7 +21,7 @@ from sqlalchemy import func, select, text
 from stripe_event_support import run_event
 from torture_support import requires_postgres
 
-import app.api.v1.orders as orders_module
+import app.api.v1.orders.create as orders_module
 import app.services.redis_async as redis_async_module
 from app import tasks
 from app.core.clock import utc_now
@@ -732,7 +732,7 @@ def test_webhook_redeliveries_and_workers_apply_once(shop, round_):
     outbox = Outbox.__new__(Outbox)
     outbox.sent = []
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("app.api.v1.orders.send_order_status_update_email",
+        mp.setattr("app.api.v1.orders._payments.send_order_status_update_email",
                    outbox._recorder("status_update"))
         body, headers = _intent_event(attempt.payment_intent_id, order["id"], attempt.amount,
                                       attempt.currency, buyer.email)

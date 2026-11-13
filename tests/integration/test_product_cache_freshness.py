@@ -19,9 +19,10 @@ from app.services import redis_codec as codec
 
 @pytest.fixture(autouse=True)
 def _quiet(monkeypatch):
-    monkeypatch.setattr("app.api.v1.orders.send_order_confirmation_email", lambda *a, **k: True)
-    monkeypatch.setattr("app.api.v1.orders.send_order_status_update_email", lambda *a, **k: True)
-    monkeypatch.setattr("app.api.v1.orders.send_order_cancellation_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders.create.send_order_confirmation_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders.manage.send_order_status_update_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders._payments.send_order_status_update_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.api.v1.orders.manage.send_order_cancellation_email", lambda *a, **k: True)
     monkeypatch.setattr("app.tasks.send_order_cancellation_email", lambda *a, **k: True)
 
 
