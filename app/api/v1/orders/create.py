@@ -14,6 +14,7 @@ from fastapi import (
 from redis.exceptions import RedisError
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.orders._create import (
     _created_order,
@@ -37,6 +38,7 @@ from app.models.order import Order
 from app.models.order_items import OrderItem
 from app.models.product import Product, ProductVariant
 from app.models.user import User
+from app.schemas.common import CartItem
 from app.schemas.order import (
     ORDER_TOTAL_MAX,
     OrderCreate,
@@ -124,17 +126,7 @@ async def create_order(
 
     shipping_address_id = body.shipping_address_id
 
-    if not current_user.is_email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email verification required before placing orders"
-        )
-
-    if not current_user.full_name or not current_user.phone:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Complete profile information (full name and phone) required for placing orders"
-        )
+    _check_customer(current_user)
 
     # A retried checkout request (e.g. client timeout + retry, double-click)
     # with the same key returns the order already created instead of
@@ -180,43 +172,9 @@ async def create_order(
             detail="Cart is empty"
         )
 
-    # Unpaid orders hold stock until paid, cancelled or expired; one account
-    # cannot hold more than the cap at once.
-    pending_orders = (await db.scalar(
-        select(func.count()).select_from(Order).where(
-            Order.user_id == current_user.id,
-            Order.status == OrderStatus.NEW,
-            Order.payment_status.in_([s.value for s in UNPAID_PAYMENT_STATUSES]),
-        )
-    )) or 0
-    if pending_orders >= settings.MAX_PENDING_ORDERS_PER_USER:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Too many unpaid orders ({settings.MAX_PENDING_ORDERS_PER_USER} allowed): "
-                "pay for or cancel one before placing another"
-            ),
-        )
+    await _check_pending_order_limit(db, current_user.id)
 
-    # Queried through this route's session, not read off
-    # current_user.addresses: current_user is a detached snapshot from the
-    # auth dependency (app/core/security.py) and cannot lazy-load a
-    # relationship. Only an active address: deleting one only deactivates
-    # it (kept for the orders already shipped there), and a deleted
-    # address used to be accepted here like any other.
-    address = (await db.execute(
-        select(Address).where(
-            Address.id == shipping_address_id,
-            Address.user_id == current_user.id,
-            Address.is_active,
-        ).limit(1)
-    )).scalars().first()
-    if not address:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shipping address not found"
-        )
-
+    address = await _shipping_address(db, current_user.id, shipping_address_id)
 
     order = Order(
         user_id=current_user.id,
@@ -277,110 +235,9 @@ async def create_order(
 
     total_amount = Decimal('0.00')
     for item in cart.items.values():
-        product = (await db.execute(
-            select(Product).where(Product.id == item.product_id).limit(1)
-        )).scalars().first()
-        # is_active is re-checked here, for product and variant alike, and
-        # not only when the line is added: either can be withdrawn from
-        # sale while it sits in a cart, and used to be ordered regardless.
-        if not product or not product.is_active:
-            await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Product {item.product_id} not available in requested quantity"
-            )
+        total_amount += await _add_order_line(db, order, item)
 
-        variant = None
-        if item.variant_id is not None:
-            variant = (await db.execute(
-                select(ProductVariant).where(
-                    ProductVariant.id == item.variant_id,
-                    ProductVariant.product_id == item.product_id,
-                ).limit(1)
-            )).scalars().first()
-            if not variant or not variant.is_active:
-                await db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Product {item.product_id} not available in requested quantity"
-                )
-        elif await db.scalar(product_has_active_variants(item.product_id)):
-            await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Product {item.product_id} requires a variant"
-            )
-
-        price_at_time = (
-            variant.price_override
-            if variant and variant.price_override is not None
-            else product.price
-        )
-
-        # Atomic conditional decrement instead of read-then-write: under
-        # concurrent checkouts, two requests reading stock_quantity=1 and
-        # both deciding "enough stock" would oversell. The WHERE clause
-        # makes the check-and-decrement a single database operation, so
-        # only one of two concurrent requests for the last unit can win.
-        # A variant line decrements the variant's own stock_quantity, not
-        # the parent Product's - the two are independent counters.
-        if variant is not None:
-            stock_update = await db.execute(
-                update(ProductVariant).where(
-                    ProductVariant.id == variant.id,
-                    ProductVariant.stock_quantity >= item.quantity,
-                ).values(
-                    stock_quantity=ProductVariant.stock_quantity - item.quantity
-                ).execution_options(synchronize_session=False)
-            )
-        else:
-            stock_update = await db.execute(
-                update(Product).where(
-                    Product.id == item.product_id,
-                    Product.stock_quantity >= item.quantity,
-                ).values(
-                    stock_quantity=Product.stock_quantity - item.quantity
-                ).execution_options(synchronize_session=False)
-            )
-        if stock_update.rowcount == 0:  # type: ignore[attr-defined]  # execute() on UPDATE returns CursorResult at runtime
-            await db.rollback()
-            raise Problem(
-                status.HTTP_409_CONFLICT,
-                type=ProblemType.INSUFFICIENT_STOCK,
-                detail=f"Product {item.product_id} not available in requested quantity",
-            )
-
-        order_item = OrderItem(
-            order_id=order.id,
-            product_id=product.id,
-            variant_id=variant.id if variant else None,
-            quantity=item.quantity,
-            price_at_time=price_at_time,
-            product_name_snapshot=product.name,
-            variant_sku_snapshot=variant.sku if variant else None,
-            variant_attributes_snapshot=variant.attributes if variant else None,
-        )
-        db.add(order_item)
-
-        total_amount += price_at_time * item.quantity
-
-    if total_amount > ORDER_TOTAL_MAX:  # Order.total_amount is Numeric(10, 2)
-        await db.rollback()
-        raise Problem(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            type=ProblemType.VALIDATION_ERROR,
-            detail="Order total exceeds the maximum amount",
-        )
-    # An order Stripe will not charge used to be placed anyway: it held its
-    # stock until it expired, and every /pay was refused.
-    minimum = MINIMUM_CHARGE.get(order.currency)
-    if minimum is not None and total_amount < minimum:
-        await db.rollback()
-        raise Problem(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            type=ProblemType.VALIDATION_ERROR,
-            detail=f"Order total is below the minimum charge of {minimum} {order.currency}",
-        )
+    await _check_order_total(db, order, total_amount)
     order.total_amount = total_amount
     await db.commit()
     await _drop_product_details(redis, products_with_cached_stock(
@@ -416,3 +273,173 @@ async def create_order(
     )
 
     return _created_order(request, response, order)
+
+
+def _check_customer(user: User) -> None:
+    """Verify that the customer has a verified email, full name, and phone."""
+    if not user.is_email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email verification required before placing orders"
+        )
+
+    if not user.full_name or not user.phone:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Complete profile information (full name and phone) required for placing orders"
+        )
+
+
+async def _check_pending_order_limit(db: AsyncSession, user_id: int) -> None:
+    """Enforce the unpaid pending order limit per user."""
+    # Unpaid orders hold stock until paid, cancelled or expired; one account
+    # cannot hold more than the cap at once.
+    pending_orders = (await db.scalar(
+        select(func.count()).select_from(Order).where(
+            Order.user_id == user_id,
+            Order.status == OrderStatus.NEW,
+            Order.payment_status.in_([s.value for s in UNPAID_PAYMENT_STATUSES]),
+        )
+    )) or 0
+    if pending_orders >= settings.MAX_PENDING_ORDERS_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Too many unpaid orders ({settings.MAX_PENDING_ORDERS_PER_USER} allowed): "
+                "pay for or cancel one before placing another"
+            ),
+        )
+
+
+async def _shipping_address(db: AsyncSession, user_id: int, shipping_address_id: int) -> Address:
+    """Look up an active shipping address for the user."""
+    # Queried through this route's session, not read off
+    # current_user.addresses: current_user is a detached snapshot from the
+    # auth dependency (app/core/security.py) and cannot lazy-load a
+    # relationship. Only an active address: deleting one only deactivates
+    # it (kept for the orders already shipped there), and a deleted
+    # address used to be accepted here like any other.
+    address = (await db.execute(
+        select(Address).where(
+            Address.id == shipping_address_id,
+            Address.user_id == user_id,
+            Address.is_active,
+        ).limit(1)
+    )).scalars().first()
+    if not address:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shipping address not found"
+        )
+    return address
+
+
+async def _add_order_line(db: AsyncSession, order: Order, item: CartItem) -> Decimal:
+    """Process a single cart item, decrement stock, and add order item."""
+    product = (await db.execute(
+        select(Product).where(Product.id == item.product_id).limit(1)
+    )).scalars().first()
+    # is_active is re-checked here, for product and variant alike, and
+    # not only when the line is added: either can be withdrawn from
+    # sale while it sits in a cart, and used to be ordered regardless.
+    if not product or not product.is_active:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Product {item.product_id} not available in requested quantity"
+        )
+
+    variant = None
+    if item.variant_id is not None:
+        variant = (await db.execute(
+            select(ProductVariant).where(
+                ProductVariant.id == item.variant_id,
+                ProductVariant.product_id == item.product_id,
+            ).limit(1)
+        )).scalars().first()
+        if not variant or not variant.is_active:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Product {item.product_id} not available in requested quantity"
+            )
+    elif await db.scalar(product_has_active_variants(item.product_id)):
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Product {item.product_id} requires a variant"
+        )
+
+    price_at_time = (
+        variant.price_override
+        if variant and variant.price_override is not None
+        else product.price
+    )
+
+    # Atomic conditional decrement instead of read-then-write: under
+    # concurrent checkouts, two requests reading stock_quantity=1 and
+    # both deciding "enough stock" would oversell. The WHERE clause
+    # makes the check-and-decrement a single database operation, so
+    # only one of two concurrent requests for the last unit can win.
+    # A variant line decrements the variant's own stock_quantity, not
+    # the parent Product's - the two are independent counters.
+    if variant is not None:
+        stock_update = await db.execute(
+            update(ProductVariant).where(
+                ProductVariant.id == variant.id,
+                ProductVariant.stock_quantity >= item.quantity,
+            ).values(
+                stock_quantity=ProductVariant.stock_quantity - item.quantity
+            ).execution_options(synchronize_session=False)
+        )
+    else:
+        stock_update = await db.execute(
+            update(Product).where(
+                Product.id == item.product_id,
+                Product.stock_quantity >= item.quantity,
+            ).values(
+                stock_quantity=Product.stock_quantity - item.quantity
+            ).execution_options(synchronize_session=False)
+        )
+    if stock_update.rowcount == 0:  # type: ignore[attr-defined]  # execute() on UPDATE returns CursorResult at runtime
+        await db.rollback()
+        raise Problem(
+            status.HTTP_409_CONFLICT,
+            type=ProblemType.INSUFFICIENT_STOCK,
+            detail=f"Product {item.product_id} not available in requested quantity",
+        )
+
+    order_item = OrderItem(
+        order_id=order.id,
+        product_id=product.id,
+        variant_id=variant.id if variant else None,
+        quantity=item.quantity,
+        price_at_time=price_at_time,
+        product_name_snapshot=product.name,
+        variant_sku_snapshot=variant.sku if variant else None,
+        variant_attributes_snapshot=variant.attributes if variant else None,
+    )
+    db.add(order_item)
+
+    return price_at_time * item.quantity
+
+
+async def _check_order_total(db: AsyncSession, order: Order, total_amount: Decimal) -> None:
+    """Validate that order total is within allowed bounds and meets minimum charge."""
+    if total_amount > ORDER_TOTAL_MAX:  # Order.total_amount is Numeric(10, 2)
+        await db.rollback()
+        raise Problem(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            type=ProblemType.VALIDATION_ERROR,
+            detail="Order total exceeds the maximum amount",
+        )
+    # An order Stripe will not charge used to be placed anyway: it held its
+    # stock until it expired, and every /pay was refused.
+    minimum = MINIMUM_CHARGE.get(order.currency)
+    if minimum is not None and total_amount < minimum:
+        await db.rollback()
+        raise Problem(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            type=ProblemType.VALIDATION_ERROR,
+            detail=f"Order total is below the minimum charge of {minimum} {order.currency}",
+        )
