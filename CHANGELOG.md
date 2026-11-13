@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.0] - 2026-11-13
+
+A MINOR release: the fixes from an external load, concurrency, chaos and perimeter audit of 6.0.0 on two 2-vCPU servers ([report](docs/reports/load-chaos-audit-2026-11.md)), two new settings (`REDIS_SOCKET_TIMEOUT`, `REDIS_SOCKET_CONNECT_TIMEOUT`), and an OpenAPI document that now names every header and shared cause a client can meet. No route, field or parameter was removed or changed in a way a client must follow. The fixes were tested in the test suite; the servers were not audited again after them.
+
+### Upgrade notes
+- New settings `REDIS_SOCKET_TIMEOUT` and `REDIS_SOCKET_CONNECT_TIMEOUT` (seconds, 1.0 each by default): a Redis command or connection that does not answer in time fails instead of waiting redis-py's default 5 s.
+- The API no longer writes uvicorn's access log; one JSON line per request comes from the `app.access` logger instead (method, path, route, status, duration, client address, request id). Log pipelines that parsed uvicorn's text line need the new fields.
+- Responses no longer carry a `Server` header.
+- Stripe: stripe-python 16.1.0 pins API version `2026-10-28.endive` (only additions within Endive). Create a webhook endpoint with that version; see [docs/OPERATIONS.md](docs/OPERATIONS.md#going-live-with-stripe).
+
+### Fixed
+- `dispute_status` on orders: as soon as any dispute existed, every order of every customer showed the status of the newest dispute in the whole table (the subquery was not correlated to the order's payments). Each order now shows its own (F-BUG-1).
+- With `WORKERS` above 1 every response on a reused connection waited about 40 ms: uvicorn's shared listener left Nagle's algorithm on for the connections the workers accepted. The workers now set `TCP_NODELAY` on every connection (F-PERF-1). Verified by a socket-level test; the latency through the proxy was not measured again.
+- A frozen Redis held catalog requests for about 15 s at the median (redis-py's 5 s socket timeout per command, no timeout set by the app); both Redis clients now give up after 1 s by default (F-CHAOS-1). Not measured again on a server.
+- An order's `shipping_address` copy took `is_default` and its timestamps from the live address book entry; the copy now has `is_default` false and the order's `created_at`.
+- Two concurrent admin refunds of the same flagged payment: the loser got Stripe's refusal as an error; it is now a 409 "This payment has already been fully refunded".
+- Celery's own lines (task received, succeeded, failed; beat's "Sending due task") were not written although the worker and beat ran with `--loglevel=info`, so periodic tasks could not be traced in the logs; they now go through the application's JSON logging at the worker's `--loglevel`.
+- Emails had no `Date` or `Message-ID` header and no plain-text part; they now have both headers and a text/plain part generated from the HTML.
+- `RateLimit` and `RateLimit-Policy` were sent only on responses a route returned itself; every counted response, 4xx included, now carries them, and the failed-login 429 names its own policy.
+- `HEAD` on the health probes answered a `Content-Length` of 0; it now matches GET.
+- Country normalisation of addresses was not a fixed point for a value that title-cases to two characters ("ß" to "Ss", then "SS" on the next read). Not reachable through the API (a country has at least two characters), found by the response round-trip property test.
+
+### Changed
+- A provider failure that leaves a payment attempt `unknown` logs one WARNING line with the error class, Stripe's request id, the HTTP status, the provider code and a hash of the idempotency key.
+- OpenAPI: `RateLimit` and `RateLimit-Policy` are declared on every 429 and `WWW-Authenticate` on every 401; where a route describes its own 400, 401 or 503, the description also names the causes every route shares (a body that is not JSON, a bad token, the in-flight limit). A problem body carries `retry_after` whenever `Retry-After` is set.
+- CORS exposes `Location` (the 201 of a POST) and allows the `X-Request-ID` request header.
+- Documentation: the webhook API version, the worst case of the Stripe timeouts (about 16 s and 31 s observed against a theoretical 76.5 s), a table of Redis key TTLs, how to find PaymentIntents left unconfirmed after a lost provider answer, and the audit report with its charts.
+- Dependencies: stripe 16.1.0, pydantic 2.14.2, hypothesis 6.170.14, dnspython 2.9.1, wrapt 2.5.2, python-dateutil 3.0.0 (used only by Celery and freezegun; the application keeps time in UTC). Held back: pytest 9.2 (pytest-benchmark 5.3.1 passes the two-week rule on 2026-11-15).
+
 ## [6.0.0] - 2026-11-11
 
 A MAJOR release: three request bodies changed (API clients must update, see "Migrating API clients"), and the Docker Compose stack moves to PostgreSQL 18, whose data volume layout a 15 volume cannot be started with (see "Upgrading a deployment"). It also closes the remaining findings of the 2026-11-10 review, tightens the type and lint configuration, and documents every route's outcomes in the OpenAPI document.

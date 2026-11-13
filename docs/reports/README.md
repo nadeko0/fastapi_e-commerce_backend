@@ -1,6 +1,10 @@
 # Verification, Security, and Engineering Reports
 
-This directory houses the comprehensive public records of all testing campaigns, security audits, architectural redesigns, and resilience evaluations for the FastAPI e-commerce backend. Each report states the release it measured (3.0.0 to 4.0.3); none was repeated on 4.1.x.
+This directory houses the comprehensive public records of all testing campaigns, security audits, architectural redesigns, and resilience evaluations for the FastAPI e-commerce backend. Each report states the release it measured (3.0.0 to 4.0.3, and 6.0.0 for the November 2026 audit); none was repeated on a later release.
+
+## Load, Chaos and Perimeter Audit (v6.0.0, November 2026)
+
+- [Load, Concurrency, Chaos and Perimeter Audit](load-chaos-audit-2026-11.md): External audit of 6.0.0 on two 2-vCPU servers: perimeter and authorization, Stripe test mode, races, open-model load and a 60-minute soak, fault injection, and a final stock and money audit. The fixes released in 6.1.0 are listed at the top of the report; they were not measured again on servers.
 
 ## 📋 Final Test Campaign (v4.0.0 to v4.0.3)
 

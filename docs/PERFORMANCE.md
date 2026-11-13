@@ -24,6 +24,8 @@ Performance was evaluated in Stage T7 using Locust 2.46.7 against release v4.0.1
 | limiter (Prod Limits) | 200 | 41.8 | 27 ms | 65 ms | 352 ms | 0 | 3,532 x 429 Too Many Requests |
 | soak2 (1-Hour Soak) | 200 | 41.3 | 15 ms | 139 ms | 534 ms | 0 | 15 x 503 (0.01% transient shed) |
 
+**Keep-alive latency with several workers.** Up to and including 6.0.0, with `WORKERS` above 1 the connections the workers accepted had Nagle's algorithm on (uvicorn's shared listener did not get `TCP_NODELAY`; see `app/core/http_protocol.py`), so a response on a reused connection waited about 40 ms for the client's delayed ACK. A November 2026 audit measured `/livez` through Caddy at p50 43 ms against a floor of 2 to 4 ms. The workers now set `TCP_NODELAY` on every connection; the proxied numbers have not been measured again since.
+
 ### Throughput Knee and Capacity Limits
 - **Sub-saturation (up to 400 users, ~82.5 rps):** Zero dropped requests, p95 latency under 90 ms.
 - **Capacity Knee (450 to 500 users, 85 to 100 rps):** Worker concurrency saturates; the in-flight middleware begins shedding requests with rapid 503 responses.
@@ -79,6 +81,8 @@ Configuration parameters in `app/core/config.py`:
 | `DB_POOL_RECYCLE` | `3600` | Connection recycling timeout in seconds |
 | `REDIS_POOL_SIZE` | `50` | Redis client connection pool size |
 | `REDIS_POOL_TIMEOUT` | `20` | Seconds the async client waits for a free pooled connection |
+| `REDIS_SOCKET_TIMEOUT` | `1.0` | Seconds a Redis command waits for its answer (sync and async clients) |
+| `REDIS_SOCKET_CONNECT_TIMEOUT` | `1.0` | Seconds to open a Redis connection (sync and async clients) |
 | `MAX_IN_FLIGHT_REQUESTS` | `None` | Active request ceiling per worker (set to 15 in benchmarks and in `.env.example`) |
 | `RATE_LIMIT_ENABLED` | `True` | Global toggle for rate limiting |
 | `RATE_LIMIT_DEFAULT` | `"300/minute"` | Default route rate limit |

@@ -16,6 +16,8 @@ Resilience was verified during Stage T8 chaos engineering experiments under a su
 | **Celery Beat Stopped** (3 minutes) | API response unaffected (100% 200 OK). Periodic cleanup tasks delayed. | `/livez`: 200 OK<br>`/readyz`: 200 OK | Immediate upon process restart | Beat resumes its schedule on restart. The schedule file lives in the container's `/tmp`, so it is lost when the container is re-created. |
 | **Database Latency** (+200 ms via Toxiproxy) | p95 latency rises; in-flight limiter sheds 26 requests via 503 to prevent pool starvation; remaining 4092 succeed. | `/livez`: 200 OK<br>`/readyz`: 200 OK | Immediate upon removing latency proxy | Zero database deadlocks or connection leaks; pool checkout timeout enforces boundary. |
 
+**Redis socket timeouts.** A load and chaos run on 6.0.0 (November 2026) froze Redis for 75 s while the catalog was under load. The clients then had no socket timeout of their own, so redis-py's default of 5 s per command applied: catalog requests took 15 s at the median (up to 34 s), and requests waiting on Redis kept their database transactions open. Both Redis clients now give up after `REDIS_SOCKET_TIMEOUT` and `REDIS_SOCKET_CONNECT_TIMEOUT` (1 s each by default). The frozen-Redis case has not been measured again since that change.
+
 ## Webhook Durability Architecture
 
 Stripe webhook processing uses a persistent outbox pattern with database-backed idempotency:

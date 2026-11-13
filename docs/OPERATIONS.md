@@ -10,6 +10,7 @@ Setting `ENVIRONMENT=production` (or `staging`) activates fail-closed deployment
 - **Password Hashing Cost:** `BCRYPT_ROUNDS` must be at least 12. Test suites lower this cost factor to 4 for execution speed, but production forbids cheap hashes to resist offline brute-force attacks.
 - **Payment Provider:** `PAYMENT_PROVIDER` must be set to `stripe`. The in-process `mock` provider marks orders as paid without moving funds and is prohibited outside development and test environments.
 - **Email Provider:** `EMAIL_PROVIDER` must be `smtp`. The `logging` provider drops every email (verification and password-reset links included) while reporting success.
+- **Message Format:** Each email is `multipart/alternative` with a plain-text part (generated from the HTML) before the HTML part, and carries `Date` (UTC) and a `Message-ID` in the domain of `EMAILS_FROM_EMAIL`.
 - **SMTP TLS:** The connection is upgraded with STARTTLS (use port 587; port 465 is not supported) and the server certificate is verified against the system CAs. `SMTP_TLS_VERIFY` must stay `true` (it may be `false` only in development and test, for a mail catcher with a self-signed certificate). A relay with a private CA is trusted by setting the standard `SSL_CERT_FILE` (or `SSL_CERT_DIR`) environment variable for the api and worker processes.
 - **Cryptographic Secrets and Placeholders:** Secrets must not contain default placeholders (`change-me`, `changeme`, `placeholder`, or test-mock prefixes) and must meet strict minimum byte lengths:
   - `JWT_SECRET_KEY`: Minimum length determined by `JWT_ALGORITHM` (32 bytes for HS256, 48 bytes for HS384, 64 bytes for HS512; RFC 7518 §3.2).
@@ -34,7 +35,7 @@ flowchart LR
 ```
 
 - **Published address:** compose publishes the API on `${DOCKER_API_BIND:-0.0.0.0}:${DOCKER_API_PORT:-8000}`. Set `DOCKER_API_BIND=127.0.0.1` when the proxy runs on the same host so the API cannot be reached around it; leave the default when the proxy is on another host.
-- **Shutdown:** on SIGTERM uvicorn waits `timeout_graceful_shutdown=90` s (root `main.py`) for requests in flight; compose gives the `api` container `stop_grace_period: 100s`. The longest wait is a Stripe call, 76.5 s worst case with default `STRIPE_*` settings ((5 s connect + 20 s read) x 3 tries + 1.5 s backoff). Raising `STRIPE_READ_TIMEOUT_SECONDS` or `STRIPE_MAX_NETWORK_RETRIES` means raising both values, keeping grace period > graceful-shutdown timeout > longest provider wait.
+- **Shutdown:** on SIGTERM uvicorn waits `timeout_graceful_shutdown=90` s (root `main.py`) for requests in flight; compose gives the `api` container `stop_grace_period: 100s`. The longest wait is a Stripe call, 76.5 s worst case with default `STRIPE_*` settings ((5 s connect + 20 s read) x 3 tries + 1.5 s backoff). That bound is reached only by a Stripe that completes every TLS handshake and then sends nothing; in the November 2026 audit a hung or silent provider failed calls after about 16 s (each new connection hung in the TLS handshake, counted against the 5 s connect timeout) or about 31 s when the first try reused a kept-alive connection. Raising `STRIPE_READ_TIMEOUT_SECONDS` or `STRIPE_MAX_NETWORK_RETRIES` means raising both values, keeping grace period > graceful-shutdown timeout > longest provider wait.
 
 ### Trusted Proxies and Client Resolution
 
@@ -58,13 +59,16 @@ flowchart LR
 | `/readyz` | Readiness | Dependencies respond within `READINESS_TIMEOUT_SECONDS` (2.0 s). | 200 OK (`{"status": "ok", "checks": {"database": "ok", "redis": "ok"}}`) or 503 Service Unavailable with `Retry-After: 5` (`{"status": "fail", ...}`). Removes unready instances from load balancer rotation without killing them. |
 | `/health` | Legacy Combined | Combined liveness and dependency readiness for Docker healthchecks. | 200 OK if both database and Redis respond; 503 with `Retry-After: 5` if degraded. |
 
+All three answer `HEAD` with the status and headers of the `GET`, `Content-Length` included, and no body.
+
 ## Structured Logging
 
 Logging is configured in `app/core/logging_config.py` following Twelve-Factor App rule XI:
 
 - **JSON to stdout:** Log records are serialized as single-line JSON via `JSONFormatter` to standard output. Container runtimes and log aggregators (e.g. FluentBit, Datadog) collect stdout directly.
 - **Trace and Request Correlation:** Log entries include `timestamp` (RFC 3339 in UTC with millisecond precision), `level`, `logger`, `message`, `request_id`, and `trace_id` (propagated from incoming W3C `traceparent` headers or OpenTelemetry spans).
-- **Log Levels:** `LOG_LEVEL` sets the threshold for `app.*` loggers (`INFO`, `WARNING`, `ERROR`, `CRITICAL`). Third-party loggers default to `WARNING` in production to reduce noise.
+- **Access Log:** Every HTTP request writes one line from the `app.access` logger (`app/core/access_log.py`), with `request_id`, and in `extra`: `method`, `path` (without the query string), `route` (the matched route template, or null), `status`, `duration_ms` and `client_ip` (the client as resolved by `TRUSTED_PROXIES`; a request shed by the in-flight limit shows the peer's address). No query string and no header is logged. uvicorn's own plain-text access log is off (`access_log=False` in `main.py`). The line is written at `INFO`, so it follows `LOG_LEVEL`.
+- **Log Levels:** `LOG_LEVEL` sets the threshold for `app.*` loggers (`INFO`, `WARNING`, `ERROR`, `CRITICAL`). Third-party loggers default to `WARNING` in production to reduce noise. Celery's own loggers follow the `--loglevel` of the worker and beat commands (`info` in `docker-compose.yml`), so task received/succeeded/failed lines and beat's "Sending due task" lines are written, as JSON like the rest.
 - **Optional File Rotation:** Setting `LOG_FILE` enables a secondary `RotatingFileHandler` (100 MB per file, 5 backup generations). If unset or empty, file logging is disabled.
 
 ## OpenTelemetry Distributed Tracing
@@ -165,6 +169,16 @@ Redis serves as the Celery message broker, token revocation store, password-chan
 - **Supported Versions:** Redis 7.2 to 8.8, the range the redis-py 8.1 client lists as supported. Compose builds 8.8 from `docker/redis/Dockerfile` (the official `redis:8.8-alpine`, pinned by digest, with `apk upgrade`); CI runs the Redis-semantics tests on the same base image.
 - **Persistence Configuration:** Redis runs with Append-Only File persistence (`--appendonly yes`, `--appendfsync everysec`) alongside RDB snapshots.
 - **Memory Ceiling:** Memory is capped via `REDIS_MAXMEMORY` (default 256 MB) with `--maxmemory-policy noeviction`. When full, Redis refuses writes rather than evicting keys. Evicting volatile keys would invalidate token blacklists and password watermarks, resurrecting revoked sessions.
+- **Key Lifetimes:** Each key family expires on its own TTL; nothing sweeps them.
+
+  | Key | TTL |
+  |---|---|
+  | `category:tree` (category tree cache) | `REDIS_PRODUCT_CACHE_TTL_HOURS` (1 hour); deleted when a category changes |
+  | `product:{id}` (product detail cache) | 5 minutes (`PRODUCT_CACHE_TTL` in `app/services/redis_codec.py`); deleted on writes |
+  | `pwd_changed:{user_id}` (revocation watermark) | `REFRESH_TOKEN_EXPIRE_DAYS` (7 days) from the password change or logout |
+  | `refresh_user:{user_id}` (the user's refresh families) | `REFRESH_TOKEN_EXPIRE_DAYS` (7 days), renewed at each login and refresh |
+  | `blacklist:{jti}` (revoked access token) | The token's remaining lifetime, rounded up |
+  | Carts | `REDIS_CART_TTL_DAYS` (30) for an account, `REDIS_GUEST_CART_TTL_DAYS` (7) for a guest, from the last write |
 - **Resilience Under Outage:** When Redis is unavailable, public catalog browsing succeeds (200 OK) and rate limiting fails open. Authenticated routes and cart writes fail closed with HTTP 503 (`Retry-After: 30` and `Retry-After: 5`). See [RESILIENCE.md](RESILIENCE.md) for chaos test recovery profiles.
 
 ## Going Live with Stripe
@@ -177,9 +191,12 @@ Development setup (test keys, Stripe CLI) is in [SETUP.md](../SETUP.md#real-stri
   - Refunds: create and list.
 
   Grant Write on those three resources and no permission on anything else (no Customers, Payouts, Disputes or account settings). A call the key may not make fails with a Stripe permission error, which the provider answers as a 503 and logs at critical level ("Stripe refused our API key"). Try the exact key set in test mode first (an `rk_test_` key with the same permissions: place an order, pay, refund, run the reconciliation) and read Stripe's request logs for 403 responses before switching to live keys. The key needs no permission to receive webhooks: they are verified with `STRIPE_WEBHOOK_SECRET` only.
+- **Provider failures on `/pay` and `/checkout-session`.** When Stripe cannot be reached or answers with an error that leaves the outcome open (a dropped connection, a 429, a 5xx), the client gets 503 with `Retry-After: 5` and the attempt is left `unknown`. One WARNING line from `app.api.v1.orders` ("Payment attempt ... left unknown") records it, with `extra` fields `flow`, `order_id`, `payment_id`, `error_class` (the Stripe SDK error class, such as `RateLimitError` or `APIConnectionError`), `stripe_request_id` (search it in the Dashboard's request logs), `http_status`, `provider_code` and `idempotency_key_sha256` (the first 16 hex digits of the SHA-256 of the provider idempotency key, which matches the retries of one attempt; the key itself is not logged).
+- **Unconfirmed PaymentIntents after a lost answer.** If Stripe created the PaymentIntent but its answer was lost (for example a connection reset) and the client never retries with the same `Idempotency-Key`, the application does not learn the PaymentIntent's id. The attempt stays `unknown` until the expiry sweep cancels the unpaid order, but it cannot cancel that PaymentIntent and the reconciliation does not see it. It takes no money: it stays in `requires_confirmation`, and only the application's secret key could confirm it (the client never received its `client_secret`). To clean such leftovers up, search PaymentIntents in the Dashboard by `metadata['order_id']` for orders cancelled by expiry and cancel those still in `requires_confirmation`. Found in the November 2026 audit: 3 of 61 unretried attempts during injected connection resets.
 - **Rotating the API key.** Rotate in the Dashboard with a delayed expiry (Stripe keeps the old key valid for up to 7 days), put the new value in `STRIPE_SECRET_KEY` in `.env` and recreate the services that read it, `docker compose up -d --force-recreate api celery-worker` (a plain `restart` does not re-read `.env`), then confirm in Stripe's request logs that the old key is idle before it expires.
 - **Rotating the webhook secret.** The signing secret belongs to one webhook endpoint and is separate from the API key. Use "Roll secret" on the endpoint in the Dashboard with a delayed expiry: until then Stripe signs each delivery with both secrets, so deliveries keep verifying while you set the new `STRIPE_WEBHOOK_SECRET` and recreate `api`. Live and test mode have different secrets. The value must pass the deployment check (at least 32 bytes, not a placeholder).
 - **Webhook events.** Register the endpoint `https://<your-host>/api/v1/orders/webhooks/stripe` and subscribe to exactly the 16 event types listed in [SETUP.md](../SETUP.md#real-stripe-development); the application handles no other type, so subscribing to more only adds load. Stripe retries a failed delivery for up to three days; the stored-first design means a 503 from the application during an outage is retried, not lost (see [RESILIENCE.md](RESILIENCE.md)).
+- **Webhook API version.** Stripe writes each event in the API version of the endpoint that receives it: the version given when the endpoint was created (`api_version` on the create call), otherwise the account's default version. The application's own API calls use the version pinned by the Stripe SDK in `uv.lock` (stripe-python 16.1.0: `2026-10-28.endive`, since 6.1.0; 6.0.0 used 16.0.1 and `2026-09-30.endive`, which differ only by additions). Tested in the November 2026 audit on 6.0.0: the events of a test series (payments, a declined card and retry, a partial refund) in `2024-11-20.acacia` (an account default) and in `2026-10-28.endive` (`stripe listen --latest`) were all processed, with the same order and payment states in the end. The endive payloads only lack fields the acacia ones have (for example `invoice` on charges and PaymentIntents). Other event types, `checkout.session.*` and the dispute events among them, were not compared across versions. Create the endpoint with the SDK's version (`2026-10-28.endive`, the version of the endive events tested above) so events and API responses have the same shape, and test in test mode before moving the endpoint to another version.
 - **Optional: restrict the webhook route to Stripe's addresses.** Stripe lists the addresses it sends webhooks from at <https://docs.stripe.com/ips> and recommends allowing only those, in addition to signature verification. The application does not enforce this; do it at the reverse proxy for `POST /api/v1/orders/webhooks/stripe` only, taking the ranges from that page (they can change, so keep them in configuration you can update; the signature check stays the authority either way). Behind a proxy, check the address Stripe connects from, not an `X-Forwarded-For` value a client could send.
 
 ## Time, DST, and GDPR Retention
@@ -202,6 +219,8 @@ Tune the following settings in `.env` based on instance resources. The defaults 
 | `DB_MAX_OVERFLOW` | `5` | Maximum overflow connections above pool size. |
 | `REDIS_POOL_SIZE` | `50` | Maximum connections in the Redis connection pool. |
 | `REDIS_POOL_TIMEOUT` | `20` | Timeout in seconds waiting for an available Redis connection. |
+| `REDIS_SOCKET_TIMEOUT` | `1.0` | Seconds a Redis command waits for its answer before failing (both application clients; not the Celery broker). |
+| `REDIS_SOCKET_CONNECT_TIMEOUT` | `1.0` | Seconds to open a Redis connection before failing. |
 | `BCRYPT_MAX_CONCURRENCY` | `None` (default `4 * CPU`) | Semaphore bounding concurrent password hashes per worker to prevent CPU starvation. |
 | `RATE_LIMIT_DEFAULT` | `"300/minute"` | Baseline rate limit applied to general API routes. |
 | `RATE_LIMIT_SEARCH` | `"60/minute"` | Limit on catalog search queries. |

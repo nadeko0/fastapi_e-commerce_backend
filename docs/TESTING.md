@@ -7,8 +7,8 @@ Software that processes money cannot rely on good intentions or manual smoke tes
 ```mermaid
 flowchart TD
     E2E["E2E Tests (Stripe Test Mode, Stripe CLI, 54 live Stripe tests)"] --> Fuzz["Contract & Fuzz (Schemathesis, Hypothesis State Machines)"]
-    Fuzz --> Integration["Integration Tests (PostgreSQL 16/17/18, SQLite WAL, Real Redis, 2,868 cases)"]
-    Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, 2,771 cases)"]
+    Fuzz --> Integration["Integration Tests (PostgreSQL 16/17/18, SQLite WAL, Real Redis, 2,890 cases)"]
+    Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, 2,787 cases)"]
 ```
 
 1. **Unit Tests:** Fast, isolated tests covering models, services, schema serialization, and money calculations. All external I/O (Stripe, Redis, SMTP) is mocked deterministically.
@@ -155,20 +155,20 @@ The CI comparison, base commit against HEAD on this machine (Linux or WSL):
 bash .github/scripts/benchmark_ab.sh origin/main
 ```
 
-## Verified Metrics for Release v6.0.0
+## Verified Metrics for Release v6.1.0
 
-Verification results on release v6.0.0; a row measured on an earlier release says which:
+Verification results on release v6.1.0; a row measured on an earlier release says which:
 
 | Metric | Measured Value | Standard / Target |
 |---|---|---|
-| SQLite Test Suite | 6,601 passed, 78 skipped without their services (+ 30 timing), random order | 0 failures, 0 warnings |
-| PostgreSQL Test Suite | 6,618 passed on PostgreSQL 18.6 with Redis 8.8 under WSL Linux (+ 124 timing); 16, 17 and 18 in CI | Full migration and constraint parity |
-| Hypothesis `explore` profile | 2 runs of the 1,540 property and state-machine cases on PostgreSQL 18.6, new random inputs each run; one falsifying example, a false positive in the test itself (fixed) | No falsifying example in the code |
+| SQLite Test Suite | 6,639 passed, 78 skipped without their services (+ 30 timing), random order | 0 failures, 0 warnings |
+| PostgreSQL Test Suite (v6.0.0) | 6,618 passed on PostgreSQL 18.6 with Redis 8.8 under WSL Linux (+ 124 timing); 16, 17 and 18 in CI | Full migration and constraint parity |
+| Hypothesis `explore` profile (v6.0.0) | 2 runs of the 1,540 property and state-machine cases on PostgreSQL 18.6, new random inputs each run; one falsifying example, a false positive in the test itself (fixed) | No falsifying example in the code |
 | Migration Round Trip | every revision on PostgreSQL 16, 17 and 18 (CI) | Previous release keeps working on the new schema |
 | Live Stripe Test Suite (v4.1.0) | 52 passed, 2 skipped | api.stripe.com sandbox |
 | Payment Layer Coverage | 100.0% line and branch on the listed payment-layer files (the mock provider file is excluded) | Zero uncovered branches in financial path |
 | Overall Coverage (lines and branches combined) | 98.9% (source: `app`) | Fail-under gate set to 85% |
-| Mutation Score (mutmut 3.8.0) | 98.8% of 3,669 mutants detected (3,346 killed, 279 over the time limit; a sample of 12 of these run without it: all killed by a failing test) | The 44 survivors reviewed as equivalent |
+| Mutation Score (mutmut 3.8.0, v6.0.0) | 98.8% of 3,669 mutants detected (3,346 killed, 279 over the time limit; a sample of 12 of these run without it: all killed by a failing test) | The 44 survivors reviewed as equivalent |
 | CI Execution Time | ~10 minutes across 19 jobs | Fully automated GitHub Actions workflow |
 
 ## Campaign Reports

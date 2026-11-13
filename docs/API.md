@@ -1,10 +1,10 @@
 # REST API Reference and Conventions
 
-Every API contract in release v6.0.0 is designed around standard HTTP semantics and deterministic data representations. Clients communicate with a uniform interface where resources, errors, authentication lifecycles, and caching rules follow RFC standards rather than framework idiosyncrasies.
+Every API contract in release v6.1.0 is designed around standard HTTP semantics and deterministic data representations. Clients communicate with a uniform interface where resources, errors, authentication lifecycles, and caching rules follow RFC standards rather than framework idiosyncrasies.
 
 Interactive OpenAPI documentation and Swagger UI are accessible at `/api/v1/docs` (with ReDoc at `/redoc` and OpenAPI JSON at `/api/v1/openapi.json`) in non-production environments. When `ENVIRONMENT=production`, all documentation endpoints answer 404 to avoid leaking internal route structures.
 
-The OpenAPI document is written to generate typed clients. Operation ids are the handler names (`get_product`, not `get_product_api_v1_products__product_id__get`; a handler serving both PUT and PATCH gets the method as a suffix, for example `update_product_patch`), so a client generated from the spec names its methods after them; release 5.0.0 renamed 69 operation ids and no route, parameter or payload changed on the wire. The document publishes the closed value sets (enums such as order and payment status, dispute status and problem types) without validating them at runtime, the required fields of every schema, the `guest_cart` cookie (`Set-Cookie`) on the cart routes, the `ETag` header on product and variant responses, `X-Request-ID` on every response and `Retry-After` on 429 and 503. `tests/unit/test_openapi_contract.py` checks the operation ids and the promises of the response fields, and `tests/snapshots/openapi.json` pins the whole document (see TESTING.md).
+The OpenAPI document is written to generate typed clients. Operation ids are the handler names (`get_product`, not `get_product_api_v1_products__product_id__get`; a handler serving both PUT and PATCH gets the method as a suffix, for example `update_product_patch`), so a client generated from the spec names its methods after them; release 5.0.0 renamed 69 operation ids and no route, parameter or payload changed on the wire. The document publishes the closed value sets (enums such as order and payment status, dispute status and problem types) without validating them at runtime, the required fields of every schema, the `guest_cart` cookie (`Set-Cookie`) on the cart routes, the `ETag` header on product and variant responses, `X-Request-ID` on every response, `Retry-After` on 429 and 503, `RateLimit` and `RateLimit-Policy` on 429, and `WWW-Authenticate` on every 401. Where a route describes its own 400, 401 or 503, the description also names the causes every route shares (a body that is not JSON, a bad token, the in-flight limit). HEAD is answered on the health probes (see below) without being listed in the document. `tests/unit/test_openapi_contract.py` checks the operation ids and the promises of the response fields, and `tests/snapshots/openapi.json` pins the whole document (see TESTING.md).
 
 ## Base Path and Endpoint Overview
 
@@ -71,7 +71,8 @@ API responses avoid arbitrary wrappers:
   }
   ```
 - **Confirmation Responses:** Operations with no returned resource body return `{"message": "..."}`.
-- **Request Tracking:** Every HTTP response carries the `X-Request-ID` header for log tracing: a well-formed incoming value is kept, otherwise one is generated (a UUID4 in hex form).
+- **Order Shipping Address:** An order's `shipping_address` is the copy taken when the order was placed; editing, deleting or re-defaulting the address book entry does not change it. In the copy, `is_default` is always `false` and `created_at` and `updated_at` are the order's `created_at`.
+- **Request Tracking:** Every HTTP response carries the `X-Request-ID` header for log tracing: a well-formed incoming value is kept, otherwise one is generated (a UUID4 in hex form). A browser client may send it: CORS allows the request header.
 
 ## Error Handling (RFC 9457 Problem Details)
 
@@ -105,12 +106,12 @@ The complete catalog of typed problems declared in `app/core/errors.py`:
 ## HTTP Status Codes
 
 The API strictly adheres to RFC 9110 status code semantics:
-- **201 Created + Location:** Returned by POST endpoints that instantiate persistent resources (`POST /api/v1/orders`, `POST /api/v1/users/addresses`, `POST /api/v1/admin/products`, `POST /api/v1/admin/products/{product_id}/variants`, `POST /api/v1/admin/categories`). The `Location` header points to the newly created resource path.
+- **201 Created + Location:** Returned by POST endpoints that instantiate persistent resources (`POST /api/v1/orders`, `POST /api/v1/users/addresses`, `POST /api/v1/admin/products`, `POST /api/v1/admin/products/{product_id}/variants`, `POST /api/v1/admin/categories`). The `Location` header points to the newly created resource path; CORS exposes it to browser clients.
 - **202 Accepted:** Returned by `POST /api/v1/users/register`. The server accepts the registration request asynchronously regardless of whether the email is already registered, completely preventing account enumeration.
 - **204 No Content:** Deleting an address (`DELETE /api/v1/users/addresses/{id}`) or a product (`DELETE /api/v1/admin/products/{id}`). Contains no body. `DELETE /api/v1/cart` and `DELETE /api/v1/cart/items/{product_id}` return 200 with the updated cart.
 - **400 vs 409 vs 422:**
   - `400 Bad Request`: Syntactically invalid payloads (non-JSON body, unreadable text), missing or invalid `Idempotency-Key` format, or invalid Stripe signature HMAC.
-  - `409 Conflict`: Request conflicts with current resource or inventory state (`insufficient-stock`, `idempotency-key-in-use`, an invalid order status transition, cancelling an order that is paid or no longer new (or, with `Retry-After: 60`, one whose payment attempt is still in progress), replaying a webhook event that has not failed). Also returned for ordering a variant-enabled product without selecting a variant, exceeding `MAX_PENDING_ORDERS_PER_USER`, a new payment attempt (`/pay` or `/checkout-session` with a new `Idempotency-Key`) on an order placed more than `UNPAID_ORDER_EXPIRE_MINUTES` ago (a retry with the key of an earlier attempt is still served), retrying an admin refund on a settled payment, attempting to refund a disputed payment, when `/pay` cannot apply a payment success, when the last active administrator requests erasure, when a new or changed address equals another active address of the user, or when another request made a different address the default at the same time.
+  - `409 Conflict`: Request conflicts with current resource or inventory state (`insufficient-stock`, `idempotency-key-in-use`, an invalid order status transition, cancelling an order that is paid or no longer new (or, with `Retry-After: 60`, one whose payment attempt is still in progress), replaying a webhook event that has not failed). Also returned for ordering a variant-enabled product without selecting a variant, exceeding `MAX_PENDING_ORDERS_PER_USER`, a new payment attempt (`/pay` or `/checkout-session` with a new `Idempotency-Key`) on an order placed more than `UNPAID_ORDER_EXPIRE_MINUTES` ago (a retry with the key of an earlier attempt is still served), retrying an admin refund on a settled payment (also the loser of two concurrent refunds of a flagged payment, whose whole amount the other one took: `detail` "This payment has already been fully refunded"), attempting to refund a disputed payment, when `/pay` cannot apply a payment success, when the last active administrator requests erasure, when a new or changed address equals another active address of the user, or when another request made a different address the default at the same time.
   - `422 Unprocessable Content`: Syntactically well-formed JSON violating domain constraints (unknown properties, negative prices, order total exceeding 21,474,836.47 or below Stripe's minimum charge for the store currency (0.50 USD, 0.50 EUR, 0.30 GBP and others; `MINIMUM_CHARGE` in `app/core/currencies.py`), non-finite numbers, JSON depth exceeding 64, failed regex, `idempotency-key-reused`, or declined cards).
 - **401 vs 403:**
   - `401 Unauthorized`: Missing, invalid, expired, or revoked Bearer token, or invalid login credentials. Includes `WWW-Authenticate: Bearer` challenge.
@@ -127,7 +128,7 @@ Financial and mutating order endpoints enforce the IETF draft `Idempotency-Key` 
 - **Enforced Routes:** `POST /api/v1/orders`, `POST /api/v1/orders/{order_id}/pay`, `POST /api/v1/orders/{order_id}/checkout-session`, `POST /api/v1/orders/{order_id}/refund`, and `POST /api/v1/admin/payments/{payment_id}/refund`.
 - **Format Requirements:** A string of 8 to 255 characters (a UUID is a good choice). Missing or out-of-range headers immediately receive 400 `idempotency-key-missing`.
 - **Payload Fingerprinting:** On `POST /orders`, `/pay` and `/checkout-session`, a canonical SHA-256 fingerprint is generated from validated payload fields. Replaying the identical key with different payload parameters triggers 422 `idempotency-key-reused`. The two refund routes store no fingerprint: Stripe compares the parameters, and a key it has already seen with different refund parameters gives 409 `idempotency-key-in-use`. `/pay` and `/checkout-session` answer the same 409 when Stripe reports such a key conflict. A key whose request died before the provider answered (its attempt left "processing") is answered 409 with `Retry-After` for `PAYMENT_ATTEMPT_STALE_AFTER_MINUTES`; after that, on both routes, the retry is sent to Stripe again with the same provider key.
-- **Cancelling an order:** an admin's cancellation (`PUT`/`PATCH /orders/{id}/status`) and the customer's (`POST /orders/{id}/cancel`) close the order's open payment attempts at Stripe after the commit (a Checkout Session is expired, a PaymentIntent cancelled), so a cancelled order whose stock is back on sale can no longer be paid.
+- **Cancelling an order:** an admin's cancellation (`PUT /orders/{id}/status`) and the customer's (`POST /orders/{id}/cancel`) close the order's open payment attempts at Stripe after the commit (a Checkout Session is expired, a PaymentIntent cancelled), so a cancelled order whose stock is back on sale can no longer be paid.
 - **Placing an order:** two `POST /orders` of one account run one after the other (a lock on the user's row), so requests with different keys no longer place several orders from one cart or pass `MAX_PENDING_ORDERS_PER_USER`.
 - **Concurrent In-Flight Locks:** If a request arrives while an identical key is already being processed, the server yields 409 `idempotency-key-in-use`.
 - **Retention and TTL:**
@@ -193,10 +194,11 @@ Per RFC 9110 sections 9.1 and 9.3.2, every GET endpoint transparently supports `
 
 Rate limits are evaluated atomically per route template using Redis Lua scripts:
 - Keyed by user ID for authenticated requests, or client IP address (evaluating `settings.TRUSTED_PROXIES` from right to left, and grouping IPv6 traffic into `/64` subnets).
-- Responses include draft IETF RateLimit headers:
+- Every counted response, whatever its status (2xx, 4xx such as 401, 404 and 422, and 429), includes draft IETF RateLimit headers:
   - `RateLimit-Policy: "<policy_name>";q=<quota>;w=<window_seconds>` (e.g. `"default";q=300;w=60`)
   - `RateLimit: "<policy_name>";r=<remaining>;t=<seconds_to_replenish>`
 - Exceeded limits trigger HTTP 429 with `Retry-After` matching the remaining window seconds.
+- A login refused for too many failed attempts (429) names the failed-login policy that refused it, `login_failures_per_email_and_address` or `login_failures_per_email`, instead of the route's `auth` policy.
 
 ## Frontend Contract for E-mail Links
 

@@ -101,6 +101,7 @@ The ASGI middleware stack injects OWASP Secure Headers on every response (includ
 | `Cache-Control` | `no-store` | Enforced on `/users`, `/orders`, `/cart`, `/admin`, and authenticated calls. |
 
 - **Content Security Policy (CSP):** API endpoints enforce `default-src 'none'; frame-ancestors 'none'`. Interactive documentation routes (`/api/v1/docs`, `/redoc`) apply a CDN-scoped policy outside production; documentation endpoints are disabled entirely in production (`ENVIRONMENT=production`).
+- **No `Server` Header:** `main.py` starts uvicorn with `server_header=False`, so responses do not name the server software.
 - **Deprecated Headers Omitted:** `X-XSS-Protection` is deliberately omitted; modern browsers deprecate it, and its heuristic audit mode can introduce client-side security vulnerabilities.
 - **CORS Policy:** Origins are strictly restricted to `settings.BACKEND_CORS_ORIGINS`. Because credentials are enabled (`allow_credentials=True`), a wildcard `*` is refused at startup by settings validation.
 

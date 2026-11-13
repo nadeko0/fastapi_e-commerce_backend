@@ -92,9 +92,6 @@ A full code review found these. Each was judged low impact and is accepted as it
 - **The Whole User Row on Every Authenticated Request:**
   - *Why not:* `get_current_user` loads the full `users` row with each authenticated request, although a route usually needs only a few of its columns. It is one primary-key query per request.
   - *Where to start:* Load only the needed columns, or cache them briefly with the revocation checks.
-- **Redis Socket Timeouts Are the Client's Defaults:**
-  - *Why not:* The application sets only `REDIS_POOL_TIMEOUT` (the wait for a free pooled connection). Socket connect and read timeouts are redis-py's own defaults (5 seconds in 8.1), which the chaos run on a frozen Redis showed to be short enough (503 after about 2 s), but they are not written down in the settings.
-  - *Where to start:* Add explicit `REDIS_SOCKET_TIMEOUT` and connect-timeout settings and pass them to both clients.
 - **Celery Worker Concurrency Is Not Pinned:**
   - *Why not:* The worker command has no `--concurrency`, so Celery starts one prefork child per CPU of the host. Each child builds its own database pool (`DB_POOL_SIZE` plus `DB_MAX_OVERFLOW`, opened lazily), so the number of connections the worker can use depends on the host, and the `max_connections=200` of Compose is sized for the default four-worker stack.
   - *Where to start:* Set `--concurrency` in the worker command and count it in the `max_connections` formula in `docs/OPERATIONS.md`.

@@ -187,6 +187,7 @@ To integrate with Stripe test mode:
      --events payment_intent.succeeded,payment_intent.payment_failed,payment_intent.canceled,checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,checkout.session.expired,refund.created,refund.updated,refund.failed,charge.refunded,charge.dispute.created,charge.dispute.updated,charge.dispute.closed,charge.dispute.funds_withdrawn,charge.dispute.funds_reinstated \
      --forward-to http://localhost:8000/api/v1/orders/webhooks/stripe
    ```
+   `stripe listen` sends events in your account's default API version, and with `--latest` in Stripe's latest version. Payment and refund events in both `2024-11-20.acacia` and `2026-10-28.endive` were tested and processed alike; which version to give a production endpoint is in [OPERATIONS.md](docs/OPERATIONS.md#going-live-with-stripe).
 3. Copy the webhook signing secret printed by the Stripe CLI into `.env`:
    ```env
    STRIPE_WEBHOOK_SECRET=<your-webhook-signing-secret>
@@ -200,7 +201,7 @@ Standard Stripe test payment method tokens (send these `pm_card_*` ids to the AP
 
 ## Running Tests
 
-The test suite includes 6,803 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
+The test suite includes 6,841 automated test cases covering unit logic, PostgreSQL concurrency, property-based invariants, and Stripe test-mode workflows.
 
 To run the full suite locally:
 
