@@ -18,8 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - A Stripe webhook stored while the Celery broker (Redis) was unreachable was applied only about 20 minutes later: the sweeper re-queued an event only once it had been unchanged for `STRIPE_EVENT_SWEEP_AFTER_MINUTES`, a wait meant for messages lost in other ways and for events backing off between retries. In the November 2026 audit, a payment confirmed during a 75 s Redis freeze reached its order 21 minutes later (F-CHAOS-3). When the webhook route or an admin replay cannot publish an event, the event is now marked (`last_error`: "Not enqueued: ...", visible in the admin's webhook event list) and the sweeper publishes it on its next run, then clears the mark; a payment confirmed that way reaches its order within about a minute of the broker's return. Unmarked events keep the 20-minute wait, so a long queue gets no duplicate messages.
 
+### Changed
+- Dependency age rule for Python packages: one week instead of two (`[tool.uv] exclude-newer`, Dependabot's uv cooldown). Over the last year every yanked release of a locked package was replaced within 4 days and no release found to be bad was found within 14 days, while 30 security fixes waited a week longer. Images, GitHub Actions and tools keep two weeks.
+- Test tooling: pytest 9.1.1 -> 9.2.0, pytest-benchmark 5.3.0 -> 5.3.1 (held back in 6.0.0 and 6.1.0 by the two-week rule).
+
 ### Security
-- OpenTelemetry 1.45.1 -> 1.45.2 (instrumentation 0.66b1 -> 0.66b2): CVE-2026-126360 (GHSA-mf5v-w3w3-f6cg), quadratic-time parsing of a crafted `traceparent` value in `TraceContextTextMapPropagator.extract()`. Conforming HTTP header values cannot carry the newline the attack needs, and the app's other carrier, Celery task headers, is written by the app itself, so no exposure is known; upgraded all the same. 1.45.2 was released on 2026-10-29 and passes the two-week dependency age rule.
+- dnspython 2.9.1 -> 2.9.2: CVE-2026-128089 (GHSA-vvf4-9x63-8xvv), excessive memory and CPU use when parsing a crafted WKS record from zone-file text. The app does not parse zone files (dnspython is loaded by email-validator, with the deliverability check off), so no exposure is known; upgraded all the same.
+- OpenTelemetry 1.45.1 -> 1.45.2 (instrumentation 0.66b1 -> 0.66b2): CVE-2026-126360 (GHSA-mf5v-w3w3-f6cg), quadratic-time parsing of a crafted `traceparent` value in `TraceContextTextMapPropagator.extract()`. Conforming HTTP header values cannot carry the newline the attack needs, and the app's other carrier, Celery task headers, is written by the app itself, so no exposure is known; upgraded all the same. 1.45.2 was released on 2026-10-29.
 
 ### Documentation
 - `docs/OPERATIONS.md`: a failed `/readyz` check means the dependency did not answer this instance within 2 s (a saturated instance can fail one probe while the database is healthy); remove an instance only after several consecutive failures.

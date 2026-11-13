@@ -57,15 +57,18 @@ dev = [
     "mypy==2.4.0",
     "pytest-socket==0.8.1",
     "pytest-randomly==5.0.0",
-    "pytest-benchmark==5.3.0",
+    "pytest-benchmark==5.3.1",
 ]
 
 [tool.uv]
-# Dependency age rule: a release is a lock candidate only once it is two weeks old,
-# so a malicious or broken fresh upload has time to be caught and yanked.
+# Dependency age rule: a release is a lock candidate only once it is a week old,
+# so a malicious or broken fresh upload has time to be caught and yanked. One
+# week, not two: over Nov 2025 - Nov 2026 every yanked release of a locked
+# package was replaced within 4 days, and no release found bad later was found
+# within 14 days, while 30 security fixes waited 7 days longer under two weeks.
 # A security fix that cannot wait is let through per package with
 # exclude-newer-package (see the dependency-age-rule note), never by loosening this.
-exclude-newer = "2 weeks"
+exclude-newer = "1 week"
 
 [tool.pytest]
 minversion = "9.0"

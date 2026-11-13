@@ -12,7 +12,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    cooldown: {default-days: 14}
+    # Matches exclude-newer in pyproject.toml: a PR for a younger release could not be locked.
+    cooldown: {default-days: 7}
     groups:
       python-minor-patch:
         update-types: ["minor", "patch"]
