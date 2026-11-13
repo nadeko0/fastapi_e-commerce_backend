@@ -105,8 +105,14 @@ def assert_problem(response) -> dict:
         assert isinstance(body["errors"], list)
         for error in body["errors"]:
             assert "input" not in error, error
-    assert not _LEAK_ANYCASE.search(response.text), response.text[:500]
-    assert not _LEAK_EXACT.search(response.text), response.text[:500]
+    # `loc` repeats the request's own keys (an unknown field named "SELECT"
+    # is reported by that name): the client's text, not something leaked.
+    scanned = json.dumps({
+        **body,
+        "errors": [{k: v for k, v in error.items() if k != "loc"} for error in body.get("errors", [])],
+    })
+    assert not _LEAK_ANYCASE.search(scanned), response.text[:500]
+    assert not _LEAK_EXACT.search(scanned), response.text[:500]
     return body
 
 
@@ -589,12 +595,14 @@ def test_a_patch_document_that_is_not_an_object_is_refused(world, target, body):
 @given(name=st.text(min_size=1, max_size=20), value=st.one_of(
     st.none(), st.booleans(), st.integers(), st.text(max_size=10),
     st.lists(st.integers(), max_size=3), st.dictionaries(st.text(max_size=3), st.integers(), max_size=2)))
+# The 422 names the unknown member in `loc` (the client's own key, by
+# design), which assert_problem leaves out of its leak scan: names that look
+# like the server's internals, found by HYPOTHESIS_PROFILE=explore and by a
+# plain run (November 2026).
+@example(name="psycopg", value=1)
+@example(name="SELECT", value=1)
 def test_unknown_members_are_422_and_never_applied(world, target, name, value):
     assume(name not in target[3].model_fields)
-    # The 422 names the unknown member in `loc` (the client's own key, by
-    # design); a name like "psycopg" would then trip the leak check, which
-    # looks for the server's internals. Found by HYPOTHESIS_PROFILE=explore.
-    assume(not _LEAK_ANYCASE.search(name))
     response = no_5xx(_patch(world, target, {name: value}))
     assert response.status_code == 422, response.text
 
