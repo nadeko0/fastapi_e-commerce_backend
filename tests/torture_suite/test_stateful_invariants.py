@@ -728,6 +728,13 @@ class PaymentWorld(RuleBasedStateMachine):
                    and p.created_at.replace(tzinfo=None) > stale.replace(tzinfo=None)
                    for p in self._payments(order_id))
 
+    def _window_closed(self, order):
+        # A new attempt is refused once the order is UNPAID_ORDER_EXPIRE_MINUTES
+        # old (_guard_payment_window_open); unpaid_order_expires backdates an
+        # order it may leave alive while an attempt of it is young.
+        window = utc_now() - timedelta(minutes=settings.UNPAID_ORDER_EXPIRE_MINUTES)
+        return order.created_at.replace(tzinfo=None) <= window.replace(tzinfo=None)
+
     def _open_dispute(self, order_id, payment_id=None):
         return any(d.status not in DISPUTE_CLOSED_STATUSES
                    for p in self._payments(order_id) if payment_id in (None, p.id)
@@ -923,7 +930,8 @@ class PaymentWorld(RuleBasedStateMachine):
         order = self._order(order_id)
         if stranger == 0:
             expected = 404
-        elif order.payment_status in ("paid", "refunded") or order.status == "cancelled" or self._in_flight(order_id):
+        elif (order.payment_status in ("paid", "refunded") or order.status == "cancelled"
+              or self._in_flight(order_id) or self._window_closed(order)):
             expected = 409
         elif token == PAY_DECLINED:
             expected = 422
@@ -975,7 +983,7 @@ class PaymentWorld(RuleBasedStateMachine):
             return
         order = self._order(order_id)
         blocked = (order.payment_status in ("paid", "refunded") or order.status == "cancelled"
-                   or self._in_flight(order_id))
+                   or self._in_flight(order_id) or self._window_closed(order))
         response = check(self.shop.checkout_session(self.buyers[self.owner[order_id]], order_id),
                          200, 409)
         assert response.status_code == (409 if blocked else 200), response.text
