@@ -3,6 +3,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from app.core.clock import UTCDateTime
 from app.core.config import settings
 
 # Import all models here
@@ -26,6 +27,16 @@ if config.config_file_name is not None and config.attributes.get("configure_logg
 
 # Set SQLAlchemy metadata object for 'autogenerate' support
 target_metadata = Base.metadata
+
+
+def render_item(type_, obj, autogen_context):
+    """Autogenerate writes a model's UTCDateTime as the plain column type it
+    is in the database: a migration states the schema of its own revision and
+    does not import application code, and Alembic would otherwise write
+    app.core.clock.UTCDateTime(...) without importing it."""
+    if type_ == "type" and isinstance(obj, UTCDateTime):
+        return "sa.DateTime(timezone=True)"
+    return False
 
 # Custom configuration values
 config.set_section_option(
@@ -63,6 +74,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,  # Enable column type comparison
         compare_server_default=True,  # Compare server defaults
+        render_item=render_item,
     )
 
     with context.begin_transaction():
@@ -91,6 +103,7 @@ def run_migrations_online() -> None:
                 target_metadata=target_metadata,
                 compare_type=True,  # Enable column type comparison
                 compare_server_default=True,  # Compare server defaults
+                render_item=render_item,
             )
 
             with context.begin_transaction():

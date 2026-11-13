@@ -64,7 +64,10 @@ def test_it_follows_the_previous_one_in_a_single_chain():
 # DateTime columns added by later revisions, created as TIMESTAMP WITH TIME
 # ZONE from the start (the next test checks every model column is): this
 # migration converted the columns that existed when it was written.
-ADDED_LATER = {"payments": {"reconciled_at"}}  # f180919aaf3b
+ADDED_LATER = {
+    "payments": {"reconciled_at"},  # f180919aaf3b
+    "payment_disputes": {"evidence_due_by"},
+}
 
 
 def test_it_covers_exactly_the_datetime_columns_of_the_models():

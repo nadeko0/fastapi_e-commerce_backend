@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 - The `sweep_stripe_events` beat task runs every minute instead of every 5. No new setting.
+- Migration `0c86df1cbf98` adds five nullable columns to `payment_disputes` (evidence deadline and state). Run `docker compose --profile migrate run --rm migrate` before starting the new image.
+
+### Added
+- Each dispute stores what Stripe reports about its evidence (`Dispute.evidence_details`): the deadline (`due_by`), whether evidence was staged and submitted, whether it is past due, how many times it was submitted and how (`manual`, `smart_disputes`, `not_submitted`). Updated on every `charge.dispute.*` event; disputes stored before this release show nothing until their next event.
 
 ### Fixed
 - A Stripe webhook stored while the Celery broker (Redis) was unreachable was applied only about 20 minutes later: the sweeper re-queued an event only once it had been unchanged for `STRIPE_EVENT_SWEEP_AFTER_MINUTES`, a wait meant for messages lost in other ways and for events backing off between retries. In the November 2026 audit, a payment confirmed during a 75 s Redis freeze reached its order 21 minutes later (F-CHAOS-3). When the webhook route or an admin replay cannot publish an event, the event is now marked (`last_error`: "Not enqueued: ...", visible in the admin's webhook event list) and the sweeper publishes it on its next run, then clears the mark; a payment confirmed that way reaches its order within about a minute of the broker's return. Unmarked events keep the 20-minute wait, so a long queue gets no duplicate messages.

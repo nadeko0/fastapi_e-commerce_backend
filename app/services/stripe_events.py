@@ -13,7 +13,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, case, or_, select, update
@@ -191,6 +191,8 @@ def _apply_dispute_event(db: Session, object_data: dict[str, Any]) -> dict[str, 
     # one dispute: logged when the dispute is first seen or its status moves.
     status_changed = dispute.status is None or dispute.status != status  # type: ignore[redundant-expr]  # None on a dispute just created above
     dispute.status = status
+    for column, value in _evidence_details(object_data).items():
+        setattr(dispute, column, value)
     is_closed = status in DISPUTE_CLOSED_STATUSES
     if is_closed:
         dispute.closed_at = utc_now()
@@ -206,6 +208,36 @@ def _apply_dispute_event(db: Session, object_data: dict[str, Any]) -> dict[str, 
     if is_closed:
         return {"status": "processed", "applied": True}
     return {"status": "processed", "applied": True, "requires_manual_review": True}
+
+
+def _evidence_details(object_data: dict[str, Any]) -> dict[str, Any]:
+    """The PaymentDispute columns from a Dispute's evidence_details; empty
+    when the event carries none (the stored values stay). A field of the
+    wrong type is stored as None (not reported)."""
+    details = object_data.get("evidence_details")
+    if not isinstance(details, dict):
+        return {}
+
+    def _flag(name: str) -> bool | None:
+        value = details.get(name)
+        return value if isinstance(value, bool) else None
+
+    due_by = details.get("due_by")
+    count = details.get("submission_count")
+    method = details.get("submission_method")
+    return {
+        "evidence_due_by": (
+            datetime.fromtimestamp(due_by, UTC)
+            if isinstance(due_by, int) and not isinstance(due_by, bool)
+            else None
+        ),
+        "evidence_has_evidence": _flag("has_evidence"),
+        "evidence_past_due": _flag("past_due"),
+        "evidence_submission_count": (
+            count if isinstance(count, int) and not isinstance(count, bool) else None
+        ),
+        "evidence_submission_method": method if isinstance(method, str) else None,
+    }
 
 
 def _object_id(value: Any) -> str | None:

@@ -114,6 +114,15 @@ class PaymentDispute(Base):
     status: Mapped[str]
     reason: Mapped[str | None]
     closed_at: Mapped[datetime | None]
+    # Dispute.evidence_details as last reported; None until an event carries
+    # it (disputes stored before migration 804f43988360).
+    evidence_due_by: Mapped[datetime | None]
+    evidence_has_evidence: Mapped[bool | None]
+    evidence_past_due: Mapped[bool | None]
+    evidence_submission_count: Mapped[int | None]
+    # "manual", "smart_disputes" or "not_submitted" in API 2026-10-28.endive;
+    # stored as reported, so a value Stripe adds later is kept too.
+    evidence_submission_method: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
 
