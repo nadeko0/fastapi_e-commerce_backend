@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-11-14
+
 ### Upgrade notes
 - The `sweep_stripe_events` beat task runs every minute instead of every 5. No new setting.
 - Migration `0c86df1cbf98` adds five nullable columns to `payment_disputes` (evidence deadline and state). Run `docker compose --profile migrate run --rm migrate` before starting the new image.
@@ -31,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 - `docs/OPERATIONS.md`: a failed `/readyz` check means the dependency did not answer this instance within 2 s (a saturated instance can fail one probe while the database is healthy); remove an instance only after several consecutive failures.
 - Load and chaos audit report: corrections from a re-verification of every numeric claim against the raw data.
+- `docs/API.md` describes the dispute `evidence` and the appeal statuses; `SECURITY.md` the one-week age rule for Python packages; `docs/TESTING.md` the module-length and function-size checks.
 
 ## [6.1.0] - 2026-11-13
 
