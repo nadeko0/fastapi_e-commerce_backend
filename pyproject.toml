@@ -200,18 +200,30 @@ ignore = [
 # RUF005 (list/tuple concatenation), RUF012 (mutable class defaults), RUF013
 # (implicit Optional), RUF022 (sorted __all__), RUF100 (stale noqa).
 extend-select = ["UP", "B", "ASYNC", "DTZ", "FAST", "SIM", "RUF005", "RUF012", "RUF013", "RUF022", "RUF100",
-    "G", "LOG", "BLE", "PGH003", "PIE", "C4", "RET", "PT", "T20", "PLE", "PLW", "TID251"]
+    "G", "LOG", "BLE", "PGH003", "PIE", "C4", "RET", "PT", "T20", "PLE", "PLW", "TID251",
+    "C901", "PLR0912", "PLR0915"]
 # Second batch: logging format (G, LOG), blind except (BLE), type: ignore without code
 # (PGH003), PIE, comprehensions (C4), return statements (RET), pytest style (PT),
 # print (T20), pylint errors and warnings (PLE, PLW).
+# Function size: complexity (C901), branches (PLR0912), statements (PLR0915), with
+# limits above Ruff's defaults (10/12/50): about a dozen app functions sit just past
+# the defaults and read fine as they are; the limits stop one from growing further.
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.pylint]
+max-branches = 15
+max-statements = 60
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "app.services.redis.RedisService".msg = "Use the helpers in app.services.redis or app.tasks; only those two modules may name RedisService."
 
 [tool.ruff.lint.per-file-ignores]
 "app/tasks.py" = ["TID251"]
-# The tests build and patch RedisService directly.
-"tests/**" = ["TID251"]
+# The tests build and patch RedisService directly. Test scenarios and data strategies
+# are long by design: the function-size limits are for app/.
+"tests/**" = ["TID251", "C901", "PLR0912", "PLR0915"]
 # Auth code changes only when a task names it; four `x = jwt.encode(); return x` pairs stay.
 "app/core/security.py" = ["RET504"]
 "app/services/redis.py" = ["TID251"]

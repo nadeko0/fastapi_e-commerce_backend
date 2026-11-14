@@ -292,6 +292,175 @@ def _apply_refund_event(db: Session, event_type: str, object_data: dict[str, Any
     return {"status": "processed", "applied": True}
 
 
+def _find_payment_row(db: Session, event_type: str, object_data: dict[str, Any]) -> Payment | None:
+    if event_type.startswith("checkout.session."):
+        # Session events key off Payment.checkout_session_id, not
+        # payment_intent_id - a fresh Checkout Session's payment_intent is
+        # null until the customer actually completes the hosted page (see
+        # CheckoutSession's docstring in app/services/payment/types.py), so
+        # it cannot be used to find the Payment row at all event types
+        # (e.g. checkout.session.expired never gets one).
+        return (
+            db.scalars(
+                select(Payment).where(Payment.checkout_session_id == object_data.get("id")).limit(1)
+            ).first()
+            if object_data.get("id")
+            else None
+        )
+    payment_intent_id = object_data.get("id")
+    payment_row = (
+        db.scalars(
+            select(Payment).where(Payment.payment_intent_id == payment_intent_id).limit(1)
+        ).first()
+        if payment_intent_id
+        else None
+    )
+    if payment_row is None and event_type.startswith("payment_intent."):
+        payment_row = _checkout_attempt_named_by_metadata(db, object_data)
+    return payment_row
+
+
+def _apply_intent_succeeded(
+    db: Session, event_type: str, order: Order, payment_row: Payment,
+    object_data: dict[str, Any], background_tasks: TaskQueue, event_id: str | None,
+) -> dict[str, Any]:
+    # A Checkout attempt found through its metadata still holds the
+    # placeholder: store the real PaymentIntent id, as
+    # checkout.session.completed does (re-read under the lock in apply_event,
+    # so a session event that got there first has already stored it).
+    # Whichever of the two events runs second finds the attempt succeeded and
+    # changes nothing (_apply_payment_success).
+    intent_id = object_data.get("id")
+    if payment_row.payment_intent_id.startswith(_PENDING_CHECKOUT_ID_PREFIX) and (
+        isinstance(intent_id, str) and intent_id
+    ):
+        payment_row.payment_intent_id = intent_id
+    # A success for a cancelled order, or for one another attempt
+    # already paid, is flagged rather than applied inside
+    # _apply_payment_success (the same rule for /pay's own outcome).
+    if payment_row.status != "succeeded" and not _reported_charge_matches_order(
+        object_data, "amount_received", order
+    ):
+        # Stripe charged something other than what the order costs (or
+        # in another currency): marking the order paid would ship it
+        # for the wrong money. Recorded and flagged for manual review.
+        # Only for an attempt not yet known to have succeeded: a report
+        # about one already applied changes nothing (see
+        # _apply_payment_success). Checked first, this used to flag the
+        # attempt that had paid the order, leaving the order paid with
+        # no unflagged charge behind it - and impossible to refund.
+        return _flag_payment_for_manual_review(
+            db, payment_row, "charged amount or currency differs from the order"
+        )
+
+    if not _apply_payment_success(db, order, payment_row, background_tasks, order.user.email):
+        return _MANUAL_REVIEW_RESPONSE
+    return {"status": "processed", "applied": True}
+
+
+def _apply_intent_failed(
+    db: Session, event_type: str, order: Order, payment_row: Payment,
+    object_data: dict[str, Any], background_tasks: TaskQueue, event_id: str | None,
+) -> dict[str, Any]:
+    if not _is_checkout_row(payment_row):
+        return _apply_attempt_ended(
+            db, event_type, order, payment_row, object_data, background_tasks, event_id
+        )
+    # A decline on Stripe's hosted page is not the end of the attempt:
+    # the customer can retry on the same open Session, and the Session's
+    # own events (completed, expired) end it. Marking the attempt and the
+    # order failed here would be wrong, so it is only recorded in the log.
+    error = object_data.get("last_payment_error")
+    error = error if isinstance(error, dict) else {}
+    logger.warning(
+        "Checkout payment attempt %s (order %s) was declined on the hosted page "
+        "(event %s, code %s, decline code %s); the session stays open for a retry",
+        payment_row.id, order.id, event_id, error.get("code"), error.get("decline_code"),
+    )
+    db.commit()
+    return {"status": "processed", "applied": False}
+
+
+def _apply_attempt_ended(
+    db: Session, event_type: str, order: Order, payment_row: Payment,
+    object_data: dict[str, Any], background_tasks: TaskQueue, event_id: str | None,
+) -> dict[str, Any]:
+    # A terminal failure or expiry of the attempt: a failed PaymentIntent
+    # (outside Checkout), an expired or failed Checkout Session, or a
+    # canceled PaymentIntent. A canceled one (from the Dashboard, by the
+    # integration, or by Stripe after an abandoned authentication) can never
+    # be charged: the attempt is over, like a failed one. It used to be
+    # unhandled, so the attempt stayed "requires_action" and blocked every
+    # new attempt for the order while it was recent
+    # (_guard_no_attempt_in_flight). A succeeded intent cannot be canceled,
+    # and _apply_payment_failure never touches an attempt that succeeded or
+    # a paid order.
+    _apply_payment_failure(db, order, payment_row)
+    return {"status": "processed", "applied": True}
+
+
+def _apply_session_paid(
+    db: Session, event_type: str, order: Order, payment_row: Payment,
+    object_data: dict[str, Any], background_tasks: TaskQueue, event_id: str | None,
+) -> dict[str, Any]:
+    # Backfill the real PaymentIntent id now that Stripe has attached
+    # one - Session.payment_intent is a string id on the webhook
+    # payload (confirmed via Stripe's own docs example for this event:
+    # https://docs.stripe.com/payments/momo/save-during-payment), not
+    # an expanded object. payment_row.payment_intent_id started out as
+    # a "pending-..." placeholder set at session-creation time (see
+    # create_checkout_session), matching /pay's own placeholder
+    # convention for the same not-yet-known-value situation.
+    session_payment_intent = object_data.get("payment_intent")
+    if isinstance(session_payment_intent, dict):
+        session_payment_intent = session_payment_intent.get("id")
+    if session_payment_intent:
+        payment_row.payment_intent_id = session_payment_intent
+
+    # checkout.session.completed can fire with payment_status="unpaid"
+    # for delayed/async payment methods (e.g. bank debits) - Stripe
+    # documents that the real outcome then arrives later via a
+    # checkout.session.async_payment_succeeded/_failed event. Only a
+    # session that is actually paid (or needs no payment at all) is
+    # applied as a success here; an unpaid "completed" session is
+    # acknowledged but left pending.
+    payment_status_raw = object_data.get("payment_status")
+    if event_type == "checkout.session.completed" and payment_status_raw not in (
+        "paid",
+        "no_payment_required",
+    ):
+        db.commit()
+        return {"status": "processed", "applied": False}
+
+    # Same conflict handling as payment_intent.succeeded (_apply_intent_succeeded).
+    if payment_row.status != "succeeded" and not _reported_charge_matches_order(
+        object_data, "amount_total", order
+    ):
+        return _flag_payment_for_manual_review(
+            db, payment_row, "charged amount or currency differs from the order"
+        )
+
+    if not _apply_payment_success(db, order, payment_row, background_tasks, order.user.email):
+        return _MANUAL_REVIEW_RESPONSE
+    return {"status": "processed", "applied": True}
+
+
+_PAYMENT_EVENT_HANDLERS: dict[
+    str,
+    Callable[
+        [Session, str, Order, Payment, dict[str, Any], TaskQueue, str | None], dict[str, Any]
+    ],
+] = {
+    "payment_intent.succeeded": _apply_intent_succeeded,
+    "payment_intent.payment_failed": _apply_intent_failed,
+    "payment_intent.canceled": _apply_attempt_ended,
+    "checkout.session.completed": _apply_session_paid,
+    "checkout.session.async_payment_succeeded": _apply_session_paid,
+    "checkout.session.expired": _apply_attempt_ended,
+    "checkout.session.async_payment_failed": _apply_attempt_ended,
+}
+
+
 def apply_event(
     db: Session, event_type: str, event_data: Any, background_tasks: TaskQueue, event_id: str | None = None
 ) -> dict[str, Any]:
@@ -314,34 +483,8 @@ def apply_event(
         return _apply_refund_event(db, event_type, object_data)
     if event_type in _DISPUTE_EVENT_TYPES:
         return _apply_dispute_event(db, object_data)
-    is_checkout_session_event = event_type.startswith("checkout.session.")
 
-    if is_checkout_session_event:
-        # Session events key off Payment.checkout_session_id, not
-        # payment_intent_id - a fresh Checkout Session's payment_intent is
-        # null until the customer actually completes the hosted page (see
-        # CheckoutSession's docstring in app/services/payment/types.py), so
-        # it cannot be used to find the Payment row at all event types
-        # (e.g. checkout.session.expired never gets one).
-        payment_row = (
-            db.scalars(
-                select(Payment).where(Payment.checkout_session_id == object_data.get("id")).limit(1)
-            ).first()
-            if object_data.get("id")
-            else None
-        )
-    else:
-        payment_intent_id = object_data.get("id")
-        payment_row = (
-            db.scalars(
-            select(Payment).where(Payment.payment_intent_id == payment_intent_id).limit(1)
-        ).first()
-            if payment_intent_id
-            else None
-        )
-        if payment_row is None and event_type.startswith("payment_intent."):
-            payment_row = _checkout_attempt_named_by_metadata(db, object_data)
-
+    payment_row = _find_payment_row(db, event_type, object_data)
     if payment_row is None:
         if _attempt_still_storing_its_id(db, object_data):
             # One of our orders has an attempt that has not stored its
@@ -362,7 +505,7 @@ def apply_event(
         db.commit()
         return {"status": "processed", "applied": False}
 
-    # Locked for the rest of this event's handling (every branch ends in a
+    # Locked for the rest of this event's handling (every handler ends in a
     # commit), and the attempt re-read under the lock: a concurrent /pay or
     # another event for the same order waits instead of deciding on the
     # same state. See _lock_order_and_reload.
@@ -372,116 +515,15 @@ def apply_event(
     assert order is not None, "payments.order_id is a non-null foreign key to orders"
     db.refresh(payment_row)
 
-    if event_type == "payment_intent.succeeded":
-        # A Checkout attempt found through its metadata still holds the
-        # placeholder: store the real PaymentIntent id, as
-        # checkout.session.completed does (re-read under the lock above, so a
-        # session event that got there first has already stored it). Whichever
-        # of the two events runs second finds the attempt succeeded and
-        # changes nothing (_apply_payment_success).
-        intent_id = object_data.get("id")
-        if payment_row.payment_intent_id.startswith(_PENDING_CHECKOUT_ID_PREFIX) and (
-            isinstance(intent_id, str) and intent_id
-        ):
-            payment_row.payment_intent_id = intent_id
-        # A success for a cancelled order, or for one another attempt
-        # already paid, is flagged rather than applied inside
-        # _apply_payment_success (the same rule for /pay's own outcome).
-        if payment_row.status != "succeeded" and not _reported_charge_matches_order(
-            object_data, "amount_received", order
-        ):
-            # Stripe charged something other than what the order costs (or
-            # in another currency): marking the order paid would ship it
-            # for the wrong money. Recorded and flagged for manual review.
-            # Only for an attempt not yet known to have succeeded: a report
-            # about one already applied changes nothing (see
-            # _apply_payment_success). Checked first, this used to flag the
-            # attempt that had paid the order, leaving the order paid with
-            # no unflagged charge behind it - and impossible to refund.
-            return _flag_payment_for_manual_review(
-                db, payment_row, "charged amount or currency differs from the order"
-            )
-
-        if not _apply_payment_success(db, order, payment_row, background_tasks, order.user.email):
-            return _MANUAL_REVIEW_RESPONSE
-    elif event_type == "payment_intent.payment_failed" and _is_checkout_row(payment_row):
-        # A decline on Stripe's hosted page is not the end of the attempt:
-        # the customer can retry on the same open Session, and the Session's
-        # own events (completed, expired) end it. Marking the attempt and the
-        # order failed here would be wrong, so it is only recorded in the log.
-        error = object_data.get("last_payment_error")
-        error = error if isinstance(error, dict) else {}
-        logger.warning(
-            "Checkout payment attempt %s (order %s) was declined on the hosted page "
-            "(event %s, code %s, decline code %s); the session stays open for a retry",
-            payment_row.id, order.id, event_id, error.get("code"), error.get("decline_code"),
-        )
-        db.commit()
-        return {"status": "processed", "applied": False}
-    elif event_type in ("payment_intent.payment_failed", "payment_intent.canceled"):
-        # A canceled PaymentIntent (from the Dashboard, by the integration,
-        # or by Stripe after an abandoned authentication) can never be
-        # charged: the attempt is over, like a failed one. It used to be
-        # unhandled, so the attempt stayed "requires_action" and blocked
-        # every new attempt for the order while it was recent
-        # (_guard_no_attempt_in_flight). A succeeded intent cannot be
-        # canceled, and _apply_payment_failure leaves a succeeded attempt
-        # alone in any case.
-        _apply_payment_failure(db, order, payment_row)
-    elif event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
-        # Backfill the real PaymentIntent id now that Stripe has attached
-        # one - Session.payment_intent is a string id on the webhook
-        # payload (confirmed via Stripe's own docs example for this event:
-        # https://docs.stripe.com/payments/momo/save-during-payment), not
-        # an expanded object. payment_row.payment_intent_id started out as
-        # a "pending-..." placeholder set at session-creation time (see
-        # create_checkout_session), matching /pay's own placeholder
-        # convention for the same not-yet-known-value situation.
-        session_payment_intent = object_data.get("payment_intent")
-        if isinstance(session_payment_intent, dict):
-            session_payment_intent = session_payment_intent.get("id")
-        if session_payment_intent:
-            payment_row.payment_intent_id = session_payment_intent
-
-        # checkout.session.completed can fire with payment_status="unpaid"
-        # for delayed/async payment methods (e.g. bank debits) - Stripe
-        # documents that the real outcome then arrives later via a
-        # checkout.session.async_payment_succeeded/_failed event. Only a
-        # session that is actually paid (or needs no payment at all) is
-        # applied as a success here; an unpaid "completed" session is
-        # acknowledged but left pending.
-        payment_status_raw = object_data.get("payment_status")
-        if event_type == "checkout.session.completed" and payment_status_raw not in (
-            "paid",
-            "no_payment_required",
-        ):
-            db.commit()
-            return {"status": "processed", "applied": False}
-
-        # Same conflict handling as payment_intent.succeeded above.
-        if payment_row.status != "succeeded" and not _reported_charge_matches_order(
-            object_data, "amount_total", order
-        ):
-            return _flag_payment_for_manual_review(
-                db, payment_row, "charged amount or currency differs from the order"
-            )
-
-        if not _apply_payment_success(db, order, payment_row, background_tasks, order.user.email):
-            return _MANUAL_REVIEW_RESPONSE
-    elif event_type in ("checkout.session.expired", "checkout.session.async_payment_failed"):
-        # Mirrors payment_intent.payment_failed's handling: a terminal
-        # failure/expiry for this attempt. See _apply_payment_failure for
-        # why it never touches an attempt that succeeded or a paid order.
-        _apply_payment_failure(db, order, payment_row)
-    else:
+    handler = _PAYMENT_EVENT_HANDLERS.get(event_type)
+    if handler is None:
         # A type with no handling of its own (payment_intent.created,
         # .processing, ...: Stripe sends them to an endpoint subscribed to
         # them). Recorded, and answered as not applied - it used to be
         # answered "applied" like a payment that was.
         db.commit()
         return {"status": "processed", "applied": False}
-
-    return {"status": "processed", "applied": True}
+    return handler(db, event_type, order, payment_row, object_data, background_tasks, event_id)
 
 
 # -- Storing, publishing, processing and sweeping stored events ------------------

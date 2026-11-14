@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Dependency age rule for Python packages: one week instead of two (`[tool.uv] exclude-newer`, Dependabot's uv cooldown). Over the last year every yanked release of a locked package was replaced within 4 days and no release found to be bad was found within 14 days, while 30 security fixes waited a week longer. Images, GitHub Actions and tools keep two weeks.
 - CI fails when a module under `app/` passes 800 lines. The longest ones were split by job: the order routes into `app/api/v1/orders/` and `app/api/v1/admin/` and `app/api/v1/users/` packages, the payment helpers the routes and the webhook processing share into `app/services/payment/`, and the GDPR redaction of stored Stripe events into `app/services/stripe_event_redaction.py`. No route, response or behaviour changed.
+- Ruff now limits function size in `app/`: complexity 15, branches 15, statements 60 (C901, PLR0912, PLR0915). The one function past them, the Stripe webhook's `apply_event`, now looks up the payment attempt and hands the event to one handler per event type; what each event does is unchanged.
 - Test tooling: pytest 9.1.1 -> 9.2.0, pytest-benchmark 5.3.0 -> 5.3.1 (held back in 6.0.0 and 6.1.0 by the two-week rule).
 
 ### Security
