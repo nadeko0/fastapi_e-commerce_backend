@@ -67,7 +67,7 @@ sequenceDiagram
 ### Guarantees
 - **Storage First:** Webhooks are committed to PostgreSQL before returning an acknowledgment to Stripe.
 - **Worker Crash Safety:** Celery tasks run with `acks_late=True` and `reject_on_worker_lost=True`. If a pool process dies the task is requeued at once; if the whole worker is killed, the broker redelivers after `visibility_timeout` (1 hour).
-- **Autonomous Recovery (Sweeper):** The `sweep_stripe_events` Celery beat task (every minute) publishes the events the webhook route could not publish (marked `Not enqueued` in `last_error`) on its next run, and any other event still `received` or `retrying` after `STRIPE_EVENT_SWEEP_AFTER_MINUTES` (20, past the longest backoff). Until 6.1.0 every event waited the 20 minutes: in the November 2026 audit, webhooks stored during a 75 s Redis freeze reached their orders about 21 minutes later.
+- **Autonomous Recovery (Sweeper):** The `sweep_stripe_events` Celery beat task (every minute) publishes the events the webhook route could not publish (marked `Not enqueued` in `last_error`) on its next run, and any other event still `received` or `retrying` after `STRIPE_EVENT_SWEEP_AFTER_MINUTES` (20, past the longest backoff). Through 6.1.0 every event waited the 20 minutes: in the November 2026 audit (run on 6.0.0), webhooks stored during a 75 s Redis freeze reached their orders about 21 minutes later.
 - **Idempotency:** Replaying identical event payloads returns `200 already_processed` with zero ledger duplicate entries.
 
 ## Fail-Closed Token Semantics: Why 503 and Not 401

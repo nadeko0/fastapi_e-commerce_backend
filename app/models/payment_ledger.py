@@ -119,7 +119,7 @@ class PaymentDispute(Base):
     reason: Mapped[str | None]
     closed_at: Mapped[datetime | None]
     # Dispute.evidence_details as last reported; None until an event carries
-    # it (disputes stored before migration 804f43988360).
+    # it (disputes stored before migration 0c86df1cbf98).
     evidence_due_by: Mapped[datetime | None]
     evidence_has_evidence: Mapped[bool | None]
     evidence_past_due: Mapped[bool | None]

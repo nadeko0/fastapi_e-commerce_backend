@@ -47,7 +47,7 @@ flowchart TD
     test_redis --> docker_build
 ```
 
-- **lint:** Runs Ruff across `app` and `tests` (the pycodestyle, Pyflakes, isort and warning rules plus pyupgrade, bugbear, async, naive-datetime, FastAPI, simplify, logging, return, pytest and print rule sets; the full list is in `pyproject.toml`), and static type checking with `mypy` over `app` (`warn_return_any`, `warn_unreachable`, `disallow_any_generics` and extra error codes everywhere; fully annotated definitions in the payment layer and `app/tasks.py`).
+- **lint:** Runs Ruff across `app` and `tests` (the pycodestyle, Pyflakes, isort and warning rules plus pyupgrade, bugbear, async, naive-datetime, FastAPI, simplify, logging, return, pytest and print rule sets; the full list is in `pyproject.toml`), and static type checking with `mypy` over `app` (`warn_return_any`, `warn_unreachable`, `disallow_any_generics` and extra error codes everywhere; fully annotated definitions in the payment layer and `app/tasks.py`). It also fails when a module under `app/` has more than 800 lines (the aim is 500), and Ruff limits a function in `app/` to complexity 15, 15 branches and 60 statements (C901, PLR0912, PLR0915; the tests are exempt).
 - **sast:** Runs Bandit offline (`-r app --severity-level medium`) for static application security testing.
 - **benchmark:** Times hot execution paths with `pytest-benchmark` on the base commit (the pull request's base, or the previous head of `main`) and on HEAD, one after the other on the same runner, and fails when a median on HEAD is more than 35% slower (`.github/scripts/benchmark_ab.sh`). Both sides share one machine because runners differ: six runs of one commit landed on three AMD EPYC models (7763, 9V74, 9V45) whose medians differed by up to 2.26 times. On one runner, six runs of unchanged code put HEAD within 6% of the base on the CPU benchmarks and within 22% on the request benchmarks, which the 35% leaves room for.
 - **audit:** Exports locked dependencies to check against the PyPI Advisory Database using `pip-audit`, producing a CycloneDX SBOM.
@@ -155,19 +155,19 @@ The CI comparison, base commit against HEAD on this machine (Linux or WSL):
 bash .github/scripts/benchmark_ab.sh origin/main
 ```
 
-## Verified Metrics for Release v6.1.0
+## Verified Metrics for Release v6.2.0
 
-Verification results on release v6.1.0; a row measured on an earlier release says which:
+Verification results on release v6.2.0; a row measured on an earlier release says which:
 
 | Metric | Measured Value | Standard / Target |
 |---|---|---|
-| SQLite Test Suite | 6,639 passed, 78 skipped without their services (+ 30 timing), random order | 0 failures, 0 warnings |
+| SQLite Test Suite | 6,671 passed, 78 skipped without their services (+ 30 timing), random order | 0 failures, 0 warnings |
 | PostgreSQL Test Suite (v6.0.0) | 6,618 passed on PostgreSQL 18.6 with Redis 8.8 under WSL Linux (+ 124 timing); 16, 17 and 18 in CI | Full migration and constraint parity |
 | Hypothesis `explore` profile (v6.0.0) | 2 runs of the 1,540 property and state-machine cases on PostgreSQL 18.6, new random inputs each run; one falsifying example, a false positive in the test itself (fixed) | No falsifying example in the code |
 | Migration Round Trip | every revision on PostgreSQL 16, 17 and 18 (CI) | Previous release keeps working on the new schema |
 | Live Stripe Test Suite (v4.1.0) | 52 passed, 2 skipped | api.stripe.com sandbox |
 | Payment Layer Coverage | 100.0% line and branch on the listed payment-layer files (the mock provider file is excluded) | Zero uncovered branches in financial path |
-| Overall Coverage (lines and branches combined) | 98.9% (source: `app`) | Fail-under gate set to 85% |
+| Overall Coverage (lines and branches combined) | 99.0% (source: `app`) | Fail-under gate set to 85% |
 | Mutation Score (mutmut 3.8.0, v6.0.0) | 98.8% of 3,669 mutants detected (3,346 killed, 279 over the time limit; a sample of 12 of these run without it: all killed by a failing test) | The 44 survivors reviewed as equivalent |
 | CI Execution Time | ~10 minutes across 19 jobs | Fully automated GitHub Actions workflow |
 

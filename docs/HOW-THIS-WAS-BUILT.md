@@ -29,7 +29,7 @@ This is a first-person account of who did what in this repository, where the mai
 | No response envelope; errors as RFC 9457 problem details | I asked for research on how production APIs do it instead of guessing; the AI proposed this from Google AIP-131, Microsoft, Stripe and Zalando guidelines; I accepted it |
 | Strict input (`extra="forbid"`, money as strings) | Proposed by the AI after an API audit; I accepted it for 4.0.0 |
 | Redis unreachable during a token check returns 503, not 401 | The AI's call |
-| Dependencies at least two weeks old | The model's rule. Mine was "the newest version without known CVEs". When the two-week rule left known HIGH/CRITICAL CVEs in the Redis image, I made the exception: official images with security patches go in immediately, with scanner output as proof |
+| Dependencies at least two weeks old | The model's rule. Mine was "the newest version without known CVEs". When the two-week rule left known HIGH/CRITICAL CVEs in the Redis image, I made the exception: official images with security patches go in immediately, with scanner output as proof. Since 6.2.0 Python packages need one week (images and Actions still two): the second week caught nothing in a year and delayed security fixes |
 | No public promises (response times, support) and no statements about the project's future | Mine |
 
 ## Mistakes caught in review
