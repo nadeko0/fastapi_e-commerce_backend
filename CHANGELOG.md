@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Dependencies: Celery 5.7.0 (kombu 5.7.0), pydantic 2.14.3, python-multipart 0.0.33, ruff 0.17.4, hypothesis 6.170.15, mypy 2.4.1.
+- python-dateutil 3.0.0 -> 2.9.0.post0: Celery 5.7.0 requires exactly `python-dateutil==2.9.0.post0`. dateutil is used only by Celery and freezegun; the application keeps time in UTC, and the time zone test matrix passes on 2.9.
+
 ## [6.2.0] - 2026-11-14
 
 ### Upgrade notes
