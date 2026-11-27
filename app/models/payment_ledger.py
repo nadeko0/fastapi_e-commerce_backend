@@ -114,7 +114,8 @@ class PaymentDispute(Base):
     currency: Mapped[str] = mapped_column(String(3))
     # Stripe's Dispute.status as last reported. Once it is one of
     # DISPUTE_CLOSED_STATUSES it no longer changes: a late, out-of-order
-    # event for the dispute does not reopen it.
+    # event for the dispute does not reopen it. An open status only moves
+    # forward (app/services/stripe_events.py, _OPEN_DISPUTE_RANK).
     status: Mapped[str]
     reason: Mapped[str | None]
     closed_at: Mapped[datetime | None]

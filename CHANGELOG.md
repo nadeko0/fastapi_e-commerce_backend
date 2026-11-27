@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stripe: stripe-python 17.1.0 pins API version `2026-11-18.endive` (a monthly Endive release; the SDK changelog lists additions and type changes only). Its one breaking change, API keys no longer kept in pickled Stripe objects, does not apply: the application does not pickle them. Create a new webhook endpoint with that version; see [docs/OPERATIONS.md](docs/OPERATIONS.md#going-live-with-stripe).
 - python-dateutil 3.0.0 -> 2.9.0.post0: Celery 5.7.0 requires exactly `python-dateutil==2.9.0.post0`. dateutil is used only by Celery and freezegun; the application keeps time in UTC, and the time zone test matrix passes on 2.9.
 
+### Fixed
+- An open dispute could show a stale status: Stripe does not deliver events in order, and a `charge.dispute.created` or `charge.dispute.funds_withdrawn` (`needs_response`) that arrived after `charge.dispute.updated` (`under_review`) moved the stored status back. An open status now only moves forward (inquiry, chargeback, appeal); an event with an earlier one is acknowledged and ignored, as a late event for a closed dispute already was. The order was on hold either way; only the status and evidence shown to the admin and the customer were stale. Found by the stateful payment test.
+
 ## [6.2.0] - 2026-11-14
 
 ### Upgrade notes

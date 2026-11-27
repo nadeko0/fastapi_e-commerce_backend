@@ -142,6 +142,17 @@ _DISPUTE_EVENT_TYPES = (
     "charge.dispute.funds_withdrawn",
     "charge.dispute.funds_reinstated",
 )
+# Stripe's open dispute statuses in the order a dispute passes through them:
+# an inquiry (warning_*) may escalate to a chargeback, which may be appealed
+# (docs.stripe.com/disputes/how-disputes-work, /disputes/arbitration).
+_OPEN_DISPUTE_RANK = {
+    status: rank
+    for rank, status in enumerate((
+        "warning_needs_response", "warning_under_review",
+        "needs_response", "under_review",
+        "appeal_needs_response", "appeal_under_review",
+    ))
+}
 
 
 def _apply_dispute_event(db: Session, object_data: dict[str, Any]) -> dict[str, Any]:
@@ -151,7 +162,9 @@ def _apply_dispute_event(db: Session, object_data: dict[str, Any]) -> dict[str, 
     _has_open_dispute: no fulfilment, no refund); its status and
     payment_status are not changed silently, it is flagged for review.
     Once closed it is final - a late, out-of-order event for it is
-    acknowledged and ignored - and a lost one refunds the order
+    acknowledged and ignored, as is one reporting an earlier open status
+    than the stored one (created arriving after updated) - and a lost one
+    refunds the order
     (_settle_refunds). Following WooCommerce's Stripe gateway, mapped onto
     this order model, which has no "on hold" status of its own.
     """
@@ -177,7 +190,12 @@ def _apply_dispute_event(db: Session, object_data: dict[str, Any]) -> dict[str, 
     dispute = db.scalars(
         select(PaymentDispute).where(PaymentDispute.dispute_id == dispute_id).limit(1)
     ).first()
-    if dispute is not None and dispute.status in DISPUTE_CLOSED_STATUSES:
+    if dispute is not None and (
+        dispute.status in DISPUTE_CLOSED_STATUSES
+        # A status Stripe added later has no rank and is applied as received.
+        or (status in _OPEN_DISPUTE_RANK
+            and _OPEN_DISPUTE_RANK.get(dispute.status, -1) > _OPEN_DISPUTE_RANK[status])
+    ):
         db.commit()
         return {"status": "processed", "applied": False}
     if dispute is None:

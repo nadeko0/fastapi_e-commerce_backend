@@ -12,7 +12,8 @@ semantics, mapped onto this app's order model:
   back to the customer through their bank, so the order becomes refunded;
   won and warning_closed (an inquiry that never became a chargeback) lift
   the hold. A closed dispute is final: an event for it that arrives late,
-  out of order, does not reopen it.
+  out of order, does not reopen it. An open one only moves forward: a late
+  event with an earlier status (created after updated) is ignored.
 """
 import uuid
 
@@ -142,6 +143,33 @@ def test_a_closed_dispute_is_not_reopened_by_a_late_event(shop, paid):
     assert _disputes(shop) == [("du_test_1", "won", True)]
     assert order_state(shop, order_id) == ("confirmed", "paid")
     assert shop.set_status(paid["admin"], order_id, "processing").status_code == 200
+
+
+def test_an_earlier_open_status_arriving_late_does_not_move_the_dispute_back(shop, paid):
+    # updated overtakes created and funds_withdrawn, which report needs_response.
+    shop.webhook("charge.dispute.updated", _dispute(paid["payment"], "under_review"))
+
+    for event_type in ("charge.dispute.created", "charge.dispute.funds_withdrawn"):
+        response = shop.webhook(event_type, _dispute(paid["payment"], "needs_response"))
+        assert response.status_code == 200
+        assert response.json() == {"status": "processed", "applied": False}
+
+    assert _disputes(shop) == [("du_test_1", "under_review", False)]
+
+
+def test_an_inquiry_escalating_to_a_chargeback_moves_forward(shop, paid):
+    shop.webhook("charge.dispute.created", _dispute(paid["payment"], "warning_under_review"))
+    shop.webhook("charge.dispute.updated", _dispute(paid["payment"], "needs_response"))
+
+    assert _disputes(shop) == [("du_test_1", "needs_response", False)]
+
+
+def test_a_dispute_status_stripe_adds_later_is_stored_as_received(shop, paid):
+    shop.webhook("charge.dispute.created", _dispute(paid["payment"], "under_review"))
+    shop.webhook("charge.dispute.updated", _dispute(paid["payment"], "new_open_status"))
+    shop.webhook("charge.dispute.updated", _dispute(paid["payment"], "needs_response"))
+
+    assert _disputes(shop) == [("du_test_1", "needs_response", False)]
 
 
 def test_a_lost_dispute_is_not_undone_by_a_late_event(shop, paid):
