@@ -105,6 +105,7 @@ All recurring jobs run strictly on UTC clocks:
 | `sweep-stripe-events` | `sweep_stripe_events` | Every minute | Re-publishes webhook events whose task message was lost. An event the webhook route or an admin replay could not publish (broker down) is marked in `last_error` ("Not enqueued: ...") and taken on the next run, so a payment it confirms reaches its order within about a minute of the broker's return; any other event still `received` or `retrying` is taken after `STRIPE_EVENT_SWEEP_AFTER_MINUTES` (default 20, longer than the longest retry backoff), so events waiting in a long queue get no duplicate messages. |
 | `cleanup-expired-retention` | `cleanup_expired_retention` | Daily at 02:45 UTC | Anonymises deactivated accounts past `USER_DATA_RETENTION_DAYS` (GDPR Art. 5(1)(e)). |
 | `cleanup-expired-idempotency-keys` | `cleanup_expired_idempotency_keys` | Daily at 03:00 UTC | Clears expired order idempotency keys older than `IDEMPOTENCY_KEY_TTL_HOURS`. |
+| `cleanup-expired-gdpr-exports` | `cleanup_expired_gdpr_exports` | Every hour | Deletes export archives in `GDPR_EXPORT_DIR` older than `GDPR_EXPORT_EXPIRY_HOURS` (24) and unfinished ones older than an hour. |
 
 ## PostgreSQL Database Operations
 

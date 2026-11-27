@@ -1,6 +1,6 @@
 # REST API Reference and Conventions
 
-Every API contract in release v6.2.0 is designed around standard HTTP semantics and deterministic data representations. Clients communicate with a uniform interface where resources, errors, authentication lifecycles, and caching rules follow RFC standards rather than framework idiosyncrasies.
+Every API contract is designed around standard HTTP semantics and deterministic data representations. Clients communicate with a uniform interface where resources, errors, authentication lifecycles, and caching rules follow RFC standards rather than framework idiosyncrasies.
 
 Interactive OpenAPI documentation and Swagger UI are accessible at `/api/v1/docs` (with ReDoc at `/redoc` and OpenAPI JSON at `/api/v1/openapi.json`) in non-production environments. When `ENVIRONMENT=production`, all documentation endpoints answer 404 to avoid leaking internal route structures.
 
@@ -8,7 +8,7 @@ The OpenAPI document is written to generate typed clients. Operation ids are the
 
 ## Base Path and Endpoint Overview
 
-The API version prefix is mounted at `/api/v1` (configured via `settings.API_V1_STR`). The test suite validates 56 distinct paths comprising 69 endpoint operations across 6 routers plus the health probes.
+The API version prefix is mounted at `/api/v1` (configured via `settings.API_V1_STR`). The test suite validates 57 distinct paths comprising 71 endpoint operations across 6 routers plus the health probes.
 
 | Router Tag | Operations | Scope and Primary Responsibilities |
 |---|---|---|

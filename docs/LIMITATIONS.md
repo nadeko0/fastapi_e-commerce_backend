@@ -40,7 +40,7 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
   - *Why not:* The API and the Celery worker connect as `APP_DB_USER`, a role that can read and write rows and nothing else (no superuser, no DDL, no new databases or roles). Migrations run through the `migrate` profile service as `POSTGRES_USER`, which is the superuser the PostgreSQL image creates and the owner of the schema. That superuser is not used by the running application and the port is published on loopback only, but it is still the account that owns the data.
   - *Where to start:* Create a second, non-superuser owner role in `docker/postgres/initdb/`, give it `CREATE` on the schema, and run the `migrate` service as that role. Until then, keep the `migrate` service run on demand only and use a long random `POSTGRES_PASSWORD` (the application refuses to start outside development with a shorter one).
 - **Dedicated Email Queue and Retries:**
-  - *Why not:* Emails are sent after commit without retries: from API routes in-process via BackgroundTasks, and from webhook processing and the expiry task inside the Celery task that ran them. A crash after commit loses the email.
+  - *Why not:* Emails are sent after commit without retries: from API routes in-process via BackgroundTasks, and from webhook processing, the expiry task and the export build inside the Celery task that ran them. A crash after commit loses the email.
   - *Where to start:* Route email tasks to a dedicated Celery queue with exponential backoff and dead-letter handling.
 
 ## API Contract Boundaries
