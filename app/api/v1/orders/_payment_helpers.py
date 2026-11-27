@@ -1,7 +1,11 @@
+from datetime import UTC, datetime
+
 from fastapi import status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import as_utc
+from app.core.config import settings
 from app.core.errors import Problem, ProblemType
 from app.core.idempotency import ensure_same_request
 from app.models.order import Order
@@ -52,6 +56,13 @@ def _payment_row_to_response(payment_row: Payment, order: Order) -> PaymentRespo
     )
 
 
+def _checkout_session_expires_at(payment_row: Payment) -> int:
+    """The Unix time the attempt's Checkout Session expires: sent to the
+    provider when the session is created, and answered to the client, so
+    both come from this one formula."""
+    return int(as_utc(payment_row.created_at).timestamp()) + settings.CHECKOUT_SESSION_EXPIRE_MINUTES * 60
+
+
 def _checkout_session_row_to_response(payment_row: Payment, order: Order) -> CheckoutSessionResponse:
     return CheckoutSessionResponse(
         order_id=order.id,
@@ -64,6 +75,7 @@ def _checkout_session_row_to_response(payment_row: Payment, order: Order) -> Che
         amount=_cents_to_decimal(payment_row.amount),
         currency=payment_row.currency,
         created_at=payment_row.created_at,
+        expires_at=datetime.fromtimestamp(_checkout_session_expires_at(payment_row), UTC),
     )
 
 

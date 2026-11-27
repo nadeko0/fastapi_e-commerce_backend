@@ -70,6 +70,19 @@ def if_none_match_hits(header: str | None, current: str) -> bool:
     return any(tag is None or tag == opaque for _, tag in _parse(header))
 
 
+def require_etag_for_stock(header: str | None, changes: dict[str, object]) -> None:
+    """428 (RFC 6585 section 3) when an update sets stock_quantity without an
+    entity tag. Stock moves with every order, cancellation and expiry, so a
+    write from a form read earlier would undo the sales made since. "*"
+    matches any version and protects nothing, so it is refused too."""
+    if "stock_quantity" in changes and (header is None or header.strip() == "*"):
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail="Changing stock_quantity needs If-Match with the ETag of the current version "
+                   "(from GET); stock may have changed since it was read",
+        )
+
+
 def require_if_match(header: str | None, current: str) -> None:
     """412 (RFC 9110 15.5.13) when If-Match is present and false. The
     current tag is returned so the client can refetch deliberately."""

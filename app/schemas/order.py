@@ -426,6 +426,11 @@ class CheckoutSessionResponse(BaseModel):
     amount: ResponseMoney
     currency: str
     created_at: datetime
+    # The hosted page stops taking payment then (CHECKOUT_SESSION_EXPIRE_MINUTES
+    # after the attempt was created); a new session is needed after it.
+    expires_at: datetime = Field(
+        description="When the Checkout Session expires (UTC): created_at plus CHECKOUT_SESSION_EXPIRE_MINUTES"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -624,7 +624,14 @@ def test_patch_media_types(world, target, content_type, status):
         "product": {"stock_quantity": 7},
         "variant": {"stock_quantity": 7},
     }[target[0]]
-    response = no_5xx(_patch(world, target, body, content_type=content_type))
+    extra_headers = {}
+    if target[0] == "product":
+        etag, _ = world.product_etag()
+        extra_headers["If-Match"] = etag
+    elif target[0] == "variant":
+        etag, _ = world.variant_etag()
+        extra_headers["If-Match"] = etag
+    response = no_5xx(_patch(world, target, body, content_type=content_type, extra_headers=extra_headers))
     assert response.status_code == status, response.text
     if status == 415:
         assert MERGE_PATCH in response.headers.get("accept", ""), response.headers
@@ -761,7 +768,7 @@ def test_bug_non_finite_numbers_in_free_form_json(world, literal, where):
 def _if_match_cases(current: str):
     bare = current.strip('"')
     return [
-        ("*", 200),
+        ("*", 428),
         (current, 200),
         (f" {current} ", 200),
         (f'"stale", {current}', 200),
@@ -801,9 +808,10 @@ def _strict_if_match(header: str, current: str):
 @pytest.mark.parametrize("which", ["product", "variant"])
 @pytest.mark.parametrize("index", list(range(19)))
 def test_if_match_table(world, which, index):
-    """RFC 9110 13.1.1: If-Match passes for "*" or a strongly matching tag of the
+    """RFC 9110 13.1.1: If-Match passes for a strongly matching tag of the
     list; a weak tag never matches; otherwise 412 (with the current ETag) and the
-    resource is unchanged."""
+    resource is unchanged. With stock_quantity, '*' is refused (428). Without
+    stock_quantity, '*' passes (200)."""
     etag_of = world.product_etag if which == "product" else world.variant_etag
     target = PATCH_TARGETS[2] if which == "product" else PATCH_TARGETS[3]
     current, before = etag_of()
@@ -814,7 +822,13 @@ def test_if_match_table(world, which, index):
         assert response.status_code in (200, 400, 412), response.text
         return
     assert response.status_code == status, (header, response.text)
-    if status == 412:
+    if status == 428:
+        _, after = etag_of()
+        assert after["stock_quantity"] == before["stock_quantity"]
+        no_stock = {"price": "12.34"} if which == "product" else {"price_override": "12.34"}
+        ok = no_5xx(_patch(world, target, no_stock, extra_headers={"If-Match": header}))
+        assert ok.status_code == 200
+    elif status == 412:
         assert response.headers.get("etag") == current
         _, after = etag_of()
         assert after["stock_quantity"] == before["stock_quantity"]
@@ -830,15 +844,22 @@ _etag_tokens = st.sampled_from(["CUR", "W/CUR", '"stale"', 'W/"stale"', "*", "bo
 @given(parts=st.lists(_etag_tokens, min_size=0, max_size=5), sep=st.sampled_from([",", ", ", " ", ""]))
 @strict_only(example(parts=['"stale"', "*"], sep=", "))
 def test_if_match_only_passes_for_star_or_the_current_strong_tag(world, parts, sep):
-    """Safety property of If-Match (lost-update protection): the PATCH applies
-    only when the field is "*" or lists the current entity-tag (strong); a
-    well-formed list naming it always applies. (A malformed field carrying a
-    "*" is refused as malformed; it is left out unless TORTURE_STRICT=1.)"""
+    """Safety property of If-Match (lost-update protection): with stock_quantity,
+    '*' is 428 and leaves stock unchanged; the PATCH applies only when the field
+    lists the current entity-tag (strong). Without stock_quantity, '*' applies (200)."""
     current, before = world.product_etag()
     header = sep.join(parts).replace("CURRAW", current.strip('"')).replace("CUR", current)
     assume(TORTURE_STRICT or "*" not in header or _strict_if_match(header, current) is not None)
     response = no_5xx(_patch(world, PATCH_TARGETS[2], {"stock_quantity": before["stock_quantity"] + 1},
                              extra_headers={"If-Match": header}))
+    if header.strip() == "*":
+        assert response.status_code == 428, response.text
+        _, after = world.product_etag()
+        assert after["stock_quantity"] == before["stock_quantity"]
+        no_stock = no_5xx(_patch(world, PATCH_TARGETS[2], {"price": "19.99"},
+                                 extra_headers={"If-Match": header}))
+        assert no_stock.status_code == 200
+        return
     assert response.status_code in (200, 412), response.text
     verdict = _strict_if_match(header, current)
     if response.status_code == 200:
@@ -876,11 +897,19 @@ def test_if_match_is_out_of_scope_on_profile_and_address_patch(world, target):
     assert "etag" not in response.headers
 
 
-def test_no_if_match_is_an_unconditional_update_not_428(world):
-    """Documented (admin.update_product docstring): without If-Match the update
-    is unconditional; 428 (RFC 6585) is not required."""
+def test_stock_update_without_if_match_is_428_unconditional_without_stock(world):
+    """RFC 6585 section 3: 428 when stock_quantity is sent without an entity tag;
+    without stock_quantity the update stays unconditional."""
+    _, before = world.product_etag()
     response = no_5xx(_patch(world, PATCH_TARGETS[2], {"stock_quantity": 3}))
-    assert response.status_code == 200, response.text
+    assert response.status_code == 428, response.text
+    _, after = world.product_etag()
+    assert after["stock_quantity"] == before["stock_quantity"]
+
+    unconditional = no_5xx(_patch(world, PATCH_TARGETS[2], {"price": "18.50"}))
+    assert unconditional.status_code == 200, unconditional.text
+    star = no_5xx(_patch(world, PATCH_TARGETS[2], {"price": "19.50"}, extra_headers={"If-Match": "*"}))
+    assert star.status_code == 200, star.text
 
 
 @pytest.mark.parametrize("which", ["product", "variant"])

@@ -98,6 +98,17 @@ def _valid_product_payload(category_id):
     }
 
 
+def _product_etag(client, product_id):
+    return client.get(f"{CATALOG_PREFIX}/products/{product_id}").headers["etag"]
+
+
+def _variant_etag(client, admin_token, product_id, variant_id):
+    return client.get(
+        f"{ADMIN_PREFIX}/products/{product_id}/variants/{variant_id}",
+        headers=_auth_headers(admin_token),
+    ).headers["etag"]
+
+
 # --- Non-admin is forbidden, not merely unauthenticated -----------------
 
 
@@ -322,10 +333,11 @@ def test_admin_updates_product(client, db_session):
         headers=_auth_headers(admin_token),
     ).json()
 
+    etag = _product_etag(client, created["id"])
     response = client.put(
         f"{ADMIN_PREFIX}/products/{created['id']}",
         json={"stock_quantity": 42},
-        headers=_auth_headers(admin_token),
+        headers={**_auth_headers(admin_token), "If-Match": etag},
     )
 
     assert response.status_code == 200
@@ -363,7 +375,7 @@ def test_admin_update_nonexistent_product_returns_404(client, db_session):
 
     response = client.put(
         f"{ADMIN_PREFIX}/products/999999",
-        json={"stock_quantity": 5},
+        json={"price": "29.99"},
         headers=_auth_headers(admin_token),
     )
 
@@ -711,10 +723,11 @@ def test_admin_updates_product_variant(client, db_session):
         headers=_auth_headers(admin_token),
     ).json()
 
+    etag = _variant_etag(client, admin_token, product["id"], variant["id"])
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
         json={"stock_quantity": 20, "price_override": "15.50"},
-        headers=_auth_headers(admin_token),
+        headers={**_auth_headers(admin_token), "If-Match": etag},
     )
 
     assert response.status_code == 200
@@ -825,10 +838,11 @@ def test_admin_update_variant_other_integrity_error_is_not_reported_as_sku_confl
     ).json()
     _add_variant_constraint(db_session, "UPDATE")
 
+    etag = _variant_etag(client, admin_token, product["id"], variant["id"])
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
         json={"stock_quantity": 5000},
-        headers=_auth_headers(admin_token),
+        headers={**_auth_headers(admin_token), "If-Match": etag},
     )
 
     assert response.status_code == 422, response.text
@@ -855,10 +869,11 @@ def test_admin_update_variant_with_a_free_sku_and_another_integrity_error_is_not
     ).json()
     _add_variant_constraint(db_session, "UPDATE")
 
+    etag = _variant_etag(client, admin_token, product["id"], variant["id"])
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
         json={"sku": "VARIANT-Y2", "stock_quantity": 5000},
-        headers=_auth_headers(admin_token),
+        headers={**_auth_headers(admin_token), "If-Match": etag},
     )
 
     assert response.status_code == 422, response.text
@@ -921,7 +936,7 @@ def test_admin_update_variant_returns_404_for_missing_variant(client, db_session
 
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/999999",
-        json={"stock_quantity": 5},
+        json={"price_override": "15.50"},
         headers=_auth_headers(admin_token),
     )
 
@@ -1058,10 +1073,11 @@ def test_admin_update_product_is_visible_through_the_cache(client, db_session):
     before = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()
     assert before["price"] == "19.99"
 
+    etag = _product_etag(client, product["id"])
     client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}",
         json={"price": "25.00", "stock_quantity": 0},
-        headers=_auth_headers(admin_token),
+        headers={**_auth_headers(admin_token), "If-Match": etag},
     )
 
     after = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()
@@ -1276,10 +1292,11 @@ def test_admin_variant_of_another_product_is_not_found_through_this_one(client, 
         headers=_auth_headers(admin_token),
     ).json()
 
+    etag = _variant_etag(client, admin_token, owner["id"], variant["id"])
     response = client.put(
         f"{ADMIN_PREFIX}/products/{other['id']}/variants/{variant['id']}",
         json={"stock_quantity": 99},
-        headers=_auth_headers(admin_token),
+        headers={**_auth_headers(admin_token), "If-Match": etag},
     )
 
     assert response.status_code == 404

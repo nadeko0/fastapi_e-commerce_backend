@@ -15,6 +15,7 @@ import mode puts it on sys.path - see test_payment.py's own comment on
 import json
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from test_payment import (
@@ -225,6 +226,30 @@ class TestCreateCheckoutSessionEndpoint:
         # until the customer completes the hosted page (see
         # types.py's CheckoutSession docstring).
         assert payments[0].payment_intent_id.startswith("pending-")
+
+    def test_answers_when_the_session_expires_as_sent_to_the_provider(self, client, db_session, monkeypatch):
+        sent = []
+        real_create = StripePaymentProvider.create_checkout_session
+
+        def create_and_record(self, *args, **kwargs):
+            sent.append(kwargs["expires_at"])
+            return real_create(self, *args, **kwargs)
+
+        monkeypatch.setattr(StripePaymentProvider, "create_checkout_session", create_and_record)
+        setup = _create_verified_buyer_with_order(client, db_session)
+        headers = _with_idempotency_key(setup["headers"])
+
+        first = client.post(CHECKOUT_SESSION_URL(setup["order"]["id"]), headers=headers)
+        replay = client.post(CHECKOUT_SESSION_URL(setup["order"]["id"]), headers=headers)
+
+        assert first.status_code == 200, first.text
+        body = first.json()
+        expires_at = datetime.fromisoformat(body["expires_at"])
+        assert sent == [int(expires_at.timestamp())]
+        created_at = datetime.fromisoformat(body["created_at"]).replace(tzinfo=UTC)
+        assert expires_at - created_at == timedelta(minutes=settings.CHECKOUT_SESSION_EXPIRE_MINUTES) - (
+            timedelta(microseconds=created_at.microsecond))
+        assert replay.json()["expires_at"] == body["expires_at"]
 
     def test_rejects_already_paid_order(self, client, db_session):
         setup = _create_verified_buyer_with_order(client, db_session)

@@ -1210,6 +1210,12 @@
             "title": "Currency",
             "type": "string"
           },
+          "expires_at": {
+            "description": "When the Checkout Session expires (UTC): created_at plus CHECKOUT_SESSION_EXPIRE_MINUTES",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
           "order_id": {
             "title": "Order Id",
             "type": "integer"
@@ -1241,7 +1247,8 @@
           "status",
           "amount",
           "currency",
-          "created_at"
+          "created_at",
+          "expires_at"
         ],
         "title": "CheckoutSessionResponse",
         "type": "object"
@@ -4524,7 +4531,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -4889,7 +4896,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -5175,7 +5182,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -5457,7 +5464,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -5735,7 +5742,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -5943,7 +5950,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -6022,6 +6029,225 @@
           }
         ],
         "summary": "Delete Product",
+        "tags": [
+          "admin"
+        ],
+        "x-admin-only": true
+      },
+      "get": {
+        "description": "The product as GET /products/{id} shows it, deactivated products included, for admins;\nits ETag is the one to send in If-Match on PUT/PATCH, which a change of\nstock_quantity requires.",
+        "operationId": "get_admin_product",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "title": "Product Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "Strong entity tag of this representation (RFC 9110 8.8.3). Send it back as If-Match on PUT/PATCH, or as If-None-Match on GET.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired or revoked access token; or a missing, invalid, expired or revoked access token",
+            "headers": {
+              "WWW-Authenticate": {
+                "description": "The challenge, \"Bearer\" (RFC 6750, section 3).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Admin privileges required; the account is inactive (problem type account-inactive)",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Product not found",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ValidationProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    }
+                  ],
+                  "title": "Response 422 Get Admin Product"
+                }
+              }
+            },
+            "description": "Validation Error: the error list, or a message for a value rejected by the route",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "headers": {
+              "RateLimit": {
+                "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "RateLimit-Policy": {
+                "description": "The limit: \"<policy>\";q=<requests>;w=<window seconds>.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before repeating the request.",
+                "schema": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Server error",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Temporarily unavailable: the server is at capacity (Retry-After: 1), or a service it needs cannot answer (the token check or the cart store, Retry-After 5 to 30; the database; the payment provider, Retry-After: 5). Repeat the request after Retry-After seconds, with the same Idempotency-Key where the route takes one",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before repeating the request.",
+                "schema": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Admin Product",
         "tags": [
           "admin"
         ],
@@ -6271,6 +6497,24 @@
               }
             }
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "stock_quantity sent without If-Match, or with *: a stock change needs the current ETag",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "429": {
             "content": {
               "application/problem+json": {
@@ -6279,7 +6523,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -6364,7 +6608,7 @@
         "x-admin-only": true
       },
       "put": {
-        "description": "Update fields on an existing product.\n\nWith If-Match (an ETag from GET /products/{id} or a previous update, or\n*), the update is applied only if the product is unchanged since (412\notherwise). Without it the update is unconditional, as before.\n\nEvery field is optional but at least the ones sent must be valid and\nnone may be null; `category_id` must be an existing category (404). A\nproduct with variants is hashed together with them, so the ETag of\nGET /products/{id} is the one to send. The response carries the new ETag.",
+        "description": "Update fields on an existing product.\n\nWith If-Match (an ETag from GET /products/{id} or a previous update, or\n*), the update is applied only if the product is unchanged since (412\notherwise). Without it the update is unconditional, except a change of\n`stock_quantity`: that needs If-Match with an ETag, not * (428), because\norders move the stock and a stale value would undo their sales.\n\nEvery field is optional but at least the ones sent must be valid and\nnone may be null; `category_id` must be an existing category (404). A\nproduct with variants is hashed together with them, so the ETag of\nGET /products/{id} is the one to send. The response carries the new ETag.",
         "operationId": "update_product_put",
         "parameters": [
           {
@@ -6602,6 +6846,24 @@
               }
             }
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "stock_quantity sent without If-Match, or with *: a stock change needs the current ETag",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "429": {
             "content": {
               "application/problem+json": {
@@ -6610,7 +6872,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -6825,7 +7087,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -7132,7 +7394,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -7399,7 +7661,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -7756,6 +8018,24 @@
               }
             }
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "stock_quantity sent without If-Match, or with *: a stock change needs the current ETag",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "429": {
             "content": {
               "application/problem+json": {
@@ -7764,7 +8044,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -7849,7 +8129,7 @@
         "x-admin-only": true
       },
       "put": {
-        "description": "Update fields on an existing variant of a product.\n\nWith If-Match (the ETag of an earlier update response of this variant, or\n*), applied only if the variant is unchanged since (412 otherwise). The\nSKU must be unique across all variants (409). The response carries the\nnew ETag.",
+        "description": "Update fields on an existing variant of a product.\n\nWith If-Match (the ETag of an earlier update response of this variant, or\n*), applied only if the variant is unchanged since (412 otherwise). The\nSKU must be unique across all variants (409). A change of\n`stock_quantity` needs If-Match with an ETag, not * (428): orders move a\nvariant's stock, and a stale value would undo their sales. The response\ncarries the new ETag.",
         "operationId": "update_product_variant_put",
         "parameters": [
           {
@@ -8116,6 +8396,24 @@
               }
             }
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "stock_quantity sent without If-Match, or with *: a stock change needs the current ETag",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Identifier of this request (the one sent in X-Request-ID if it was usable), to quote to support.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "429": {
             "content": {
               "application/problem+json": {
@@ -8124,7 +8422,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -8393,7 +8691,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -8653,7 +8951,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -8852,7 +9150,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -9125,7 +9423,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -9374,7 +9672,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -9549,7 +9847,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -9716,7 +10014,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -10273,7 +10571,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -10589,7 +10887,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -10776,7 +11074,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -11000,7 +11298,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -11110,7 +11408,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -11277,7 +11575,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -11700,7 +11998,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -11815,7 +12113,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -12037,7 +12335,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -12483,7 +12781,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -12598,7 +12896,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -12708,7 +13006,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -13013,7 +13311,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -13350,7 +13648,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -13607,7 +13905,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -13936,7 +14234,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -14258,7 +14556,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -14472,7 +14770,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -14788,7 +15086,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -15091,7 +15389,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -15178,7 +15476,7 @@
     },
     "/api/v1/products": {
       "get": {
-        "description": "List active products with optional filtering, sorting, and pagination.\n\n`page` starts at 1; `size` is 1 to 100 (20 by default). `sort_by` is one of\nname_asc, name_desc, price_asc, price_desc, created_at_asc, created_at_desc\n(any other value is 422; without it, by id). `max_price` below `min_price`\nis a 422. A product with has_variants true is sold by its variants: its own\nprice and stock are not the purchasable values (see GET /products/{id}).",
+        "description": "List active products with optional filtering, sorting, and pagination.\n\n`page` starts at 1; `size` is 1 to 100 (20 by default). `sort_by` is one of\nname_asc, name_desc, price_asc, price_desc, created_at_asc, created_at_desc\n(any other value is 422; without it, by id). `max_price` below `min_price`\nis a 422. A product with has_variants true is sold by its variants: its own\nprice and stock are not the purchasable values (see GET /products/{id}).\nA listing with `search_query` is limited and counted with\nGET /products/search (RATE_LIMIT_SEARCH, 60/minute by default).",
         "operationId": "list_products",
         "parameters": [
           {
@@ -15412,7 +15710,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -15493,7 +15791,7 @@
     },
     "/api/v1/products/search": {
       "get": {
-        "description": "Search active products by name/description, optionally scoped to a category.\n\n`query` is 3 to 100 characters (shorter or longer is 422). Results are\nordered by id and paginated like the product list. This route has its own\nlimit per user or client address, RATE_LIMIT_SEARCH (60/minute by\ndefault).",
+        "description": "Search active products by name/description, optionally scoped to a category.\n\n`query` is 3 to 100 characters (shorter or longer is 422). Results are\nordered by id and paginated like the product list. This route has its own\nlimit per user or client address, RATE_LIMIT_SEARCH (60/minute by\ndefault), counted together with product listings that pass search_query.",
         "operationId": "search_products",
         "parameters": [
           {
@@ -15611,7 +15909,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -15819,7 +16117,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -16068,7 +16366,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -16343,7 +16641,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -16632,7 +16930,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -16857,7 +17155,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -17069,7 +17367,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -17374,7 +17672,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -17674,7 +17972,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -18121,7 +18419,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -18278,7 +18576,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -19076,7 +19374,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -19287,7 +19585,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -19511,7 +19809,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -19735,7 +20033,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -19965,7 +20263,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -20171,7 +20469,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -20395,7 +20693,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",
@@ -20583,7 +20881,7 @@
                 }
               }
             },
-            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
+            "description": "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, password reset, email verification and data requests (defaults shown). Every counted response, a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a narrower limit is decided by Retry-After: the failed-login one names its own policy in these fields, the ones for new guest carts (RATE_LIMIT_GUEST_CART) and consent changes (RATE_LIMIT_CONSENT) carry the route's",
             "headers": {
               "RateLimit": {
                 "description": "What is left of it: \"<policy>\";r=<remaining>;t=<seconds until the window ends>.",

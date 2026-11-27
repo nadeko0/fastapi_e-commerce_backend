@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.orders._payment_helpers import (
+    _checkout_session_expires_at,
     _checkout_session_row_to_response,
     _ensure_same_request_in_flow,
     _payment_by_key,
@@ -27,7 +28,7 @@ from app.api.v1.orders._payments import (
     _log_attempt_left_unknown,
 )
 from app.api.v1.orders._router import router
-from app.core.clock import as_utc, utc_now
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, Provider
 from app.core.errors import Problem, ProblemType
@@ -259,8 +260,7 @@ async def _open_session(
             # payment_intent.* event can find its attempt before the session's
             # own event has stored the intent's id (stripe_events.apply_event).
             metadata={"order_id": str(order.id), "payment_id": str(payment_row.id)},
-            expires_at=int(as_utc(payment_row.created_at).timestamp())
-            + settings.CHECKOUT_SESSION_EXPIRE_MINUTES * 60,
+            expires_at=_checkout_session_expires_at(payment_row),
         )
     except PaymentProviderTimeoutError as e:
         # Same reasoning as /pay: unknown whether Stripe actually created

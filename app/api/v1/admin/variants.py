@@ -9,7 +9,14 @@ from app.api.merge_patch import PATCH_DESCRIPTION, merge_patch_body
 from app.api.v1.admin._router import router
 from app.core.clock import utc_now
 from app.core.dependencies import AdminUser, Cache, DbSession
-from app.core.etag import IfMatch, IfNoneMatch, etag_for, if_none_match_hits, require_if_match
+from app.core.etag import (
+    IfMatch,
+    IfNoneMatch,
+    etag_for,
+    if_none_match_hits,
+    require_etag_for_stock,
+    require_if_match,
+)
 from app.core.location import set_location
 from app.core.openapi import (
     ETAG_HEADER,
@@ -248,6 +255,7 @@ async def get_product_variant(
         412: {"description": "If-Match does not match the variant's current ETag (the current one is in the "
                              "ETag header)", "headers": ETAG_HEADER},
         422: {"description": "Invalid variant data"},
+        428: {"description": "stock_quantity sent without If-Match, or with *: a stock change needs the current ETag"},
     },
 )
 @router.put(
@@ -261,6 +269,7 @@ async def get_product_variant(
         412: {"description": "If-Match does not match the variant's current ETag (the current one is in the "
                              "ETag header)", "headers": ETAG_HEADER},
         422: {"description": "Invalid variant data"},
+        428: {"description": "stock_quantity sent without If-Match, or with *: a stock change needs the current ETag"},
     },
 )
 async def update_product_variant(
@@ -277,9 +286,13 @@ async def update_product_variant(
 
     With If-Match (the ETag of an earlier update response of this variant, or
     *), applied only if the variant is unchanged since (412 otherwise). The
-    SKU must be unique across all variants (409). The response carries the
-    new ETag.
+    SKU must be unique across all variants (409). A change of
+    `stock_quantity` needs If-Match with an ETag, not * (428): orders move a
+    variant's stock, and a stale value would undo their sales. The response
+    carries the new ETag.
     """
+    update_data = variant.model_dump(exclude_unset=True)
+    require_etag_for_stock(if_match, update_data)
 
     db_product = await _get_product_or_404(db, product_id)
 
@@ -302,7 +315,6 @@ async def update_product_variant(
     if if_match is not None:
         require_if_match(if_match, etag_for(ProductVariantResponse.model_validate(db_variant)))
 
-    update_data = variant.model_dump(exclude_unset=True)
     if (
         "sku" in update_data
         and update_data["sku"] != db_variant.sku

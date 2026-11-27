@@ -330,7 +330,9 @@ async def list_products(
     name_asc, name_desc, price_asc, price_desc, created_at_asc, created_at_desc
     (any other value is 422; without it, by id). `max_price` below `min_price`
     is a 422. A product with has_variants true is sold by its variants: its own
-    price and stock are not the purchasable values (see GET /products/{id})."""
+    price and stock are not the purchasable values (see GET /products/{id}).
+    A listing with `search_query` is limited and counted with
+    GET /products/search (RATE_LIMIT_SEARCH, 60/minute by default)."""
 
     stmt = select(Product).options(joinedload(Product.category)).where(
         Product.is_active
@@ -430,7 +432,7 @@ async def search_products(
     `query` is 3 to 100 characters (shorter or longer is 422). Results are
     ordered by id and paginated like the product list. This route has its own
     limit per user or client address, RATE_LIMIT_SEARCH (60/minute by
-    default)."""
+    default), counted together with product listings that pass search_query."""
 
     stmt = select(Product).options(joinedload(Product.category)).where(
         Product.is_active,

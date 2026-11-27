@@ -158,11 +158,16 @@ def test_admin_edit_still_refreshes_the_detail(client, db_session):
     admin = _make_admin(db_session)
     admin_token = _login(client, admin.email, "AdminPass1")
     assert _stock_in_detail(client, product) == 7
+    etag = _detail(client, product).headers["etag"]
 
     response = client.patch(
         f"{ADMIN_PREFIX}/products/{product.id}",
         json={"stock_quantity": 50},
-        headers={**_auth_headers(admin_token), "Content-Type": "application/merge-patch+json"},
+        headers={
+            **_auth_headers(admin_token),
+            "Content-Type": "application/merge-patch+json",
+            "If-Match": etag,
+        },
     )
 
     assert response.status_code == 200, response.text

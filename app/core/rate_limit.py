@@ -324,6 +324,10 @@ class RateLimiter:
         operation = (request.method, route.path)
         if operation in _EXEMPT:
             return
+        # A listing with search_query runs the same ILIKE as /products/search:
+        # it shares that limit and that count, or it would be the way round it.
+        if operation == ("GET", "/products") and request.query_params.get("search_query"):
+            operation = ("GET", "/products/search")
 
         setting = _ROUTE_LIMITS.get(operation, "RATE_LIMIT_DEFAULT")
         user_id = None if setting == "RATE_LIMIT_AUTH" else user_id_from_token(request)

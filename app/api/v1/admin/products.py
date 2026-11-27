@@ -8,7 +8,7 @@ from app.api.v1.admin._router import router
 from app.api.v1.products import load_product_detail, product_etag
 from app.core.clock import utc_now
 from app.core.dependencies import AdminUser, Cache, DbSession
-from app.core.etag import IfMatch, require_if_match
+from app.core.etag import IfMatch, require_etag_for_stock, require_if_match
 from app.core.location import set_location
 from app.core.openapi import (
     ETAG_HEADER,
@@ -25,6 +25,7 @@ from app.schemas.category import (
 from app.schemas.common import Int32
 from app.schemas.product import (
     ProductCreate,
+    ProductDetailResponse,
     ProductInDB,
     ProductResponse,
     ProductUpdate,
@@ -164,6 +165,7 @@ async def create_product(
         404: {"description": "Product or category not found"},
         412: {"description": "If-Match does not match the product's current ETag (the current one is in the "
                              "ETag header)", "headers": ETAG_HEADER},
+        428: {"description": "stock_quantity sent without If-Match, or with *: a stock change needs the current ETag"},
     },
 )
 @router.put(
@@ -175,6 +177,7 @@ async def create_product(
         404: {"description": "Product or category not found"},
         412: {"description": "If-Match does not match the product's current ETag (the current one is in the "
                              "ETag header)", "headers": ETAG_HEADER},
+        428: {"description": "stock_quantity sent without If-Match, or with *: a stock change needs the current ETag"},
     },
 )
 async def update_product(
@@ -190,13 +193,17 @@ async def update_product(
 
     With If-Match (an ETag from GET /products/{id} or a previous update, or
     *), the update is applied only if the product is unchanged since (412
-    otherwise). Without it the update is unconditional, as before.
+    otherwise). Without it the update is unconditional, except a change of
+    `stock_quantity`: that needs If-Match with an ETag, not * (428), because
+    orders move the stock and a stale value would undo their sales.
 
     Every field is optional but at least the ones sent must be valid and
     none may be null; `category_id` must be an existing category (404). A
     product with variants is hashed together with them, so the ETag of
     GET /products/{id} is the one to send. The response carries the new ETag.
     """
+    update_data = product.model_dump(exclude_unset=True)
+    require_etag_for_stock(if_match, update_data)
 
     stmt = select(Product).options(joinedload(Product.category)).where(Product.id == product_id).limit(1)
     if if_match is not None:
@@ -218,7 +225,6 @@ async def update_product(
         # when the product has any).
         require_if_match(if_match, product_etag(current, await load_product_detail(db, current)))
 
-    update_data = product.model_dump(exclude_unset=True)
     # Same check as create_product. Without it a missing category_id was
     # written to the row: a generic 500 from the foreign key on Postgres,
     # and on a database that does not enforce it a committed product whose
@@ -260,6 +266,47 @@ async def update_product(
     await redis.invalidate_product_cache(product_id)
     await redis.invalidate_category_cache()
     return result
+
+
+@router.get(
+    "/products/{product_id}",
+    response_model=ProductDetailResponse,
+    responses={
+        200: ETAG_RESPONSE,
+        403: {"description": "Admin privileges required"},
+        404: {"description": "Product not found"},
+    },
+)
+async def get_admin_product(
+    product_id: Int32,
+    current_user: AdminUser,
+    db: DbSession,
+    response: Response,
+) -> ProductDetailResponse:
+    """The product as GET /products/{id} shows it, deactivated products included, for admins;
+    its ETag is the one to send in If-Match on PUT/PATCH, which a change of
+    stock_quantity requires.
+    """
+    stmt = (
+        select(Product)
+        .options(joinedload(Product.category))
+        .where(Product.id == product_id)
+        .limit(1)
+    )
+    db_product = (await db.execute(stmt)).scalars().first()
+    if not db_product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    base = ProductResponse(
+        **ProductInDB.model_validate(db_product, from_attributes=True).model_dump(),
+        category_name=db_product.category.name,
+    )
+    detail = await load_product_detail(db, base)
+    response.headers["ETag"] = product_etag(base, detail)
+    return detail
 
 
 @router.delete(

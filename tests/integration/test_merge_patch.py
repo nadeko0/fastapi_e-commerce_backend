@@ -259,11 +259,12 @@ def test_patch_address_requires_authentication(client):
 
 def test_patch_product_changes_only_the_given_member(client, db_session):
     headers, product = _product(client, db_session)
+    etag = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").headers["etag"]
 
     response = client.patch(
         f"{ADMIN_PREFIX}/products/{product['id']}",
         json={"stock_quantity": 7},
-        headers={**headers, **MERGE_PATCH},
+        headers={**headers, **MERGE_PATCH, "If-Match": etag},
     )
 
     data = response.json()
@@ -332,7 +333,7 @@ def test_patch_product_unknown_id_is_404(client, db_session):
     headers = _admin(client, db_session)
 
     response = client.patch(
-        f"{ADMIN_PREFIX}/products/99999", json={"stock_quantity": 1}, headers=headers
+        f"{ADMIN_PREFIX}/products/99999", json={"price": "25.00"}, headers=headers
     )
 
     assert response.status_code == 404
@@ -428,7 +429,7 @@ def test_patch_variant_unknown_variant_is_404_and_needs_an_admin(
     url = f"{ADMIN_PREFIX}/products/{product['id']}/variants/99999"
     user_token = _register_and_login(client, valid_registration_payload)
 
-    assert client.patch(url, json={"stock_quantity": 1}, headers=headers).status_code == 404
-    assert client.patch(url, json={"stock_quantity": 1}).status_code == 401
-    forbidden = client.patch(url, json={"stock_quantity": 1}, headers=_auth_headers(user_token))
+    assert client.patch(url, json={"price_override": "15.00"}, headers=headers).status_code == 404
+    assert client.patch(url, json={"price_override": "15.00"}).status_code == 401
+    forbidden = client.patch(url, json={"price_override": "15.00"}, headers=_auth_headers(user_token))
     assert forbidden.status_code == 403

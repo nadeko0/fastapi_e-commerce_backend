@@ -226,7 +226,7 @@ Tune the following settings in `.env` based on instance resources. The defaults 
 | `REDIS_SOCKET_CONNECT_TIMEOUT` | `1.0` | Seconds to open a Redis connection before failing. |
 | `BCRYPT_MAX_CONCURRENCY` | `None` (default `4 * CPU`) | Semaphore bounding concurrent password hashes per worker to prevent CPU starvation. |
 | `RATE_LIMIT_DEFAULT` | `"300/minute"` | Baseline rate limit applied to general API routes. |
-| `RATE_LIMIT_SEARCH` | `"60/minute"` | Limit on catalog search queries. |
+| `RATE_LIMIT_SEARCH` | `"60/minute"` | Limit on catalog search queries: `GET /products/search` and `GET /products` with `search_query`, counted together. |
 | `RATE_LIMIT_AUTH` | `"20/minute"` | Limit on registration, login, and password-reset endpoints per IP. |
 | `RATE_LIMIT_CHECKOUT` | `"10/minute"` | Limit on order placement and payment execution per user. |
 | `RATE_LIMIT_CONSENT` | `"10/hour"` | Limit on consent changes per user: every `POST /legal/consent` and every `PATCH`/`PUT /users/me` that changes `marketing_consent` share one count. |

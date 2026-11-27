@@ -510,10 +510,19 @@ class CartWorld(RuleBasedStateMachine):
     def admin_sets_stock(self, index, value):
         key = self._key(index)
         product_id, variant_id = key
-        url = (f"{ADMIN}/products/{product_id}" if variant_id is None
-               else f"{ADMIN}/products/{product_id}/variants/{variant_id}")
+        url = (
+            f"{ADMIN}/products/{product_id}"
+            if variant_id is None
+            else f"{ADMIN}/products/{product_id}/variants/{variant_id}"
+        )
+        if self.products[product_id]["state"] == "gone":
+            # require_etag_for_stock runs before the lookup, so send a syntactically valid made-up tag
+            etag = '"gone"'
+        else:
+            get_resp = self.shop.client.get(url, headers=self.admin)
+            etag = get_resp.headers["etag"]
         response = check(self.shop.client.put(url, json={"stock_quantity": value},
-                                              headers=self.admin), 200, 404)
+                                              headers={**self.admin, "If-Match": etag}), 200, 404)
         if self.products[product_id]["state"] == "gone":
             assert response.status_code == 404
             return
@@ -1258,9 +1267,14 @@ class PaymentWorld(RuleBasedStateMachine):
             return
         line = self.lines[index]
         before = self._stock(line)
-        url = (f"{ADMIN}/products/{line[0]}" if line[1] is None
-               else f"{ADMIN}/products/{line[0]}/variants/{line[1]}")
-        check(self.shop.client.put(url, json={"stock_quantity": value}, headers=self.admin), 200)
+        url = (
+            f"{ADMIN}/products/{line[0]}"
+            if line[1] is None
+            else f"{ADMIN}/products/{line[0]}/variants/{line[1]}"
+        )
+        etag = self.shop.client.get(url, headers=self.admin).headers["etag"]
+        check(self.shop.client.put(url, json={"stock_quantity": value},
+                                   headers={**self.admin, "If-Match": etag}), 200)
         self.adjust[line] += value - before
 
     # -- invariants ---------------------------------------------------------------------
@@ -1635,8 +1649,9 @@ def _order_at_int32_max_stock(shop, admin):
     product = make_product(shop.db, "1.00", 2)
     buyer = shop.buyer()
     order = shop.order_of(buyer, product, 1)
+    etag = shop.client.get(f"/api/v1/products/{product.id}").headers["etag"]
     check(shop.client.put(f"{ADMIN}/products/{product.id}", json={"stock_quantity": INT32_MAX},
-                          headers=admin), 200)
+                          headers={**admin, "If-Match": etag}), 200)
     return product, buyer, order["id"]
 
 

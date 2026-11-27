@@ -124,10 +124,13 @@ def test_product_etag_changes_when_a_variant_changes(client, db_session, change)
     url = f"{CATALOG_PREFIX}/{product.id}"
     before = client.get(url).headers["etag"]
 
+    variant_url = f"{ADMIN_PREFIX}/products/{product.id}/variants/{variant.id}"
+    variant_etag = client.get(variant_url, headers=_bearer(admin_token)).headers["etag"]
+
     put = client.put(
-        f"{ADMIN_PREFIX}/products/{product.id}/variants/{variant.id}",
+        variant_url,
         json=change,
-        headers=_bearer(admin_token),
+        headers={**_bearer(admin_token), "If-Match": variant_etag},
     )
     assert put.status_code == 200
 

@@ -295,11 +295,15 @@ def test_a_variant_update_whose_response_cannot_be_built_changes_nothing(
 ):
     headers = _admin_headers(client, db_session)
     product, variant = _stored_variant(db_session)
+    etag = client.get(
+        f"{ADMIN_PREFIX}/products/{product.id}/variants/{variant.id}",
+        headers=headers,
+    ).headers["etag"]
     monkeypatch.setattr("app.api.v1.admin.variants.ProductVariantResponse", _Broken)
 
     with pytest.raises(_ResponseCannotBeBuilt):
         client.patch(f"{ADMIN_PREFIX}/products/{product.id}/variants/{variant.id}",
-                     json={"stock_quantity": 99}, headers=headers)
+                     json={"stock_quantity": 99}, headers={**headers, "If-Match": etag})
 
     db_session.expire_all()
     assert db_session.get(ProductVariant, variant.id).stock_quantity == 3

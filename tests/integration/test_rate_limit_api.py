@@ -123,6 +123,18 @@ def test_search_has_its_own_limit(client, limits):
     assert client.get(f"{API}/products").status_code == 200
 
 
+def test_a_listing_search_counts_against_the_search_limit(client, limits):
+    limits(RATE_LIMIT_SEARCH="2/minute")
+    assert client.get(f"{API}/products/search", params={"query": "shoe"}).status_code != 429
+    assert client.get(f"{API}/products", params={"search_query": "boot"}).status_code == 200
+    # One count for both: the listing is not a way round the search limit.
+    assert client.get(f"{API}/products", params={"search_query": "hat"}).status_code == 429
+    assert client.get(f"{API}/products/search", params={"query": "cap"}).status_code == 429
+    # A listing without a search term stays under the default limit.
+    assert client.get(f"{API}/products").status_code == 200
+    assert client.get(f"{API}/products", params={"search_query": ""}).status_code == 200
+
+
 def test_logged_in_callers_are_counted_per_user_and_others_per_address(
     client, limits, valid_registration_payload
 ):

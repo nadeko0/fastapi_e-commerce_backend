@@ -185,7 +185,7 @@ TOO_MANY_REQUESTS = {
     "description": (
         "Too many requests: wait Retry-After seconds. Limits are counted per route and per user (client "
         "address without a token): RATE_LIMIT_DEFAULT 300/minute, RATE_LIMIT_SEARCH 60/minute for "
-        "product search, RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a "
+        "product search (GET /products/search, and GET /products with search_query, on one count), RATE_LIMIT_CHECKOUT 10/minute for creating an order, paying and opening a "
         "checkout session, RATE_LIMIT_AUTH 20/minute per client address for register, login, "
         "password reset, email verification and data requests (defaults shown). Every counted response, "
         "a success or an error, carries RateLimit-Policy and RateLimit for the route's limit. A 429 of a "
@@ -230,6 +230,7 @@ _MODEL_FOR_EXISTING = {
     412: Problem,
     413: Problem,
     422: ValidationProblem | Problem,
+    428: Problem,
     429: Problem,
     503: Problem,
 }

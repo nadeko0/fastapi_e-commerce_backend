@@ -79,11 +79,12 @@ def test_admin_update_product_renders_for_no_key_update(client, db_session, post
         headers=headers,
     ).json()
 
+    etag = client.get(f"/api/v1/products/{product['id']}").headers["etag"]
     postgres_sql.clear()
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}",
         json={"stock_quantity": 9},
-        headers={**headers, "If-Match": "*"},
+        headers={**headers, "If-Match": etag},
     )
     assert response.status_code == 200, response.text
     product_selects = [s for s in postgres_sql if "FROM products" in s and "FOR NO KEY UPDATE" in s]
@@ -118,11 +119,15 @@ def test_admin_update_variant_renders_for_no_key_update(client, db_session, post
         headers=headers,
     ).json()
 
+    etag = client.get(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
+        headers=headers,
+    ).headers["etag"]
     postgres_sql.clear()
     response = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
         json={"stock_quantity": 4},
-        headers={**headers, "If-Match": "*"},
+        headers={**headers, "If-Match": etag},
     )
     assert response.status_code == 200, response.text
     variant_selects = [s for s in postgres_sql if "FROM product_variants" in s and "FOR NO KEY UPDATE" in s]

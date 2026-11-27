@@ -86,7 +86,7 @@ Configuration parameters in `app/core/config.py`:
 | `MAX_IN_FLIGHT_REQUESTS` | `None` | Active request ceiling per worker (set to 15 in benchmarks and in `.env.example`) |
 | `RATE_LIMIT_ENABLED` | `True` | Global toggle for rate limiting |
 | `RATE_LIMIT_DEFAULT` | `"300/minute"` | Default route rate limit |
-| `RATE_LIMIT_SEARCH` | `"60/minute"` | Product search endpoint limit |
+| `RATE_LIMIT_SEARCH` | `"60/minute"` | Product search limit (`/products/search` and listings with `search_query`, one count) |
 | `RATE_LIMIT_AUTH` | `"20/minute"` | Authentication route limit per IP |
 | `RATE_LIMIT_CHECKOUT` | `"10/minute"` | Order creation, payment, and checkout session limit |
 | `RATE_LIMIT_CONSENT` | `"10/hour"` | Consent changes per user (`POST /legal/consent`, `PATCH`/`PUT /users/me` when marketing consent changes) |

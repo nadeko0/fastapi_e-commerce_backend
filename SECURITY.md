@@ -83,7 +83,7 @@ Access boundaries are enforced strictly at the database query layer:
 - **Cross-Site Scripting (XSS):** The API serves raw JSON data with proper MIME types. Outbound transactional HTML emails escape product titles and customer names using `html.escape` to eliminate stored email XSS vectors.
 - **Monetary Precision:** Prices and order totals are represented as exact decimal strings with ASCII digits only (never floating-point numbers) with ISO 4217 currency checks. Order totals are capped at 21,474,836.47 to match payment column limits. Datetimes enforce explicit UTC timezone offsets (`UTCDatetime`).
 - **Free-Form JSON and Depth Limits:** Free-form JSON payloads enforce a maximum nesting depth of 64 levels and reject non-finite numbers (NaN, Infinity) with 422. Price filter parameters are bounded.
-- **Conditionals and Content Types:** `If-Match` accepts `*` only alone; malformed headers match nothing. `PATCH` with any `+json` media type other than `application/merge-patch+json` is rejected with 415.
+- **Conditionals and Content Types:** `If-Match` accepts `*` only alone; malformed headers match nothing. An admin update that sets `stock_quantity` requires `If-Match` with the current ETag (428 without it or with `*`), so a stale form cannot overwrite stock moved by orders. `PATCH` with any `+json` media type other than `application/merge-patch+json` is rejected with 415.
 
 ## HTTP Security Headers and CORS Policy
 

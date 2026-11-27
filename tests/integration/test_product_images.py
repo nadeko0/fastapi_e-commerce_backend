@@ -109,11 +109,14 @@ def test_an_update_whose_response_cannot_be_built_changes_nothing(client, db_ses
     created = client.post(
         f"{ADMIN_PREFIX}/products", json=_valid_product_payload(category.id), headers=headers
     ).json()
+    etag = client.get(f"{CATALOG_PREFIX}/products/{created['id']}").headers["etag"]
     _break_the_response(monkeypatch)
 
     with pytest.raises(_ResponseCannotBeBuilt):
         client.patch(
-            f"{ADMIN_PREFIX}/products/{created['id']}", json={"stock_quantity": 99}, headers=headers
+            f"{ADMIN_PREFIX}/products/{created['id']}",
+            json={"stock_quantity": 99},
+            headers={**headers, "If-Match": etag},
         )
 
     db_session.expire_all()

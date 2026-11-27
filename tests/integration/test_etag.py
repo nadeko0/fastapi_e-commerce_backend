@@ -46,7 +46,7 @@ def test_get_product_has_stable_strong_etag(client, setup):
 def test_etag_changes_after_update(client, setup):
     headers, product = setup
     before = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").headers["etag"]
-    put = _put(client, headers, product, stock_quantity=1)
+    put = _put(client, headers, product, {"If-Match": before}, stock_quantity=1)
     assert put.status_code == 200
     after = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").headers["etag"]
     assert after != before
@@ -97,11 +97,16 @@ def test_put_with_matching_if_match_succeeds(client, setup):
 
 def test_put_if_match_star_and_absent(client, setup):
     headers, product = setup
-    assert _put(client, headers, product, {"If-Match": "*"}, stock_quantity=5).status_code == 200
-    assert _put(client, headers, product, stock_quantity=6).status_code == 200
+    assert _put(client, headers, product, {"If-Match": "*"}, stock_quantity=5).status_code == 428
+    assert _put(client, headers, product, stock_quantity=6).status_code == 428
+    current = client.get(f"{CATALOG_PREFIX}/products/{product['id']}").json()
+    assert current["stock_quantity"] == product["stock_quantity"]
+
+    assert _put(client, headers, product, {"If-Match": "*"}, price="25.00").status_code == 200
+    assert _put(client, headers, product, price="26.00").status_code == 200
     missing = client.put(
         f"{ADMIN_PREFIX}/products/999999",
-        json={"stock_quantity": 1},
+        json={"price": "25.00"},
         headers={**headers, "If-Match": "*"},
     )
     assert missing.status_code == 404
@@ -123,14 +128,16 @@ def test_variant_put_if_match(client, setup):
     stale = client.put(url, json={"stock_quantity": 9}, headers={**headers, "If-Match": '"stale"'})
     assert stale.status_code == 412
 
-    plain = client.put(url, json={"stock_quantity": 3}, headers=headers)
+    plain = client.put(url, json={"price_override": "11.00"}, headers=headers)
     assert plain.status_code == 200
     etag = plain.headers["etag"]
 
     ok = client.put(url, json={"stock_quantity": 4}, headers={**headers, "If-Match": etag})
     assert ok.status_code == 200 and ok.headers["etag"] != etag
     star = client.put(url, json={"stock_quantity": 5}, headers={**headers, "If-Match": "*"})
-    assert star.status_code == 200
+    assert star.status_code == 428
+    star_nostock = client.put(url, json={"price_override": "12.00"}, headers={**headers, "If-Match": "*"})
+    assert star_nostock.status_code == 200
     again = client.put(url, json={"stock_quantity": 6}, headers={**headers, "If-Match": etag})
     assert again.status_code == 412
 
@@ -183,7 +190,7 @@ def test_variant_stale_if_match_after_other_update_is_412(client, setup):
     base, variant = _variant(client, headers, product)
     url = f"{base}/{variant['id']}"
     etag = client.get(url, headers=headers).headers["etag"]
-    assert client.put(url, json={"stock_quantity": 7}, headers=headers).status_code == 200
+    assert client.put(url, json={"stock_quantity": 7}, headers={**headers, "If-Match": etag}).status_code == 200
     stale = client.put(url, json={"stock_quantity": 8}, headers={**headers, "If-Match": etag})
     assert stale.status_code == 412
     assert stale.headers["etag"] == client.get(url, headers=headers).headers["etag"]
@@ -237,3 +244,61 @@ def test_variant_list_route_unchanged(client, setup):
     assert listing.status_code == 200
     assert "etag" not in listing.headers
     assert listing.json()["items"] == [variant]
+
+
+@pytest.mark.parametrize("kind", ["product", "variant"])
+def test_stock_quantity_requires_real_etag(client, setup, kind):
+    headers, product = setup
+    if kind == "product":
+        url = f"{ADMIN_PREFIX}/products/{product['id']}"
+        get_url = f"{CATALOG_PREFIX}/products/{product['id']}"
+        get_headers = {}
+        no_stock_body = {"price": "29.99"}
+        stock_field = "stock_quantity"
+    else:
+        base, variant = _variant(client, headers, product, sku="REQ-ETAG-1")
+        url = f"{base}/{variant['id']}"
+        get_url = url
+        get_headers = headers
+        no_stock_body = {"price_override": "29.99"}
+        stock_field = "stock_quantity"
+
+    initial = client.get(get_url, headers=get_headers)
+    initial_etag = initial.headers["etag"]
+    initial_stock = initial.json()[stock_field]
+
+    # stock_quantity without If-Match is 428 and the stock is unchanged (GET it)
+    resp_absent = client.put(url, json={"stock_quantity": initial_stock + 10}, headers=headers)
+    assert resp_absent.status_code == 428
+    assert resp_absent.headers.get("content-type", "").startswith("application/problem+json")
+    assert resp_absent.json()["status"] == 428
+
+    current = client.get(get_url, headers=get_headers)
+    assert current.json()[stock_field] == initial_stock
+    assert current.headers["etag"] == initial_etag
+
+    # with "*" is 428
+    resp_star = client.put(
+        url,
+        json={"stock_quantity": initial_stock + 20},
+        headers={**headers, "If-Match": "*"},
+    )
+    assert resp_star.status_code == 428
+    assert resp_star.headers.get("content-type", "").startswith("application/problem+json")
+    assert resp_star.json()["status"] == 428
+    assert client.get(get_url, headers=get_headers).json()[stock_field] == initial_stock
+
+    # with the current ETag is 200
+    resp_etag = client.put(
+        url,
+        json={"stock_quantity": initial_stock + 30},
+        headers={**headers, "If-Match": initial_etag},
+    )
+    assert resp_etag.status_code == 200
+    assert resp_etag.json()[stock_field] == initial_stock + 30
+    assert resp_etag.headers["etag"] != initial_etag
+
+    # a body without stock_quantity and without If-Match is 200
+    resp_nostock = client.put(url, json=no_stock_body, headers=headers)
+    assert resp_nostock.status_code == 200
+

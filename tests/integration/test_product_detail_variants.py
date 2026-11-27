@@ -104,10 +104,14 @@ def test_etag_changes_after_a_variant_update(client, setup):
     etag = first.headers["etag"]
     assert _detail(client, product).headers["etag"] == etag
 
+    variant_etag = client.get(
+        f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
+        headers=headers,
+    ).headers["etag"]
     update = client.put(
         f"{ADMIN_PREFIX}/products/{product['id']}/variants/{variant['id']}",
         json={"stock_quantity": 1, "price_override": "26.00"},
-        headers=headers,
+        headers={**headers, "If-Match": variant_etag},
     )
     assert update.status_code == 200, update.text
 
