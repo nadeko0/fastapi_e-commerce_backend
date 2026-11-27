@@ -63,6 +63,7 @@ import pytest
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck
 from hypothesis import settings as hypothesis_settings
+from hypothesis.database import DirectoryBasedExampleDatabase
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -88,7 +89,9 @@ from app.services.redis import RedisService
 #        @reproduce_failure line needed to replay it.
 #   explore: the ci budget with random seeds, run by hand
 #        (HYPOTHESIS_PROFILE=explore) to search new inputs; the 4.0.0 payment
-#        failure was found that way, and a find becomes a plain test.
+#        failure was found that way, and a find becomes a plain test. Unlike
+#        ci it keeps the example database dev uses, so a find is replayed
+#        first by the next run, under either profile, until it is fixed.
 # Per-test settings stay only where a test has a reason of its own (a cost
 # budget for tests that make HTTP calls, or a deadline switched off).
 hypothesis_settings.register_profile("dev", max_examples=100, deadline=200, print_blob=False, derandomize=False)
@@ -101,7 +104,12 @@ hypothesis_settings.register_profile(
     database=None,
     suppress_health_check=[HealthCheck.too_slow],
 )
-hypothesis_settings.register_profile("explore", parent=hypothesis_settings.get_profile("ci"), derandomize=False)
+hypothesis_settings.register_profile(
+    "explore",
+    parent=hypothesis_settings.get_profile("ci"),
+    derandomize=False,
+    database=DirectoryBasedExampleDatabase(".hypothesis/examples"),
+)
 hypothesis_settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
 
 

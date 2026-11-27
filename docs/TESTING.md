@@ -110,7 +110,7 @@ STRIPE_SECRET_KEY=<your Stripe test secret key> uv run pytest tests/integration/
 Select property testing budgets using `HYPOTHESIS_PROFILE`:
 - `dev`: 100 examples, 200 ms deadline (default).
 - `ci`: 200 examples, derandomized, deadlines disabled, `print_blob=True`.
-- `explore`: 200 examples with randomized seeds to uncover novel failure modes:
+- `explore`: 200 examples with randomized seeds to uncover novel failure modes. A failing example is saved in `.hypothesis/examples` (as under `dev`) and replayed first by the next run until it passes:
 ```bash
 HYPOTHESIS_PROFILE=explore uv run pytest tests/integration/test_payment_state_machine.py
 ```
