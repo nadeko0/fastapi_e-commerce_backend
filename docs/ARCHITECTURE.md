@@ -114,10 +114,10 @@ flowchart TD
 
     Enqueue --> Worker["Celery Worker claims the event (FOR UPDATE SKIP LOCKED)"]
     Worker --> Apply{"Apply event to order & payment ledger"}
-    
+
     Apply -->|Success| Processed["UPDATE status = 'processed'"]
     Apply -->|Transient Error / Overtaken Attempt| Retry{"Attempts <= STRIPE_EVENT_MAX_RETRIES?"}
-    
+
     Retry -->|Yes| Retrying["UPDATE status = 'retrying', schedule Celery backoff"]
     Retrying --> Worker
     Retry -->|No| Failed["UPDATE status = 'failed' (Terminal State)"]
@@ -133,19 +133,19 @@ Order statuses transition deterministically according to `ORDER_STATUS_TRANSITIO
 ```mermaid
 stateDiagram-v2
     [*] --> NEW: Placed from cart (POST /orders)
-    
+
     NEW --> CONFIRMED: Payment succeeded, in /pay or via Stripe webhook (Paid only)
     NEW --> CANCELLED: Customer cancels unpaid order or expiry task restocks
-    
+
     CONFIRMED --> PROCESSING: Admin moves to fulfillment packaging (Paid only)
     CONFIRMED --> CANCELLED: Admin cancels (restocks inventory)
-    
+
     PROCESSING --> SENT: Admin dispatches shipment (Paid only)
     PROCESSING --> CANCELLED: Admin cancels (restocks inventory)
-    
+
     SENT --> DELIVERED: Admin records delivery (Paid only)
     SENT --> CANCELLED: Admin cancels (restocks inventory)
-    
+
     DELIVERED --> [*]
     CANCELLED --> [*]
 ```

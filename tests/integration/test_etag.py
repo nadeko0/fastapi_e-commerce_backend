@@ -301,4 +301,3 @@ def test_stock_quantity_requires_real_etag(client, setup, kind):
     # a body without stock_quantity and without If-Match is 200
     resp_nostock = client.put(url, json=no_stock_body, headers=headers)
     assert resp_nostock.status_code == 200
-

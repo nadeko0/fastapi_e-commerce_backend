@@ -159,4 +159,3 @@ def test_snapshot_payment_preserves_payment_fields():
     assert snap.currency == "USD"
     assert len(snap.refunds) == 1
     assert snap.refunds[0].refund_id == "re_test"
-

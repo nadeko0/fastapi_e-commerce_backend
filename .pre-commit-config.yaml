@@ -12,8 +12,11 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
+      # Generated charts in the reports keep their bytes.
       - id: end-of-file-fixer
+        exclude: \.svg$
       - id: trailing-whitespace
+        exclude: \.svg$
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # v8.30.1
@@ -34,6 +37,8 @@ repos:
         entry: uv run --no-sync ruff check
         language: system
         types: [python]
+        # The scope CI lints (ruff check app tests); migrations/ is not linted.
+        files: ^(app|tests)/
       - id: uv-lock-check
         name: uv.lock matches pyproject.toml
         entry: uv lock --check

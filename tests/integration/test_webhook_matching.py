@@ -184,4 +184,3 @@ def test_unusable_order_metadata_is_treated_as_not_ours(shop, metadata):
 
     assert response.status_code == 200, response.text
     assert response.json() == {"status": "processed", "applied": False}
-
