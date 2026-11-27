@@ -70,7 +70,7 @@ Configuration in `pyproject.toml` and `tests/conftest.py` ensures hermetic, repr
 ### Conftest Hermetic Behaviour
 
 - **Redis:** `fakeredis` backs `RedisService` and async clients on a shared `FakeServer`. `REDIS_PORT=1` is set in the test environment so unmocked network calls fail immediately.
-- **Payments and Email:** `PAYMENT_PROVIDER=mock` and `EMAIL_PROVIDER=logging` prevent external network traffic.
+- **Payments and Email:** `PAYMENT_PROVIDER=mock` and `EMAIL_PROVIDER=logging` prevent external network traffic. The mock compares only the amount and currency when an idempotency key is reused, where Stripe compares every parameter; the API cannot reach that difference, because the application compares the whole request under its own `Idempotency-Key` first, so the mock is left simpler.
 - **Password Hashing:** `BCRYPT_ROUNDS=4` minimizes CPU time during mass user creation.
 - **Database Isolation:** For SQLite, each worker uses a dedicated file database in WAL mode (`PRAGMA journal_mode=WAL`, `synchronous=OFF`). For PostgreSQL, each test session creates a unique database (`ecom_pgtests_<epoch>_<hex>`), runs `alembic upgrade head`, and drops the database on exit. The throwaway databases of the migration tests are named the same way. Test startup removes stale temporary databases older than one day left by aborted runs on both SQLite (`ecommerce-tests-*`) and PostgreSQL (`ecom_pgtests_*`).
 - **Random Test Order:** `pytest-randomly` is enabled by default to run tests in randomized order. Each run prints its seed in the header (`Using --randomly-seed=N`) and, because `-q` hides the header, again at the end (`random order seed: rerun with --randomly-seed=N`). Reproduce an exact execution order with `pytest --randomly-seed=N`, or disable randomization with `-p no:randomly`.
@@ -139,7 +139,7 @@ uv run coverage report --fail-under=100 \
 ```
 
 ### Type Checking
-Run static type verification with mypy across `app/`:
+Run static type verification with mypy across `app/` (the tests are not type-checked: Ruff covers them, and their fixtures and Hypothesis strategies would need annotations that prove little):
 ```bash
 uv run mypy
 ```
