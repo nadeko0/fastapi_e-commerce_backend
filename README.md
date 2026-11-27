@@ -101,7 +101,7 @@ Details and the conditions behind each number: [docs/reports/final-test-campaign
 
 ## 🧱 Tech stack
 
-Python 3.13 · FastAPI 0.162 and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and Alembic · PostgreSQL 16, 17 or 18 (Compose runs 18) · Redis 7.2 to 8.8 (Compose runs 8.8; redis-py 8.1) · Celery 5.6 · Stripe (SDK 16) · PyJWT and bcrypt · uv · pytest and Hypothesis in the suite; Schemathesis, mutmut and Locust for the release campaign · Docker · GitHub Actions.
+Python 3.13 · FastAPI 0.165 and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and Alembic · PostgreSQL 16, 17 or 18 (Compose runs 18) · Redis 7.2 to 8.8 (Compose runs 8.8; redis-py 8.1) · Celery 5.7 · Stripe (SDK 17) · PyJWT and bcrypt · uv · pytest and Hypothesis in the suite; Schemathesis, mutmut and Locust for the release campaign · Docker · GitHub Actions.
 
 ## 📌 About this project
 
