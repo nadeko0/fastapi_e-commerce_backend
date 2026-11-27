@@ -142,17 +142,11 @@ _DISPUTE_EVENT_TYPES = (
     "charge.dispute.funds_withdrawn",
     "charge.dispute.funds_reinstated",
 )
-# Stripe's open dispute statuses in the order a dispute passes through them:
-# an inquiry (warning_*) may escalate to a chargeback, which may be appealed
-# (docs.stripe.com/disputes/how-disputes-work, /disputes/arbitration).
-_OPEN_DISPUTE_RANK = {
-    status: rank
-    for rank, status in enumerate((
-        "warning_needs_response", "warning_under_review",
-        "needs_response", "under_review",
-        "appeal_needs_response", "appeal_under_review",
-    ))
-}
+# Stripe's open dispute statuses in the order a dispute passes through them: inquiry
+# (warning_*), chargeback, appeal (docs.stripe.com/disputes/how-disputes-work).
+_OPEN_DISPUTE_RANK = {status: rank for rank, status in enumerate((
+    "warning_needs_response", "warning_under_review", "needs_response", "under_review",
+    "appeal_needs_response", "appeal_under_review"))}
 
 
 def _apply_dispute_event(db: Session, object_data: dict[str, Any]) -> dict[str, Any]:
