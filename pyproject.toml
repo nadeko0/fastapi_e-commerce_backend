@@ -58,6 +58,7 @@ dev = [
     "pytest-socket==0.8.1",
     "pytest-randomly==5.0.0",
     "pytest-benchmark==5.3.1",
+    "prek>=0.5.11",
 ]
 
 [tool.uv]
@@ -87,7 +88,7 @@ addopts = [
     "--allow-hosts=127.0.0.1,::1,localhost",
     "--allow-unix-socket",
     # tests/benchmarks run once each, as plain tests, in every ordinary run;
-    # the benchmark CI job turns timing on with --benchmark-enable.
+    # timing them needs --benchmark-enable, by hand (CI has no benchmark job).
     "--benchmark-disable",
 ]
 testpaths = ["tests"]
@@ -111,7 +112,7 @@ filterwarnings = [
 markers = [
     "timing_sensitive: asserts on elapsed time or event-loop latency; run alone, not beside other xdist workers (-m timing_sensitive)",
     "db_sensitive: outcome depends on the database (locks, constraints, indexes, migrations); applied by file name in tests/conftest.py, run on PostgreSQL in CI",
-    "real_redis: runs on the Redis server named by REAL_REDIS_URL (parametrization backend=real of tests/integration/test_real_redis_parity.py); skipped without it, run by CI job test-redis",
+    "real_redis: runs on the Redis server named by REAL_REDIS_URL (parametrization backend=real of tests/integration/test_real_redis_parity.py); skipped without it, run by the CI job integration",
 ]
 
 [tool.coverage.run]
@@ -125,6 +126,11 @@ branch = true
 # of the function as never run: routes on AsyncSession showed 65% while
 # their tests exercised every line.
 concurrency = ["greenlet", "thread"]
+# Records which test ran each line; `coverage html` shows them per line.
+dynamic_context = "test_function"
+
+[tool.coverage.html]
+show_contexts = true
 
 [tool.coverage.report]
 fail_under = 85
@@ -194,6 +200,9 @@ ignore = [
     # PLW0603 (global statement): three lazily built module singletons (compiled Lua
     # script, trace source, one-shot log flag); the alternative is a holder object.
     "PLW0603",
+    "S101",
+    "S105",
+    "S106",
 ]
 # Added on top of E/F/I/W: pyupgrade (UP), bugbear (B), async pitfalls (ASYNC),
 # naive datetimes (DTZ), FastAPI (FAST), simplifications (SIM), and the Ruff-specific
@@ -201,10 +210,14 @@ ignore = [
 # (implicit Optional), RUF022 (sorted __all__), RUF100 (stale noqa).
 extend-select = ["UP", "B", "ASYNC", "DTZ", "FAST", "SIM", "RUF005", "RUF012", "RUF013", "RUF022", "RUF100",
     "G", "LOG", "BLE", "PGH003", "PIE", "C4", "RET", "PT", "T20", "PLE", "PLW", "TID251",
-    "C901", "PLR0912", "PLR0915"]
+    "C901", "PLR0912", "PLR0915", "S"]
 # Second batch: logging format (G, LOG), blind except (BLE), type: ignore without code
 # (PGH003), PIE, comprehensions (C4), return statements (RET), pytest style (PT),
 # print (T20), pylint errors and warnings (PLE, PLW).
+# Security (S, Bandit's rules in Ruff) replaced the separate Bandit run, which failed on
+# medium severity and up in app/ only. So the rules Bandit rates low stay off: assert
+# (S101) and "looks like a password" names (S105, S106: token_type="bearer", Stripe
+# test token names, Redis key prefixes), and tests/ is not checked for S.
 # Function size: complexity (C901), branches (PLR0912), statements (PLR0915), with
 # limits above Ruff's defaults (10/12/50): about a dozen app functions sit just past
 # the defaults and read fine as they are; the limits stop one from growing further.
@@ -223,7 +236,7 @@ max-statements = 60
 "app/tasks.py" = ["TID251"]
 # The tests build and patch RedisService directly. Test scenarios and data strategies
 # are long by design: the function-size limits are for app/.
-"tests/**" = ["TID251", "C901", "PLR0912", "PLR0915"]
+"tests/**" = ["TID251", "C901", "PLR0912", "PLR0915", "S"]
 # Auth code changes only when a task names it; four `x = jwt.encode(); return x` pairs stay.
 "app/core/security.py" = ["RET504"]
 "app/services/redis.py" = ["TID251"]

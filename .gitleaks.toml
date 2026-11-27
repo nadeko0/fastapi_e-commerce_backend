@@ -1,4 +1,4 @@
-# gitleaks configuration (CI job "secrets", and `gitleaks git` / `gitleaks dir`
+# gitleaks configuration (the pre-commit hook, and `gitleaks git` / `gitleaks dir`
 # locally). Starts from the default rules; the allowlist below covers only
 # findings that are not secrets.
 title = "fastapi-e-commerce-backend gitleaks config"

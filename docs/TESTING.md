@@ -7,12 +7,12 @@ Software that processes money cannot rely on good intentions or manual smoke tes
 ```mermaid
 flowchart TD
     E2E["E2E Tests (Stripe Test Mode, Stripe CLI, 54 live Stripe tests)"] --> Fuzz["Contract & Fuzz (Schemathesis, Hypothesis State Machines)"]
-    Fuzz --> Integration["Integration Tests (PostgreSQL 16/17/18, SQLite WAL, Real Redis, 2,890 cases)"]
+    Fuzz --> Integration["Integration Tests (PostgreSQL 18, SQLite WAL, Real Redis, 2,890 cases)"]
     Integration --> Unit["Unit Tests (Deterministic Mocks, Invariants, 2,787 cases)"]
 ```
 
 1. **Unit Tests:** Fast, isolated tests covering models, services, schema serialization, and money calculations. All external I/O (Stripe, Redis, SMTP) is mocked deterministically.
-2. **Integration Tests:** Executed across SQLite (local development) and PostgreSQL 16, 17, and 18 (CI). Tests verify row locking in payment paths, database CHECK constraints, lower(email) unique indexes, and Alembic migrations.
+2. **Integration Tests:** Executed across SQLite (local development) and PostgreSQL 18, the version Compose deploys (CI). Tests verify row locking in payment paths, database CHECK constraints, lower(email) unique indexes, and Alembic migrations.
 3. **Property and State-Machine Tests:** Hypothesis generates pseudo-random inputs to find boundary bugs. Stateful tests (`PaymentChain`) exercise arbitrary sequences of orders, payments, cancellations, and refunds. One property test discovered that normalizing the German letter "ß" expands "0ß" into two characters ("0SS"), quietly invalidating ISO country code length invariants.
 4. **Contract and Fuzz Testing:** Schemathesis was run against the 4.0.0 OpenAPI document (54 paths), outside this suite. It uncovered unhandled 500 errors on NUL bytes (`\x00`) and lone surrogates, prompting global input sanitization.
 5. **E2E Tests (Stripe Test Mode):** Black-box tests driven against real Stripe test-mode endpoints (`api.stripe.com`) with webhook forwarding via the Stripe CLI.
@@ -20,44 +20,26 @@ flowchart TD
 
 ## Continuous Integration Pipeline
 
-GitHub Actions runs 19 job instances on ubuntu-latest: 11 jobs, expanded by 7 time zones and 3 PostgreSQL versions. It runs on pushes and pull requests to `main` and, since 6.0.0, every Monday at 06:00 UTC (the `benchmark` job is skipped then, as a scheduled run has no base commit to compare with), so a newly published CVE with a fix fails the `audit` or the image scan without waiting for a push.
+GitHub Actions runs 4 jobs on ubuntu-latest, on pushes and pull requests to `main`. A new push to a pull request cancels its older run; runs on `main` always finish.
 
 ```mermaid
 flowchart TD
     subgraph Parallel Checks
-        lint["lint (Ruff & mypy)"]
-        sast["sast (Bandit)"]
-        benchmark["benchmark (pytest-benchmark, not in the weekly run)"]
-        audit["audit (pip-audit & CycloneDX)"]
-        secrets["secrets (gitleaks)"]
-        test["test (SQLite & Coverage Gate)"]
-        test_tz["test-timezones (7 Timezones)"]
-        test_pg["test-postgres (PG 18 whole suite, 16 and 17 database-sensitive)"]
-        migration_compat["migration-compat (Previous Release)"]
-        test_redis["test-redis (Real Redis 8.8 Parity)"]
+        lint["lint (Ruff, mypy, module length, pip-audit)"]
+        test["test (SQLite and fakeredis, coverage gates)"]
+        integration["integration (PostgreSQL 18, Redis 8.8, previous release on new migrations)"]
     end
-    lint --> docker_build["docker-build (app, postgres and redis images: build & Trivy scan)"]
-    sast --> docker_build
-    audit --> docker_build
-    secrets --> docker_build
+    lint --> docker_build["docker-build (app, postgres and redis images: build and Trivy scan)"]
     test --> docker_build
-    test_tz --> docker_build
-    test_pg --> docker_build
-    migration_compat --> docker_build
-    test_redis --> docker_build
+    integration --> docker_build
 ```
 
-- **lint:** Runs Ruff across `app` and `tests` (the pycodestyle, Pyflakes, isort and warning rules plus pyupgrade, bugbear, async, naive-datetime, FastAPI, simplify, logging, return, pytest and print rule sets; the full list is in `pyproject.toml`), and static type checking with `mypy` over `app` (`warn_return_any`, `warn_unreachable`, `disallow_any_generics` and extra error codes everywhere; fully annotated definitions in the payment layer and `app/tasks.py`). It also fails when a module under `app/` has more than 800 lines (the aim is 500), and Ruff limits a function in `app/` to complexity 15, 15 branches and 60 statements (C901, PLR0912, PLR0915; the tests are exempt).
-- **sast:** Runs Bandit offline (`-r app --severity-level medium`) for static application security testing.
-- **benchmark:** Times hot execution paths with `pytest-benchmark` on the base commit (the pull request's base, or the previous head of `main`) and on HEAD, one after the other on the same runner, and fails when a median on HEAD is more than 35% slower (`.github/scripts/benchmark_ab.sh`). Both sides share one machine because runners differ: six runs of one commit landed on three AMD EPYC models (7763, 9V74, 9V45) whose medians differed by up to 2.26 times. On one runner, six runs of unchanged code put HEAD within 6% of the base on the CPU benchmarks and within 22% on the request benchmarks, which the 35% leaves room for.
-- **audit:** Exports locked dependencies to check against the PyPI Advisory Database using `pip-audit`, producing a CycloneDX SBOM.
-- **secrets:** Scans git history for exposed credentials using `gitleaks`. `.gitleaks.toml` allowlists one placeholder: the JWT-shaped example of the `Token` response in `app/schemas/user.py` and the OpenAPI snapshot, only when the file and the exact placeholder value both match, so a real token in those files is still reported.
-- **test:** Executes the primary suite in parallel on SQLite, runs timing-sensitive tests sequentially, and enforces coverage gates.
-- **test-timezones:** Matrix testing payment and order logic across 7 timezones (including UTC, Pacific/Kiritimati, Pacific/Pago_Pago, Asia/Kathmandu, America/St_Johns, Europe/Bratislava, America/New_York).
-- **test-postgres:** Runs the whole suite on PostgreSQL 18 (the deployed image) and the database-sensitive subset on 16 and 17, including schema round-trip tests (`tests/integration/test_postgres_migration_roundtrip.py`) across every revision.
-- **migration-compat:** Runs the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses against the current migrations on PostgreSQL 18 (`.github/scripts/migration_compat.sh`); that release's tests about the migrations themselves are left out. It ends at once when `migrations/` is unchanged since the tag.
-- **test-redis:** Tests Redis Lua scripts, token revocation, and concurrency on a real Redis 8.8 container (the deployed image).
-- **docker-build:** Builds the production app image and the `docker/postgres` and `docker/redis` images that Compose builds, and scans all three with Trivy. It needs every job above except `benchmark`.
+- **lint:** Runs Ruff across `app` and `tests` (the pycodestyle, Pyflakes, isort and warning rules plus pyupgrade, bugbear, async, naive-datetime, FastAPI, simplify, logging, return, pytest, print and security (Bandit's rules, `S`) rule sets; the full list is in `pyproject.toml`), and static type checking with `mypy` over `app` (`warn_return_any`, `warn_unreachable`, `disallow_any_generics` and extra error codes everywhere; fully annotated definitions in the payment layer and `app/tasks.py`). It also fails when a module under `app/` has more than 800 lines (the aim is 500), and Ruff limits a function in `app/` to complexity 15, 15 branches and 60 statements (C901, PLR0912, PLR0915; the tests are exempt). Last, `pip-audit` checks the packages pinned in `uv.lock` (all groups, by hash) against the PyPI Advisory Database. Naive local time (`datetime.now()` without a zone, `date.today()`) is caught by Ruff's DTZ rules in the code itself, so no job runs the suite under other time zones (until 6.2.0 a 7-zone matrix did).
+- **test:** Executes the primary suite in parallel on SQLite, runs timing-sensitive tests sequentially, and enforces the coverage gates.
+- **integration:** Runs on the PostgreSQL 18 and Redis 8.8 images Compose deploys: the whole suite on PostgreSQL (including schema round-trip tests across every revision, `tests/integration/test_postgres_migration_roundtrip.py`), the timing-sensitive database tests alone, the `real_redis` parity tests, and last the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses on the current migrations (`.github/scripts/migration_compat.sh`; that release's tests about the migrations themselves are left out, and it ends at once when `migrations/` is unchanged since the tag).
+- **docker-build:** Builds the production app image and the `docker/postgres` and `docker/redis` images that Compose builds, and scans all three with Trivy. It needs the three jobs above.
+
+Secrets are caught before they are committed, not after the push: the `gitleaks` hook of `.pre-commit-config.yaml` (see Pre-commit Hooks below). `.gitleaks.toml` allowlists one placeholder: the JWT-shaped example of the `Token` response in `app/schemas/user.py` and the OpenAPI snapshot, only when the file and the exact placeholder value both match, so a real token in those files is still reported.
 
 ## Test Markers and Isolation
 
@@ -150,9 +132,13 @@ Run performance benchmarks for hot execution paths:
 uv run pytest tests/benchmarks --benchmark-enable --benchmark-only
 ```
 
-The CI comparison, base commit against HEAD on this machine (Linux or WSL):
+They run by hand, not in CI: compare two commits on the same machine, as runners of one kind differ in CPU model.
+
+### Pre-commit Hooks
+`.pre-commit-config.yaml` runs with `prek` (a dev dependency) before each commit: gitleaks on the staged changes, zizmor on the workflow, Ruff, a check that `uv.lock` matches `pyproject.toml`, and generic file checks (YAML and TOML syntax, large files, trailing whitespace, final newline). Install it once per clone:
 ```bash
-bash .github/scripts/benchmark_ab.sh origin/main
+uv run prek install
+uv run prek run --all-files   # on demand
 ```
 
 ## Verified Metrics for Release v6.2.0

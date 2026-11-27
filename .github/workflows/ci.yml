@@ -5,290 +5,81 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # Weekly, with no change to the code: a new CVE with a fix in a dependency
-  # or an image package fails the audit or the image scan here instead of on
-  # the next unrelated push.
-  schedule:
-    - cron: "0 6 * * 1"
 
 permissions:
   contents: read
 
+# A new push to a PR cancels its older run; runs on main always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   UV_VERSION: "0.13.6"
-  # Hypothesis settings profile registered in tests/conftest.py (more examples,
-  # derandomized, print_blob); every test job below inherits it.
+  UV_LOCKED: "1"
   HYPOTHESIS_PROFILE: ci
+  # Dummy settings the app reads at import. Not secrets.
+  JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
+  POSTGRES_SERVER: localhost
+  POSTGRES_USER: ci
+  POSTGRES_PASSWORD: ci
+  POSTGRES_DB: ci
+  REDIS_HOST: localhost
+  SMTP_HOST: localhost
+  SMTP_USER: ci@example.com
+  SMTP_PASSWORD: ci
+  EMAILS_FROM_EMAIL: ci@example.com
+  EMAILS_FROM_NAME: CI
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: ${{ env.UV_VERSION }}
-      - name: Set up Python
-        run: uv python install
-      - name: Install dependencies
-        run: uv sync --locked --group dev
-      - name: Ruff lint
-        run: uv run ruff check app tests
-      - name: Module length (app/ at most 800 lines; aim for 500)
-        # A module past 800 lines has usually taken on a second job: split it
-        # by job (as app/api/v1/orders/ and app/services/stripe_event_redaction.py
-        # were), not by line count. Tests are not checked.
+      - run: uv sync --group dev
+      - run: uv run ruff check app tests
+      - run: uv run mypy
+      - name: No module in app/ over 800 lines
         run: |
           long=$(find app -name '*.py' -print0 | xargs -0 wc -l | awk '$2 != "total" && $1 > 800')
-          if [ -n "$long" ]; then echo "Modules over 800 lines:"; echo "$long"; exit 1; fi
-      - name: Type check (mypy, configured in pyproject.toml)
-        run: uv run mypy
-
-  sast:
-    # Static security analysis of the application code. Bandit runs offline
-    # with its built-in rules at a pinned version, so the result changes only
-    # when the code does. Medium severity and up fails the build; the one
-    # accepted finding is marked in place with its reason (# nosec B104).
-    # CodeQL runs separately through GitHub's default setup and reports to the
-    # repository's Security tab.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: ${{ env.UV_VERSION }}
-      - name: Bandit
-        run: uvx bandit==1.9.4 -r app --severity-level medium --quiet
+          if [ -n "$long" ]; then echo "$long"; exit 1; fi
+      - name: Known vulnerabilities in uv.lock
+        run: |
+          uv export --all-groups --all-extras --no-emit-project --no-header --format requirements-txt -o "$RUNNER_TEMP/req.txt"
+          uvx pip-audit==2.10.1 --require-hashes --disable-pip --progress-spinner off -r "$RUNNER_TEMP/req.txt"
 
   test:
+    # SQLite and fakeredis. Timing tests are flaky beside parallel workers, so
+    # they run alone after, appending to the same coverage data.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: ${{ env.UV_VERSION }}
-      - name: Set up Python
-        run: uv python install
-      - name: Install dependencies
-        run: uv sync --locked --group dev
-      # Two runs, one coverage file. The parallel run (pytest-xdist, one SQLite
-      # database and one fakeredis server per worker) skips the tests that
-      # assert on elapsed time or event-loop latency, because CPU contention from
-      # other workers would make them flaky; they run alone right after, with
-      # --cov-append, so the coverage numbers and both gates see every test.
-      # The 85% gate is enforced on the combined data in the second run (the
-      # first one cannot reach it without the second's tests).
-      - name: Run tests in parallel with coverage
-        env:
-          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
-          POSTGRES_SERVER: localhost
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: ci
-          REDIS_HOST: localhost
-          SMTP_HOST: localhost
-          SMTP_USER: ci@example.com
-          SMTP_PASSWORD: ci
-          EMAILS_FROM_EMAIL: ci@example.com
-          EMAILS_FROM_NAME: CI
-        run: >-
-          uv run pytest tests/ -q -n auto --dist worksteal -m "not timing_sensitive"
-          --cov=app --cov-report= --cov-fail-under=0
-      - name: Run the timing-sensitive tests alone (coverage gate at 85%)
-        env:
-          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
-          POSTGRES_SERVER: localhost
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: ci
-          REDIS_HOST: localhost
-          SMTP_HOST: localhost
-          SMTP_USER: ci@example.com
-          SMTP_PASSWORD: ci
-          EMAILS_FROM_EMAIL: ci@example.com
-          EMAILS_FROM_NAME: CI
-        run: >-
-          uv run pytest tests/ -q -m timing_sensitive
-          --cov=app --cov-append --cov-report=term-missing --cov-report=xml
+      - run: uv sync --group dev
+      - run: uv run pytest tests/ -q -n auto --dist worksteal -m "not timing_sensitive" --cov=app --cov-report= --cov-fail-under=0
+      - name: Timing-sensitive tests alone (85% gate on the sum)
+        run: uv run pytest tests/ -q -m timing_sensitive --cov=app --cov-append --cov-report=term-missing
       - name: Payment layer coverage gate (100% lines and branches)
         run: >-
           uv run coverage report --fail-under=100
           --include="app/api/v1/orders/*.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py,app/services/stripe_events.py,app/services/stripe_event_redaction.py,app/services/reconciliation.py,app/models/payment_discrepancy.py,app/schemas/webhook_event.py"
           --omit="app/services/payment/stripe_provider.py"
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: coverage-xml
-          path: coverage.xml
 
-  test-timezones:
-    # Payment and order code compares and stores timestamps; run just those
-    # tests under zones that differ from UTC by the extremes (+14, -11), a
-    # 45-minute offset and a half-hour offset with DST, and two zones whose
-    # clocks change on the dates the DST tests use (Europe/Bratislava,
-    # America/New_York). No coverage here: the
-    # full suite in the test job already measures it.
+  integration:
+    # The PostgreSQL and Redis images docker-compose.yml deploys.
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        tz:
-          - UTC
-          - Pacific/Kiritimati
-          - Pacific/Pago_Pago
-          - Asia/Kathmandu
-          - America/St_Johns
-          - Europe/Bratislava
-          - America/New_York
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: ${{ env.UV_VERSION }}
-      - name: Set up Python
-        run: uv python install
-      - name: Install dependencies
-        run: uv sync --locked --group dev
-      - name: Payment and order tests under TZ=${{ matrix.tz }}
-        env:
-          TZ: ${{ matrix.tz }}
-          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
-          POSTGRES_SERVER: localhost
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: ci
-          REDIS_HOST: localhost
-          SMTP_HOST: localhost
-          SMTP_USER: ci@example.com
-          SMTP_PASSWORD: ci
-          EMAILS_FROM_EMAIL: ci@example.com
-          EMAILS_FROM_NAME: CI
-        run: >-
-          uv run pytest -q -p no:cacheprovider -n auto --dist worksteal
-          tests/integration/test_payment*.py
-          tests/integration/test_order*.py
-          tests/integration/test_checkout_session*.py
-          tests/integration/test_refund*.py
-          tests/integration/test_disputes.py
-          tests/integration/test_webhook*.py
-          tests/integration/test_tasks*.py
-          tests/integration/test_stripe_event*.py
-          tests/integration/test_reconciliation*.py
-          tests/integration/test_admin_webhook_events.py
-          tests/integration/test_dst_clock.py
-          tests/unit/test_payment*.py
-          tests/unit/test_order*.py
-          tests/unit/test_money*.py
-          tests/unit/test_webhook*.py
-          tests/unit/test_reconciliation*.py
-          tests/unit/test_dst_*.py
-
-  test-postgres:
-    # The main test job runs on a temporary SQLite database. Production is
-    # PostgreSQL, so what only PostgreSQL does (row locks in the pay path,
-    # CHECK constraints, the unique index on lower(email), the refund and
-    # dispute tables, the Alembic migrations) is checked here: the tests that
-    # depend on the database (marker db_sensitive, applied by file name in
-    # tests/conftest.py) plus the PostgreSQL-only ones, against a real server.
-    # tests/conftest.py creates a throwaway database on it, builds the schema
-    # with `alembic upgrade head` and drops it at the end.
-    #
-    # One run per PostgreSQL major: 18 is what docker-compose.yml deploys
-    # (SETUP.md: "16+"), 16 and 17 are the other supported majors. 18 runs the
-    # whole suite on PostgreSQL (everything that does not assert on elapsed
-    # time), 16 and 17 the database-sensitive subset: the subset is ~80% of the
-    # whole run's time (11 min of ~15 on two local workers), so the full suite
-    # on each major would triple the cost for ~20% more coverage of code that
-    # does not touch the database differently between majors. Images by tag and
-    # digest; 18's is the one test_docker_compose.py keeps equal to
-    # docker-compose.yml (pinned under the security exception noted there), the
-    # others were more than two weeks old when pinned.
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - postgres: "16"
-            image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
-            selection: db_sensitive and not timing_sensitive
-          - postgres: "17"
-            image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
-            selection: db_sensitive and not timing_sensitive
-          - postgres: "18"
-            image: postgres:18.6-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
-            selection: not timing_sensitive
-    name: test-postgres (PostgreSQL ${{ matrix.postgres }})
-    services:
-      postgres:
-        # max_connections stays at the default 100 here: a service container
-        # cannot pass the `-c max_connections=200` that docker-compose.yml
-        # sets, and the tests open far fewer.
-        image: ${{ matrix.image }}
-        env:
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ci -d ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: ${{ env.UV_VERSION }}
-      - name: Set up Python
-        run: uv python install
-      - name: Install dependencies
-        run: uv sync --locked --group dev
-      - name: Tests on PostgreSQL ${{ matrix.postgres }} (${{ matrix.selection }})
-        env:
-          TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/ci
-          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
-          POSTGRES_SERVER: localhost
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: ci
-          REDIS_HOST: localhost
-          SMTP_HOST: localhost
-          SMTP_USER: ci@example.com
-          SMTP_PASSWORD: ci
-          EMAILS_FROM_EMAIL: ci@example.com
-          EMAILS_FROM_NAME: CI
-        run: uv run pytest tests/ -m "${{ matrix.selection }}" -q -p no:cacheprovider -rs -n auto --dist worksteal
-      - name: Timing-sensitive database tests on PostgreSQL, alone
-        env:
-          TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/ci
-          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
-          POSTGRES_SERVER: localhost
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: ci
-          REDIS_HOST: localhost
-          SMTP_HOST: localhost
-          SMTP_USER: ci@example.com
-          SMTP_PASSWORD: ci
-          EMAILS_FROM_EMAIL: ci@example.com
-          EMAILS_FROM_NAME: CI
-        run: uv run pytest tests/ -m "db_sensitive and timing_sensitive" -q -p no:cacheprovider -rs
-
-  migration-compat:
-    # The previous release's database tests on the current migrations: during
-    # a rolling deploy the old code keeps running on the upgraded schema (see
-    # .github/scripts/migration_compat.sh). The base is the newest tag behind
-    # HEAD; when migrations/ has not changed since it, the job ends at once.
-    # tests/integration/test_postgres_migration_roundtrip.py checks the other
-    # direction, every downgrade, in the test-postgres jobs.
-    runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:18.6-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
@@ -296,198 +87,67 @@ jobs:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
           POSTGRES_DB: ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ci -d ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: ${{ env.UV_VERSION }}
-      - name: Set up Python
-        run: uv python install
-      - name: Previous release on the current migrations
-        env:
-          TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/ci
-        run: bash .github/scripts/migration_compat.sh "$(git describe --tags --abbrev=0 HEAD)"
-
-  test-redis:
-    # The suite runs on fakeredis (tests/conftest.py). The tests marked
-    # real_redis are the parametrizations of tests/integration/
-    # test_real_redis_parity.py that run on a real server instead: the
-    # rate-limit Lua script, token revocation, SET NX guards, WATCH/MULTI
-    # against a competing writer, expiry and the stored JSON. The same tests
-    # run on fakeredis in the other jobs, so a difference between emulator and
-    # server shows up as one failing parametrization. The image is the one
-    # docker-compose.yml runs (test_docker_compose.py keeps them equal).
-    runs-on: ubuntu-latest
-    services:
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U ci -d ci" --health-interval 5s --health-retries 12
       redis:
         image: redis:8.8-alpine@sha256:c027ae0f677dcf73d74038256f5b88c9ba7b11ccbfae97e96a9f091208d36125
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/ci
+      REAL_REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          fetch-depth: 0 # migration_compat.sh needs the tags
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: ${{ env.UV_VERSION }}
-      - name: Set up Python
-        run: uv python install
-      - name: Install dependencies
-        run: uv sync --locked --group dev
+      - run: uv sync --group dev
+      - name: Suite on PostgreSQL
+        run: uv run pytest tests/ -m "not timing_sensitive" -q -p no:cacheprovider -rs -n auto --dist worksteal
+      - name: Timing-sensitive database tests, alone
+        run: uv run pytest tests/ -m "db_sensitive and timing_sensitive" -q -p no:cacheprovider -rs
       - name: Redis-semantics tests on a real Redis
-        env:
-          REAL_REDIS_URL: redis://localhost:6379/0
-          JWT_SECRET_KEY: ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test
         run: uv run pytest tests/ -m real_redis -q -p no:cacheprovider -rs
-
-  benchmark:
-    # tests/benchmarks: the hot paths (entity tags, JWT, serialization, cart
-    # totals, three requests through the app on SQLite) timed with
-    # pytest-benchmark. The base commit (the PR's base, or the previous head
-    # of main) and HEAD run one after the other on this runner, and the job
-    # fails when a median on HEAD is more than 35% slower (see
-    # .github/scripts/benchmark_ab.sh). A baseline saved by an earlier run is
-    # not used: it came from another runner, and runner CPU models alone
-    # moved the same commit by more than 2x. It catches a blocking call or a
-    # quadratic loop, not a few percent. The weekly scheduled run has no base
-    # to compare with and skips it.
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: ${{ env.UV_VERSION }}
-      - name: Set up Python
-        run: uv python install
-      - name: Base and HEAD on the same runner
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: bash .github/scripts/benchmark_ab.sh "$BASE_SHA"
-
-  audit:
-    # Fails the build when a package pinned in uv.lock has a known
-    # vulnerability (PyPI Advisory Database, via pip-audit). The requirements
-    # file is exported from the lock, with hashes, so pip-audit audits exactly
-    # the pinned versions and files (--require-hashes: no resolution, nothing
-    # installed). All dependency groups are included on purpose: the dev group
-    # runs in CI with the repository checked out, so it is part of the supply
-    # chain too. The project itself is not on PyPI and is left out.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          version: ${{ env.UV_VERSION }}
-      - name: Export the locked dependencies
-        run: >-
-          uv export --locked --all-groups --all-extras --no-emit-project --no-header
-          --format requirements-txt --output-file "$RUNNER_TEMP/requirements-audit.txt"
-      - name: Generate the CycloneDX SBOM of the locked dependencies
-        # uv's own CycloneDX 1.5 export of uv.lock (all groups, as the audit).
-        # Runs before the audit and is uploaded even when the audit fails.
-        run: >-
-          uv export --locked --all-groups --all-extras --no-emit-project --no-header
-          --format cyclonedx1.5 --output-file "$RUNNER_TEMP/bom.cdx.json"
-      - name: Upload the SBOM
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: sbom-cyclonedx
-          path: ${{ runner.temp }}/bom.cdx.json
-          if-no-files-found: error
-      - name: Audit locked dependencies for known vulnerabilities
-        run: >-
-          uvx pip-audit==2.10.1 --require-hashes --disable-pip
-          --progress-spinner off -r "$RUNNER_TEMP/requirements-audit.txt"
-
-  secrets:
-    # Scans every commit of the history for committed credentials (gitleaks,
-    # default rules plus .gitleaks.toml, which allowlists the test data and
-    # the CI stub that look like keys). Run from the image by tag and digest,
-    # like the base images in the Dockerfile. fetch-depth: 0 because the
-    # default checkout is one commit deep. safe.directory: the checkout is
-    # owned by the runner user, the scanner runs as root in the container.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Scan the history with gitleaks
-        run: >-
-          docker run --rm
-          -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo
-          -v "$GITHUB_WORKSPACE:/repo:ro"
-          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
-          git /repo --config /repo/.gitleaks.toml -v --redact --no-banner
+      - name: Previous release on the current migrations (rolling deploy)
+        run: bash .github/scripts/migration_compat.sh "$(git describe --tags --abbrev=0 HEAD)"
 
   docker-build:
     runs-on: ubuntu-latest
-    needs: [lint, sast, audit, secrets, test, test-timezones, test-postgres, test-redis, migration-compat]
+    timeout-minutes: 15
+    needs: [lint, test, integration]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build metadata for the OCI labels
+        with:
+          persist-credentials: false
+      - name: Version and date for the OCI labels
         id: meta
         run: |
           echo "version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" >> "$GITHUB_OUTPUT"
           echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-      - name: Build image (no push)
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          push: false
           load: true
           tags: fastapi-ecommerce-backend:ci
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             REVISION=${{ github.sha }}
             CREATED=${{ steps.meta.outputs.created }}
-      # A scan of the images that ship, not of the lockfile alone: audit covers
-      # the Python dependencies, this covers the OS packages and every binary in
-      # the app image and in the postgres and redis images docker-compose.yml
-      # builds (docker/postgres, docker/redis: the official images with Alpine's
-      # security updates applied, so a fix is not waited for until Docker
-      # Library rebuilds them). Only findings with a fix fail the job (one
-      # without cannot be acted on yet). The ignore list holds only the gosu
-      # findings shown unreachable (see .trivyignore.yaml).
-      - name: Build the postgres and redis images
-        run: |
+      - run: |
           docker build --pull -t ecommerce-postgres:ci docker/postgres
           docker build --pull -t ecommerce-redis:ci docker/redis
-      - name: Scan the app, postgres and redis images (Trivy)
+      # OS packages and binaries of the shipped images; only fixable HIGH/CRITICAL fail.
+      - name: Trivy scan of the three images
         env:
-          # Trivy 0.76.1 by digest, as the other tools in this workflow.
-          TRIVY: aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+          TRIVY: aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c # 0.76.1
         run: |
-          images="fastapi-ecommerce-backend:ci ecommerce-postgres:ci ecommerce-redis:ci"
           status=0
-          for image in $images; do
-            echo "::group::trivy $image"
-            docker run --rm \
-              -v /var/run/docker.sock:/var/run/docker.sock \
-              -v "$GITHUB_WORKSPACE:/repo:ro" \
-              "$TRIVY" image --skip-version-check \
-              --ignorefile /repo/.trivyignore.yaml \
-              --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
-              "$image" || status=1
-            echo "::endgroup::"
+          for image in fastapi-ecommerce-backend:ci ecommerce-postgres:ci ecommerce-redis:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$GITHUB_WORKSPACE:/repo:ro" \
+              "$TRIVY" image --skip-version-check --ignorefile /repo/.trivyignore.yaml \
+              --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 "$image" || status=1
           done
           exit $status

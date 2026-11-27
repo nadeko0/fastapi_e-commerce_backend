@@ -189,9 +189,6 @@ def test_postgres_and_redis_are_built_with_alpine_security_updates():
         block = _without_comments(service_block(compose_name))
         assert re.search(r"^\s*build:\s*$", block, re.M), compose_name
         assert re.search(r"^\s*no_cache: true\s*$", block, re.M), compose_name
-    build = _read(".github/workflows/ci.yml")
-    assert "docker build --pull -t ecommerce-postgres:ci docker/postgres" in build
-    assert "docker build --pull -t ecommerce-redis:ci docker/redis" in build
 
 
 def test_postgres_data_volume_follows_the_18_layout():
@@ -203,32 +200,18 @@ def test_postgres_data_volume_follows_the_18_layout():
     assert "/var/lib/postgresql/data" not in db
 
 
-def test_ci_tests_against_the_postgres_image_production_runs():
-    # The test-postgres job runs once per PostgreSQL major, from a matrix. The
-    # entry for the major docker-compose.yml deploys must be the db service's
-    # image, tag and digest: a Postgres-only behaviour is only worth testing
-    # on the server that is deployed. Bumping one without the other fails
-    # here. The other majors are pinned by digest as well.
-    compose_image = _base_image("postgres")
+def test_ci_integration_runs_on_the_postgres_and_redis_images_production_runs():
+    # A Postgres- or Redis-only behaviour, and old code on new migrations, are
+    # only worth testing on the servers that are deployed: the integration
+    # job's images must be the ones docker-compose.yml builds from, tag and
+    # digest. Bumping one without the other fails here.
     ci = _read(".github/workflows/ci.yml")
-    job = _ci_job(ci, "test-postgres")
-    assert re.search(r"^\s*image: \$\{\{ matrix\.image \}\}\s*$", job, re.M), job
-    matrix_images = re.findall(r"^\s+image: (postgres:\S+)\s*$", job, re.M)
-    assert compose_image in matrix_images
-    assert sorted(re.match(r"postgres:(\d+)", image).group(1) for image in matrix_images) == ["16", "17", "18"]
-    for image in matrix_images:
-        assert re.search(_PINNED, image), image
-    needs = re.search(r"docker-build:.*?needs: \[([^\]]*)\]", ci, re.S).group(1)
-    assert "test-postgres" in needs
-
-
-def test_ci_checks_migration_compatibility_on_the_deployed_postgres_image():
-    # Old code on new migrations matters on the server that is deployed.
-    compose_image = _base_image("postgres")
-    ci = _read(".github/workflows/ci.yml")
-    job = _ci_job(ci, "migration-compat")
-    assert re.findall(r"^\s+image: (\S+)\s*$", job, re.M) == [compose_image]
-    assert "migration-compat" in re.search(r"docker-build:.*?needs: \[([^\]]*)\]", ci, re.S).group(1)
+    job = _ci_job(ci, "integration")
+    images = re.findall(r"^\s+image: (\S+)\s*$", job, re.M)
+    assert sorted(images) == sorted([_base_image("postgres"), _base_image("redis")]), images
+    assert "REAL_REDIS_URL: redis://localhost:6379/0" in job
+    assert "-m real_redis" in job
+    assert ".github/scripts/migration_compat.sh" in job
 
 
 def _ci_job(ci, name):
@@ -236,16 +219,6 @@ def _ci_job(ci, name):
     start = ci.index(f"\n  {name}:")
     following = re.search(r"\n  [\w-]+:\n", ci[start + 1:])
     return ci[start:start + 1 + following.start()] if following else ci[start:]
-
-
-def test_ci_runs_the_real_redis_tests_on_the_redis_image_production_runs():
-    compose_image = _base_image("redis")
-    ci = _read(".github/workflows/ci.yml")
-    job = _ci_job(ci, "test-redis")
-    assert re.search(rf"^\s*image: {re.escape(compose_image)}\s*$", job, re.M)
-    assert "REAL_REDIS_URL: redis://localhost:6379/0" in job
-    assert "-m real_redis" in job
-    assert "test-redis" in re.search(r"docker-build:.*?needs: \[([^\]]*)\]", ci, re.S).group(1)
 
 
 def test_celery_worker_gets_time_to_finish_its_task_on_stop():
@@ -298,11 +271,8 @@ def test_image_carries_oci_labels_filled_from_build_args():
     assert _read("LICENSE").startswith("MIT License")
 
 
-def test_ci_passes_the_label_values_and_publishes_a_cyclonedx_sbom():
+def test_ci_passes_the_label_values():
     ci = _read(".github/workflows/ci.yml")
-    build = ci[ci.index("\n  docker-build:"):]
+    build = _ci_job(ci, "docker-build")
     for arg in ("VERSION=", "REVISION=${{ github.sha }}", "CREATED="):
         assert arg in build, arg
-    audit = ci[ci.index("\n  audit:"):ci.index("\n  docker-build:")]
-    assert "--format cyclonedx1.5" in audit
-    assert "actions/upload-artifact@" in audit

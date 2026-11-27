@@ -8,7 +8,7 @@ enforced by the database itself, and that the
 Alembic migrations run forward, back to nothing and forward again.
 
 They are skipped unless TEST_DATABASE_URL points at a server (see
-tests/conftest.py); CI's test-postgres job runs them.
+tests/conftest.py); CI's integration job runs them.
 """
 import contextlib
 import os

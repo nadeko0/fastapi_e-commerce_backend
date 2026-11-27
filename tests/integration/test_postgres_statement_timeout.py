@@ -8,7 +8,7 @@ transaction with SET LOCAL, the same mechanism with a different number: the
 server cancels the statement with QueryCanceled and get_async_db answers what
 it answers to any SQLAlchemyError.
 
-Skipped unless TEST_DATABASE_URL names a server; CI's test-postgres job runs it.
+Skipped unless TEST_DATABASE_URL names a server; CI's integration job runs it.
 """
 
 import logging

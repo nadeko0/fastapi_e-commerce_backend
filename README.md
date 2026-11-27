@@ -91,7 +91,7 @@ Each row says which release it was measured on; the test count is the number of 
 | Tests | 6,873 cases from 2,764 test functions on SQLite and PostgreSQL, 54 live Stripe tests, 0 warnings |
 | Coverage | 99.0 % overall (measured on 6.2.0), lines and branches combined; 100 % on the payment-layer files, the mock provider excluded (enforced in CI) |
 | Mutation testing | 98.8 % of 3,669 mutants detected (measured on 6.0.0): 3,346 killed by a failing test, 279 over mutmut's time limit (a sample of 12 of those, run without the limit, were all killed by a failing test, none hung); the 44 survivors reviewed as equivalent |
-| CI | lint (Ruff, mypy), sast (Bandit), benchmarks, migration-compat, tests, 7 time zones, PostgreSQL 16/17/18 with migration round-trip checks, real Redis, pip-audit, gitleaks, Trivy; also run weekly on a schedule |
+| CI | 4 jobs: lint (Ruff with its security rules, mypy, pip-audit), tests with coverage gates, integration on PostgreSQL 18 and Redis 8.8 (with migration round-trips and the previous release on the new migrations), image build with a Trivy scan. gitleaks runs as a pre-commit hook |
 | Load (4-core host, app on 3 cores, 200 users, mock payments, rate limits raised, measured on 4.0.1) | p95 57 to 68 ms; overload answers fast 503s instead of stalling |
 | Chaos (measured on 4.0.x) | Redis or PostgreSQL down: 503 with Retry-After, recovery on its own, no webhook lost or applied twice |
 | Security (measured on 4.0.3) | ZAP and a manual OWASP API Top 10 review: no open high or medium issues |
@@ -101,7 +101,7 @@ Details and the conditions behind each number: [docs/reports/final-test-campaign
 
 ## 🧱 Tech stack
 
-Python 3.13 · FastAPI 0.165 and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and Alembic · PostgreSQL 16, 17 or 18 (Compose runs 18) · Redis 7.2 to 8.8 (Compose runs 8.8; redis-py 8.1) · Celery 5.7 · Stripe (SDK 17) · PyJWT and bcrypt · uv · pytest and Hypothesis in the suite; Schemathesis, mutmut and Locust for the release campaign · Docker · GitHub Actions.
+Python 3.13 · FastAPI 0.165 and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and Alembic · PostgreSQL 18 · Redis 7.2 to 8.8 (Compose runs 8.8; redis-py 8.1) · Celery 5.7 · Stripe (SDK 17) · PyJWT and bcrypt · uv · pytest and Hypothesis in the suite; Schemathesis, mutmut and Locust for the release campaign · Docker · GitHub Actions.
 
 ## 📌 About this project
 

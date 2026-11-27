@@ -145,8 +145,8 @@ requires_postgres = pytest.mark.skipif(
 # The tests whose outcome depends on what the database does (row locks,
 # CHECK constraints, unique indexes, the payment/refund/dispute tables,
 # column types, the migrations), selected with `pytest -m db_sensitive`. CI
-# runs exactly these on PostgreSQL (job test-postgres); the whole suite also
-# passes there. Chosen by file name so that a new test file following the
+# runs the whole suite on PostgreSQL (job integration), and the previous
+# release's db_sensitive tests on the new migrations. Chosen by file name so that a new test file following the
 # naming convention is picked up without anyone remembering to mark it.
 _DB_SENSITIVE_FILES = (
     "test_payment*.py",

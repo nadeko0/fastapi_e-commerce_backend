@@ -10,7 +10,7 @@ Every test runs twice:
     backend=real        only when REAL_REDIS_URL names a server, e.g.
                         REAL_REDIS_URL=redis://localhost:6379/0
                         (marker real_redis: `pytest -m real_redis` selects
-                        exactly the real runs; CI job test-redis does)
+                        exactly the real runs; CI job integration does)
 
 A difference between the two is a finding about fakeredis or about the code,
 and shows as one failing parametrization.

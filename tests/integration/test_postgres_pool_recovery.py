@@ -6,7 +6,7 @@ runs on NullPool engines and only compared those settings as strings. Here the
 pool is the real one (tests/integration/pg_pool_support.py) and the server
 is made to misbehave: every other backend is terminated between two requests.
 
-Skipped unless TEST_DATABASE_URL names a server; CI's test-postgres job runs it.
+Skipped unless TEST_DATABASE_URL names a server; CI's integration job runs it.
 """
 
 import asyncio

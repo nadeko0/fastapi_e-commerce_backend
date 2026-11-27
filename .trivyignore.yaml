@@ -1,5 +1,5 @@
 # Trivy ignore list (experimental YAML form; Trivy only reads it when named with
-# --ignorefile .trivyignore.yaml, see the image-scan job in .github/workflows/ci.yml).
+# --ignorefile .trivyignore.yaml, see the docker-build job in .github/workflows/ci.yml).
 #
 # Every entry is the same case: the Go standard library inside
 # /usr/local/bin/gosu of the official postgres images, which tianon/gosu builds

@@ -12,7 +12,7 @@ production database holds, upgrade through it, look at the rows, go back.
                 payment status CHECK (refusing rows that break it), and
                 payments.reconciled_at
 
-Skipped unless TEST_DATABASE_URL names a server; CI's test-postgres job runs it.
+Skipped unless TEST_DATABASE_URL names a server; CI's integration job runs it.
 """
 
 import os
