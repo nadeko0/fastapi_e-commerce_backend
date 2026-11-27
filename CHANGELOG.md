@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.0] - 2026-11-28
+
 ### Upgrade notes
-- Breaking for admin clients: `PUT` and `PATCH` of `/api/v1/admin/products/{id}` and of `/api/v1/admin/products/{id}/variants/{variant_id}` that set `stock_quantity` now require `If-Match` with the current ETag; without it, or with `*`, the answer is 428 Precondition Required (RFC 6585) and nothing changes. Read the ETag from `GET /api/v1/admin/products/{id}` (new; it shows deactivated products too) or `GET /api/v1/admin/products/{id}/variants/{variant_id}` (or the previous update's response) and send it; on 412, refetch and retry. Updates without `stock_quantity` are unchanged. The next release is therefore a major one.
+- Breaking for admin clients: `PUT` and `PATCH` of `/api/v1/admin/products/{id}` and of `/api/v1/admin/products/{id}/variants/{variant_id}` that set `stock_quantity` now require `If-Match` with the current ETag; without it, or with `*`, the answer is 428 Precondition Required (RFC 6585) and nothing changes. Read the ETag from `GET /api/v1/admin/products/{id}` (new; it shows deactivated products too) or `GET /api/v1/admin/products/{id}/variants/{variant_id}` (or the previous update's response) and send it; on 412, refetch and retry. Updates without `stock_quantity` are unchanged. This is why 7.0.0 is a major release.
 - A personal data export is now a zip archive downloaded after login, no longer the data inside the mail. The frontend must serve the page the ready mail links to, `<FRONTEND_URL>/account/data-export/<request_id>`, which downloads `GET /api/v1/legal/data-export/{request_id}` with the user's token.
 - `docker-compose.yml` adds the `gdpr_exports` volume on `api` and `celery-worker` (created by `docker compose up`); the two must run on one host. New setting `GDPR_EXPORT_DIR` (default `exports`, `/app/exports` in the image).
 

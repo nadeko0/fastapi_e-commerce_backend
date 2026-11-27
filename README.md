@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 
 ![tests](https://img.shields.io/badge/tests-6%2C919%20cases-brightgreen)
-![coverage](https://img.shields.io/badge/coverage%20(6.2.0)-99.0%25-brightgreen)
+![coverage](https://img.shields.io/badge/coverage%20(7.0.0)-99.0%25-brightgreen)
 ![payment layer](https://img.shields.io/badge/payment%20layer-100%25%20lines%20%2B%20branches-brightgreen)
 ![mutation score](https://img.shields.io/badge/mutation%20score%20(6.0.0)-98.8%25-brightgreen)
 
@@ -89,7 +89,7 @@ Each row says which release it was measured on; the test count is the number of 
 | | |
 |---|---|
 | Tests | 6,919 cases from 2,795 test functions on SQLite and PostgreSQL, 54 live Stripe tests |
-| Coverage | 99.0 % overall (measured on 6.2.0), lines and branches combined; 100 % on the payment-layer files, the mock provider excluded (enforced in CI) |
+| Coverage | 99.0 % overall (measured on 7.0.0), lines and branches combined; 100 % on the payment-layer files, the mock provider excluded (enforced in CI) |
 | Mutation testing | 98.8 % of 3,669 mutants detected (measured on 6.0.0): 3,346 killed by a failing test, 279 over mutmut's time limit (a sample of 12 of those, run without the limit, were all killed by a failing test, none hung); the 44 survivors reviewed as equivalent |
 | CI | 4 jobs: lint (Ruff with its security rules, mypy, pip-audit), tests with coverage gates, integration on PostgreSQL 18 and Redis 8.8 (with migration round-trips and the previous release on the new migrations), image build with a Trivy scan. gitleaks runs as a pre-commit hook |
 | Load (4-core host, app on 3 cores, 200 users, mock payments, rate limits raised, measured on 4.0.1) | p95 57 to 68 ms; overload answers fast 503s instead of stalling |
