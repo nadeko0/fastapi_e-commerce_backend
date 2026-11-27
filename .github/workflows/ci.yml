@@ -67,9 +67,9 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
       - run: uv sync --group dev
-      - run: uv run pytest tests/ -q -n auto --dist worksteal -m "not timing_sensitive" --cov=app --cov-report= --cov-fail-under=0
+      - run: uv run pytest tests/ -q -n auto --dist worksteal -m "not timing_sensitive" --cov=app --cov-context=test --cov-report= --cov-fail-under=0
       - name: Timing-sensitive tests alone (85% gate on the sum)
-        run: uv run pytest tests/ -q -m timing_sensitive --cov=app --cov-append --cov-report=term-missing
+        run: uv run pytest tests/ -q -m timing_sensitive --cov=app --cov-context=test --cov-append --cov-report=term-missing
       - name: Payment layer coverage gate (100% lines and branches)
         run: >-
           uv run coverage report --fail-under=100

@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bandit is replaced by Ruff's `S` rules over `app/` (the rules Bandit rates low stay off, as in the medium-severity Bandit run); the accepted bind address is marked `# noqa: S104`.
 - gitleaks moved from CI to a pre-commit hook: `.pre-commit-config.yaml`, run by `prek` (new dev dependency, 0.5.11), with zizmor, Ruff, `uv lock --check` and generic file checks. Install once per clone with `uv run prek install`.
 - Age rule: one week for every dependency, base images, actions and hooks included (was two weeks for those). Updates are made by hand; `.github/dependabot.yml` is removed.
-- Coverage records which test ran each line (`dynamic_context = "test_function"`), shown by `coverage html`.
+- Coverage records which test ran each line (pytest-cov `--cov-context=test` in CI), shown by `coverage html`.
 - `.github/scripts/migration_compat.sh` leaves out the old release's migration test files by file (`--ignore`) instead of seven test ids; one of the ids no longer existed.
 - `POST /api/v1/legal/data-request` with `export`: request ids are `export_<32 hex digits>`; while an export is being built or can be downloaded, a new export request answers its id and builds nothing; when the task cannot be queued the answer is 503 (`Retry-After: 30`).
 

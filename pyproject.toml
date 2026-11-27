@@ -126,8 +126,8 @@ branch = true
 # of the function as never run: routes on AsyncSession showed 65% while
 # their tests exercised every line.
 concurrency = ["greenlet", "thread"]
-# Records which test ran each line; `coverage html` shows them per line.
-dynamic_context = "test_function"
+# Which test ran each line is recorded by pytest-cov's --cov-context=test (CI
+# passes it); dynamic_context here is refused by pytest-cov under xdist.
 
 [tool.coverage.html]
 show_contexts = true
