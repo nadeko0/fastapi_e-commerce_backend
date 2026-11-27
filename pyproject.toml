@@ -56,7 +56,7 @@ dev = [
     "opentelemetry-instrumentation-requests==0.66b2",
     "mypy==2.4.1",
     "pytest-socket==0.8.1",
-    "pytest-randomly==5.0.0",
+    "pytest-randomly==5.1.0",
     "pytest-benchmark==5.3.1",
 ]
 
