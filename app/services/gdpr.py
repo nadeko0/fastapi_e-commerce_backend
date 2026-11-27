@@ -1,5 +1,7 @@
-from datetime import timedelta
+import logging
+from datetime import datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -13,7 +15,6 @@ from app.models.order import Order
 from app.models.user import User
 from app.schemas.legal import ConsentUpdate
 from app.schemas.order import OrderStatus
-from app.schemas.user import GDPRExport
 from app.services.orders import (
     cancel_order_and_restock,
     close_attempts_at_provider,
@@ -24,7 +25,31 @@ from app.services.orders import (
 from app.services.payment import get_payment_provider
 from app.services.redis_async import AsyncRedisService
 
+logger = logging.getLogger(__name__)
+
 CONSENT_USER_AGENT_MAX = 512
+
+# A build not finished in this time is taken as lost (a worker killed
+# mid-run); the next export request starts a new one.
+EXPORT_BUILD_TIMEOUT = timedelta(hours=1)
+
+
+def export_state(entry: dict[str, Any], now: datetime) -> str:
+    """"building", "ready" or "gone" for one entry of
+    User.data_export_requests. Gone: failed, expired, a lost build, or an
+    entry from before exports were archives (it has no status)."""
+    status = entry.get("status")
+    if status == "building" and datetime.fromisoformat(entry["requested_at"]) > now - EXPORT_BUILD_TIMEOUT:
+        return "building"
+    if status == "ready" and datetime.fromisoformat(entry["expires_at"]) > now:
+        return "ready"
+    return "gone"
+
+
+def find_export(user: User, request_id: str) -> dict[str, Any] | None:
+    return next(
+        (e for e in user.data_export_requests or [] if e.get("request_id") == request_id), None
+    )
 
 
 def consent_user_agent(request: Request) -> str | None:
@@ -134,48 +159,6 @@ class GDPRService:
                 detail="Failed to update consent preferences"
             ) from e
 
-    async def collect_export(self, user_id: int) -> dict[str, Any]:
-        """Art. 15/20: the user's account, addresses, orders with their
-        lines, payments and refunds. Bounded queries, eager-loaded lines."""
-        from sqlalchemy import select
-        from sqlalchemy.orm import selectinload
-
-        from app.models.address import Address
-        from app.models.order import Order
-        from app.models.payment import Payment
-        from app.models.payment_ledger import PaymentRefund
-
-        db = self.db
-        assert db is not None, "Database session required for collecting export"
-        user = await db.get(User, user_id)
-        addresses = (await db.scalars(
-            select(Address).where(Address.user_id == user_id).order_by(Address.id)
-        )).all()
-        orders = (await db.scalars(
-            select(Order).options(selectinload(Order.items))
-            .where(Order.user_id == user_id).order_by(Order.id)
-        )).all()
-        payments = (await db.scalars(
-            select(Payment).join(Order, Order.id == Payment.order_id)
-            .where(Order.user_id == user_id).order_by(Payment.id)
-        )).all()
-        refunds = (await db.scalars(
-            select(PaymentRefund).join(Payment, Payment.id == PaymentRefund.payment_id)
-            .join(Order, Order.id == Payment.order_id)
-            .where(Order.user_id == user_id).order_by(PaymentRefund.id)
-        )).all()
-        await db.commit()  # no transaction stays open across the SMTP sends
-        return {
-            "user": _row(user, _USER_FIELDS),
-            "addresses": [_row(a, _ADDRESS_FIELDS) for a in addresses],
-            "orders": [
-                {**_row(o, _ORDER_FIELDS), "items": [_row(i, _ITEM_FIELDS) for i in o.items]}
-                for o in orders
-            ],
-            "payments": [_row(p, _PAYMENT_FIELDS) for p in payments],
-            "refunds": [_row(r, _REFUND_FIELDS) for r in refunds],
-        }
-
     # The mails of both requests are queued on the route's BackgroundTasks,
     # as the order routes queue theirs: they go out after the response, in a
     # worker thread (Starlette runs a sync task in the threadpool). The
@@ -188,43 +171,68 @@ class GDPRService:
 
     async def process_data_export(self, user: User, background_tasks: BackgroundTasks) -> str:
         """
-        Process a GDPR data export request
-        Returns a request ID that can be used to track the export status
+        Art. 15/20. Records the request and has a Celery worker build the
+        archive (app/services/gdpr_export.py, task build_gdpr_export), which
+        mails the user once it can be downloaded. While an export is being
+        built or can still be downloaded, its request id is answered again
+        and nothing new is built or mailed. Returns the request id.
         """
-        # Generate unique request ID
-        request_id = f"export_{user.id}_{utc_now().timestamp()}"
-
+        db = self.db
+        assert db is not None, "Database session required for data export"
         try:
-            # `user` may be the request's detached snapshot: the row is written
-            # through this session.
-            db = self.db
-            assert db is not None, "Database session required for data export"
-            row = await db.get(User, user.id)
+            # `user` may be the request's detached snapshot: the row is read
+            # through this session, locked so that two requests at once
+            # cannot both start a build.
+            row = await db.get(User, user.id, with_for_update=True)
             assert row is not None, "User must exist in database"
             requests = list(row.data_export_requests or [])
-            requests.append({"request_id": request_id, "requested_at": utc_now().isoformat()})
+            now = utc_now()
+            active = next((e for e in reversed(requests) if export_state(e, now) != "gone"), None)
+            if active is not None:
+                await db.commit()
+                return str(active["request_id"])
+            request_id = f"export_{uuid4().hex}"
+            requests.append({"request_id": request_id, "requested_at": now.isoformat(),
+                             "status": "building", "expires_at": None})
             row.data_export_requests = requests
             await db.commit()
-
-            # The export goes to the account's own address, in the mail. A
-            # large account would rather get a signed, expiring download link.
-            export_data = GDPRExport(
-                request_id=request_id,
-                request_date=utc_now(),
-                expires_at=utc_now() + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS),
-                status="completed",
-                data=await self.collect_export(user.id),
-            )
         except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail="Failed to process data export request"
             ) from e
 
-        from app.services.email import send_gdpr_export_email, send_gdpr_request_received
+        await self._publish_export_build(row, request_id)
+        from app.services.email import send_gdpr_request_received
         background_tasks.add_task(send_gdpr_request_received, user.email, "export", request_id)
-        background_tasks.add_task(send_gdpr_export_email, user.email, export_data)
         return request_id
+
+    async def _publish_export_build(self, row: User, request_id: str) -> None:
+        """Queue the build; when the broker cannot take it, the entry is
+        marked failed (a new request starts over) and the client gets 503."""
+        # Imported here: app.tasks imports app.services.gdpr_export, which imports this module.
+        from app import tasks
+
+        db = self.db
+        assert db is not None, "Database session required for data export"
+        try:
+            # No publish retries: the client is waiting for the answer.
+            await run_in_threadpool(
+                tasks.build_gdpr_export.apply_async, args=[row.id, request_id], retry=False
+            )
+        except Exception as exc:  # the broker can fail in any way
+            logger.warning("Could not queue GDPR export %s: %s: %s", request_id, type(exc).__name__, exc)
+            await db.refresh(row, with_for_update=True)
+            row.data_export_requests = [
+                {**e, "status": "failed"} if e.get("request_id") == request_id else e
+                for e in row.data_export_requests
+            ]
+            await db.commit()
+            raise HTTPException(
+                status_code=503,
+                detail="The export cannot be started right now, try again shortly",
+                headers={"Retry-After": "30"},
+            ) from exc
 
     async def process_data_deletion(
         self, user: User, cache: AsyncRedisService, background_tasks: BackgroundTasks
@@ -286,8 +294,16 @@ class GDPRService:
             user.is_active = False
             user.data_deletion_requested = True
             user.data_deletion_date = utc_now()
+            export_ids = [e["request_id"] for e in user.data_export_requests or []]
 
             await db.commit()
+
+            # The account's export archives go now, not when they expire; a
+            # build still running sees the inactive account and keeps nothing.
+            # Imported here: app.services.gdpr_export imports this module.
+            from app.services.gdpr_export import delete_export_files
+            for request_id in export_ids:
+                delete_export_files(request_id)
 
             # After the commit, as the cancel routes do (_drop_product_details,
             # close_attempts_at_provider). Inline rather than as a background

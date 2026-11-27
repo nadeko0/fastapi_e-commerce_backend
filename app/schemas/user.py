@@ -2,7 +2,6 @@ import re
 import unicodedata
 from datetime import datetime
 from enum import Enum
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
@@ -238,23 +237,3 @@ class PasswordResetConfirm(TokenBody, NewPassword):
     a token in the path would end up in access logs. A current_password
     (what clients sent before 4.0.0, when it was ignored) is refused like
     any other unknown member."""
-
-
-class GDPRExport(BaseModel):
-    """Schema for GDPR data export metadata"""
-    request_id: str = Field(..., description="Unique identifier for the export request")
-    request_date: datetime = Field(..., description="When the export was requested")
-    expires_at: datetime = Field(..., description="When the export data will be deleted")
-    status: str = Field(default="processing", description="Current status of the export")
-    data: dict[str, Any] | None = Field(
-        default=None, description="The user's records (Art. 15/20), as JSON-ready values"
-    )
-
-    model_config = ConfigDict(json_schema_extra={
-            "examples": [{
-                "request_id": "export_123_1642161234",
-                "request_date": "2025-01-14T19:21:32.388Z",
-                "expires_at": "2025-01-15T19:21:32.388Z",
-                "status": "processing"
-            }]
-        })

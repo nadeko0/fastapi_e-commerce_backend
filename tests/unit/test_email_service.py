@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.clock import utc_now
-from app.schemas.user import GDPRExport
+from app.core.config import settings
 from app.services import email as email_module
 from app.services.email import smtp_provider as smtp_provider_module
 from app.services.email.base import mask_email
@@ -200,20 +200,15 @@ def test_send_password_reset_email(monkeypatch):
     assert "reset-tok" in calls[0][2]
 
 
-def test_send_gdpr_export_email(monkeypatch):
+def test_send_gdpr_export_ready(monkeypatch):
     calls = _no_real_smtp(monkeypatch)
-    export_data = GDPRExport(
-        request_id="export_1_123",
-        request_date=utc_now(),
-        expires_at=utc_now() + timedelta(hours=24),
-        status="completed",
-    )
 
-    result = email_module.send_gdpr_export_email("user@example.com", export_data)
+    result = email_module.send_gdpr_export_ready(
+        "user@example.com", "export_" + "a" * 32, utc_now() + timedelta(hours=24))
 
     assert result is True
-    assert "Data Export" in calls[0][1]
-    assert "export_1_123" in calls[0][2]
+    assert "export is ready" in calls[0][1]
+    assert f"{settings.FRONTEND_URL}/account/data-export/export_{'a' * 32}" in calls[0][2]
 
 
 def test_send_gdpr_deletion_confirmation(monkeypatch):

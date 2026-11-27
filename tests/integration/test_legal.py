@@ -123,7 +123,6 @@ def test_data_request_export_returns_processing_status(client, monkeypatch):
     monkeypatch.setattr(
         "app.services.email.send_gdpr_request_received", lambda *a, **k: True
     )
-    monkeypatch.setattr("app.services.email.send_gdpr_export_email", lambda *a, **k: True)
     token = _register_and_login(client, _valid_registration_payload())
 
     response = client.post(
@@ -164,7 +163,6 @@ def _quiet_gdpr_mail(monkeypatch):
     for name in (
         "send_gdpr_request_received",
         "send_gdpr_deletion_confirmation",
-        "send_gdpr_export_email",
     ):
         monkeypatch.setattr(f"app.services.email.{name}", lambda *a, **k: True)
 
@@ -417,7 +415,6 @@ def test_data_request_export_leaves_the_account_untouched(client, db_session, mo
     monkeypatch.setattr(
         "app.services.email.send_gdpr_request_received", lambda *a, **k: True
     )
-    monkeypatch.setattr("app.services.email.send_gdpr_export_email", lambda *a, **k: True)
     token = _register_and_login(client, _valid_registration_payload())
 
     response = client.post(
@@ -428,7 +425,7 @@ def test_data_request_export_leaves_the_account_untouched(client, db_session, mo
 
     assert response.status_code == 200
     stored = _stored_user(db_session)
-    assert response.json()["request_id"].startswith(f"export_{stored.id}_")
+    assert response.json()["request_id"] == stored.data_export_requests[-1]["request_id"]
     assert stored.is_active is True
     assert stored.data_deletion_requested is False
 

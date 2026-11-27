@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Request
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import utc_now
@@ -19,7 +21,8 @@ from app.schemas.legal import (
     LegalDocument,
     UserConsent,
 )
-from app.services.gdpr import GDPRService, consent_user_agent
+from app.services.gdpr import GDPRService, consent_user_agent, export_state, find_export
+from app.services.gdpr_export import export_path
 
 router = APIRouter(prefix="/legal", tags=["legal"], route_class=DocumentedRoute)
 
@@ -342,7 +345,8 @@ async def update_user_consent(
                              "(RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL_AND_ADDRESS and "
                              "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL, shared with login)"},
         500: {"description": "The export or the deletion could not be processed"},
-        503: {"description": "Failed password attempts cannot be counted right now (Retry-After: 30), retry later"},
+        503: {"description": "Failed password attempts cannot be counted right now, or an export cannot be "
+                             "queued right now (Retry-After: 30), retry later"},
     },
 )
 async def request_personal_data(
@@ -364,19 +368,21 @@ async def request_personal_data(
     The process is asynchronous and returns a request ID for tracking.
 
     `request_type` is `export` or `deletion` (since 6.0.0 any other value is
-    a 422 from the schema, before 6.0.0 it was a 400). An export is sent to the
-    account's email address, valid for GDPR_EXPORT_EXPIRY_HOURS (24 by
-    default). A deletion deactivates the account at once (it can no longer
+    a 422 from the schema, before 6.0.0 it was a 400). An export is built in
+    the background as a zip archive; a mail tells the account when it can be
+    downloaded from `GET /legal/data-export/{request_id}`, for
+    GDPR_EXPORT_EXPIRY_HOURS (24 by default). While one is being built or can
+    still be downloaded, a new export request answers its request_id again. A deletion deactivates the account at once (it can no longer
     log in) and the account is anonymised after DATA_DELETION_GRACE_PERIOD_DAYS
     (1 by default); it needs the account's password, and the only active
     administrator cannot be erased (409). The account's new, unpaid orders
     are cancelled with it, their stock returned and their open payment
-    attempts closed at the provider; paid orders are kept. Limited per client address by
+    attempts closed at the provider; paid orders are kept. It also deletes the account's personal data exports at once: a ready archive cannot be downloaded or recovered afterwards, and one still being built is discarded. Limited per client address by
     RATE_LIMIT_AUTH (20/minute by default).
 
-    The mails (the confirmation, and the export itself) are sent after the
-    response: once the request is recorded, a mail that cannot be sent does
-    not turn the answer into an error.
+    The confirmation mails are sent after the response: once the request is
+    recorded, a mail that cannot be sent does not turn the answer into an
+    error.
     """
     gdpr_service = GDPRService(db)
 
@@ -409,6 +415,40 @@ async def request_personal_data(
         status="processing",
         estimated_completion_time=utc_now() + timedelta(hours=24)
     )
+
+@router.get(
+    "/data-export/{request_id}",
+    response_class=FileResponse,
+    responses={
+        200: {"description": "The export archive (zip: account, addresses, orders, payments, refunds as JSON)",
+              "content": {"application/zip": {}}},
+        404: {"description": "No such export of this account, or it failed or expired; request a new one"},
+        409: {"description": "The export is still being built (Retry-After: 60)"},
+    },
+)
+async def download_personal_data(
+    request_id: Annotated[str, Path(pattern=r"^export_[0-9a-f]{32}$")],
+    current_user: CurrentUser,
+) -> FileResponse:
+    """
+    Download a personal data export (GDPR Art. 15/20) requested with
+    `POST /legal/data-request`. Only the account that requested it can
+    download it, until GDPR_EXPORT_EXPIRY_HOURS (24 by default) after it was
+    built; the link in the mail leads here through the site, after login.
+    Once the account requests its deletion, its exports are deleted and this
+    answers 403 (the account is inactive): they cannot be recovered.
+    """
+    entry = find_export(current_user, request_id)
+    state = "gone" if entry is None else export_state(entry, utc_now())
+    if state == "building":
+        raise HTTPException(status_code=409, detail="The export is still being built",
+                            headers={"Retry-After": "60"})
+    path = export_path(request_id)
+    if state == "gone" or not path.is_file():
+        raise HTTPException(status_code=404, detail="Export not found")
+    # no-store: personal data, not for a shared or browser cache.
+    return FileResponse(path, media_type="application/zip", filename=f"{request_id}.zip",
+                        headers={"Cache-Control": "no-store"})
 
 @router.get("/consent-status", response_model=UserConsent)
 async def get_consent_status(

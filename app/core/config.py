@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Annotated, ClassVar, Literal
 from urllib.parse import urlsplit
 
@@ -373,6 +374,8 @@ class Settings(BaseSettings):
     # startup and was never used, which suggested otherwise. A leftover
     # line in an old .env is ignored like any unknown variable.
     GDPR_EXPORT_EXPIRY_HOURS: int = 24
+    # Relative to the working directory, /app/exports in the image; shared by api and celery-worker through a named volume
+    GDPR_EXPORT_DIR: Path = Path("exports")
     # How long an Idempotency-Key is honoured (draft-ietf-httpapi-idempotency-
     # key-header-08, section 2.3: define the expiry policy and publish it).
     # 24 hours is Stripe's: it prunes its own keys once they are at least

@@ -32,7 +32,7 @@ def _calls(dependant):
 
 def test_no_legal_route_depends_on_a_sync_session():
     routes = _legal_routes()
-    assert len(routes) == 7
+    assert len(routes) == 8
     for route in routes:
         for call in _calls(route.dependant):
             if call.__module__ == database.__name__:
@@ -48,7 +48,7 @@ def test_legal_db_routes_share_the_auth_async_session():
 def test_routes_that_never_touch_the_database_declare_no_db_parameter():
     # (get_async_db still resolves for them through the auth dependency.)
     by_name = {r.endpoint.__name__: r for r in _legal_routes()}
-    for name in ("get_consent_status", "check_data_retention"):
+    for name in ("get_consent_status", "check_data_retention", "download_personal_data"):
         assert "db" not in inspect.signature(by_name[name].endpoint).parameters, name
 
 
@@ -56,7 +56,7 @@ def test_legal_handlers_are_coroutines_without_sync_query_api():
     for route in _legal_routes():
         if route.endpoint.__name__ in {
             "update_user_consent", "request_personal_data",
-            "get_consent_status", "check_data_retention",
+            "get_consent_status", "check_data_retention", "download_personal_data",
         }:
             assert inspect.iscoroutinefunction(route.endpoint), route.path
     source = inspect.getsource(legal)

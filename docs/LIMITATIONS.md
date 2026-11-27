@@ -101,7 +101,7 @@ A full code review found these. Each was judged low impact and is accepted as it
 
 ## GDPR Scope
 
-Implemented: access and portability (Art. 15 and 20, `POST /legal/data-request` with `export`), erasure (Art. 17) with order and dispute protections, consent records, and retention of deactivated accounts. Not implemented:
+Implemented: access and portability (Art. 15 and 20, `POST /legal/data-request` with `export`, a zip archive downloaded after login), erasure (Art. 17) with order and dispute protections, consent records, and retention of deactivated accounts. Not implemented:
 
 - **Restriction of Processing (Art. 18):**
   - *Why not:* There is no "freeze but do not delete" account state. It would need a new user state handled in every query path (orders, cart, admin), and it is rarely used in a small shop.
@@ -115,9 +115,9 @@ Implemented: access and portability (Art. 15 and 20, `POST /legal/data-request` 
 - **Crypto-Shredding of Backups:**
   - *Why not:* Erasure scrubs the live database, but a database backup taken before it still holds the data until that backup is deleted. Per-user encryption keys, destroyed on erasure, would make old backups unreadable, but they need a key-management service and a migration of every personal-data column.
   - *Where to start:* Keep backups for a short, documented time so that erased data ages out, and say so in the privacy policy; then evaluate field-level encryption with a KMS.
-- **Signed-Link Export Delivery:**
-  - *Why not:* The export is assembled in the request and mailed inline as JSON to the account's verified address. Delivery through a file in object storage behind an expiring signed link needs storage the project does not have.
-  - *Where to start:* Write the export to object storage and mail a signed URL that expires after `GDPR_EXPORT_EXPIRY_HOURS`.
+- **Export Archives on More Than One Host:**
+  - *Why not:* The worker writes export archives to `GDPR_EXPORT_DIR`, a Docker volume the `api` service mounts too, so both must run on one host. Several hosts need storage they all reach, which the project does not have.
+  - *Where to start:* Write the archive to object storage (S3 or compatible) and have the download route stream it from there; the request record and the route stay as they are.
 
 ## Payment Reconciliation and Rate Limiting
 

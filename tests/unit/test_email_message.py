@@ -3,8 +3,9 @@ Message-ID (RFC 5322 3.6) and a text/plain alternative next to the HTML.
 The mails are built by the real templates (app/services/email/messages.py)
 and the real provider; only the SMTP connection is replaced."""
 
+import html as _html
 import json
-from datetime import UTC, timedelta
+from datetime import UTC
 from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
 
@@ -12,7 +13,6 @@ import pytest
 
 from app.core.clock import utc_now
 from app.core.config import settings
-from app.schemas.user import GDPRExport
 from app.services import email as email_module
 from app.services.email import smtp_provider as smtp_provider_module
 from app.services.email.smtp_provider import SmtpEmailProvider
@@ -116,14 +116,8 @@ def test_head_style_and_script_are_left_out_of_the_text(sent):
 
 def test_preformatted_json_keeps_its_layout(sent):
     data = {"user": {"full_name": 'Ann "Q" <Lee>'}, "orders": [1, 2]}
-    export = GDPRExport(
-        request_id="export_1_123",
-        request_date=utc_now(),
-        expires_at=utc_now() + timedelta(hours=24),
-        status="completed",
-        data=data,
-    )
-    email_module.send_gdpr_export_email("user@example.com", export)
+    html = f"<html><body><pre>{_html.escape(json.dumps(data, indent=2))}</pre></body></html>"
+    assert SmtpEmailProvider().send("user@example.com", "s", html)
 
     text = _parts(sent[0])["text/plain"]
     assert json.dumps(data, indent=2) in text  # indentation kept, entities decoded

@@ -52,8 +52,8 @@ RUN apt-get update && \
 RUN python -m pip uninstall --yes pip
 
 RUN adduser --disabled-password --gecos '' --no-create-home appuser && \
-    mkdir -p /app/logs && \
-    chown appuser:appuser /app/logs
+    mkdir -p /app/logs /app/exports && \
+    chown appuser:appuser /app/logs /app/exports
 
 COPY --from=builder /app/.venv /app/.venv
 

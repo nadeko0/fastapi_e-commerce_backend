@@ -48,6 +48,11 @@ EXPECTED_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
         "kind": crontab,
     },
+    "cleanup-expired-gdpr-exports": {
+        "task": "cleanup_expired_gdpr_exports",
+        "schedule": timedelta(hours=1),
+        "kind": (timedelta, schedule),
+    },
 }
 
 

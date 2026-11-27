@@ -562,6 +562,24 @@ def _reset_stripe_mock_state():
     StripePaymentProvider.reset_mock_state()
 
 
+@pytest.fixture(autouse=True)
+def export_builds(monkeypatch, tmp_path):
+    """POST /legal/data-request publishes build_gdpr_export; there is no
+    broker here, so each publish is recorded as (user_id, request_id)
+    instead, and a test runs the task body itself (tasks.build_gdpr_export.run)
+    when it wants the archive. Archives go to a per-test directory."""
+    from app import tasks
+    from app.core.config import settings
+
+    published: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        tasks.build_gdpr_export, "apply_async",
+        lambda args=None, kwargs=None, **options: published.append(tuple(args)),
+    )
+    monkeypatch.setattr(settings, "GDPR_EXPORT_DIR", tmp_path / "exports")
+    return published
+
+
 @pytest.fixture
 def tasks_db(monkeypatch):
     """app/tasks.py builds its own SessionLocal bound to settings.DATABASE_URI

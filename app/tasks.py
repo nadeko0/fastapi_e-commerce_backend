@@ -45,8 +45,16 @@ from app.schemas.order import OrderStatus
 from app.services import stripe_event_redaction, stripe_events
 from app.services.email import (
     send_gdpr_deletion_completed,
+    send_gdpr_export_ready,
     send_low_stock_alert_email,
     send_order_cancellation_email,
+)
+from app.services.gdpr_export import (
+    build_export,
+    delete_expired_exports,
+    delete_export_files,
+    has_export_request,
+    update_export_status,
 )
 from app.services.orders import (
     UNPAID_PAYMENT_STATUSES,
@@ -693,6 +701,11 @@ celery.conf.beat_schedule = {
         'task': 'cleanup_expired_idempotency_keys',
         'schedule': crontab(hour=3, minute=0),
     },
+    # Deletes expired GDPR export zips (GDPR_EXPORT_EXPIRY_HOURS) and stale tmp files.
+    'cleanup-expired-gdpr-exports': {
+        'task': 'cleanup_expired_gdpr_exports',
+        'schedule': timedelta(hours=1),
+    },
 }
 
 
@@ -749,3 +762,32 @@ def clear_expired_idempotency_keys(db: Session, batch_size: int = PURGE_BATCH_SI
 def cleanup_expired_idempotency_keys() -> int:
     with task_session() as db:
         return clear_expired_idempotency_keys(db)
+
+
+@celery.task(name="build_gdpr_export", queue="default")
+def build_gdpr_export(user_id: int, request_id: str) -> str:
+    with task_session() as db:
+        user = db.get(User, user_id)
+        # Inactive: erasure requested meanwhile, the archive must not be kept.
+        if user is None or not user.is_active or not has_export_request(user, request_id):
+            delete_export_files(request_id)
+            return "gone"
+        user_email = user.email
+
+        try:
+            build_export(db, user_id, request_id)
+        except Exception:
+            logger.exception("Failed to build GDPR export %s for user %d", request_id, user_id)
+            db.rollback()
+            return update_export_status(db, user_id, request_id, status="failed")
+
+        expires_at = utc_now() + timedelta(hours=settings.GDPR_EXPORT_EXPIRY_HOURS)
+        result = update_export_status(db, user_id, request_id, status="ready", expires_at=expires_at)
+        if result == "ready":
+            send_gdpr_export_ready(user_email, request_id, expires_at)
+        return result
+
+
+@celery.task(name="cleanup_expired_gdpr_exports", queue="cleanup")
+def cleanup_expired_gdpr_exports() -> int:
+    return delete_expired_exports(utc_now())

@@ -79,15 +79,11 @@ def test_update_user_consent_no_changes_adds_no_history_entry():
     assert _run(scenario) == []
 
 
-def test_process_data_export_returns_request_id_and_sends_emails(monkeypatch):
+def test_process_data_export_queues_the_build_and_the_received_mail(monkeypatch, export_builds):
     sent = []
     monkeypatch.setattr(
         "app.services.email.send_gdpr_request_received",
         lambda *a, **k: sent.append("received"),
-    )
-    monkeypatch.setattr(
-        "app.services.email.send_gdpr_export_email",
-        lambda *a, **k: sent.append("export"),
     )
 
     async def scenario(session):
@@ -101,9 +97,10 @@ def test_process_data_export_returns_request_id_and_sends_emails(monkeypatch):
 
     user_id, request_id, queued = _run(scenario)
 
-    assert request_id.startswith(f"export_{user_id}_")
+    assert request_id.startswith("export_") and len(request_id) == len("export_") + 32
+    assert export_builds == [(user_id, request_id)]
     assert queued == []
-    assert sent == ["received", "export"]
+    assert sent == ["received"]
 
 
 def test_process_data_deletion_deactivates_user_and_sends_emails(monkeypatch):
@@ -227,7 +224,7 @@ def test_a_consent_update_that_cannot_be_stored_is_rolled_back_and_a_500(monkeyp
     assert rolled_back == [True]
 
 
-def test_an_export_request_that_cannot_be_stored_is_a_500_and_sends_nothing(monkeypatch):
+def test_an_export_request_that_cannot_be_stored_is_a_500_and_sends_nothing(monkeypatch, export_builds):
     async def scenario(session):
         user = await _make_user(session)
         _commit_fails(monkeypatch, session)
@@ -241,6 +238,7 @@ def test_an_export_request_that_cannot_be_stored_is_a_500_and_sends_nothing(monk
     assert error.status_code == 500
     assert error.detail == "Failed to process data export request"
     assert queued == []
+    assert export_builds == []
 
 
 def test_a_deletion_request_that_cannot_be_stored_leaves_the_account_as_it_was(monkeypatch):

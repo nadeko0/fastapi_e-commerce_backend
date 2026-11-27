@@ -7,12 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+- A personal data export is now a zip archive downloaded after login, no longer the data inside the mail. The frontend must serve the page the ready mail links to, `<FRONTEND_URL>/account/data-export/<request_id>`, which downloads `GET /api/v1/legal/data-export/{request_id}` with the user's token.
+- `docker-compose.yml` adds the `gdpr_exports` volume on `api` and `celery-worker` (created by `docker compose up`); the two must run on one host. New setting `GDPR_EXPORT_DIR` (default `exports`, `/app/exports` in the image).
+
+### Added
+- `GET /api/v1/legal/data-export/{request_id}`: the account that requested an export downloads its zip archive (account, addresses, orders with their lines, payments, refunds as JSON) for `GDPR_EXPORT_EXPIRY_HOURS` (24). 409 while it is being built, 404 when it failed, expired or belongs to another account.
+- Celery tasks `build_gdpr_export` (builds the archive, then mails that it is ready) and `cleanup_expired_gdpr_exports` (hourly, deletes expired archives).
+- A deletion request (`request_type` `deletion`) deletes the account's export archives at once, without recovery; a build still running for the account keeps nothing and sends no mail.
+
 ### Changed
 - Dependencies: Celery 5.7.0 (kombu 5.7.0), stripe 17.1.0, FastAPI 0.165.0, SQLAlchemy 2.1.9, pydantic 2.14.4 (pydantic-settings 2.16.3), psycopg 3.3.9, python-multipart 0.0.34, email-validator 2.4.0, anyio 4.16.0, httpx2 2.16.2, ruff 0.17.6, hypothesis 6.170.17, coverage 7.17.3, mypy 2.4.1.
 - Stripe: stripe-python 17.1.0 pins API version `2026-11-18.endive` (a monthly Endive release; the SDK changelog lists additions and type changes only). Its one breaking change, API keys no longer kept in pickled Stripe objects, does not apply: the application does not pickle them. Create a new webhook endpoint with that version; see [docs/OPERATIONS.md](docs/OPERATIONS.md#going-live-with-stripe).
 - python-dateutil 3.0.0 -> 2.9.0.post0: Celery 5.7.0 requires exactly `python-dateutil==2.9.0.post0`. dateutil is used only by Celery and freezegun; the application keeps time in UTC, and the time zone test matrix passes on 2.9.
 
+- `POST /api/v1/legal/data-request` with `export`: request ids are `export_<32 hex digits>`; while an export is being built or can be downloaded, a new export request answers its id and builds nothing; when the task cannot be queued the answer is 503 (`Retry-After: 30`).
+
 ### Fixed
+- The data export loaded the whole account into the API worker's memory and mailed it as one message, without any limit: a large account cost the worker that much memory on every request, and a mail too large for the mail servers was lost although the request counted as done. The 3.0.0 size cap had been removed with the old export route in 4.0.0 (F-42). The archive is now written in batches by a Celery worker, and one export per account is built at a time.
 - An open dispute could show a stale status: Stripe does not deliver events in order, and a `charge.dispute.created` or `charge.dispute.funds_withdrawn` (`needs_response`) that arrived after `charge.dispute.updated` (`under_review`) moved the stored status back. An open status now only moves forward (inquiry, chargeback, appeal); an event with an earlier one is acknowledged and ignored, as a late event for a closed dispute already was. The order was on hold either way; only the status and evidence shown to the admin and the customer were stale. Found by the stateful payment test.
 
 ## [6.2.0] - 2026-11-14

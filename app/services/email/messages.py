@@ -1,5 +1,4 @@
 import html
-import json
 from collections.abc import Sequence
 from datetime import datetime
 from types import SimpleNamespace
@@ -14,7 +13,6 @@ from app.models.product import Product
 
 if TYPE_CHECKING:
     from app.schemas.order import OrderResponse
-    from app.schemas.user import GDPRExport
 
 # The pages the frontend must serve: the links in the verification and
 # reset emails open them, and each reads the token from its query string
@@ -23,6 +21,9 @@ if TYPE_CHECKING:
 # GET for a token.
 VERIFY_EMAIL_PAGE_PATH = "/verify-email"
 RESET_PASSWORD_PAGE_PATH = "/reset-password"
+# The page the export-ready mail links to (<path>/<request_id>, no token):
+# after login it downloads GET /legal/data-export/{request_id}.
+DATA_EXPORT_PAGE_PATH = "/account/data-export"
 
 
 def _frontend_link(page_path: str, token: str) -> str:
@@ -328,51 +329,6 @@ def send_password_reset_email(to_email: str, reset_token: str) -> bool:
         html_content
     )
 
-def send_gdpr_export_email(to_email: str, export_data: "GDPRExport") -> bool:
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Your Personal Data Export (GDPR Article 15)</h2>
-            <p>As requested under your right of access, here is your personal data export.</p>
-
-            <h3>Export Details:</h3>
-            <ul>
-                <li>Request Date: {export_data.request_date.strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
-                <li>Generated at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
-                <li>Expires at: {export_data.expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
-                <li>Request ID: {export_data.request_id}</li>
-            </ul>
-            <h3>Your data (JSON):</h3>
-            <pre>{html.escape(json.dumps(export_data.data or {}, indent=2))}</pre>
-
-            <p>For your privacy and security:</p>
-            <ul>
-                <li>This export will be automatically deleted after {settings.GDPR_EXPORT_EXPIRY_HOURS} hours</li>
-                <li>Store this data securely and do not share it with others</li>
-                <li>Use encryption when storing this data</li>
-                <li>Delete this export once you no longer need it</li>
-            </ul>
-
-            <p>Questions about your data?</p>
-            <ul>
-                <li>Contact our DPO: {settings.DPO_EMAIL}</li>
-                <li>Visit our Privacy Policy: [Link to Privacy Policy]</li>
-                <li>Your rights under GDPR: [Link to Rights Page]</li>
-            </ul>
-
-            <p>Best regards,<br>{settings.PROJECT_NAME}</p>
-            <p>Data Protection Officer: {settings.DPO_NAME}</p>
-            <p>{settings.COMPANY_ADDRESS}</p>
-        </body>
-    </html>
-    """
-
-    return email.get_email_provider().send(
-        to_email,
-        "Your Personal Data Export (GDPR Request)",
-        html_content
-    )
-
 def send_gdpr_deletion_confirmation(to_email: str, request_id: str) -> bool:
     html_content = f"""
     <html>
@@ -508,4 +464,40 @@ def send_gdpr_request_received(to_email: str, request_type: str, request_id: str
         to_email,
         f"GDPR {request_type.title()} Request Received",
         html_content
+    )
+
+
+def send_gdpr_export_ready(to_email: str, request_id: str, expires_at: datetime) -> bool:
+    """Notify the user that their GDPR Article 15 personal data export is ready to download."""
+    download_url = f"{settings.FRONTEND_URL}{DATA_EXPORT_PAGE_PATH}/{request_id}"
+    escaped_url = html.escape(download_url)
+    expiry_text = _utc_text(expires_at)
+
+    html_content = f"""
+    <html>
+        <body>
+            <h2>Your Personal Data Export is Ready (Article 15)</h2>
+            <p>Your personal data export archive is ready.</p>
+
+            <p>Please log in to your account to download your archive at:</p>
+            <p><a href="{escaped_url}">{escaped_url}</a></p>
+
+            <p>This download is available until {expiry_text}, after which it will be deleted.</p>
+
+            <p>This export is provided in accordance with your right of access under GDPR Article 15.</p>
+
+            <p>Questions?</p>
+            <p>Contact our DPO at {settings.DPO_EMAIL}</p>
+
+            <p>Best regards,<br>{settings.PROJECT_NAME}</p>
+            <p>Data Protection Officer: {settings.DPO_NAME}</p>
+            <p>{settings.COMPANY_ADDRESS}</p>
+        </body>
+    </html>
+    """
+
+    return email.get_email_provider().send(
+        to_email,
+        "Your personal data export is ready",
+        html_content,
     )

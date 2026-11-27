@@ -48,6 +48,8 @@ services:
       POSTGRES_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env}
     volumes:
       - api_logs:/app/logs
+      # The worker writes GDPR export zips; the api serves them for download.
+      - gdpr_exports:/app/exports
     depends_on:
       db:
         condition: service_healthy
@@ -92,6 +94,9 @@ services:
     environment:
       POSTGRES_USER: ${APP_DB_USER:?APP_DB_USER must be set in .env}
       POSTGRES_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env}
+    # The worker writes GDPR export zips; the api serves them for download.
+    volumes:
+      - gdpr_exports:/app/exports
     depends_on:
       db:
         condition: service_healthy
@@ -333,3 +338,6 @@ volumes:
   # Confirmed by actually deploying this Docker image to a real server.
   api_logs:
     name: ${DOCKER_NETWORK_NAME:-ecommerce}-api-logs
+  # Shared volume for GDPR export archives: worker writes, api serves.
+  gdpr_exports:
+    name: ${DOCKER_NETWORK_NAME:-ecommerce}-gdpr-exports

@@ -9,10 +9,12 @@ tests/conftest.py marks db_sensitive by its name.
 """
 
 import dataclasses
+import io
 import json
 import os
 import subprocess
 import sys
+import zipfile
 from datetime import timedelta
 from pathlib import Path
 
@@ -313,7 +315,7 @@ def test_GDPR04_order_retains_shipping_address_snapshot_after_erasure_purge(clie
     assert getattr(stored, "ship_to_street", None) or db_session.get(Address, stored.shipping_address_id).street != "REDACTED"
 
 
-def test_GDPR05_data_export_contains_personal_data(client, db_session, mailbox):
+def test_GDPR05_data_export_contains_personal_data(client, db_session, mailbox, tasks_db, export_builds):
     """GDPR-05 (2C-11), Medium. Correct behaviour: export contains personal data
     and data_export_requests records the request.
     """
@@ -322,8 +324,12 @@ def test_GDPR05_data_export_contains_personal_data(client, db_session, mailbox):
     response = client.post(f"{LEGAL}/data-request", json={"request_type": "export"},
                             headers=buyer.headers)
     assert response.status_code == 200
-    [(_to, _subject, body)] = [
-        m for m in mailbox.sent if "here is your personal data export" in m[2]]
+    [(user_id, request_id)] = export_builds
+    assert tasks.build_gdpr_export.run(user_id, request_id) == "ready"
+    archive = client.get(f"{LEGAL}/data-export/{request_id}", headers=buyer.headers)
+    assert archive.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(archive.content)) as zf:
+        body = "".join(zf.read(name).decode() for name in zf.namelist())
     for personal in ("Buyer One", "1 Main Street", "Metropolis", "+15551234567"):
         assert personal in body
     db_session.expire_all()
