@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/python-3.13-3776AB)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.165-009688)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-4169E1)
-![Redis](https://img.shields.io/badge/Redis-7.2%20to%208.8-DC382D)
+![Redis](https://img.shields.io/badge/Redis-8.8-DC382D)
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 
 ![tests](https://img.shields.io/badge/tests-6%2C919%20cases-brightgreen)
@@ -101,7 +101,7 @@ Details and the conditions behind each number: [docs/reports/final-test-campaign
 
 ## 🧱 Tech stack
 
-Python 3.13 · FastAPI 0.165 and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and Alembic · PostgreSQL 18 · Redis 7.2 to 8.8 (Compose runs 8.8; redis-py 8.1) · Celery 5.7 · Stripe (SDK 17) · PyJWT and bcrypt · uv · pytest and Hypothesis in the suite; Schemathesis, mutmut and Locust for the release campaign · Docker · GitHub Actions.
+Python 3.13 · FastAPI 0.165 and Starlette · Pydantic 2 · SQLAlchemy 2 (async) and Alembic · PostgreSQL 18 · Redis 8.8 (what CI tests and Compose runs; redis-py 8.1) · Celery 5.7 · Stripe (SDK 17) · PyJWT and bcrypt · uv · pytest and Hypothesis in the suite; Schemathesis, mutmut and Locust for the release campaign · Docker · GitHub Actions.
 
 ## 📌 About this project
 

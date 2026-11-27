@@ -169,7 +169,7 @@ A later major (18 to 19) can use `pg_upgrade --link` inside the one volume, whic
 
 Redis serves as the Celery message broker, token revocation store, password-change watermark tracker, rate limit window engine, and shopping cart cache:
 
-- **Supported Versions:** Redis 7.2 to 8.8, the range the redis-py 8.1 client lists as supported. Compose builds 8.8 from `docker/redis/Dockerfile` (the official `redis:8.8-alpine`, pinned by digest, with `apk upgrade`); CI runs the Redis-semantics tests on the same base image.
+- **Supported Versions:** Redis 8.8, the version CI tests. The redis-py 8.1 client lists 7.2 to 8.8 as supported; versions before 8.8 are not tested here. Compose builds 8.8 from `docker/redis/Dockerfile` (the official `redis:8.8-alpine`, pinned by digest, with `apk upgrade`); CI runs the Redis-semantics tests on the same base image.
 - **Persistence Configuration:** Redis runs with Append-Only File persistence (`--appendonly yes`, `--appendfsync everysec`) alongside RDB snapshots.
 - **Memory Ceiling:** Memory is capped via `REDIS_MAXMEMORY` (default 256 MB) with `--maxmemory-policy noeviction`. When full, Redis refuses writes rather than evicting keys. Evicting volatile keys would invalidate token blacklists and password watermarks, resurrecting revoked sessions.
 - **Key Lifetimes:** Each key family expires on its own TTL; nothing sweeps them.
