@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
@@ -809,3 +810,43 @@ def test_merge_respects_the_line_cap_without_failing(monkeypatch):
 
     assert _lines(redis.get_cart(1)) == {"7": 3, "8": 1, "9": 1}
     assert _lines(redis.get_cart(guest)) == {"10": 1}
+
+
+def test_an_unreadable_cart_is_logged_without_its_values(caplog):
+    redis = _service()
+    payload = json.dumps(
+        {
+            "user_id": 1,
+            "items": {
+                "1": {
+                    "product_id": 1,
+                    "quantity": -3,
+                    "name_snapshot": "SECRET-NAME-123",
+                }
+            },
+        }
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.services.redis_codec"):
+        result = redis._deserialize(payload, Cart)
+
+    assert result is None
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.WARNING
+    assert "items.1.quantity" in caplog.records[0].message
+    for text in (caplog.text, *(r.message for r in caplog.records)):
+        assert "-3" not in text
+        assert "SECRET-NAME-123" not in text
+        assert "input_value" not in text
+
+
+def test_malformed_json_is_logged_by_error_type_only(caplog):
+    redis = _service()
+
+    with caplog.at_level(logging.WARNING, logger="app.services.redis_codec"):
+        result = redis._deserialize("{not json", Cart)
+
+    assert result is None
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.WARNING
+    assert "JSONDecodeError" in caplog.records[0].message

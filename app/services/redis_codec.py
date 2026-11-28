@@ -129,10 +129,24 @@ def deserialize(data: str, model_class=None) -> Any:
         # Logged via the app's logger (not print()) so this actually
         # reaches the JSON log pipeline in production instead of being
         # lost/interleaved on stdout - matches the reasoning in
-        # app/services/email/smtp_provider.py's module docstring. Only
-        # the exception string is logged, never the raw stored payload,
-        # to avoid leaking cart/session contents into logs.
-        logger.warning("Deserialization error: %s", e)
+        # app/services/email/smtp_provider.py's module docstring. Never
+        # log the raw stored payload or input values; for a validation
+        # error only the field locations and error types are logged,
+        # without the input values.
+        if isinstance(e, ValidationError):
+            errors = e.errors(include_input=False, include_url=False, include_context=False)
+            summary = ", ".join(
+                f"{'.'.join(str(part) for part in err['loc'])} {err['type']}"
+                for err in errors
+            )
+            logger.warning(
+                "Deserialization error: %s: %d validation error(s): %s",
+                e.title,
+                len(errors),
+                summary,
+            )
+        else:
+            logger.warning("Deserialization error: %s", type(e).__name__)
         return None
 
 
