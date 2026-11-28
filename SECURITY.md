@@ -97,10 +97,10 @@ The ASGI middleware stack injects OWASP Secure Headers on every response (includ
 | `Referrer-Policy` | `no-referrer` | Eliminates referrer leakage across outbound links. |
 | `Cross-Origin-Resource-Policy` | `same-origin` | Blocks cross-origin no-cors resource embedding. |
 | `Cross-Origin-Opener-Policy` | `same-origin` | Isolates browsing context from external tabs. |
-| `Permissions-Policy` | `geolocation=(), microphone=()` | Disables unneeded client-side hardware APIs. |
+| `Permissions-Policy` | `accelerometer=(), autoplay=(), camera=(), cross-origin-isolated=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), keyboard-map=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), sync-xhr=(self), usb=(), web-share=(), xr-spatial-tracking=(), clipboard-read=(), clipboard-write=(), gamepad=(), hid=(), idle-detection=(), interest-cohort=(), serial=(), unload=(), local-fonts=(self), bluetooth=(), compute-pressure=()` | Disables unneeded client-side hardware and browser APIs per OWASP Secure Headers Project. |
 | `Cache-Control` | `no-store` | Enforced on `/users`, `/orders`, `/cart`, `/admin`, and authenticated calls. |
 
-- **Content Security Policy (CSP):** API endpoints enforce `default-src 'none'; frame-ancestors 'none'`. Interactive documentation routes (`/api/v1/docs`, `/redoc`) apply a CDN-scoped policy outside production; documentation endpoints are disabled entirely in production (`ENVIRONMENT=production`).
+- **Content Security Policy (CSP):** API endpoints enforce `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`. Interactive documentation routes (`/api/v1/docs`, `/redoc`) apply a CDN-scoped policy outside production (`base-uri 'self'; form-action 'self'`); documentation endpoints are disabled entirely in production (`ENVIRONMENT=production`).
 - **No `Server` Header:** `main.py` starts uvicorn with `server_header=False`, so responses do not name the server software.
 - **Deprecated Headers Omitted:** `X-XSS-Protection` is deliberately omitted; modern browsers deprecate it, and its heuristic audit mode can introduce client-side security vulnerabilities.
 - **CORS Policy:** Origins are strictly restricted to `settings.BACKEND_CORS_ORIGINS`. Because credentials are enabled (`allow_credentials=True`), a wildcard `*` is refused at startup by settings validation.

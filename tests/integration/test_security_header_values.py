@@ -12,11 +12,23 @@ API_HEADERS = {
     "strict-transport-security": "max-age=31536000; includeSubDomains",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
-    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "content-security-policy": (
+        "default-src 'none'; frame-ancestors 'none'; "
+        "base-uri 'none'; form-action 'none'"
+    ),
     "referrer-policy": "no-referrer",
     "cross-origin-resource-policy": "same-origin",
     "cross-origin-opener-policy": "same-origin",
-    "permissions-policy": "geolocation=(), microphone=()",
+    "permissions-policy": (
+        "accelerometer=(), autoplay=(), camera=(), cross-origin-isolated=(), "
+        "display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), "
+        "gyroscope=(), keyboard-map=(), magnetometer=(), microphone=(), midi=(), "
+        "payment=(), picture-in-picture=(), publickey-credentials-get=(), "
+        "screen-wake-lock=(), sync-xhr=(self), usb=(), web-share=(), "
+        "xr-spatial-tracking=(), clipboard-read=(), clipboard-write=(), gamepad=(), "
+        "hid=(), idle-detection=(), interest-cohort=(), serial=(), unload=(), "
+        "local-fonts=(self), bluetooth=(), compute-pressure=()"
+    ),
 }
 DOCS_CSP = (
     "default-src 'self';"
@@ -24,6 +36,8 @@ DOCS_CSP = (
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
     "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
     "font-src 'self' https://cdn.jsdelivr.net;"
+    "base-uri 'self';"
+    "form-action 'self';"
 )
 
 

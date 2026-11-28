@@ -17,17 +17,34 @@ _NO_STORE_PREFIXES = tuple(
 
 
 # OWASP REST Security Cheat Sheet: a JSON API answers default-src 'none' and
-# frame-ancestors 'none'. Only the interactive docs pages (FastAPI serves
+# frame-ancestors 'none', plus base-uri 'none' and form-action 'none' (neither
+# falls back to default-src). Only the interactive docs pages (FastAPI serves
 # them, outside production only, see main.py) are HTML that loads Swagger UI
 # and ReDoc from cdn.jsdelivr.net and runs an inline script: they keep the
-# policy the app has always sent.
-_API_CSP = "default-src 'none'; frame-ancestors 'none'"
+# policy the app has always sent, with base-uri 'self' and form-action 'self'
+# (for Swagger's OAuth2 Authorize form).
+_API_CSP = (
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+)
 _DOCS_CSP = (
     "default-src 'self';"
     "img-src 'self' data: https:;"
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
     "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
     "font-src 'self' https://cdn.jsdelivr.net;"
+    "base-uri 'self';"
+    "form-action 'self';"
+)
+# OWASP Secure Headers Project (headers_add.json, updated 2026-11-23, read 2026-11-28).
+_PERMISSIONS_POLICY = (
+    "accelerometer=(), autoplay=(), camera=(), cross-origin-isolated=(), "
+    "display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), "
+    "gyroscope=(), keyboard-map=(), magnetometer=(), microphone=(), midi=(), "
+    "payment=(), picture-in-picture=(), publickey-credentials-get=(), "
+    "screen-wake-lock=(), sync-xhr=(self), usb=(), web-share=(), "
+    "xr-spatial-tracking=(), clipboard-read=(), clipboard-write=(), gamepad=(), "
+    "hid=(), idle-detection=(), interest-cohort=(), serial=(), unload=(), "
+    "local-fonts=(self), bluetooth=(), compute-pressure=()"
 )
 _DOCS_PATHS = frozenset(
     {f"{settings.API_V1_STR}/docs", "/redoc", "/docs/oauth2-redirect"}
@@ -66,7 +83,7 @@ def apply_security_headers(headers: MutableHeaders, scope: Scope) -> None:
     headers["Content-Security-Policy"] = (
         _DOCS_CSP if scope["path"] in _DOCS_PATHS else _API_CSP
     )
-    headers["Permissions-Policy"] = "geolocation=(), microphone=()"
+    headers["Permissions-Policy"] = _PERMISSIONS_POLICY
 
 
 class SecurityHeadersMiddleware:
