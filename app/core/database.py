@@ -152,6 +152,23 @@ def is_database_unavailable_error(exc: BaseException | None) -> bool:
     return False
 
 
+# str(e) on a SQLAlchemy error includes the failing SQL statement
+# and its bound parameter values by default - for an INSERT/UPDATE
+# that's frequently user-submitted data (email, address, etc).
+# Returning that verbatim in a 500 response leaks both PII and
+# internal schema/query details to the client; log it in full
+# server-side instead and return a generic message.
+def _http_error(e: SQLAlchemyError, where: str) -> HTTPException:
+    if is_database_unavailable_error(e):
+        logger.error("Database unavailable in %s", where, exc_info=e)
+        return database_unavailable()
+    logger.error("Database error in %s", where, exc_info=e)
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="A database error occurred",
+    )
+
+
 @contextmanager
 def session_scope():
     session = SessionLocal()
@@ -161,20 +178,7 @@ def session_scope():
     except SQLAlchemyError as e:
         with suppress(SQLAlchemyError):
             session.rollback()
-        if is_database_unavailable_error(e):
-            logger.error("Database unavailable in session_scope", exc_info=e)
-            raise database_unavailable() from e
-        # str(e) on a SQLAlchemy error includes the failing SQL statement
-        # and its bound parameter values by default - for an INSERT/UPDATE
-        # that's frequently user-submitted data (email, address, etc).
-        # Returning that verbatim in a 500 response leaks both PII and
-        # internal schema/query details to the client; log it in full
-        # server-side instead and return a generic message.
-        logger.error("Database error in session_scope", exc_info=e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="A database error occurred",
-        ) from e
+        raise _http_error(e, "session_scope") from e
     finally:
         session.close()
 
@@ -194,14 +198,7 @@ async def get_async_db() -> AsyncGenerator[AsyncSession]:
         except SQLAlchemyError as e:
             with suppress(SQLAlchemyError):
                 await session.rollback()
-            if is_database_unavailable_error(e):
-                logger.error("Database unavailable in get_async_db", exc_info=e)
-                raise database_unavailable() from e
-            logger.error("Database error in get_async_db", exc_info=e)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="A database error occurred",
-            ) from e
+            raise _http_error(e, "get_async_db") from e
 
 
 # The session dependency, declared once. scope="function" ends the session
