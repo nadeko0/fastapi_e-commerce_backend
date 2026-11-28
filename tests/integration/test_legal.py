@@ -610,3 +610,21 @@ def test_a_password_is_not_needed_for_an_unknown_request_type_to_be_refused(clie
 
     assert response.status_code == 422
     assert [e["loc"] for e in response.json()["errors"]] == [["body", "request_type"]]
+
+
+def test_every_consent_record_names_the_privacy_policy_version_shown(client):
+    # GDPR Art. 7(1): which text a person agreed to must be demonstrable.
+    from app.services.legal_documents import load_legal_document
+
+    version = load_legal_document("privacy-policy").version
+    token = _register_and_login(client, _valid_registration_payload())
+    headers = _auth_headers(token)
+
+    changed = client.post(f"{LEGAL_PREFIX}/consent",
+                          json={"marketing_consent": True, "privacy_policy_accepted": True},
+                          headers=headers)
+    assert changed.status_code == 200
+    history = client.get(f"{LEGAL_PREFIX}/consent-status", headers=headers).json()["consent_history"]
+
+    assert len(history) == 4  # three at registration, one marketing change
+    assert {entry["privacy_policy_version"] for entry in history} == {version}

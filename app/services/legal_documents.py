@@ -95,6 +95,13 @@ def _resolve_docs_dir() -> Path:
     return _BUILTIN_DIR
 
 
+def privacy_policy_version() -> str:
+    """The version of the privacy policy served now: written into every
+    consent record, so that which text a person agreed to can be shown
+    (GDPR Art. 7(1))."""
+    return load_legal_document("privacy-policy").version
+
+
 def load_legal_document(
     name: str,
     allowed_placeholders: Iterable[str] | None = None,

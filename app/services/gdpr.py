@@ -15,6 +15,7 @@ from app.models.order import Order
 from app.models.user import User
 from app.schemas.legal import ConsentUpdate
 from app.schemas.order import OrderStatus
+from app.services.legal_documents import privacy_policy_version
 from app.services.orders import (
     cancel_order_and_restock,
     close_attempts_at_provider,
@@ -109,6 +110,7 @@ class GDPRService:
         Update user's consent preferences and maintain consent history
         """
         current_time = utc_now()
+        policy_version = privacy_policy_version()
 
         # Create consent history entry
         consent_entries = []
@@ -122,7 +124,8 @@ class GDPRService:
                 "granted": consent_update.marketing_consent,
                 "timestamp": current_time.isoformat(),
                 "ip_address": ip_address,
-                "user_agent": user_agent
+                "user_agent": user_agent,
+                "privacy_policy_version": policy_version,
             })
             user.marketing_consent = consent_update.marketing_consent
             user.marketing_consent_date = current_time
@@ -134,7 +137,8 @@ class GDPRService:
                 "granted": consent_update.privacy_policy_accepted,
                 "timestamp": current_time.isoformat(),
                 "ip_address": ip_address,
-                "user_agent": user_agent
+                "user_agent": user_agent,
+                "privacy_policy_version": policy_version,
             })
             user.privacy_policy_accepted = consent_update.privacy_policy_accepted
             user.privacy_policy_accepted_date = current_time

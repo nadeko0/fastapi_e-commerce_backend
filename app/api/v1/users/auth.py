@@ -58,6 +58,7 @@ from app.services.email import (
     send_welcome_email,
 )
 from app.services.gdpr import consent_user_agent
+from app.services.legal_documents import privacy_policy_version
 from app.services.redis_async import TokenStateUnavailable
 
 # The name the module had before the users package split: log filters and
@@ -104,6 +105,7 @@ async def register_user(
     now = utc_now()
     client_ip = request.client.host if request.client else None
     client_ua = consent_user_agent(request)
+    policy_version = privacy_policy_version()
     # Hashed in both cases, before the database is asked, so that the
     # answer for an existing email does not come back a bcrypt early.
     hashed_password = await get_password_hash_async(user_in.password)
@@ -124,18 +126,21 @@ async def register_user(
             "timestamp": now.isoformat(),
             "ip_address": client_ip,
             "user_agent": client_ua,
+            "privacy_policy_version": policy_version,
         }, {
             "type": ConsentType.PRIVACY_POLICY.value,
             "granted": user_in.privacy_policy_accepted,
             "timestamp": now.isoformat(),
             "ip_address": client_ip,
             "user_agent": client_ua,
+            "privacy_policy_version": policy_version,
         }, {
             "type": ConsentType.MARKETING.value,
             "granted": user_in.marketing_consent,
             "timestamp": now.isoformat(),
             "ip_address": client_ip,
             "user_agent": client_ua,
+            "privacy_policy_version": policy_version,
         }]
     )
     db.add(user)

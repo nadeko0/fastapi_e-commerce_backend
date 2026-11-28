@@ -58,6 +58,9 @@ class ConsentHistory(ResponseBody):
     timestamp: datetime
     ip_address: str | None = None
     user_agent: str | None = None
+    # The privacy policy version in force when the choice was made (GDPR
+    # Art. 7(1)); null on records written before 7.1.0.
+    privacy_policy_version: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

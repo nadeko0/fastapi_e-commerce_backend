@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Every consent record (registration, consent changes, marketing changes in the profile) carries `privacy_policy_version`, the version of the privacy policy in force at that moment, so that which text a person agreed to can be shown (GDPR Art. 7(1)). It is in `consent_history` of `GET /api/v1/legal/consent-status`; records written before 7.1.0 have it as null.
 - Security audit events on the `app.audit` logger: failed logins (with the reason, server side only), refresh token replays, admin requests that change something and admin routes refused to non-admins, password resets, logouts and personal data export and deletion requests. Ids only, no emails or tokens; see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 - The 409 `insufficient-stock` response of `POST /api/v1/cart/items` and `PUT /api/v1/cart/items/{product_id}` now carries `available` (units in stock) and `requested` (the requested line total).
 - `BCRYPT_WAIT_TIMEOUT_SECONDS` (default 10): a request that waits that long for a password hashing slot is answered 503 `service-overloaded` with `Retry-After: 5` instead of queueing without limit. Affects register, login, password reset confirmation and account deletion under a flood of password checks.

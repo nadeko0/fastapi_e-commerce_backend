@@ -10,6 +10,7 @@ from app.core.rate_limit import check_consent_change
 from app.models.user import User
 from app.schemas.user import UserResponse, UserUpdate
 from app.services.gdpr import consent_user_agent
+from app.services.legal_documents import privacy_policy_version
 
 # The name the module had before the users package split: log filters and
 # alerts keep matching.
@@ -111,6 +112,7 @@ async def update_current_user(
                 "timestamp": now.isoformat(),
                 "ip_address": request.client.host if request.client else None,
                 "user_agent": consent_user_agent(request),
+                "privacy_policy_version": privacy_policy_version(),
             }]
             user.marketing_consent = consent
             user.marketing_consent_date = now

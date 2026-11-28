@@ -1270,6 +1270,17 @@
             ],
             "title": "Ip Address"
           },
+          "privacy_policy_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Privacy Policy Version"
+          },
           "timestamp": {
             "format": "date-time",
             "title": "Timestamp",
@@ -1295,7 +1306,8 @@
           "granted",
           "timestamp",
           "ip_address",
-          "user_agent"
+          "user_agent",
+          "privacy_policy_version"
         ],
         "title": "ConsentHistory",
         "type": "object"
