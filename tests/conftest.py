@@ -291,13 +291,18 @@ if IS_POSTGRES:
     # that the chain builds a schema the models agree with (a constraint or
     # column added to a model but forgotten in a migration fails here, which
     # create_all would hide). A subprocess, because Alembic's env.py calls
-    # logging.fileConfig and would disable this process's loggers.
-    subprocess.run(
+    # logging.fileConfig and would disable this process's loggers. Its output
+    # (a line per revision) is shown only when the upgrade fails.
+    upgrade = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         env={**os.environ, "DATABASE_URI": TEST_DB_URL},
-        check=True,
+        capture_output=True,
+        text=True,
+        check=False,
     )
+    if upgrade.returncode != 0:
+        raise RuntimeError(f"alembic upgrade head failed:\n{upgrade.stdout}{upgrade.stderr}")
 
     if sys.platform == "win32":
         # psycopg's async mode cannot run on Windows' default ProactorEventLoop.

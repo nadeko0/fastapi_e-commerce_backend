@@ -29,7 +29,7 @@ cp -r migrations "$WORKTREE_DIR/migrations"
 # Git Bash on Windows needs a Windows path for uv (pwd -W); Linux uses pwd.
 cd "$(cd "$WORKTREE_DIR" && (pwd -W 2>/dev/null || pwd))"
 unset VIRTUAL_ENV || true
-uv sync --locked --group dev
+uv sync -q --locked --group dev
 
 # Settings the old release reads at import (CI sets them; defaults for local runs).
 export JWT_SECRET_KEY="${JWT_SECRET_KEY:-ci-test-secret-key-long-enough-for-hs256-and-the-hs512-negative-test}"
@@ -43,7 +43,7 @@ export EMAILS_FROM_EMAIL="${EMAILS_FROM_EMAIL:-ci@example.com}" EMAILS_FROM_NAME
 # model-vs-schema drift) fail by definition on a newer chain: left out.
 # pytest ignores an --ignore/--deselect that matches nothing, so a stale
 # entry here does not fail; prune it when the base release changes.
-uv run pytest -p no:cacheprovider -n auto \
+uv run pytest -q -p no:cacheprovider -n auto \
     -m "db_sensitive and not timing_sensitive" \
     -k "order or payment or checkout or cart or refund or user or address" \
     --ignore tests/integration/test_reconciliation_migration.py \

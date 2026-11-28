@@ -9,13 +9,14 @@ on:
 permissions:
   contents: read
 
-# A new push to a PR cancels its older run; runs on main always finish.
+# A new push to a PR cancels its older run. On main a started run finishes,
+# but a run still queued is replaced by the newer push (one pending per group).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  UV_VERSION: "0.13.6"
+  UV_VERSION: "0.13.9"
   UV_LOCKED: "1"
   HYPOTHESIS_PROFILE: ci
   # Dummy settings the app reads at import. Not secrets.
@@ -39,42 +40,51 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: ${{ env.UV_VERSION }}
-      - run: uv sync --group dev
-      - run: uv run ruff check app tests
-      - run: uv run mypy
+      - name: Install dependencies
+        run: uv sync -q --group dev
+      - name: Ruff
+        run: uv run ruff check app tests
+      - name: mypy
+        run: uv run mypy
       - name: No module in app/ over 800 lines
         run: |
           long=$(find app -name '*.py' -print0 | xargs -0 wc -l | awk '$2 != "total" && $1 > 800')
           if [ -n "$long" ]; then echo "$long"; exit 1; fi
       - name: Known vulnerabilities in uv.lock
         run: |
-          uv export --all-groups --all-extras --no-emit-project --no-header --format requirements-txt -o "$RUNNER_TEMP/req.txt"
+          uv export -q --all-groups --all-extras --no-emit-project --no-header --format requirements-txt -o "$RUNNER_TEMP/req.txt"
           uvx pip-audit==2.10.1 --require-hashes --disable-pip --progress-spinner off -r "$RUNNER_TEMP/req.txt"
 
   test:
     # SQLite and fakeredis. Timing tests are flaky beside parallel workers, so
-    # they run alone after, appending to the same coverage data.
+    # they run alone after, appending to the same coverage data. -rfE: the
+    # skips here (no PostgreSQL, Redis or Stripe) are expected and not listed.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: ${{ env.UV_VERSION }}
-      - run: uv sync --group dev
-      - run: uv run pytest tests/ -q -n auto --dist worksteal -m "not timing_sensitive" --cov=app --cov-context=test --cov-report= --cov-fail-under=0
+      - name: Install dependencies
+        run: uv sync -q --group dev
+      - name: Tests in parallel
+        run: uv run pytest tests/ -q -rfE --durations=10 --durations-min=1.0 -n auto --dist worksteal -m "not timing_sensitive" --cov=app --cov-context=test --cov-report= --cov-fail-under=0
       - name: Timing-sensitive tests alone (85% gate on the sum)
-        run: uv run pytest tests/ -q -m timing_sensitive --cov=app --cov-context=test --cov-append --cov-report=term-missing
+        run: uv run pytest tests/ -q -rfE -m timing_sensitive --cov=app --cov-context=test --cov-append --cov-report=term-missing:skip-covered
       - name: Payment layer coverage gate (100% lines and branches)
         run: >-
-          uv run coverage report --fail-under=100
+          uv run coverage report --fail-under=100 --skip-covered
           --include="app/api/v1/orders/*.py,app/services/orders.py,app/services/payment/*.py,app/schemas/order.py,app/models/order.py,app/models/order_items.py,app/models/payment.py,app/models/payment_ledger.py,app/tasks.py,app/services/email/messages.py,app/services/stripe_events.py,app/services/stripe_event_redaction.py,app/services/reconciliation.py,app/models/payment_discrepancy.py,app/schemas/webhook_event.py"
           --omit="app/services/payment/stripe_provider.py"
+      - name: Coverage table on the run page
+        if: always()
+        run: uv run coverage report --format=markdown --skip-covered >> "$GITHUB_STEP_SUMMARY"
 
   integration:
     # The PostgreSQL and Redis images docker-compose.yml deploys.
@@ -82,7 +92,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:18.6-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+        image: postgres:18.6-alpine@sha256:9ba53c7d41ea093baf5c1ba635ba5434c4f979880527d49bb7d9237d3193085b
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
@@ -90,7 +100,7 @@ jobs:
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U ci -d ci" --health-interval 5s --health-retries 12
       redis:
-        image: redis:8.8-alpine@sha256:c027ae0f677dcf73d74038256f5b88c9ba7b11ccbfae97e96a9f091208d36125
+        image: redis:8.8-alpine@sha256:1273af45b299d2b8b60d0e400d90aa6c2c5b1794f01d6a7ca60ff3ba6e65efb5
         ports: ["6379:6379"]
         options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 12
     env:
@@ -101,10 +111,11 @@ jobs:
         with:
           fetch-depth: 0 # migration_compat.sh needs the tags
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: ${{ env.UV_VERSION }}
-      - run: uv sync --group dev
+      - name: Install dependencies
+        run: uv sync -q --group dev
       - name: Suite on PostgreSQL
         run: uv run pytest tests/ -m "not timing_sensitive" -q -p no:cacheprovider -rs -n auto --dist worksteal
       - name: Timing-sensitive database tests, alone
@@ -113,7 +124,6 @@ jobs:
         run: uv run pytest tests/ -m real_redis -q -p no:cacheprovider -rs
       - name: Previous release on the current migrations (rolling deploy)
         run: bash .github/scripts/migration_compat.sh "$(git describe --tags --abbrev=0 HEAD)"
-
   docker-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -127,7 +137,12 @@ jobs:
         run: |
           echo "version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" >> "$GITHUB_OUTPUT"
           echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - name: Build the app image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          # No build summary on the run page and no .dockerbuild artifact per run.
+          DOCKER_BUILD_SUMMARY: "false"
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           context: .
           load: true
@@ -136,18 +151,26 @@ jobs:
             VERSION=${{ steps.meta.outputs.version }}
             REVISION=${{ github.sha }}
             CREATED=${{ steps.meta.outputs.created }}
-      - run: |
+      - name: Build the PostgreSQL and Redis images
+        run: |
           docker build --pull -t ecommerce-postgres:ci docker/postgres
           docker build --pull -t ecommerce-redis:ci docker/redis
       # OS packages and binaries of the shipped images; only fixable HIGH/CRITICAL fail.
+      # The volume shares one vulnerability database download among the three
+      # scans. --table-mode detailed: a table only for findings, not one row
+      # per clean package.
       - name: Trivy scan of the three images
         env:
-          TRIVY: aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c # 0.76.1
+          TRIVY: aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb # 0.76.2
         run: |
           status=0
           for image in fastapi-ecommerce-backend:ci ecommerce-postgres:ci ecommerce-redis:ci; do
+            echo "::group::$image"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$GITHUB_WORKSPACE:/repo:ro" \
-              "$TRIVY" image --skip-version-check --ignorefile /repo/.trivyignore.yaml \
-              --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 "$image" || status=1
+              -v trivy-cache:/trivy-cache \
+              "$TRIVY" image --cache-dir /trivy-cache --skip-version-check --no-progress --table-mode detailed \
+              --ignorefile /repo/.trivyignore.yaml \
+              --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 "$image" || { status=1; echo "::error::Trivy scan of $image failed (see its group above)"; }
+            echo "::endgroup::"
           done
           exit $status

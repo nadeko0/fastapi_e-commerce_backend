@@ -10,7 +10,7 @@
 # (Trivy 0.76.1, scan of both on 2026-11-10).
 FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
@@ -41,7 +41,7 @@ WORKDIR /app
 # old packages (zlib1g CVE-2026-76844 and CVE-2026-85091 on 2026-11-10, fixed
 # in Debian as 1:1.3.dfsg+really1.3.1-1+deb13u1). Only the runtime stage ships.
 RUN apt-get update && \
-    apt-get upgrade --yes --no-install-recommends && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
 # The base image ships pip (with its own vendored copies of certifi, urllib3,
@@ -49,7 +49,7 @@ RUN apt-get update && \
 # packages: the app runs from /app/.venv, built in the builder stage. Without
 # pip the image carries none of pip's vendored libraries, so their advisories
 # do not apply to it. python:3.13-slim installs no setuptools or wheel.
-RUN python -m pip uninstall --yes pip
+RUN python -m pip uninstall --yes --root-user-action=ignore pip
 
 RUN adduser --disabled-password --gecos '' --no-create-home appuser && \
     mkdir -p /app/logs /app/exports && \

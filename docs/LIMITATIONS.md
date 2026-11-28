@@ -134,7 +134,7 @@ Implemented: access and portability (Art. 15 and 20, `POST /legal/data-request` 
   - *Why not:* The 1-hour load soak showed API memory growth of 6.4 MiB (~1%) with a decelerating rate consistent with Python allocator warmup. Confirming a permanent RSS plateau requires a 4 to 6 hour continuous soak on isolated hardware.
   - *Where to start:* Execute a 6-hour Locust load benchmark on a dedicated machine.
 - **CI Trivy Database Caching (Campaign Finding T1):**
-  - *Why not:* Continuous integration downloads the full Trivy vulnerability database on every run, risking registry rate limits during heavy CI usage.
-  - *Where to start:* Cache `~/.cache/trivy` across workflow runs in GitHub Actions.
+  - *Why not:* Continuous integration downloads the full Trivy vulnerability database once per run (the three image scans share it through a Docker volume), risking registry rate limits during heavy CI usage.
+  - *Where to start:* Cache the Trivy cache directory across workflow runs in GitHub Actions.
 
 See also: [ARCHITECTURE.md](ARCHITECTURE.md), [OPERATIONS.md](OPERATIONS.md), [PERFORMANCE.md](PERFORMANCE.md), [RESILIENCE.md](RESILIENCE.md), [reports/final-test-campaign.md](reports/final-test-campaign.md).
