@@ -177,15 +177,32 @@ jobs:
           done
           exit $status
       # Smoke test of the real docker-compose.yml stack (PostgreSQL role separation,
-      # Redis password, Alembic migration, /livez and /readyz). ENVIRONMENT stays
-      # development so .env.example's placeholder secrets are accepted; POSTGRES_SERVER
-      # and REDIS_HOST point at the compose services, and the workflow-level database
-      # and Redis env vars are unset so compose reads .env consistently.
+      # Redis password, Alembic migration, /livez and /readyz) in production mode,
+      # so the startup checks a deployment goes through run too. .env.example's
+      # placeholders are replaced with values made for this run only (random
+      # secrets, a non-mock payment provider, an https frontend); nothing calls
+      # Stripe or SMTP at startup. POSTGRES_SERVER and REDIS_HOST point at the
+      # compose services, and the workflow-level database and Redis env vars are
+      # unset so compose reads .env consistently.
       - name: Start the stack from docker-compose.yml
         run: |
           cp .env.example .env
-          sed -i -e 's/^POSTGRES_SERVER=.*/POSTGRES_SERVER=db/' -e 's/^REDIS_HOST=.*/REDIS_HOST=redis/' .env
-          grep -E '^(POSTGRES_SERVER|REDIS_HOST)=' .env
+          set_env() {
+            if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else echo "$1=$2" >> .env; fi
+          }
+          set_env ENVIRONMENT production
+          set_env POSTGRES_SERVER db
+          set_env REDIS_HOST redis
+          set_env PAYMENT_PROVIDER stripe
+          set_env FRONTEND_URL https://shop.example.com
+          set_env JWT_SECRET_KEY "$(openssl rand -hex 32)"
+          set_env POSTGRES_PASSWORD "$(openssl rand -hex 24)"
+          set_env APP_DB_PASSWORD "$(openssl rand -hex 24)"
+          set_env REDIS_PASSWORD "$(openssl rand -hex 24)"
+          set_env SMTP_PASSWORD "$(openssl rand -hex 24)"
+          set_env STRIPE_SECRET_KEY "sk_test_$(openssl rand -hex 24)"
+          set_env STRIPE_WEBHOOK_SECRET "whsec_$(openssl rand -hex 24)"
+          grep -E '^(ENVIRONMENT|POSTGRES_SERVER|REDIS_HOST|PAYMENT_PROVIDER|FRONTEND_URL)=' .env
           unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_SERVER REDIS_HOST
           docker compose up -d --wait db redis
           docker compose --profile migrate run --rm migrate
