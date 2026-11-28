@@ -172,3 +172,18 @@ def test_tags_are_lower_case_and_described(document):
 def test_the_examples_are_valid_values(model):
     for example in model.model_json_schema()["examples"]:
         model.model_validate(example)
+
+
+def test_insufficient_stock_problem_schema_is_published_on_cart_409(document):
+    schema = document["components"]["schemas"]["InsufficientStockProblem"]
+    props = schema["properties"]
+    assert props["available"]["type"] == "integer"
+    assert props["available"]["description"]
+    assert props["requested"]["type"] == "integer"
+    assert props["requested"]["description"]
+    assert {"available", "requested"} <= set(schema["required"])
+
+    for method, path in (("post", "/api/v1/cart/items"), ("put", "/api/v1/cart/items/{product_id}")):
+        content = document["paths"][path][method]["responses"]["409"]["content"]["application/problem+json"]
+        refs = {opt.get("$ref") for opt in content["schema"].get("anyOf", [])}
+        assert "#/components/schemas/InsufficientStockProblem" in refs

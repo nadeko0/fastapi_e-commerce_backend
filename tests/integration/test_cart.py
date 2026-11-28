@@ -137,6 +137,34 @@ def test_add_item_rejects_quantity_over_stock(client, db_session):
     )
 
     assert response.status_code == 409
+    body = response.json()
+    assert body["type"].endswith("insufficient-stock")
+    assert body["available"] == 2
+    assert body["requested"] == 3
+
+
+def test_add_item_over_stock_reports_line_total_as_requested(client, db_session):
+    token = _register_and_login(client, _valid_registration_payload())
+    category = _make_category(db_session)
+    product = _make_product(db_session, category.id, stock=2)
+    first = client.post(
+        f"{CART_PREFIX}/items",
+        json={"product_id": product.id, "quantity": 1},
+        headers=_auth_headers(token),
+    )
+    assert first.status_code == 200
+
+    response = client.post(
+        f"{CART_PREFIX}/items",
+        json={"product_id": product.id, "quantity": 2},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["type"].endswith("insufficient-stock")
+    assert body["available"] == 2
+    assert body["requested"] == 3
 
 
 def test_update_cart_item_quantity(client, db_session):
@@ -176,6 +204,10 @@ def test_update_cart_item_rejects_quantity_over_stock(client, db_session):
     )
 
     assert response.status_code == 409
+    body = response.json()
+    assert body["type"].endswith("insufficient-stock")
+    assert body["available"] == 3
+    assert body["requested"] == 10
 
 
 def test_update_item_not_in_cart_returns_404(client, db_session):
@@ -735,6 +767,10 @@ def test_add_variant_rejects_quantity_over_variant_stock(client, db_session):
     )
 
     assert response.status_code == 409
+    body = response.json()
+    assert body["type"].endswith("insufficient-stock")
+    assert body["available"] == 3
+    assert body["requested"] == 4
 
 
 def test_add_variant_rejects_id_belonging_to_different_product(client, db_session):

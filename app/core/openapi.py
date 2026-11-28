@@ -76,6 +76,13 @@ class ValidationProblem(Problem):
     errors: list[ValidationErrorItem]
 
 
+class InsufficientStockProblem(Problem):
+    """The 409 of insufficient stock in cart operations."""
+
+    available: int = Field(description="Units currently in stock for the item.")
+    requested: int = Field(description="The total line quantity that was requested.")
+
+
 RETRY_AFTER_HEADER = {
     "Retry-After": {
         "description": "Seconds to wait before repeating the request.",

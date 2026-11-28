@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.dependencies import Cache, DbSession
 from app.core.errors import Problem, ProblemType
-from app.core.openapi import GUEST_CART_COOKIE_RESPONSE, DocumentedRoute
+from app.core.openapi import (
+    GUEST_CART_COOKIE_RESPONSE,
+    DocumentedRoute,
+    InsufficientStockProblem,
+)
+from app.core.openapi import Problem as ProblemSchema
 from app.core.rate_limit import (
     client_address,
     parse_rate,
@@ -446,9 +451,12 @@ async def get_user_cart(
     response_model=CartResponse,
     responses={
         200: GUEST_CART_COOKIE_RESPONSE,
-        409: {"description": "Not enough stock available (insufficient-stock: the resulting quantity of the line "
-                             "would exceed the stock), the product has variants and no variant_id was sent, "
-                             "or the cart already holds CART_MAX_LINES (100 by default) different items"},
+        409: {
+            "description": "Not enough stock available (insufficient-stock: the resulting quantity of the line "
+                           "would exceed the stock), the product has variants and no variant_id was sent, "
+                           "or the cart already holds CART_MAX_LINES (100 by default) different items",
+            "model": InsufficientStockProblem | ProblemSchema,
+        },
         404: {"description": "Product not found or inactive, or variant_id doesn't belong to product_id / isn't active"},
         429: {"description": "Too many requests, or (for a guest) this address has opened too many guest carts "
                              "(RATE_LIMIT_GUEST_CART, 100/hour by default)"},
@@ -533,11 +541,12 @@ async def add_to_cart(
                 await _allow_new_guest_cart(request)
                 owner = CartOwner.guest(new_guest_cart_id())
             cart = await redis.add_to_cart_atomic(owner, **line)
-    except InsufficientStockError:
+    except InsufficientStockError as error:
         raise Problem(
             status.HTTP_409_CONFLICT,
             type=ProblemType.INSUFFICIENT_STOCK,
             detail="Not enough stock available",
+            extensions={"available": error.available, "requested": error.requested},
         ) from None
     except CartFullError as error:
         raise _cart_full(error) from None
@@ -551,8 +560,11 @@ async def add_to_cart(
     response_model=CartResponse,
     responses={
         200: GUEST_CART_COOKIE_RESPONSE,
-        409: {"description": "Not enough stock available (insufficient-stock: the new quantity exceeds the "
-                             "stock), or the product has variants and no variant_id was sent"},
+        409: {
+            "description": "Not enough stock available (insufficient-stock: the new quantity exceeds the "
+                           "stock), or the product has variants and no variant_id was sent",
+            "model": InsufficientStockProblem | ProblemSchema,
+        },
         404: {"description": "Product not found or inactive, item not in cart, or variant_id invalid for this product"},
         503: {"description": "Cart store unavailable (Retry-After: 5), nothing was changed"},
     },
@@ -598,11 +610,12 @@ async def update_cart_item(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Item not in cart"
         ) from None
-    except InsufficientStockError:
+    except InsufficientStockError as error:
         raise Problem(
             status.HTTP_409_CONFLICT,
             type=ProblemType.INSUFFICIENT_STOCK,
             detail="Not enough stock available",
+            extensions={"available": error.available, "requested": error.requested},
         ) from None
 
     cart = _cart_or_503(cart)

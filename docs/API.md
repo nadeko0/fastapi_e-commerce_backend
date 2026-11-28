@@ -100,7 +100,7 @@ The complete catalog of typed problems declared in `app/core/errors.py`:
 | `idempotency-key-reused` | 422 | Stored `Idempotency-Key` reused with a differing request body or parameter payload. |
 | `idempotency-key-in-use` | 409 | Identical `Idempotency-Key` currently undergoing active processing by a concurrent worker. |
 | `payment-declined` | 422 | Payment provider refused the transaction (e.g. card declined, insufficient funds, expired card). |
-| `insufficient-stock` | 409 | Requested quantity exceeds available inventory during cart operations or order placement. |
+| `insufficient-stock` | 409 | Requested quantity exceeds available inventory during cart operations or order placement. The cart add and update routes' 409 response carries `available` (units in stock) and `requested` (the requested line total). |
 | `account-inactive` | 403 | The token is valid but the account is deactivated. (An unverified email blocks `POST /orders` with a plain 403, type `about:blank`.) |
 
 ## HTTP Status Codes

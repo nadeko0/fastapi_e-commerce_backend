@@ -109,8 +109,8 @@ PROBLEM_TITLES = {
 
 class Problem(HTTPException):
     """An HTTPException that carries a problem type, and the extension
-    members `errors` and `retry_after`. `retry_after` also sets the
-    Retry-After header, so the two cannot disagree."""
+    members `errors`, `retry_after`, and optional `extensions`. `retry_after`
+    also sets the Retry-After header, so the two cannot disagree."""
 
     def __init__(
         self,
@@ -121,6 +121,7 @@ class Problem(HTTPException):
         headers: dict[str, str] | None = None,
         retry_after: int | None = None,
         errors: list[dict[str, Any]] | None = None,
+        extensions: dict[str, Any] | None = None,
     ) -> None:
         if retry_after is not None:
             headers = {**(headers or {}), "Retry-After": str(retry_after)}
@@ -131,6 +132,7 @@ class Problem(HTTPException):
         self.problem_type = type
         self.retry_after = retry_after
         self.errors = errors
+        self.extensions = extensions
 
 
 class ProblemResponse(JSONResponse):
@@ -167,6 +169,10 @@ def problem_response(scope: Scope, exc: StarletteHTTPException) -> ProblemRespon
         retry_after = int(exc.headers["Retry-After"])
     if retry_after is not None:
         body["retry_after"] = retry_after
+    extensions = getattr(exc, "extensions", None)
+    if extensions:
+        for key, value in extensions.items():
+            body.setdefault(key, value)
     return ProblemResponse(body, status_code=exc.status_code, headers=exc.headers)
 
 
