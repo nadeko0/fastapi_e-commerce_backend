@@ -1665,6 +1665,96 @@
         "title": "HealthServices",
         "type": "object"
       },
+      "InsufficientStockProblem": {
+        "description": "The 409 of insufficient stock in cart operations.",
+        "properties": {
+          "available": {
+            "description": "Units currently in stock for the item.",
+            "title": "Available",
+            "type": "integer"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This occurrence, for a human to read; absent on a 500.",
+            "title": "Detail"
+          },
+          "instance": {
+            "description": "The request path, without the query string.",
+            "title": "Instance",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "The X-Request-ID of the response, to quote to support.",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "requested": {
+            "description": "The total line quantity that was requested.",
+            "title": "Requested",
+            "type": "integer"
+          },
+          "retry_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds until the request can be repeated; also the Retry-After header.",
+            "title": "Retry After"
+          },
+          "status": {
+            "description": "The HTTP status code.",
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "The status phrase for about:blank, else a fixed title of the type.",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "default": "about:blank",
+            "description": "\"about:blank\" when the problem has no meaning beyond its status code, else one of the problem types, which are identifiers, not links: https://github.com/nadeko0/fastapi_e-commerce_backend/problems/validation-error, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/malformed-request, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/unsupported-media-type, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/body-too-large, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/rate-limited, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/service-overloaded, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/idempotency-key-missing, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/idempotency-key-reused, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/idempotency-key-in-use, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/payment-declined, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/insufficient-stock, https://github.com/nadeko0/fastapi_e-commerce_backend/problems/account-inactive",
+            "enum": [
+              "about:blank",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/validation-error",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/malformed-request",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/unsupported-media-type",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/body-too-large",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/rate-limited",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/service-overloaded",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/idempotency-key-missing",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/idempotency-key-reused",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/idempotency-key-in-use",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/payment-declined",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/insufficient-stock",
+              "https://github.com/nadeko0/fastapi_e-commerce_backend/problems/account-inactive"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "status",
+          "instance",
+          "request_id",
+          "available",
+          "requested"
+        ],
+        "title": "InsufficientStockProblem",
+        "type": "object"
+      },
       "LegalDocument": {
         "examples": [
           {
@@ -10231,7 +10321,15 @@
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Problem"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InsufficientStockProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    }
+                  ],
+                  "title": "Response 409 Add To Cart"
                 }
               }
             },
@@ -10797,7 +10895,15 @@
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Problem"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InsufficientStockProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    }
+                  ],
+                  "title": "Response 409 Update Cart Item"
                 }
               }
             },
@@ -12679,7 +12785,7 @@
                 }
               }
             },
-            "description": "Failed password attempts cannot be counted right now, or an export cannot be queued right now (Retry-After: 30), retry later; or, as on any route: the server is at capacity (Retry-After: 1), or the token check or the database cannot answer (Retry-After 5 to 30)",
+            "description": "Failed password attempts cannot be counted right now, or an export cannot be queued right now (Retry-After: 30), or no password check slot within BCRYPT_WAIT_TIMEOUT_SECONDS (Retry-After: 5); retry later; or, as on any route: the server is at capacity (Retry-After: 1), or the token check or the database cannot answer (Retry-After 5 to 30)",
             "headers": {
               "Retry-After": {
                 "description": "Seconds to wait before repeating the request.",
@@ -18226,7 +18332,7 @@
                 }
               }
             },
-            "description": "Failed attempts cannot be counted, or the refresh token cannot be recorded (Retry-After: 30), retry later; or, as on any route: the server is at capacity (Retry-After: 1), or the token check or the database cannot answer (Retry-After 5 to 30)",
+            "description": "Failed attempts cannot be counted, or the refresh token cannot be recorded (Retry-After: 30), or no password check slot within BCRYPT_WAIT_TIMEOUT_SECONDS (Retry-After: 5); retry later; or, as on any route: the server is at capacity (Retry-After: 1), or the token check or the database cannot answer (Retry-After 5 to 30)",
             "headers": {
               "Retry-After": {
                 "description": "Seconds to wait before repeating the request.",
@@ -20088,7 +20194,7 @@
                 }
               }
             },
-            "description": "Old tokens could not be revoked (Retry-After: 5), nothing changed; retry with the same token; or, as on any route: the server is at capacity (Retry-After: 1), or the token check or the database cannot answer (Retry-After 5 to 30)",
+            "description": "Old tokens could not be revoked (Retry-After: 5), nothing changed; retry with the same token. Also when no password check slot within BCRYPT_WAIT_TIMEOUT_SECONDS (Retry-After: 5); or, as on any route: the server is at capacity (Retry-After: 1), or the token check or the database cannot answer (Retry-After 5 to 30)",
             "headers": {
               "Retry-After": {
                 "description": "Seconds to wait before repeating the request.",
@@ -20524,7 +20630,7 @@
                 }
               }
             },
-            "description": "Temporarily unavailable: the server is at capacity (Retry-After: 1), or a service it needs cannot answer (the token check or the cart store, Retry-After 5 to 30; the database; the payment provider, Retry-After: 5). Repeat the request after Retry-After seconds, with the same Idempotency-Key where the route takes one",
+            "description": "Too many password checks at once: no password check slot within BCRYPT_WAIT_TIMEOUT_SECONDS (Retry-After: 5), retry later; or, as on any route: the server is at capacity (Retry-After: 1), or the token check or the database cannot answer (Retry-After 5 to 30)",
             "headers": {
               "Retry-After": {
                 "description": "Seconds to wait before repeating the request.",
