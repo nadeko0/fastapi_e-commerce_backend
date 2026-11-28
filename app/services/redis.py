@@ -2,12 +2,7 @@ import json
 import logging
 from datetime import timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Optional, cast
-
-from app.core.clock import utc_now
-
-if TYPE_CHECKING:
-    from app.schemas.category import CategoryTreeResponse
+from typing import Any, Optional, cast
 
 # RedisError (not just ConnectionError) is caught throughout this file: every
 # public method below is meant to fail open/degrade gracefully rather than
@@ -18,12 +13,14 @@ if TYPE_CHECKING:
 # here and propagated as a raw, unhandled exception out of the request.
 from redis import ConnectionPool, Redis, RedisError
 
+from app.core.clock import utc_now
 from app.core.config import settings
 from app.schemas.cart import (
     CartOwner,
     CartOwnerRef,
     as_cart_owner,
 )
+from app.schemas.category import CategoryTreeResponse
 from app.schemas.common import Cart
 
 # The Redis-free rules (serialization, TTLs, the cart mutations, the errors

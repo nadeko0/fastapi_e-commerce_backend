@@ -27,6 +27,7 @@ from pydantic import ValidationError
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.schemas.cart import CartOwner, CartOwnerRef, as_cart_owner
+from app.schemas.category import CategoryTreeResponse
 from app.schemas.common import Cart, CartItem, cart_item_key
 
 # One logger for both services, under the name these warnings have always had.
@@ -103,7 +104,7 @@ def deserialize(data: str, model_class=None) -> Any:
         parsed = json.loads(data)
         if model_class:
 
-            if model_class.__name__ == 'Cart':
+            if model_class is Cart:
                 if 'items' not in parsed:
                     parsed['items'] = {}
                 elif not isinstance(parsed['items'], dict):
@@ -118,7 +119,7 @@ def deserialize(data: str, model_class=None) -> Any:
                     parsed['expires_at'] = (utc_now() + cart_ttl()).isoformat()
 
 
-            if model_class.__name__ == 'CategoryTreeResponse':
+            if model_class is CategoryTreeResponse:
                 if isinstance(parsed, str):
                     parsed = {'tree': [], 'total_categories': 0, 'max_depth': 0}
                 elif not isinstance(parsed, dict):
