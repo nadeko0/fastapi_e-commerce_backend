@@ -126,7 +126,9 @@ jobs:
         run: bash .github/scripts/migration_compat.sh "$(git describe --tags --abbrev=0 HEAD)"
   docker-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Compose rebuilds the images with no_cache: true after the image scan, so
+    # 15 minutes is not enough for two builds plus startup and migrations.
+    timeout-minutes: 30
     needs: [lint, test, integration]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -174,3 +176,39 @@ jobs:
             echo "::endgroup::"
           done
           exit $status
+      # Smoke test of the real docker-compose.yml stack (PostgreSQL role separation,
+      # Redis password, Alembic migration, /livez and /readyz). ENVIRONMENT stays
+      # development so .env.example's placeholder secrets are accepted; POSTGRES_SERVER
+      # and REDIS_HOST point at the compose services, and the workflow-level database
+      # and Redis env vars are unset so compose reads .env consistently.
+      - name: Start the stack from docker-compose.yml
+        run: |
+          cp .env.example .env
+          sed -i -e 's/^POSTGRES_SERVER=.*/POSTGRES_SERVER=db/' -e 's/^REDIS_HOST=.*/REDIS_HOST=redis/' .env
+          grep -E '^(POSTGRES_SERVER|REDIS_HOST)=' .env
+          unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_SERVER REDIS_HOST
+          docker compose up -d --wait db redis
+          docker compose --profile migrate run --rm migrate
+          docker compose up -d --wait api
+      - name: Probe the running API
+        run: |
+          curl --fail --silent --show-error --retry 10 --retry-delay 2 --retry-all-errors http://127.0.0.1:8000/livez
+          echo
+          curl --fail --silent --show-error --retry 10 --retry-delay 2 --retry-all-errors http://127.0.0.1:8000/readyz
+          echo
+      - name: Compose logs on failure
+        if: failure()
+        run: |
+          if [ -f .env ]; then
+            unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_SERVER REDIS_HOST
+            echo "::group::Compose logs"
+            docker compose logs --no-color api db redis
+            echo "::endgroup::"
+          fi
+      - name: Stop the compose stack
+        if: always()
+        run: |
+          if [ -f .env ]; then
+            unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_SERVER REDIS_HOST
+            docker compose down -v
+          fi

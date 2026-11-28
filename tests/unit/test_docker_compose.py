@@ -276,3 +276,17 @@ def test_ci_passes_the_label_values():
     build = _ci_job(ci, "docker-build")
     for arg in ("VERSION=", "REVISION=${{ github.sha }}", "CREATED="):
         assert arg in build, arg
+
+
+def test_ci_docker_build_smoke_tests_the_compose_stack():
+    ci = _read(".github/workflows/ci.yml")
+    build = _ci_job(ci, "docker-build")
+    for snippet in (
+        "docker compose up -d --wait db redis",
+        "docker compose --profile migrate run --rm migrate",
+        "docker compose up -d --wait api",
+        "/livez",
+        "/readyz",
+        "docker compose down -v",
+    ):
+        assert snippet in build, snippet

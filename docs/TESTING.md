@@ -29,7 +29,7 @@ flowchart TD
         test["test (SQLite and fakeredis, coverage gates)"]
         integration["integration (PostgreSQL 18, Redis 8.8, previous release on new migrations)"]
     end
-    lint --> docker_build["docker-build (app, postgres and redis images: build and Trivy scan)"]
+    lint --> docker_build["docker-build (app, postgres and redis images: build, Trivy scan and Compose smoke test)"]
     test --> docker_build
     integration --> docker_build
 ```
@@ -37,7 +37,7 @@ flowchart TD
 - **lint:** Runs Ruff across `app` and `tests` (the pycodestyle, Pyflakes, isort and warning rules plus pyupgrade, bugbear, async, naive-datetime, FastAPI, simplify, logging, return, pytest, print and security (Bandit's rules, `S`, in `app` only) rule sets; the full list is in `pyproject.toml`), and static type checking with `mypy` over `app` (`warn_return_any`, `warn_unreachable`, `disallow_any_generics` and extra error codes everywhere; fully annotated definitions in the payment layer and `app/tasks.py`). It also fails when a module under `app/` has more than 800 lines (the aim is 500), and Ruff limits a function in `app/` to complexity 15, 15 branches and 60 statements (C901, PLR0912, PLR0915; the tests are exempt). Last, `pip-audit` checks the packages pinned in `uv.lock` (all groups, by hash) against the PyPI Advisory Database. Naive local time (`datetime.now()` without a zone, `date.today()`) is caught by Ruff's DTZ rules in the code itself, so no job runs the suite under other time zones (until 6.2.0 a 7-zone matrix did).
 - **test:** Executes the primary suite in parallel on SQLite, runs timing-sensitive tests sequentially, and enforces the coverage gates.
 - **integration:** Runs on the PostgreSQL 18 and Redis 8.8 images Compose deploys: the whole suite on PostgreSQL (including schema round-trip tests across every revision, `tests/integration/test_postgres_migration_roundtrip.py`), the timing-sensitive database tests alone, the `real_redis` parity tests, and last the newest tagged release's database tests of orders, payments, checkout, carts, refunds, users and addresses on the current migrations (`.github/scripts/migration_compat.sh`; that release's tests about the migrations themselves are left out, and it ends at once when `migrations/` is unchanged since the tag).
-- **docker-build:** Builds the production app image and the `docker/postgres` and `docker/redis` images that Compose builds, and scans all three with Trivy. It needs the three jobs above.
+- **docker-build:** Builds the production app image and the `docker/postgres` and `docker/redis` images that Compose builds, scans all three with Trivy, and starts the `docker-compose.yml` stack (`db`, `redis`, `migrate`, `api`) to verify `/livez` and `/readyz`. It needs the three jobs above.
 
 Secrets are caught before they are committed, not after the push: the `gitleaks` hook of `.pre-commit-config.yaml` (see Pre-commit Hooks below). `.gitleaks.toml` allowlists one placeholder: the JWT-shaped example of the `Token` response in `app/schemas/user.py` and the OpenAPI snapshot, only when the file and the exact placeholder value both match, so a real token in those files is still reported.
 
