@@ -19,14 +19,8 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 
-# OpenTelemetry packages are the optional extra "telemetry": installed only
-# with --build-arg INSTALL_TELEMETRY=true (tracing itself stays off until
-# OTEL_* variables are set at run time).
-ARG INSTALL_TELEMETRY=false
-
 RUN --mount=type=cache,target=/root/.cache/uv \
-    if [ "$INSTALL_TELEMETRY" = "true" ]; then extra="--extra telemetry"; else extra=""; fi && \
-    uv sync --frozen --no-dev --no-install-project $extra
+    uv sync --frozen --no-dev --no-install-project
 
 FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
 

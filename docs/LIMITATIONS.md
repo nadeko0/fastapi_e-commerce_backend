@@ -28,7 +28,7 @@ Every engineering design is a series of deliberate tradeoffs. This document outl
   - *Why not:* The application is Twelve-Factor compliant (environment configuration, `/livez` and `/readyz` probes, graceful SIGTERM shutdown, stdout logging), but deployment manifests belong in infrastructure repositories.
   - *Where to start:* Author Helm charts defining PodDisruptionBudgets, resource quotas, and horizontal pod autoscalers.
 - **Prometheus Metrics (`/metrics`):**
-  - *Why not:* OpenTelemetry distributed tracing and structured JSON logs fulfill current observability requirements; scrapeable Prometheus metrics are a subsequent enhancement.
+  - *Why not:* Structured JSON logs with request and trace ids, and the slow statement log of PostgreSQL, fulfill current observability requirements; scrapeable Prometheus metrics are a subsequent enhancement.
   - *Where to start:* Add `prometheus-fastapi-instrumentator` to export request duration histograms.
 - **PostgreSQL Image Gosu Vulnerability (Campaign Finding):**
   - *Why not:* The `postgres:18.6-alpine` base image (built on in `docker/postgres/Dockerfile`) includes `gosu` built with Go 1.24.6 and `moby/sys/user` v0.1.0, flagged in security scans as GO-2026-6686 (DoS parsing `/etc/passwd`). The vulnerability is practically unreachable in our environment because passwd files are root-owned.

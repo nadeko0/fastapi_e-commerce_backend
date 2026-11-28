@@ -68,20 +68,10 @@ A `"fail"` check means the dependency did not answer this instance within 2 s, n
 Logging is configured in `app/core/logging_config.py` following Twelve-Factor App rule XI:
 
 - **JSON to stdout:** Log records are serialized as single-line JSON via `JSONFormatter` to standard output. Container runtimes and log aggregators (e.g. FluentBit, Datadog) collect stdout directly.
-- **Trace and Request Correlation:** Log entries include `timestamp` (RFC 3339 in UTC with millisecond precision), `level`, `logger`, `message`, `request_id`, and `trace_id` (propagated from incoming W3C `traceparent` headers or OpenTelemetry spans).
+- **Trace and Request Correlation:** Log entries include `timestamp` (RFC 3339 in UTC with millisecond precision), `level`, `logger`, `message`, `request_id`, and `trace_id` (taken from an incoming W3C `traceparent` header and carried into Celery tasks; the application creates no spans and exports no traces).
 - **Access Log:** Every HTTP request writes one line from the `app.access` logger (`app/core/access_log.py`), with `request_id`, and in `extra`: `method`, `path` (without the query string), `route` (the matched route template, or null), `status`, `duration_ms` and `client_ip` (the client as resolved by `TRUSTED_PROXIES`; a request shed by the in-flight limit shows the peer's address). No query string and no header is logged. uvicorn's own plain-text access log is off (`access_log=False` in `main.py`). The line is written at `INFO`, so it follows `LOG_LEVEL`.
 - **Log Levels:** `LOG_LEVEL` sets the threshold for `app.*` loggers (`INFO`, `WARNING`, `ERROR`, `CRITICAL`). Third-party loggers default to `WARNING` in production to reduce noise. Celery's own loggers follow the `--loglevel` of the worker and beat commands (`info` in `docker-compose.yml`), so task received/succeeded/failed lines and beat's "Sending due task" lines are written, as JSON like the rest.
 - **Optional File Rotation:** Setting `LOG_FILE` enables a secondary `RotatingFileHandler` (100 MB per file, 5 backup generations). If unset or empty, file logging is disabled.
-
-## OpenTelemetry Distributed Tracing
-
-Distributed tracing is implemented in `app/core/telemetry.py` using standard OpenTelemetry SDK specifications:
-
-- **Packaging:** Tracing dependencies are packaged in the optional `telemetry` extra. In Docker builds, pass `--build-arg INSTALL_TELEMETRY=true` to include them.
-- **Zero Overhead When Inactive:** Tracing is disabled by default. It starts when an exporter endpoint is configured or `OTEL_SDK_DISABLED=false` is set (then with the default endpoint `localhost:4318`). Otherwise no OpenTelemetry libraries are loaded, and `OTEL_SDK_DISABLED=true` always turns it off.
-- **Enabling Tracing:** Set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://otel-collector:4318`) with `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. Only HTTP protobuf transport is supported.
-- **Container Identification:** Assign `OTEL_SERVICE_NAME` per container (e.g. `ecommerce-api` for the web service and `ecommerce-worker` for Celery).
-- **Instrumented Layers:** FastAPI endpoints (excluding health probes), SQLAlchemy synchronous and asynchronous engines, Redis commands, Celery task publication and consumption, and outbound HTTP requests via the Stripe SDK.
 
 ## Celery Background Workers and Scheduler
 

@@ -11,17 +11,17 @@ buffering) that
   anyio's worker threads (run_in_threadpool, sync routes) run in a copy of the
   caller's context, so they see the same values.
 
-Not done on purpose: With tracing off no traceparent is sent; with OTEL_* set,
-app/core/telemetry.py propagates it (requests, Celery). It is never echoed back,
-and the `traceresponse` header is a separate W3C draft, not implemented. Celery
-tasks receive the context through message headers (app/core/celery_context.py).
+Not done on purpose: no traceparent is sent on outbound calls (no spans are
+created here, so there is no span of our own to name as the parent). It is never
+echoed back, and the `traceresponse` header is a separate W3C draft, not
+implemented. Celery tasks receive the context through message headers
+(app/core/celery_context.py).
 """
 
 import re
 import uuid
-from collections.abc import Callable
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -52,26 +52,8 @@ class RequestContext:
 _context: ContextVar[RequestContext | None] = ContextVar("request_context", default=None)
 
 
-# Set by app/core/telemetry.py when OpenTelemetry tracing is on: returns
-# (trace_id, span_id) of the current span, or None when there is no valid one.
-_trace_source: Callable[[], tuple[str, str] | None] | None = None
-
-
-def set_trace_source(source: Callable[[], tuple[str, str] | None] | None) -> None:
-    global _trace_source
-    _trace_source = source
-
-
 def get_request_context() -> RequestContext | None:
-    context = _context.get()
-    if context is None or _trace_source is None:
-        return context
-    # Tracing on: the current span is the truth, so log trace_id equals the
-    # span's trace id (a continued traceparent has the same trace id anyway).
-    ids = _trace_source()
-    if ids is None:
-        return context
-    return replace(context, trace_id=ids[0], parent_span_id=ids[1])
+    return _context.get()
 
 
 def bind_request_context(context: RequestContext) -> Token[RequestContext | None]:

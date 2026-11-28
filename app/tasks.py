@@ -12,10 +12,6 @@ from celery.schedules import crontab
 from celery.signals import (
     setup_logging as configure_celery_logging,
 )
-from celery.signals import (
-    worker_process_init,
-    worker_process_shutdown,
-)
 from sqlalchemy import (
     Select,
     String,
@@ -30,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from app.core import celery_context, telemetry
+from app.core import celery_context
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.database import _build_connect_args
@@ -189,11 +185,6 @@ engine = create_engine(
     connect_args=_build_connect_args(settings.DATABASE_URI.get_secret_value()),
 )
 SessionLocal = sessionmaker(autoflush=False, bind=engine)
-
-# OpenTelemetry (off unless OTEL_* says so): set up in each prefork child, not
-# in the parent, because the exporter's background thread does not survive fork().
-worker_process_init.connect(lambda **_: telemetry.setup(engines=[engine]), weak=False)
-worker_process_shutdown.connect(lambda **_: telemetry.shutdown(), weak=False)
 
 
 def _configure_logging(loglevel: int | None = None, **_: object) -> None:

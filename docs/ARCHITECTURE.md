@@ -19,16 +19,15 @@ flowchart TD
         direction TB
         subgraph Middlewares ["Middleware Stack (Execution Order)"]
             direction TB
-            M1["1. OpenTelemetry (only when OTEL_* is set and the telemetry extra is installed)"]
-            --> M2["2. SecurityHeadersMiddleware (HSTS, CSP, CORP, COOP)"]
-            --> M3["3. RequestContextMiddleware (X-Request-ID, Traceparent)"]
-            --> M4["4. AccessLogMiddleware (one JSON access line per request)"]
-            --> M5["5. CORSMiddleware (Origins, Allowed Headers, Exposed Headers)"]
-            --> M6["6. InFlightLimitMiddleware (only when MAX_IN_FLIGHT_REQUESTS is set)"]
-            --> M7["7. ForwardedClientMiddleware (TRUSTED_PROXIES Client Extraction)"]
-            --> M8["8. BodySizeLimitMiddleware (MAX_REQUEST_BODY_BYTES, 413)"]
-            --> M9["9. RateLimitFieldsMiddleware (RateLimit fields on every counted response)"]
-            --> M10["10. HeadMiddleware (RFC 9110 9.3.2 GET Execution)"]
+            M1["1. SecurityHeadersMiddleware (HSTS, CSP, CORP, COOP)"]
+            --> M2["2. RequestContextMiddleware (X-Request-ID, Traceparent)"]
+            --> M3["3. AccessLogMiddleware (one JSON access line per request)"]
+            --> M4["4. CORSMiddleware (Origins, Allowed Headers, Exposed Headers)"]
+            --> M5["5. InFlightLimitMiddleware (only when MAX_IN_FLIGHT_REQUESTS is set)"]
+            --> M6["6. ForwardedClientMiddleware (TRUSTED_PROXIES Client Extraction)"]
+            --> M7["7. BodySizeLimitMiddleware (MAX_REQUEST_BODY_BYTES, 413)"]
+            --> M8["8. RateLimitFieldsMiddleware (RateLimit fields on every counted response)"]
+            --> M9["9. HeadMiddleware (RFC 9110 9.3.2 GET Execution)"]
         end
         Middlewares --> Dependencies["Global Dependencies (rate_limit, reject_unusable_text, check_patch_media_type)"]
         Dependencies --> Routers["API Routers (app/api/v1: orders, cart, catalog, users, admin, legal)"]
@@ -157,7 +156,7 @@ The project follows a modular layered architecture separating transport, domain 
 | Directory | Primary Architectural Scope and Responsibilities |
 |---|---|
 | `app/api/v1` | HTTP transport controllers, route endpoints, dependency injection, and OpenAPI operation schemas across 6 domain modules. |
-| `app/core` | Application lifecycle, settings, database engines, security primitives, custom middlewares, and telemetry. |
+| `app/core` | Application lifecycle, settings, database engines, security primitives, and custom middlewares. |
 | `app/services` | Domain business logic (orders, restock, payment adapters, Stripe webhook handling, reconciliation, and Redis clients). |
 | `app/models` | Declarative SQLAlchemy 2.0 database models defining relational tables, foreign key constraints, and indices. |
 | `app/schemas` | Pydantic v2 schemas for strict input parsing (`RequestBody`), response serialization, and RFC 9457 error details. |
