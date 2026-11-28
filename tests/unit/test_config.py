@@ -57,7 +57,7 @@ def _construct_settings(env_var, raw_value):
     "env_var,raw_value",
     [
         (env_var, raw_value)
-        for env_var in ("BACKEND_CORS_ORIGINS", "TRUSTED_PROXIES", "ESSENTIAL_COOKIES")
+        for env_var in ("BACKEND_CORS_ORIGINS", "TRUSTED_PROXIES")
         for raw_value in (
             None,  # unset - the field's default
             "",  # empty string - what an unfilled-in .env line becomes

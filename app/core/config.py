@@ -25,10 +25,9 @@ from app.core.currencies import (
 
 
 def _split_comma_separated(v: str | list[str]) -> list[str]:
-    # Shared by every plain-string-list env setting (TRUSTED_PROXIES,
-    # ESSENTIAL_COOKIES): see the longer NoDecode explanation on
-    # BACKEND_CORS_ORIGINS below - same underlying pydantic-settings
-    # behavior, same fix.
+    # Shared by plain-string-list env settings (TRUSTED_PROXIES): see the
+    # longer NoDecode explanation on BACKEND_CORS_ORIGINS below - same
+    # underlying pydantic-settings behavior, same fix.
     if isinstance(v, str):
         if not v.strip():
             return []
@@ -411,11 +410,10 @@ class Settings(BaseSettings):
     # task raised AttributeError every time it ran (scheduled every 4h).
     ADMIN_EMAIL: str = "admin@yourcompany.com"
 
-    # Cookie Consent Settings
-    COOKIE_CONSENT_EXPIRE_DAYS: int = 365
-    ESSENTIAL_COOKIES: CommaSeparated = [
-        "session", "csrf_token", "__Host-guest_cart",
-    ]
+    # Directory containing custom legal Markdown documents
+    # (privacy-policy.md, terms-of-service.md, cookie-policy.md); when unset,
+    # the built-in templates under app/legal/ are used.
+    LEGAL_DOCS_DIR: str | None = None
 
     # Email Settings
     SMTP_HOST: str

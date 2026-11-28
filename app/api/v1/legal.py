@@ -1,10 +1,11 @@
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.cart import guest_cart_cookie_name
 from app.core.audit import audit
 from app.core.clock import utc_now
 from app.core.config import settings
@@ -24,239 +25,69 @@ from app.schemas.legal import (
 )
 from app.services.gdpr import GDPRService, consent_user_agent, export_state, find_export
 from app.services.gdpr_export import export_path
+from app.services.legal_documents import load_legal_document
 
 router = APIRouter(prefix="/legal", tags=["legal"], route_class=DocumentedRoute)
 
-# Legal document content - In production, these should be stored in a database or CMS
-# Version and effective date are fixed per document: change them together with
-# the text below, never per request.
-PRIVACY_POLICY_VERSION = "1.0"
-PRIVACY_POLICY_EFFECTIVE = datetime(2026, 11, 10, tzinfo=UTC)
-TERMS_OF_SERVICE_VERSION = "1.0"
-TERMS_OF_SERVICE_EFFECTIVE = datetime(2026, 11, 10, tzinfo=UTC)
-COOKIE_POLICY_VERSION = "1.0"
-COOKIE_POLICY_EFFECTIVE = datetime(2026, 11, 10, tzinfo=UTC)
 
-PRIVACY_POLICY = """
-Privacy Policy for {company_name}
+def _render_legal_document(name: str, **context: object) -> LegalDocument:
+    doc = load_legal_document(name, allowed_placeholders=(*context, "last_updated"))
+    last_updated = doc.effective_date.strftime("%Y-%m-%d")
+    return LegalDocument(
+        content=doc.text.format(**context, last_updated=last_updated),
+        version=doc.version,
+        last_updated=doc.effective_date,
+    )
 
-Last Updated: {last_updated}
-
-1. Who We Are
-{company_name}
-Address: {company_address}
-VAT: {company_vat}
-Data Protection Officer: {dpo_name}
-DPO Email: {dpo_email}
-Technical Contact: {technical_contact}
-
-2. Legal Basis (GDPR Article 6)
-We process your data based on:
-- Contract fulfillment (for orders)
-- Legal obligations (tax, business records)
-- Legitimate interests (security, fraud prevention)
-- Your consent (marketing)
-
-3. Data We Process
-We collect and process:
-- Account information (email, name)
-- Order details and history
-- Delivery addresses
-- Payment information (processed securely via certified providers)
-- Technical data (IP address, cookies - see Cookie Policy)
-
-4. How We Use Your Data
-- Order processing and delivery
-- Account management
-- Legal compliance
-- Security and fraud prevention
-- Service improvements
-- Marketing (with consent)
-
-5. Your GDPR Rights
-You have the right to:
-- Access your data (Article 15)
-- Correct your data (Article 16)
-- Delete your data (Article 17)
-- Port your data (Article 20)
-- Withdraw consent (Article 7)
-- Object to processing (Article 21)
-
-6. Data Retention
-We keep your data for {retention_days} days unless:
-- Required longer by law
-- You request deletion
-- Ongoing legal proceedings
-
-7. International Transfers
-We process data within the EU/EEA.
-Any transfers outside follow GDPR Chapter 5.
-
-8. Contact
-Privacy questions: {dpo_email}
-Technical issues: {company_email}
-Postal: {company_address}
-
-9. Supervisory Authority
-You have the right to complain to your local data protection authority.
-"""
-
-TERMS_OF_SERVICE = """
-Terms of Service for {company_name}
-
-Last Updated: {last_updated}
-
-1. Company Information
-{company_name}
-Registered Address: {company_address}
-VAT Number: {company_vat}
-Email: {company_email}
-
-2. Agreement
-By using our service, you agree to these terms.
-These terms constitute a legally binding agreement.
-
-3. Account Rules
-- Provide accurate information
-- Keep your account secure
-- Must be 16 or older (GDPR requirement)
-- One account per user
-
-4. Orders and Payments
-- All prices are in {store_currency}
-- Payment required before shipping
-- Secure payment processing
-- Order confirmation via email
-
-5. EU Consumer Rights
-- 14-day withdrawal right (EU Directive 2011/83/EU)
-- Right to return goods
-- Refund within 14 days of return
-- Warranty rights under EU law
-
-6. Data Protection
-- GDPR compliance
-- Data processing details in Privacy Policy
-- Cookie usage detailed in Cookie Policy
-- Right to data portability
-
-7. Dispute Resolution
-- EU Online Dispute Resolution platform
-- Applicable law: EU member state
-- Court of jurisdiction: Your residence
-
-8. Contact
-Technical: {technical_contact}
-Legal/DPO: {dpo_name}
-Email: {company_email}
-Address: {company_address}
-"""
-
-COOKIE_POLICY = """
-Cookie Policy for {company_name}
-
-Last Updated: {last_updated}
-
-1. Introduction
-This policy explains how {company_name} uses cookies and similar technologies.
-We respect your right to privacy and provide cookie controls.
-
-2. What Are Cookies
-Cookies are small text files stored on your device.
-They help make websites work better and provide information to owners.
-
-3. Cookie Categories
-We use only essential cookies for:
-- Shopping cart functionality
-- Account authentication
-- Security measures
-- Session management
-- CSRF protection
-
-4. Cookie List
-Essential Cookies:
-{essential_cookies}
-Duration: Session to {cookie_consent_days} days
-
-5. Your Controls
-- Accept/reject via cookie banner
-- Browser settings configuration
-- Essential cookies cannot be disabled
-- Cookie preferences can be updated anytime
-
-6. Legal Basis
-We use cookies based on:
-- Essential cookies: Legitimate interest
-- All others: Your consent
-
-7. Updates
-We may update this policy.
-Last updated: {last_updated}
-
-8. Contact
-Technical: {technical_contact}
-Privacy/DPO: {dpo_email}
-Address: {company_address}
-"""
 
 @router.get("/privacy-policy", response_model=LegalDocument)
 def get_privacy_policy():
     """
     Retrieve the current privacy policy.
     """
-    return LegalDocument(
-        content=PRIVACY_POLICY.format(
-            company_name=settings.PROJECT_NAME,
-            company_address=settings.COMPANY_ADDRESS,
-            company_vat=settings.COMPANY_VAT,
-            dpo_name=settings.DPO_NAME,
-            dpo_email=settings.DPO_EMAIL,
-            technical_contact=settings.TECHNICAL_CONTACT,
-            company_email=settings.COMPANY_EMAIL,
-            retention_days=settings.USER_DATA_RETENTION_DAYS,
-            last_updated=PRIVACY_POLICY_EFFECTIVE.strftime("%Y-%m-%d")
-        ),
-        version=PRIVACY_POLICY_VERSION,
-        last_updated=PRIVACY_POLICY_EFFECTIVE
+    return _render_legal_document(
+        "privacy-policy",
+        company_name=settings.PROJECT_NAME,
+        company_address=settings.COMPANY_ADDRESS,
+        company_vat=settings.COMPANY_VAT,
+        dpo_name=settings.DPO_NAME,
+        dpo_email=settings.DPO_EMAIL,
+        technical_contact=settings.TECHNICAL_CONTACT,
+        company_email=settings.COMPANY_EMAIL,
+        retention_days=settings.USER_DATA_RETENTION_DAYS,
     )
+
 
 @router.get("/terms-of-service", response_model=LegalDocument)
 def get_terms_of_service():
     """
     Retrieve the current terms of service.
     """
-    return LegalDocument(
-        content=TERMS_OF_SERVICE.format(
-            company_name=settings.PROJECT_NAME,
-            company_address=settings.COMPANY_ADDRESS,
-            company_vat=settings.COMPANY_VAT,
-            company_email=settings.COMPANY_EMAIL,
-            technical_contact=settings.TECHNICAL_CONTACT,
-            dpo_name=settings.DPO_NAME,
-            store_currency=settings.STORE_CURRENCY,
-            last_updated=TERMS_OF_SERVICE_EFFECTIVE.strftime("%Y-%m-%d")
-        ),
-        version=TERMS_OF_SERVICE_VERSION,
-        last_updated=TERMS_OF_SERVICE_EFFECTIVE
+    return _render_legal_document(
+        "terms-of-service",
+        company_name=settings.PROJECT_NAME,
+        company_address=settings.COMPANY_ADDRESS,
+        company_vat=settings.COMPANY_VAT,
+        company_email=settings.COMPANY_EMAIL,
+        technical_contact=settings.TECHNICAL_CONTACT,
+        dpo_name=settings.DPO_NAME,
+        store_currency=settings.STORE_CURRENCY,
     )
+
 
 @router.get("/cookie-policy", response_model=LegalDocument)
 def get_cookie_policy():
     """
     Retrieve the current cookie policy.
     """
-    return LegalDocument(
-        content=COOKIE_POLICY.format(
-            company_name=settings.PROJECT_NAME,
-            company_address=settings.COMPANY_ADDRESS,
-            technical_contact=settings.TECHNICAL_CONTACT,
-            dpo_email=settings.DPO_EMAIL,
-            essential_cookies=", ".join(settings.ESSENTIAL_COOKIES),
-            cookie_consent_days=settings.COOKIE_CONSENT_EXPIRE_DAYS,
-            last_updated=COOKIE_POLICY_EFFECTIVE.strftime("%Y-%m-%d")
-        ),
-        version=COOKIE_POLICY_VERSION,
-        last_updated=COOKIE_POLICY_EFFECTIVE
+    return _render_legal_document(
+        "cookie-policy",
+        company_name=settings.PROJECT_NAME,
+        company_address=settings.COMPANY_ADDRESS,
+        technical_contact=settings.TECHNICAL_CONTACT,
+        dpo_email=settings.DPO_EMAIL,
+        guest_cart_cookie=guest_cart_cookie_name(),
+        guest_cart_days=settings.REDIS_GUEST_CART_TTL_DAYS,
     )
 
 async def _load_user(db: AsyncSession, user_id: int) -> User:

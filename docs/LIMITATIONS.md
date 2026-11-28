@@ -121,6 +121,9 @@ Implemented: access and portability (Art. 15 and 20, `POST /legal/data-request` 
 - **Export Archives on More Than One Host:**
   - *Why not:* The worker writes export archives to `GDPR_EXPORT_DIR`, a Docker volume the `api` service mounts too, so both must run on one host. Several hosts need storage they all reach, which the project does not have.
   - *Where to start:* Write the archive to object storage (S3 or compatible) and have the download route stream it from there; the request record and the route stay as they are.
+- **Legal Document Templates Are Not Legal Advice:**
+  - *Why not:* The built-in `privacy-policy.md`, `terms-of-service.md`, and `cookie-policy.md` under `app/legal/` are starting templates, not legal advice or complete shop disclosures. Before opening a live shop, a lawyer must review them and add what cannot be generated generically by the backend: the official model withdrawal form and the online withdrawal function/button disclosures required by Directive (EU) 2023/2673, the harmonised legal-guarantee notice, the seller's phone number and national registration/consumer disclosures, and the competent supervisory authority.
+  - *Where to start:* Point `LEGAL_DOCS_DIR` to lawyer-reviewed Markdown files and update each document's front-matter `version` and `effective` date.
 
 ## Payment Reconciliation and Rate Limiting
 
