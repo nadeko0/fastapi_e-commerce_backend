@@ -1,0 +1,14 @@
+<html>
+    <body>
+        <h2>Email Verification</h2>
+        <p>Please verify your email address by clicking the link below:</p>
+
+        <p><a href="{{ verification_link }}">Verify Email Address</a></p>
+
+        <p>This link will expire in {{ expire_hours }} hours.</p>
+
+        <p>If you didn't request this verification, please ignore this email.</p>
+
+        <p>Best regards,<br>The {{ project_name }} Team</p>
+    </body>
+</html>

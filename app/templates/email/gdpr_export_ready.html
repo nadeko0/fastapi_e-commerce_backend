@@ -1,0 +1,20 @@
+<html>
+    <body>
+        <h2>Your Personal Data Export is Ready (Article 15)</h2>
+        <p>Your personal data export archive is ready.</p>
+
+        <p>Please log in to your account to download your archive at:</p>
+        <p><a href="{{ download_url }}">{{ download_url }}</a></p>
+
+        <p>This download is available until {{ expiry_text }}, after which it will be deleted.</p>
+
+        <p>This export is provided in accordance with your right of access under GDPR Article 15.</p>
+
+        <p>Questions?</p>
+        <p>Contact our DPO at {{ dpo_email }}</p>
+
+        <p>Best regards,<br>{{ project_name }}</p>
+        <p>Data Protection Officer: {{ dpo_name }}</p>
+        <p>{{ company_address }}</p>
+    </body>
+</html>

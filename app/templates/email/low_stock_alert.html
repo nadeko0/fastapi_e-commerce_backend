@@ -1,0 +1,19 @@
+<html>
+    <body>
+        <h2>Low Stock Alert</h2>
+        <p>The following products are running low on stock:</p>
+
+        <table border="1">
+            <tr>
+                <th>Product</th>
+                <th>Current Stock</th>
+            </tr>
+            {% for product in products %}
+            <tr><td>{{ product.name }}</td><td>{{ product.stock_quantity }}</td></tr>
+            {% endfor %}
+        </table>
+
+        <p>Please review and restock as needed.</p>
+        <p>Generated at: {{ generated_at }}</p>
+    </body>
+</html>

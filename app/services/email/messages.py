@@ -1,4 +1,3 @@
-import html
 from collections.abc import Sequence
 from datetime import datetime
 from types import SimpleNamespace
@@ -10,6 +9,7 @@ from app.core.clock import as_utc, utc_now
 from app.core.config import settings
 from app.models.order import Order
 from app.models.product import Product
+from app.services.email.templates import render
 
 if TYPE_CHECKING:
     from app.schemas.order import OrderResponse
@@ -56,17 +56,13 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
     # denormalized product_name instead of a live product relationship.
     # product_name originates from Product.name (admin-entered, no character
     # validation beyond length) and is rendered into an HTML email a customer
-    # opens. Escape it so a name containing markup cannot inject HTML/JS into
-    # the message - same reasoning as full_name in send_welcome_email. quantity
-    # and price_at_time are server-side numerics, not escaped. Amounts are in
-    # the order's own currency (Order.currency, the store's when it was
-    # placed): every order email used to print "$" before them, so a EUR or
-    # PLN store told its customers they had paid dollars.
-    items_html = "".join([
-        f"<tr><td>{html.escape(item.product_name)}</td><td>{item.quantity}</td><td>{item.price_at_time} {order.currency}</td></tr>"
-        for item in order.items
-    ])
-
+    # opens (autoescaped by the Jinja2 template so markup cannot inject
+    # HTML/JS into the message - same reasoning as full_name in
+    # send_welcome_email). quantity and price_at_time are server-side
+    # numerics. Amounts are in the order's own currency (Order.currency, the
+    # store's when it was placed): every order email used to print "$" before
+    # them, so a EUR or PLN store told its customers they had paid dollars.
+    #
     # Same str-or-enum handling as send_order_status_update_email below, and
     # for the same reason: a freshly-queried Order's .status is a plain str.
     # Fixed there first and missed here, so every order confirmation sent
@@ -74,37 +70,22 @@ def send_order_confirmation_email(to_email: str, order: "OrderResponse") -> bool
     # real orders, which the unit test could not catch because its fake order
     # always carried an enum-like status.
     status_value = order.status.value if hasattr(order.status, "value") else order.status
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Order Confirmation #{order.id}</h2>
-            <p>Thank you for your order!</p>
-
-            <h3>Order Details:</h3>
-            <table border="1">
-                <tr>
-                    <th>Product</th>
-                    <th>Quantity</th>
-                    <th>Price</th>
-                </tr>
-                {items_html}
-            </table>
-
-            <p>Total Amount: {order.total_amount} {order.currency}</p>
-            <p>Order Status: {status_value}</p>
-
-            <p>Order Date: {_utc_text(order.created_at)}</p>
-
-            <p>Thank you for shopping with us!</p>
-        </body>
-    </html>
-    """
+    html_content = render(
+        "order_confirmation.html",
+        order_id=order.id,
+        items=order.items,
+        total_amount=order.total_amount,
+        currency=order.currency,
+        status=status_value,
+        order_date=_utc_text(order.created_at),
+    )
 
     return email.get_email_provider().send(
         to_email,
         f"Order Confirmation #{order.id}",
-        html_content
+        html_content,
     )
+
 
 def send_order_status_update_email(
     to_email: str, order: "Order | OrderResponse | SimpleNamespace"
@@ -117,87 +98,56 @@ def send_order_status_update_email(
     # app/models/order.py), so a caller handing this a
     # freshly-queried Order got a plain str back and `.value` raised AttributeError.
     status_value = getattr(order.status, "value", order.status)
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Order Status Update</h2>
-            <p>Your order #{order.id} has been updated.</p>
-
-            <p>New Status: <strong>{status_value}</strong></p>
-
-            <h3>Order Details:</h3>
-            <p>Order Date: {_utc_text(order.created_at)}</p>
-            <p>Total Amount: {order.total_amount} {order.currency}</p>
-
-            <p>Thank you for your patience!</p>
-        </body>
-    </html>
-    """
+    html_content = render(
+        "order_status_update.html",
+        order_id=order.id,
+        status=status_value,
+        order_date=_utc_text(order.created_at),
+        total_amount=order.total_amount,
+        currency=order.currency,
+    )
 
     return email.get_email_provider().send(
         to_email,
         f"Order Status Update - #{order.id}",
-        html_content
+        html_content,
     )
+
 
 def send_order_cancellation_email(
     to_email: str, order: "Order | OrderResponse | SimpleNamespace"
 ) -> bool:
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Order Cancellation</h2>
-            <p>Your order #{order.id} has been cancelled.</p>
-
-            <h3>Order Details:</h3>
-            <p>Order Date: {_utc_text(order.created_at)}</p>
-            <p>Total Amount: {order.total_amount} {order.currency}</p>
-
-            <p>If you have any questions, please contact our support team.</p>
-        </body>
-    </html>
-    """
+    html_content = render(
+        "order_cancellation.html",
+        order_id=order.id,
+        order_date=_utc_text(order.created_at),
+        total_amount=order.total_amount,
+        currency=order.currency,
+    )
 
     return email.get_email_provider().send(
         to_email,
         f"Order Cancellation - #{order.id}",
-        html_content
+        html_content,
     )
 
+
 def send_low_stock_alert_email(to_email: str, products: Sequence[Product]) -> bool:
-    # product.name is admin-entered and unvalidated for markup; escape it
-    # before rendering into the HTML alert email (defense in depth, mirrors
-    # the order-confirmation and welcome emails).
-    products_html = "".join([
-        f"<tr><td>{html.escape(product.name)}</td><td>{product.stock_quantity}</td></tr>"
-        for product in products
-    ])
-
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Low Stock Alert</h2>
-            <p>The following products are running low on stock:</p>
-
-            <table border="1">
-                <tr>
-                    <th>Product</th>
-                    <th>Current Stock</th>
-                </tr>
-                {products_html}
-            </table>
-
-            <p>Please review and restock as needed.</p>
-            <p>Generated at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
-        </body>
-    </html>
-    """
+    # product.name is admin-entered and unvalidated for markup; the Jinja2
+    # template autoescapes it before rendering into the HTML alert email
+    # (defense in depth, mirrors the order-confirmation and welcome emails).
+    html_content = render(
+        "low_stock_alert.html",
+        products=products,
+        generated_at=utc_now().strftime("%Y-%m-%d %H:%M:%S UTC"),
+    )
 
     return email.get_email_provider().send(
         to_email,
         "Low Stock Alert",
-        html_content
+        html_content,
     )
+
 
 def send_welcome_email(to_email: str, full_name: str | None, verification_token: str) -> bool:
     verification_link = _frontend_link(VERIFY_EMAIL_PAGE_PATH, verification_token)
@@ -205,46 +155,27 @@ def send_welcome_email(to_email: str, full_name: str | None, verification_token:
     # registration, app/api/v1/users/auth.py) and was previously interpolated
     # into this HTML email unescaped - a name like
     # `<img src=x onerror=...>` would be embedded verbatim into the HTML
-    # body an email client renders. Escaped here at the point of use,
-    # matching how every other f-string-built HTML email in this module
-    # only ever interpolates server-controlled values (settings, IDs,
-    # enum .value, formatted dates). full_name is optional at registration
-    # (UserCreate): html.escape(None) raised, the background task died and
-    # the verification link - required for checkout - was never sent.
-    safe_full_name = html.escape(full_name or "customer")
-
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Welcome to {settings.PROJECT_NAME}!</h2>
-            <p>Dear {safe_full_name},</p>
-
-            <p>Thank you for registering with us. We're excited to have you as a member of our community!</p>
-
-            <p><strong>Please verify your email address by clicking the link below:</strong></p>
-            <p><a href="{verification_link}">Verify Email Address</a></p>
-            <p>This link will expire in {settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS} hours.</p>
-
-            <h3>What's Next?</h3>
-            <ul>
-                <li>Verify your email address</li>
-                <li>Browse our product catalog</li>
-                <li>Update your profile information</li>
-                <li>Add items to your shopping cart</li>
-            </ul>
-
-            <p>If you have any questions, our support team is here to help.</p>
-
-            <p>Best regards,<br>The {settings.PROJECT_NAME} Team</p>
-        </body>
-    </html>
-    """
+    # body an email client renders. The Jinja2 template autoescapes it,
+    # matching how every other HTML email in this module only ever renders
+    # escaped or server-controlled values. full_name is optional at
+    # registration (UserCreate): html.escape(None) used to raise, the
+    # background task died and the verification link - required for checkout -
+    # was never sent.
+    recipient_name = full_name or "customer"
+    html_content = render(
+        "welcome.html",
+        project_name=settings.PROJECT_NAME,
+        full_name=recipient_name,
+        verification_link=verification_link,
+        expire_hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS,
+    )
 
     return email.get_email_provider().send(
         to_email,
         f"Welcome to {settings.PROJECT_NAME}! Please Verify Your Email",
-        html_content
+        html_content,
     )
+
 
 def send_account_exists_email(to_email: str) -> bool:
     """Sent instead of a welcome email when someone registers with an email
@@ -252,249 +183,123 @@ def send_account_exists_email(to_email: str) -> bool:
     way (so it cannot be used to find out which emails are registered);
     this email is how the owner of the mailbox, and only they, learn which
     case it was. Nothing in it comes from the request."""
-    html_content = f"""
-    <html>
-        <body>
-            <h2>You already have an account</h2>
-            <p>Someone - probably you - just tried to register at {settings.PROJECT_NAME}
-            with this email address, which already has an account. No new account was
-            created and your existing one was not changed.</p>
-
-            <p>If it was you, log in with your existing password. If you have forgotten
-            it, request a password reset from the login page.</p>
-
-            <p>If it was not you, you can ignore this email.</p>
-
-            <p>Best regards,<br>The {settings.PROJECT_NAME} Team</p>
-        </body>
-    </html>
-    """
+    html_content = render(
+        "account_exists.html",
+        project_name=settings.PROJECT_NAME,
+    )
 
     return email.get_email_provider().send(
         to_email,
         f"You already have an account at {settings.PROJECT_NAME}",
-        html_content
+        html_content,
     )
+
 
 def send_email_verification(to_email: str, verification_token: str) -> bool:
     verification_link = _frontend_link(VERIFY_EMAIL_PAGE_PATH, verification_token)
-
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Email Verification</h2>
-            <p>Please verify your email address by clicking the link below:</p>
-
-            <p><a href="{verification_link}">Verify Email Address</a></p>
-
-            <p>This link will expire in {settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS} hours.</p>
-
-            <p>If you didn't request this verification, please ignore this email.</p>
-
-            <p>Best regards,<br>The {settings.PROJECT_NAME} Team</p>
-        </body>
-    </html>
-    """
+    html_content = render(
+        "email_verification.html",
+        verification_link=verification_link,
+        expire_hours=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS,
+        project_name=settings.PROJECT_NAME,
+    )
 
     return email.get_email_provider().send(
         to_email,
         "Verify Your Email Address",
-        html_content
+        html_content,
     )
+
 
 def send_password_reset_email(to_email: str, reset_token: str) -> bool:
     reset_link = _frontend_link(RESET_PASSWORD_PAGE_PATH, reset_token)
-
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Password Reset Request</h2>
-            <p>You have requested to reset your password.</p>
-
-            <p>Click the link below to reset your password:</p>
-            <p><a href="{reset_link}">Reset Password</a></p>
-
-            <p>This link will expire in {settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes.</p>
-
-            <p>If you didn't request this, please ignore this email.</p>
-
-            <p>Best regards,<br>The {settings.PROJECT_NAME} Team</p>
-        </body>
-    </html>
-    """
+    html_content = render(
+        "password_reset.html",
+        reset_link=reset_link,
+        expire_minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES,
+        project_name=settings.PROJECT_NAME,
+    )
 
     return email.get_email_provider().send(
         to_email,
         "Password Reset Request",
-        html_content
+        html_content,
     )
 
+
 def send_gdpr_deletion_confirmation(to_email: str, request_id: str) -> bool:
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Data Deletion Scheduled (GDPR Article 17)</h2>
-            <p>Your data deletion request has been scheduled.</p>
-
-            <h3>Deletion Details:</h3>
-            <ul>
-                <li>Request ID: {request_id}</li>
-                <li>Scheduled at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
-            </ul>
-
-            <p>What will be deleted once the grace period passes:</p>
-            <ul>
-                <li>Account information</li>
-                <li>Order history personal details</li>
-                <li>Communication preferences</li>
-                <li>Addresses</li>
-                <li>Usage data</li>
-            </ul>
-
-            <p>Please note:</p>
-            <ul>
-                <li>Some data may be retained for legal requirements (e.g., tax records, active fulfilment or disputes under GDPR Art. 17(3))</li>
-                <li>Anonymized data may be kept for analytics</li>
-                <li>You can create a new account at any time</li>
-            </ul>
-
-            <p>Questions?</p>
-            <p>Contact our DPO at {settings.DPO_EMAIL}</p>
-
-            <p>Best regards,<br>{settings.PROJECT_NAME}</p>
-            <p>Data Protection Officer: {settings.DPO_NAME}</p>
-            <p>{settings.COMPANY_ADDRESS}</p>
-        </body>
-    </html>
-    """
+    html_content = render(
+        "gdpr_deletion_confirmation.html",
+        request_id=request_id,
+        scheduled_at=utc_now().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        dpo_email=settings.DPO_EMAIL,
+        project_name=settings.PROJECT_NAME,
+        dpo_name=settings.DPO_NAME,
+        company_address=settings.COMPANY_ADDRESS,
+    )
 
     return email.get_email_provider().send(
         to_email,
         "Your Data Deletion Request Has Been Scheduled",
-        html_content
+        html_content,
     )
 
 
 def send_gdpr_deletion_completed(to_email: str, retained_records: list[str] | None = None) -> bool:
-    retained_html = ""
-    if retained_records:
-        items = "".join(f"<li>{html.escape(r)}</li>" for r in retained_records)
-        retained_html = f"<h3>Retained records (Art. 17(3)):</h3><ul>{items}</ul>"
-
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Data Deletion Completed (GDPR Article 17)</h2>
-            <p>We confirm that your personal data has been deleted as requested.</p>
-
-            <h3>Deletion Details:</h3>
-            <ul>
-                <li>Completed at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
-            </ul>
-
-            {retained_html}
-
-            <p>Please note:</p>
-            <ul>
-                <li>Some transaction and tax records may be retained for statutory periods under GDPR Art. 17(3)(b)</li>
-                <li>Order shipping snapshots are retained during active fulfilment or dispute defense under Art. 17(3)(b)/(e)</li>
-                <li>Anonymized data may be kept for analytics</li>
-            </ul>
-
-            <p>Questions?</p>
-            <p>Contact our DPO at {settings.DPO_EMAIL}</p>
-
-            <p>Best regards,<br>{settings.PROJECT_NAME}</p>
-            <p>Data Protection Officer: {settings.DPO_NAME}</p>
-            <p>{settings.COMPANY_ADDRESS}</p>
-        </body>
-    </html>
-    """
+    html_content = render(
+        "gdpr_deletion_completed.html",
+        completed_at=utc_now().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        retained_records=retained_records,
+        dpo_email=settings.DPO_EMAIL,
+        project_name=settings.PROJECT_NAME,
+        dpo_name=settings.DPO_NAME,
+        company_address=settings.COMPANY_ADDRESS,
+    )
 
     return email.get_email_provider().send(
         to_email,
         "Your Personal Data Has Been Deleted",
-        html_content
+        html_content,
     )
+
 
 def send_gdpr_request_received(to_email: str, request_type: str, request_id: str) -> bool:
     request_type_text = "deletion" if request_type == "deletion" else "export"
     gdpr_article = "17" if request_type == "deletion" else "15"
 
-    html_content = f"""
-    <html>
-        <body>
-            <h2>GDPR Request Received (Article {gdpr_article})</h2>
-            <p>We have received your request for data {request_type_text}.</p>
-
-            <h3>Request Details:</h3>
-            <ul>
-                <li>Request Type: {request_type_text}</li>
-                <li>Request ID: {request_id}</li>
-                <li>Received at: {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
-                <li>Estimated completion: Within 30 days</li>
-            </ul>
-
-            <p>Next steps:</p>
-            <ul>
-                <li>We will process your request within 30 days</li>
-                <li>You will receive a confirmation email when completed</li>
-                <li>We may contact you if we need additional information</li>
-            </ul>
-
-            <p>Your rights under GDPR:</p>
-            <ul>
-                <li>Right to access your data (Article 15)</li>
-                <li>Right to erasure (Article 17)</li>
-                <li>Right to data portability (Article 20)</li>
-                <li>Right to object (Article 21)</li>
-            </ul>
-
-            <p>Questions about your request?</p>
-            <p>Contact our DPO at {settings.DPO_EMAIL}</p>
-
-            <p>Best regards,<br>{settings.PROJECT_NAME}</p>
-            <p>Data Protection Officer: {settings.DPO_NAME}</p>
-            <p>{settings.COMPANY_ADDRESS}</p>
-        </body>
-    </html>
-    """
+    html_content = render(
+        "gdpr_request_received.html",
+        gdpr_article=gdpr_article,
+        request_type_text=request_type_text,
+        request_id=request_id,
+        received_at=utc_now().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        dpo_email=settings.DPO_EMAIL,
+        project_name=settings.PROJECT_NAME,
+        dpo_name=settings.DPO_NAME,
+        company_address=settings.COMPANY_ADDRESS,
+    )
 
     return email.get_email_provider().send(
         to_email,
         f"GDPR {request_type.title()} Request Received",
-        html_content
+        html_content,
     )
 
 
 def send_gdpr_export_ready(to_email: str, request_id: str, expires_at: datetime) -> bool:
     """Notify the user that their GDPR Article 15 personal data export is ready to download."""
     download_url = f"{settings.FRONTEND_URL}{DATA_EXPORT_PAGE_PATH}/{request_id}"
-    escaped_url = html.escape(download_url)
     expiry_text = _utc_text(expires_at)
 
-    html_content = f"""
-    <html>
-        <body>
-            <h2>Your Personal Data Export is Ready (Article 15)</h2>
-            <p>Your personal data export archive is ready.</p>
-
-            <p>Please log in to your account to download your archive at:</p>
-            <p><a href="{escaped_url}">{escaped_url}</a></p>
-
-            <p>This download is available until {expiry_text}, after which it will be deleted.</p>
-
-            <p>This export is provided in accordance with your right of access under GDPR Article 15.</p>
-
-            <p>Questions?</p>
-            <p>Contact our DPO at {settings.DPO_EMAIL}</p>
-
-            <p>Best regards,<br>{settings.PROJECT_NAME}</p>
-            <p>Data Protection Officer: {settings.DPO_NAME}</p>
-            <p>{settings.COMPANY_ADDRESS}</p>
-        </body>
-    </html>
-    """
+    html_content = render(
+        "gdpr_export_ready.html",
+        download_url=download_url,
+        expiry_text=expiry_text,
+        dpo_email=settings.DPO_EMAIL,
+        project_name=settings.PROJECT_NAME,
+        dpo_name=settings.DPO_NAME,
+        company_address=settings.COMPANY_ADDRESS,
+    )
 
     return email.get_email_provider().send(
         to_email,

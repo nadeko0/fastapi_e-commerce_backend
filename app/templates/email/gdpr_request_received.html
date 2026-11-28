@@ -1,0 +1,36 @@
+<html>
+    <body>
+        <h2>GDPR Request Received (Article {{ gdpr_article }})</h2>
+        <p>We have received your request for data {{ request_type_text }}.</p>
+
+        <h3>Request Details:</h3>
+        <ul>
+            <li>Request Type: {{ request_type_text }}</li>
+            <li>Request ID: {{ request_id }}</li>
+            <li>Received at: {{ received_at }}</li>
+            <li>Estimated completion: Within 30 days</li>
+        </ul>
+
+        <p>Next steps:</p>
+        <ul>
+            <li>We will process your request within 30 days</li>
+            <li>You will receive a confirmation email when completed</li>
+            <li>We may contact you if we need additional information</li>
+        </ul>
+
+        <p>Your rights under GDPR:</p>
+        <ul>
+            <li>Right to access your data (Article 15)</li>
+            <li>Right to erasure (Article 17)</li>
+            <li>Right to data portability (Article 20)</li>
+            <li>Right to object (Article 21)</li>
+        </ul>
+
+        <p>Questions about your request?</p>
+        <p>Contact our DPO at {{ dpo_email }}</p>
+
+        <p>Best regards,<br>{{ project_name }}</p>
+        <p>Data Protection Officer: {{ dpo_name }}</p>
+        <p>{{ company_address }}</p>
+    </body>
+</html>

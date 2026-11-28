@@ -1,0 +1,25 @@
+<html>
+    <body>
+        <h2>Order Confirmation #{{ order_id }}</h2>
+        <p>Thank you for your order!</p>
+
+        <h3>Order Details:</h3>
+        <table border="1">
+            <tr>
+                <th>Product</th>
+                <th>Quantity</th>
+                <th>Price</th>
+            </tr>
+            {% for item in items %}
+            <tr><td>{{ item.product_name }}</td><td>{{ item.quantity }}</td><td>{{ item.price_at_time }} {{ currency }}</td></tr>
+            {% endfor %}
+        </table>
+
+        <p>Total Amount: {{ total_amount }} {{ currency }}</p>
+        <p>Order Status: {{ status }}</p>
+
+        <p>Order Date: {{ order_date }}</p>
+
+        <p>Thank you for shopping with us!</p>
+    </body>
+</html>

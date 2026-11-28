@@ -158,6 +158,7 @@ The project follows a modular layered architecture separating transport, domain 
 | `app/api/v1` | HTTP transport controllers, route endpoints, dependency injection, and OpenAPI operation schemas across 6 domain modules. |
 | `app/core` | Application lifecycle, settings, database engines, security primitives, and custom middlewares. |
 | `app/services` | Domain business logic (orders, restock, payment adapters, Stripe webhook handling, reconciliation, and Redis clients). |
+| `app/templates` | Jinja2 HTML email templates (`app/templates/email/`) rendered with autoescaping. |
 | `app/models` | Declarative SQLAlchemy 2.0 database models defining relational tables, foreign key constraints, and indices. |
 | `app/schemas` | Pydantic v2 schemas for strict input parsing (`RequestBody`), response serialization, and RFC 9457 error details. |
 | `migrations` | Alembic migration scripts supporting sequential forward upgrades, schema rollbacks, and offline SQL generation. |

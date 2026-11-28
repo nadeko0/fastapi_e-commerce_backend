@@ -20,6 +20,7 @@ dependencies = [
     "celery",
     "stripe",
     "psycopg[binary]",
+    "jinja2",
 ]
 
 [dependency-groups]
