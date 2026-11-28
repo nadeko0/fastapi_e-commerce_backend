@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- PostgreSQL in Compose logs statements of 500 ms or more with their duration and SQL text, without bound values (`log_min_duration_statement=500ms`, `log_parameter_max_length=0`); see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 - Images: uv 0.13.9 in the app image (was 0.13.6); the PostgreSQL 18.6 and Redis 8.8 (8.8.4) base images on their current digests (rebuilt 2026-11-11 and 2026-11-12).
 - CI: uv 0.13.9, astral-sh/setup-uv v10.4.0, Trivy 0.76.2, the service images on the new digests. The log is shorter: quiet `uv sync` and `uv export`, no list of the expected skips in the test job, coverage tables only for files below 100%, one Trivy database download per run instead of three, without a progress bar or a table of clean packages, no build record artifact, and `alembic upgrade head` in the test setup prints only when it fails. The run page shows the coverage table (files below 100%), and the test job lists its tests slower than one second.
 

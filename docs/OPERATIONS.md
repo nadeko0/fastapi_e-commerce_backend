@@ -125,6 +125,7 @@ Each API worker maintains two connection pools (synchronous and asynchronous):
 - Default pool size: `DB_POOL_SIZE=10`, `DB_MAX_OVERFLOW=5`, `DB_POOL_TIMEOUT=30`.
 - Size PostgreSQL `max_connections` to support peak worker concurrency: `WORKERS * 2 * (DB_POOL_SIZE + DB_MAX_OVERFLOW) + Celery`. With 4 workers, this requires at least 120 connections; `docker-compose.yml` configures `max_connections=200`.
 - Connections enforce `idle_in_transaction_session_timeout=30s`, `statement_timeout=60s`, and `connect_timeout=5s` to prevent stalled connections and leaked locks.
+- Slow queries: PostgreSQL logs every statement that runs 500 ms or longer with its duration and SQL text (`log_min_duration_statement=500ms` in `docker-compose.yml`), without the bound values (`log_parameter_max_length=0`), so no email or password hash reaches the log. Read them with `docker compose logs postgres | grep duration:`, then run the statement under `EXPLAIN ANALYZE` to see its plan.
 - SQLAlchemy engines configure `hide_parameters=True` outside SQL debugging to prevent sensitive parameters from leaking in logs and statement errors. Database credentials in `DATABASE_URI` are safely encoded via `URL.create`.
 - Celery background workers install structured JSON logging to standard output matching the web tier.
 

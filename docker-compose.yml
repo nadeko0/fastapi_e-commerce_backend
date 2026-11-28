@@ -210,7 +210,12 @@ services:
     # DB_MAX_OVERFLOW) connections (a sync and an async pool), so 4 workers
     # with the default 10 + 5 can reach 120, plus the Celery worker. The
     # Postgres default of 100 is below that.
-    command: ["postgres", "-c", "max_connections=200"]
+    # log_min_duration_statement: every statement of 500 ms or more goes to the
+    # server log with its duration and text, to find slow queries.
+    # log_parameter_max_length=0 keeps the bind values (emails, password
+    # hashes, addresses) out of those lines; the text shows $1, $2.
+    command: ["postgres", "-c", "max_connections=200",
+              "-c", "log_min_duration_statement=500ms", "-c", "log_parameter_max_length=0"]
     volumes:
       # The image's VOLUME since 18: data lives in /var/lib/postgresql/18/docker
       # (PGDATA), so a later major upgrade can use pg_upgrade --link inside
