@@ -161,7 +161,7 @@ class Settings(BaseSettings):
     # How many bcrypt operations one worker process runs at the same time
     # (the rest wait their turn without blocking anything else). Unset keeps
     # the built-in default of 4 x CPU count per worker - see
-    # _get_bcrypt_semaphore in app/core/security.py. With several workers
+    # _get_bcrypt_semaphore in app/core/password_hashing.py. With several workers
     # that default multiplies: 4 workers on 4 cores admit 64 hashes at once,
     # far more than the cores can run, so a burst of logins slows every
     # request on the machine. Set it to about CPU count / WORKERS to keep

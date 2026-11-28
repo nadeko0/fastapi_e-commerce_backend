@@ -57,7 +57,7 @@ def test_verify_password_still_runs_bcrypt_for_more_than_72_bytes(monkeypatch):
         calls.append(len(password))
         return real(password, hashed)
 
-    monkeypatch.setattr("app.core.security.bcrypt.checkpw", spy)
+    monkeypatch.setattr("app.core.password_hashing.bcrypt.checkpw", spy)
 
     assert verify_password("x" * 1000, DUMMY_PASSWORD_HASH) is False
     assert calls == [72]

@@ -1,4 +1,4 @@
-"""The wait for a bcrypt slot is bounded (app/core/security.py _bcrypt_slot):
+"""The wait for a bcrypt slot is bounded (app/core/password_hashing.py _bcrypt_slot):
 a request that finds every slot taken for BCRYPT_WAIT_TIMEOUT_SECONDS is
 answered 503 with Retry-After instead of queueing without end."""
 
@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-from app.core import security
+from app.core import password_hashing as security
 from app.core.config import settings
 from app.core.errors import Problem, ProblemType
 
@@ -27,7 +27,7 @@ def test_no_slot_in_time_is_a_503_with_retry_after(one_slot, caplog):
         finally:
             taken.release()
 
-    with caplog.at_level(logging.WARNING, logger="app.core.security"), pytest.raises(Problem) as raised:
+    with caplog.at_level(logging.WARNING, logger="app.core.password_hashing"), pytest.raises(Problem) as raised:
         asyncio.run(scenario())
 
     assert raised.value.status_code == 503
