@@ -5,7 +5,7 @@ Getting a transactional e-commerce backend running locally should be predictable
 ## Prerequisites
 
 - **Python 3.13** (what CI and the image use; newer versions are not tested)
-- **uv** for dependency management, 0.13.6 is the version CI pins ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
+- **uv** for dependency management, 0.13.9 is the version CI pins ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
 - **Docker Engine** and **Docker Compose** (the `docker compose` plugin); last run with Docker Engine 29 and Compose 5 (November 2026), older versions are not tested
 - **Git**
 - Optional: **Stripe CLI** for local webhook forwarding

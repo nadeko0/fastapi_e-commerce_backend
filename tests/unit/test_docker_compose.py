@@ -156,7 +156,7 @@ def test_base_images_are_pinned_by_digest_on_their_current_majors():
     # stop being reproducible and a replaced image is taken unnoticed. The
     # tag stays in front of the digest for the reader (Docker uses the
     # digest). python 3.13, postgres 18, redis 8.8 (the newest redis-py 8.1
-    # supports), uv 0.13.6.
+    # supports), uv 0.13.9.
     dockerfile = _read("Dockerfile")
     references = re.findall(r"^FROM (\S+)", dockerfile, re.M)
     stages = set(re.findall(r"^FROM \S+ AS (\S+)", dockerfile, re.M))
@@ -165,14 +165,14 @@ def test_base_images_are_pinned_by_digest_on_their_current_majors():
     ]
     references += [_base_image("postgres"), _base_image("redis")]
     expected_tags = [
-        "python:3.13-slim", "python:3.13-slim", "ghcr.io/astral-sh/uv:0.13.6",
+        "python:3.13-slim", "python:3.13-slim", "ghcr.io/astral-sh/uv:0.13.9",
         "postgres:18.6-alpine", "redis:8.8-alpine",
     ]
     assert sorted(ref.split("@")[0] for ref in references) == sorted(expected_tags), references
     for ref in references:
         assert re.search(_PINNED, ref), ref
     ci_uv = re.search(r'^\s*UV_VERSION: "([\d.]+)"', _read(".github/workflows/ci.yml"), re.M)
-    assert ci_uv and ci_uv.group(1) == "0.13.6", "CI and the image use the same uv"
+    assert ci_uv and ci_uv.group(1) == "0.13.9", "CI and the image use the same uv"
 
 
 def test_postgres_and_redis_are_built_with_alpine_security_updates():
