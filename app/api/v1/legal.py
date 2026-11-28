@@ -346,7 +346,7 @@ async def update_user_consent(
                              "RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL, shared with login)"},
         500: {"description": "The export or the deletion could not be processed"},
         503: {"description": "Failed password attempts cannot be counted right now, or an export cannot be "
-                             "queued right now (Retry-After: 30), retry later"},
+                             "queued right now (Retry-After: 30), or no password check slot within BCRYPT_WAIT_TIMEOUT_SECONDS (Retry-After: 5); retry later"},
     },
 )
 async def request_personal_data(

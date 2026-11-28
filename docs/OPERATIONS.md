@@ -217,6 +217,7 @@ Tune the following settings in `.env` based on instance resources. The defaults 
 | `REDIS_SOCKET_TIMEOUT` | `1.0` | Seconds a Redis command waits for its answer before failing (both application clients; not the Celery broker). |
 | `REDIS_SOCKET_CONNECT_TIMEOUT` | `1.0` | Seconds to open a Redis connection before failing. |
 | `BCRYPT_MAX_CONCURRENCY` | `None` (default `4 * CPU`) | Semaphore bounding concurrent password hashes per worker to prevent CPU starvation. |
+| `BCRYPT_WAIT_TIMEOUT_SECONDS` | `10.0` | How long a request waits for a password hashing slot; after that it is answered 503 with `Retry-After: 5` (register, login, password reset, account deletion) instead of queueing without limit. |
 | `RATE_LIMIT_DEFAULT` | `"300/minute"` | Baseline rate limit applied to general API routes. |
 | `RATE_LIMIT_SEARCH` | `"60/minute"` | Limit on catalog search queries: `GET /products/search` and `GET /products` with `search_query`, counted together. |
 | `RATE_LIMIT_AUTH` | `"20/minute"` | Limit on registration, login, and password-reset endpoints per IP. |

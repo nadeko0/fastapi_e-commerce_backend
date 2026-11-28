@@ -165,6 +165,11 @@ class Settings(BaseSettings):
     # request on the machine. Set it to about CPU count / WORKERS to keep
     # bcrypt from taking more than the cores there are.
     BCRYPT_MAX_CONCURRENCY: int | None = Field(None, ge=1)
+    # How long a request waits for one of those slots before it is answered
+    # 503 with Retry-After. The wait used to be unbounded: under a login
+    # flood every request queued until the client or the proxy gave up,
+    # still holding its place in the queue.
+    BCRYPT_WAIT_TIMEOUT_SECONDS: float = Field(10.0, gt=0)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     # How long a login's session lasts at most, however often its refresh

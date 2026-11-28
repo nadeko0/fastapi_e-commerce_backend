@@ -54,7 +54,7 @@ def test_every_limit_setting_is_covered_here():
 @pytest.mark.parametrize(
     "name,value", [
         ("REDIS_GUEST_CART_TTL_DAYS", 0), ("CART_MAX_LINES", 0), ("BCRYPT_MAX_CONCURRENCY", 0),
-        ("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", 0),
+        ("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", 0), ("BCRYPT_WAIT_TIMEOUT_SECONDS", 0),
     ]
 )
 def test_lower_bounds(name, value):

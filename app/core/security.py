@@ -1,12 +1,15 @@
 import asyncio
 import hashlib
 import hmac
+import logging
 import math
 import os
 import re
 import time
 import uuid
 import weakref
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Annotated, Any, NamedTuple
 
@@ -31,7 +34,9 @@ from app.services.redis_async import (
     is_token_superseded,
 )
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
+logger = logging.getLogger(__name__)
+
+oauth2_scheme =OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
 
 # passlib (last released 2020, unmaintained) is incompatible with bcrypt>=5:
 # hashing raises "password cannot be longer than 72 bytes" even for short
@@ -131,19 +136,48 @@ def _get_bcrypt_semaphore() -> asyncio.Semaphore:
         _bcrypt_semaphores[loop] = semaphore
     return semaphore
 
+# Retry-After of the 503 for a request that waited too long for a bcrypt
+# slot: long enough for a queue of BCRYPT_WAIT_TIMEOUT_SECONDS to drain.
+BCRYPT_BUSY_RETRY_AFTER = 5
+
+
+@asynccontextmanager
+async def _bcrypt_slot() -> AsyncIterator[None]:
+    """Hold one bcrypt slot, or answer 503 when none frees up within
+    BCRYPT_WAIT_TIMEOUT_SECONDS (load shedding: a quick "not now" to some
+    requests instead of a slow answer to all of them)."""
+    semaphore = _get_bcrypt_semaphore()
+    try:
+        await asyncio.wait_for(semaphore.acquire(), timeout=settings.BCRYPT_WAIT_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.warning(
+            "No bcrypt slot within %s s; answered 503", settings.BCRYPT_WAIT_TIMEOUT_SECONDS
+        )
+        raise Problem(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            type=ProblemType.SERVICE_OVERLOADED,
+            detail="Too many password checks at once, please retry",
+            retry_after=BCRYPT_BUSY_RETRY_AFTER,
+        ) from None
+    try:
+        yield
+    finally:
+        semaphore.release()
+
+
 async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
     """Event-loop-safe wrapper around verify_password for use in async route
     handlers - runs the blocking bcrypt call in a threadpool, bounded by the
     per-loop bcrypt semaphore so unbounded concurrent callers can't all pile
     onto the threadpool (and whatever resources they're holding) at once."""
-    async with _get_bcrypt_semaphore():
+    async with _bcrypt_slot():
         return await run_in_threadpool(verify_password, plain_password, hashed_password)
 
 async def get_password_hash_async(password: str) -> str:
     """Event-loop-safe wrapper around get_password_hash for use in async
     route handlers - runs the blocking bcrypt call in a threadpool, bounded
     by the per-loop bcrypt semaphore (see verify_password_async)."""
-    async with _get_bcrypt_semaphore():
+    async with _bcrypt_slot():
         return await run_in_threadpool(get_password_hash, password)
 
 # The canonical spelling of a user id, which is all this application ever

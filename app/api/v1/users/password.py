@@ -118,7 +118,7 @@ async def _check_reset_token(token: str, db: AsyncSession):
         422: {"description": "Invalid new password (8 characters to 72 bytes, not a commonly used password or "
                              "one derived from the account's email)"},
         503: {"description": "Old tokens could not be revoked (Retry-After: 5), nothing changed; retry with "
-                             "the same token"},
+                             "the same token. Also when no password check slot within BCRYPT_WAIT_TIMEOUT_SECONDS (Retry-After: 5)"},
     },
 )
 async def reset_password(

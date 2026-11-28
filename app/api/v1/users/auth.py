@@ -78,6 +78,7 @@ REGISTRATION_RECEIVED = (
         422: {"description": "Invalid email, name, phone or password (8 characters to 72 bytes, not a commonly "
                              "used password or one derived from the email), or gdpr_consent or "
                              "privacy_policy_accepted is not true"},
+        503: {"description": "Too many password checks at once: no password check slot within BCRYPT_WAIT_TIMEOUT_SECONDS (Retry-After: 5), retry later"},
     },
 )
 async def register_user(
@@ -262,7 +263,7 @@ async def resend_verification_email(
                              "from one address) or RATE_LIMIT_LOGIN_FAILURES_PER_EMAIL (100/hour, from anywhere); "
                              "a correct password does not help until Retry-After has passed"},
         503: {"description": "Failed attempts cannot be counted, or the refresh token cannot be recorded "
-                             "(Retry-After: 30), retry later"},
+                             "(Retry-After: 30), or no password check slot within BCRYPT_WAIT_TIMEOUT_SECONDS (Retry-After: 5); retry later"},
     },
 )
 async def login(
