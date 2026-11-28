@@ -766,7 +766,9 @@ class PaymentWorld(RuleBasedStateMachine):
             return order_id
         paid = [o for o in self.order_ids
                 if self._order(o).payment_status in ("paid", "refunded")]
-        return paid[order_id % len(paid)] if paid else order_id
+        # Position, not the database id, is used so that a replayed example picks the same order.
+        position = self.order_ids.index(order_id)
+        return paid[position % len(paid)] if paid else order_id
 
     def _enqueue(self, event_type, obj, event_id=None):
         self.outbox.append({"id": event_id or f"evt_{uuid.uuid4().hex[:24]}",
