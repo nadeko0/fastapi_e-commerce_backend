@@ -225,7 +225,7 @@ def test_a_low_bcrypt_cost_is_rejected_in_production(rounds):
         _settings(BCRYPT_ROUNDS=rounds)
 
 
-@pytest.mark.parametrize("rounds", [12, 13])
+@pytest.mark.parametrize("rounds", [12, 13, 15])
 def test_the_production_bcrypt_cost_is_accepted(rounds):
     assert _settings(BCRYPT_ROUNDS=rounds).BCRYPT_ROUNDS == rounds
 
@@ -235,7 +235,7 @@ def test_the_minimum_bcrypt_cost_is_allowed_where_nothing_is_deployed(environmen
     assert _settings(environment=environment, BCRYPT_ROUNDS=4).BCRYPT_ROUNDS == 4
 
 
-@pytest.mark.parametrize("rounds", [3, 32])
-def test_bcrypt_cost_outside_the_library_range_is_refused(rounds):
+@pytest.mark.parametrize("rounds", [3, 16, 20, 32])
+def test_bcrypt_cost_outside_the_accepted_range_is_refused(rounds):
     with pytest.raises(ValidationError):
         _settings(environment="development", BCRYPT_ROUNDS=rounds)

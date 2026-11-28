@@ -7,7 +7,7 @@ Running this e-commerce backend in production requires strict adherence to Twelv
 Setting `ENVIRONMENT=production` (or `staging`) activates fail-closed deployment validation in `Settings.check_deployment_settings` (`app/core/config.py`). If any constraint fails, the application aborts startup immediately with a descriptive error:
 
 - **Log Level:** `LOG_LEVEL` must not be `DEBUG`. Verbose debugging exposes sensitive payload internals that outlive the HTTP request.
-- **Password Hashing Cost:** `BCRYPT_ROUNDS` must be at least 12. Test suites lower this cost factor to 4 for execution speed, but production forbids cheap hashes to resist offline brute-force attacks.
+- **Password Hashing Cost:** `BCRYPT_ROUNDS` must be at least 12, and is at most 15 (each step doubles the cost of every login; 15 is about 2.4 s a hash). Test suites lower this cost factor to 4 for execution speed, but production forbids cheap hashes to resist offline brute-force attacks.
 - **Payment Provider:** `PAYMENT_PROVIDER` must be set to `stripe`. The in-process `mock` provider marks orders as paid without moving funds and is prohibited outside development and test environments.
 - **Email Provider:** `EMAIL_PROVIDER` must be `smtp`. The `logging` provider drops every email (verification and password-reset links included) while reporting success.
 - **Message Format:** Each email is `multipart/alternative` with a plain-text part (generated from the HTML) before the HTML part, and carries `Date` (UTC) and a `Message-ID` in the domain of `EMAILS_FROM_EMAIL`.

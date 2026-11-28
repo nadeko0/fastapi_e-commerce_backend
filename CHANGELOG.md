@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BCRYPT_WAIT_TIMEOUT_SECONDS` (default 10): a request that waits that long for a password hashing slot is answered 503 `service-overloaded` with `Retry-After: 5` instead of queueing without limit. Affects register, login, password reset confirmation and account deletion under a flood of password checks.
 
 ### Upgrade notes
+- `BCRYPT_ROUNDS` above 15 is refused at startup (it was accepted up to bcrypt's own 31). Each step doubles the cost of every login: 16 is about 5 s a hash. A deployment with a value above 15 must lower it.
 - The HTTP API is unchanged. Operators who traced with `OTEL_*` and an image built with `INSTALL_TELEMETRY=true` get no spans after the upgrade, and the build argument is ignored; remove both from the deployment.
 
 ### Removed

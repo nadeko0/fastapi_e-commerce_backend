@@ -154,8 +154,11 @@ class Settings(BaseSettings):
     # that security margin and pay real wall-clock cost for it (~400ms per
     # hash at 12 rounds) - tests/conftest.py overrides this via
     # BCRYPT_ROUNDS=4 to keep the suite fast without weakening production.
-    # bcrypt accepts 4 to 31; a deployment must not go below 12.
-    BCRYPT_ROUNDS: int = Field(12, ge=4, le=31)
+    # bcrypt accepts 4 to 31; a deployment must not go below 12. The upper
+    # bound is 15, not bcrypt's 31: each step doubles the cost, so a typo such
+    # as 20 (~2 minutes a hash at 12 = 0.3 s) would make every login a
+    # self-inflicted denial of service. 15 is already ~2.4 s a hash.
+    BCRYPT_ROUNDS: int = Field(12, ge=4, le=15)
     # How many bcrypt operations one worker process runs at the same time
     # (the rest wait their turn without blocking anything else). Unset keeps
     # the built-in default of 4 x CPU count per worker - see
