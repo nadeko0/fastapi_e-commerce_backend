@@ -172,7 +172,6 @@ celery.conf.update(
 # running this worker locally left 2 Postgres connections stuck permanently
 # idle-in-transaction (still stuck 38+ minutes later) because this engine
 # had no timeout protection at all.
-assert settings.DATABASE_URI is not None, "assemble_db_connection always produces a database URI"
 engine = create_engine(
     settings.DATABASE_URI.get_secret_value(),
     pool_size=settings.DB_POOL_SIZE,

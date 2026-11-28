@@ -120,16 +120,15 @@ def test_a_refresh_session_cannot_be_shorter_than_one_refresh_token():
     assert _settings(REFRESH_TOKEN_EXPIRE_DAYS=1, REFRESH_SESSION_MAX_DAYS=1).REFRESH_SESSION_MAX_DAYS == 1
 
 
-def test_development_forces_one_worker_debug_and_reload():
-    development = _settings(ENVIRONMENT="development", WORKERS=8, DEBUG=False, RELOAD=False)
-    assert (development.WORKERS, development.DEBUG, development.RELOAD) == (1, True, True)
+# DEBUG also switches uvicorn's reload on (main.py: reload=settings.DEBUG).
+def test_development_forces_one_worker_and_debug():
+    development = _settings(ENVIRONMENT="development", WORKERS=8, DEBUG=False)
+    assert (development.WORKERS, development.DEBUG) == (1, True)
 
 
-def test_elsewhere_workers_are_kept_and_debug_and_reload_are_off():
-    staging = _settings(
-        ENVIRONMENT="test", WORKERS=8, DEBUG=True, RELOAD=True,
-    )
-    assert (staging.WORKERS, staging.DEBUG, staging.RELOAD) == (8, False, False)
+def test_elsewhere_workers_are_kept_and_debug_is_off():
+    staging = _settings(ENVIRONMENT="test", WORKERS=8, DEBUG=True)
+    assert (staging.WORKERS, staging.DEBUG) == (8, False)
     assert staging.SQL_DEBUG is False
 
 

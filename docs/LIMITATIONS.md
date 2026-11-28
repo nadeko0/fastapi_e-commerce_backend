@@ -89,6 +89,9 @@ A full code review found these. Each was judged low impact and is accepted as it
 - **Settings Without Bounds:**
   - *Why not:* `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `DB_POOL_SIZE`, `DB_MAX_OVERFLOW` and `STRIPE_WEBHOOK_TOLERANCE_SECONDS` accept any integer, so a zero, a negative or an absurd value starts the application and breaks it later (a webhook tolerance of 0 turns the timestamp check off in Stripe's libraries). The settings that guard money and security have bounds or deployment checks; these are operator choices.
   - *Where to start:* Add `Field(ge=..., le=...)` to each, as the newer settings have.
+- **A Misspelled Setting Name Is Not Detected:**
+  - *Why not:* Settings are read from the environment by field name only (pydantic-settings), and docker-compose.yml passes the same `.env` to the containers as environment variables, so `JWT_SECRT_KEY=...` is simply never read and the setting keeps its default or fails as missing. `extra="forbid"` would not help: it applies only to a dotenv file the application reads itself, and the shared `.env` also holds docker-compose-only variables. The names have no common prefix that would let the application reject unknown ones. `tests/unit/test_settings_inventory.py` checks that `.env.example` names only settings and docker-compose.yml variables, and that every setting is read by the code.
+  - *Where to start:* A common prefix (`APP_`) on every setting, with a startup check that rejects unknown `APP_` variables. It renames every variable, so it is a breaking change for every deployment.
 - **The Whole User Row on Every Authenticated Request:**
   - *Why not:* `get_current_user` loads the full `users` row with each authenticated request, although a route usually needs only a few of its columns. It is one primary-key query per request.
   - *Where to start:* Load only the needed columns, or cache them briefly with the revocation checks.

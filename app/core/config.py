@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -118,7 +118,6 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"  # noqa: S104
     PORT: int = 8000
     WORKERS: int = 4
-    RELOAD: bool = False
 
     @field_validator("WORKERS", mode="before")
     @classmethod
@@ -127,7 +126,7 @@ class Settings(BaseSettings):
             return 1
         return v
 
-    @field_validator("DEBUG", "RELOAD", mode="before")
+    @field_validator("DEBUG", mode="before")
     @classmethod
     def set_debug_settings(cls, v: bool, info: ValidationInfo) -> bool:
         return info.data.get("ENVIRONMENT") == "development"
@@ -199,8 +198,10 @@ class Settings(BaseSettings):
     POSTGRES_USER: str
     POSTGRES_PASSWORD: SecretStr
     POSTGRES_DB: str
-    # A SecretStr as a whole: the URL carries the database password.
-    DATABASE_URI: SecretStr | None = None
+    # A SecretStr as a whole: the URL carries the database password. Always
+    # set: when the environment does not give it, assemble_db_connection
+    # builds it from the POSTGRES_* settings before validation.
+    DATABASE_URI: SecretStr
     SQL_DEBUG: bool = False
 
     DB_POOL_SIZE: int = 10
@@ -224,22 +225,26 @@ class Settings(BaseSettings):
             return max(5, v_int // 2)
         return v_int
 
-    @field_validator("DATABASE_URI", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def assemble_db_connection(cls, v: str | None, info: ValidationInfo) -> str:
-        if isinstance(v, str):
-            return v
-        password = info.data.get("POSTGRES_PASSWORD")
-        password = password.get_secret_value() if password is not None else None
+    def assemble_db_connection(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or data.get("DATABASE_URI"):
+            return data
+        password = data.get("POSTGRES_PASSWORD")
+        if isinstance(password, SecretStr):
+            password = password.get_secret_value()
         from sqlalchemy.engine import URL
 
-        return URL.create(
-            "postgresql+psycopg",
-            username=info.data.get("POSTGRES_USER"),
-            password=password,
-            host=info.data.get("POSTGRES_SERVER"),
-            database=info.data.get("POSTGRES_DB"),
-        ).render_as_string(hide_password=False)
+        return {
+            **data,
+            "DATABASE_URI": URL.create(
+                "postgresql+psycopg",
+                username=data.get("POSTGRES_USER"),
+                password=password,
+                host=data.get("POSTGRES_SERVER"),
+                database=data.get("POSTGRES_DB"),
+            ).render_as_string(hide_password=False),
+        }
 
     REDIS_HOST: str
     REDIS_PORT: int = 6379

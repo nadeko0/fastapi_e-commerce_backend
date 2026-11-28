@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The HTTP API is unchanged. Operators who traced with `OTEL_*` and an image built with `INSTALL_TELEMETRY=true` get no spans after the upgrade, and the build argument is ignored; remove both from the deployment.
 
 ### Removed
+- The `RELOAD` setting. Nothing read it: uvicorn's auto-reload follows `DEBUG` (on in development). Setting it has no effect, as before.
 - OpenTelemetry tracing: `app/core/telemetry.py`, the `telemetry` extra, the `INSTALL_TELEMETRY` build argument of the image and the OpenTelemetry SDK, exporter and instrumentation packages (with protobuf and wrapt, which only they needed). `OTEL_*` variables are no longer read. `opentelemetry-api` stays in the lock as a dependency of FastAPI itself; without an SDK it does nothing. Logs keep `request_id` and the `trace_id` of an incoming `traceparent`, in the API and in Celery tasks. A single API and worker are debugged by these ids and the slow statement log; distributed tracing pays off across several services, which this project does not have.
 
 ### Changed

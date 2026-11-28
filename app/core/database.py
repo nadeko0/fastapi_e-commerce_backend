@@ -65,7 +65,6 @@ def _build_connect_args(database_uri: str) -> dict[str, Any]:
     return {}
 
 
-assert settings.DATABASE_URI is not None, "assemble_db_connection always produces a database URI"
 _database_uri = settings.DATABASE_URI
 
 _connect_args = _build_connect_args(_database_uri.get_secret_value())
