@@ -21,6 +21,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import audit
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.database import DbSession
@@ -447,14 +448,24 @@ async def get_current_active_user(
         )
     return current_user
 
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
 async def get_current_admin_user(
+    request: Request,
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> User:
     if current_user.role != UserRole.ADMIN:
+        audit("admin.denied", level=logging.WARNING, user_id=current_user.id,
+              method=request.method, path=request.url.path)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The user doesn't have enough privileges"
         )
+    if request.method not in _SAFE_METHODS:
+        # Logged when the request is let through; its outcome is the status
+        # on the access log line with the same request_id.
+        audit("admin.action", user_id=current_user.id, method=request.method, path=request.url.path)
     return current_user
 
 # Declares the bearer scheme on a route that also serves callers without a
@@ -613,6 +624,7 @@ async def rotate_refresh_token(token: str, db: AsyncSession) -> tuple[str, str]:
     if consumed is None:
         # Unknown jti or a replay of an already-rotated token: burn the rest
         # of the chain either way; if it was not tracked this is a no-op.
+        audit("refresh.replay", level=logging.WARNING, user_id=user_id)
         await async_redis_service.revoke_refresh_family(family)
         raise RefreshTokenError("Refresh token already used or invalid")
 

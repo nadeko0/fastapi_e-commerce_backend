@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.users._common import _user_by_email
 from app.api.v1.users._router import router
+from app.core.audit import audit
 from app.core.dependencies import DbSession
 from app.core.passwords import BLOCKED_MESSAGE, is_blocked_password
 from app.core.rate_limit import clear_login_failures
@@ -198,6 +199,7 @@ async def reset_password(
     await db.commit()
     if updated != 1:
         raise _invalid_reset_token()
+    audit("password.reset", user_id=user_id)
 
     # Evict sessions that raced the reset: a second watermark after the
     # commit refuses tokens a login or refresh rotation minted while the

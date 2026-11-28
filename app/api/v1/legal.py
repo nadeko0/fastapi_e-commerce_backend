@@ -5,6 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import audit
 from app.core.clock import utc_now
 from app.core.config import settings
 from app.core.dependencies import Cache, CurrentUser, DbSession
@@ -389,6 +390,7 @@ async def request_personal_data(
     if request_data.request_type == "export":
         # Reads user.id and user.email only - the detached snapshot will do.
         request_id = await gdpr_service.process_data_export(current_user, background_tasks)
+        audit("gdpr.export_requested", user_id=current_user.id, request_id=request_id)
     else:
         # "deletion", the schema's only other value. Re-authentication. The
         # schema has already refused a deletion request without a password
@@ -409,6 +411,7 @@ async def request_personal_data(
         request_id = await gdpr_service.process_data_deletion(
             await _load_user(db, current_user.id), redis, background_tasks
         )
+        audit("gdpr.deletion_requested", user_id=current_user.id, request_id=request_id)
 
     return DataRequestResponse(
         request_id=request_id,

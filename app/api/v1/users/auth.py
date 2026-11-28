@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.cart import merge_guest_cart_on_login_async
 from app.api.v1.users._common import _user_by_email
 from app.api.v1.users._router import router
+from app.core.audit import audit
 from app.core.clock import utc_now
 from app.core.dependencies import BearerToken, Cache, CurrentUser, DbSession
 from app.core.openapi import CLEAR_GUEST_CART_COOKIE_RESPONSE
@@ -326,7 +327,14 @@ async def login(
     # password does not reveal that the account exists but is switched off.
     if user_id is None or not password_valid or not user_is_active:
         # The attempt was counted when it started (check_login_attempt), for
-        # the email as submitted, account or no account.
+        # the email as submitted, account or no account. The reason goes to
+        # the server log only; the client gets one answer for all three.
+        reason = (
+            "unknown_account" if user_id is None
+            else "wrong_password" if not password_valid
+            else "inactive_account"
+        )
+        audit("login.failed", level=logging.WARNING, user_id=user_id, reason=reason)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -462,4 +470,5 @@ async def logout(
             detail="Logout is temporarily unavailable, please retry",
             headers={"Retry-After": "5"},
         ) from e
+    audit("logout", user_id=current_user.id, all_devices=logout_in.refresh_token is None)
     return Message(message="Logged out successfully")
