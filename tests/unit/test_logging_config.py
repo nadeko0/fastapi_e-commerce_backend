@@ -3,6 +3,8 @@
 import json
 import logging
 import re
+from datetime import UTC, datetime
+from decimal import Decimal
 from logging.handlers import RotatingFileHandler
 
 import pytest
@@ -180,3 +182,60 @@ def test_set_log_file_adds_a_rotating_file_handler(configure):
         isinstance(h, RotatingFileHandler) and h.baseFilename == str(path)
         for h in logging.getLogger().handlers
     )
+
+
+def test_an_exception_is_written_with_its_traceback(configure, capsys):
+    configure(ENVIRONMENT="production")
+    capsys.readouterr()
+    logger = logging.getLogger("app.api.v1.users")
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        logger.exception("failed")
+    records = _stdout_records(capsys)
+    assert len(records) == 1
+    assert records[0]["message"] == "failed"
+    assert records[0]["level"] == "ERROR"
+    assert "Traceback" in records[0]["exception"]
+    assert "ValueError" in records[0]["exception"]
+    assert "boom" in records[0]["exception"]
+
+
+def test_a_record_without_an_exception_has_no_exception_field(configure, capsys):
+    configure(ENVIRONMENT="production")
+    capsys.readouterr()
+    logging.getLogger("app.api.v1.users").info("plain message")
+    records = _stdout_records(capsys)
+    assert len(records) == 1
+    assert "exception" not in records[0]
+
+
+def test_a_value_json_cannot_encode_is_written_as_its_str(configure, capsys):
+    configure(ENVIRONMENT="production")
+    capsys.readouterr()
+    when = datetime(2026, 10, 23, 14, 5, 9, tzinfo=UTC)
+    logging.getLogger("app.api.v1.users").info(
+        "payment recorded",
+        extra={"amount": Decimal("12.50"), "when": when},
+    )
+    records = _stdout_records(capsys)
+    assert len(records) == 1
+    assert records[0]["extra"] == {"amount": "12.50", "when": str(when)}
+
+
+def test_extra_carries_only_the_caller_fields(configure, capsys):
+    configure(ENVIRONMENT="production")
+    capsys.readouterr()
+    logging.getLogger("app.api.v1.users").info("order updated", extra={"order_id": 7})
+    records = _stdout_records(capsys)
+    assert len(records) == 1
+    assert records[0]["extra"] == {"order_id": 7}
+
+
+def test_a_record_without_extra_fields_has_no_extra_key(configure, capsys):
+    configure(ENVIRONMENT="production")
+    capsys.readouterr()
+    logging.getLogger("app.api.v1.users").info("plain message")
+    records = _stdout_records(capsys)
+    assert len(records) == 1
+    assert "extra" not in records[0]
