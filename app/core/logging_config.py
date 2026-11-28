@@ -52,7 +52,30 @@ class JSONFormatter(logging.Formatter):
         if extra:
             payload["extra"] = extra
 
-        return json.dumps(payload, default=str)
+        return json.dumps(payload, default=str, ensure_ascii=False)
+
+
+# uvicorn configures its loggers before the application is imported, and in the
+# parent process when workers > 1, so the format must be given to uvicorn itself.
+UVICORN_LOG_CONFIG: dict[str, Any] = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "json": {"()": "app.core.logging_config.JSONFormatter"},
+    },
+    "handlers": {
+        "stdout": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "formatter": "json",
+        },
+    },
+    "loggers": {
+        "uvicorn": {"handlers": ["stdout"], "level": "INFO", "propagate": False},
+        "uvicorn.error": {"handlers": ["stdout"], "level": "INFO", "propagate": False},
+        "uvicorn.access": {"handlers": ["stdout"], "level": "WARNING", "propagate": False},
+    },
+}
 
 
 def setup_logging(config=settings):

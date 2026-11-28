@@ -4,6 +4,7 @@ import uvicorn
 
 from app.core.config import settings
 from app.core.http_protocol import NoDelayH11Protocol
+from app.core.logging_config import UVICORN_LOG_CONFIG
 
 if __name__ == "__main__":
     uvicorn.run(
@@ -27,6 +28,8 @@ if __name__ == "__main__":
         # The application writes one JSON access line per request
         # (app/core/access_log.py); uvicorn's plain-text one would repeat it.
         access_log=False,
+        # Format uvicorn's own startup/shutdown/error lines as one-line JSON.
+        log_config=UVICORN_LOG_CONFIG,
         # No "Server: uvicorn" on responses: it names the stack for nothing.
         server_header=False,
         # On SIGTERM, wait this long for requests in flight, then cancel them.

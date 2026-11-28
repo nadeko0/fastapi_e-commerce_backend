@@ -2,6 +2,7 @@
 
 import json
 import logging
+import logging.config
 import re
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -239,3 +240,49 @@ def test_a_record_without_extra_fields_has_no_extra_key(configure, capsys):
     records = _stdout_records(capsys)
     assert len(records) == 1
     assert "extra" not in records[0]
+
+
+@pytest.fixture
+def restore_uvicorn_loggers():
+    names = ("uvicorn", "uvicorn.error", "uvicorn.access")
+    saved = {
+        name: (
+            logging.getLogger(name).handlers[:],
+            logging.getLogger(name).level,
+            logging.getLogger(name).propagate,
+        )
+        for name in names
+    }
+    yield
+    for name, (handlers, level, propagate) in saved.items():
+        logger = logging.getLogger(name)
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
+        for handler in handlers:
+            logger.addHandler(handler)
+        logger.setLevel(level)
+        logger.propagate = propagate
+
+
+def test_uvicorn_log_config_formats_uvicorn_error_as_json(restore_uvicorn_loggers, capsys):
+    logging.config.dictConfig(logging_config.UVICORN_LOG_CONFIG)
+    capsys.readouterr()
+    logging.getLogger("uvicorn.error").info("Started server process [1]")
+    records = _stdout_records(capsys)
+    assert len(records) == 1
+    assert records[0]["logger"] == "uvicorn.error"
+    assert records[0]["level"] == "INFO"
+    assert records[0]["message"] == "Started server process [1]"
+
+
+def test_non_ascii_message_is_written_without_unicode_escapes(configure, capsys):
+    configure(ENVIRONMENT="production")
+    capsys.readouterr()
+    text = "Заказ оплачен é"
+    logging.getLogger("app.api.v1.orders").info(text)
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1
+    assert text in lines[0]
+    assert "\\u" not in lines[0]
+    assert json.loads(lines[0])["message"] == text
