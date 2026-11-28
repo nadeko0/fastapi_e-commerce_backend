@@ -682,8 +682,8 @@ def test_the_sweeper_runs_every_minute_on_the_payments_queue():
     assert entry["task"] == "sweep_stripe_events"
     assert entry["schedule"] == timedelta(minutes=1)
     assert entry["task"] in tasks.celery.tasks
-    assert tasks.celery.tasks["sweep_stripe_events"].queue == "payments"
-    assert tasks.celery.tasks["process_stripe_event"].queue == "payments"
+    assert tasks.celery.amqp.router.route({}, "sweep_stripe_events", args=(), kwargs={})["queue"].name == "payments"
+    assert tasks.celery.amqp.router.route({}, "process_stripe_event", args=(), kwargs={})["queue"].name == "payments"
     assert "payments" in tasks.celery.conf.task_queues
 
 

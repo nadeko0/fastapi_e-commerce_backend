@@ -694,7 +694,7 @@ def test_beat_runs_it_daily_at_a_quiet_hour():
 
     assert entry["task"] == "check_payment_reconciliation"
     assert entry["schedule"] == crontab(hour=3, minute=15)
-    assert tasks.celery.tasks["check_payment_reconciliation"].queue == "stats"
+    assert tasks.celery.amqp.router.route({}, "check_payment_reconciliation", args=(), kwargs={})["queue"].name == "stats"
 
 
 def test_the_existing_beat_entries_are_unchanged():

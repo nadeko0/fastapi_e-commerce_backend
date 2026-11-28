@@ -136,11 +136,16 @@ celery.conf.update(
     # "app.tasks.process_stripe_event"), and Celery matches routes,
     # annotations and beat entries against that name, not the import path.
     # These used to be written with an "app.tasks." prefix and so matched
-    # nothing: routing only worked because each task also sets queue= in its
-    # decorator, and the rate limits were never applied at all.
+    # nothing: routing only worked because each task also set queue= in its
+    # decorator, and the rate limits were never applied at all. The routes
+    # are now the one place a task's queue is set (queue= on the decorator
+    # is deprecated in Celery 5 and removed in 6).
     task_routes={
         'cleanup_*': {'queue': 'cleanup'},
         'check_*': {'queue': 'stats'},
+        'cancel_expired_unpaid_orders': {'queue': 'cleanup'},
+        'process_stripe_event': {'queue': 'payments'},
+        'sweep_stripe_events': {'queue': 'payments'},
     },
     # No glob patterns here: task_annotations is looked up by exact task
     # name (or '*' for all tasks), unlike task_routes.
@@ -418,7 +423,6 @@ def _anonymise_account(account: User, unusable_hash: str) -> None:
 
 @celery.task(
     name="cleanup_inactive_accounts",
-    queue="cleanup",
 )
 def cleanup_inactive_accounts() -> int:
     with task_session() as db:
@@ -472,7 +476,6 @@ def purge_expired_retention(db: Session, batch_size: int = PURGE_BATCH_SIZE) -> 
 
 @celery.task(
     name="cleanup_expired_retention",
-    queue="cleanup",
 )
 def cleanup_expired_retention() -> int:
     with task_session() as db:
@@ -575,7 +578,6 @@ def expire_unpaid_orders(db: Session) -> int:
 
 @celery.task(
     name="cancel_expired_unpaid_orders",
-    queue="cleanup",
 )
 def cancel_expired_unpaid_orders() -> int:
     with task_session() as db:
@@ -583,7 +585,6 @@ def cancel_expired_unpaid_orders() -> int:
 
 @celery.task(
     name="check_payment_reconciliation",
-    queue="stats",
 )
 def check_payment_reconciliation(order_id: int | None = None) -> dict[str, Any]:
     """Compare our payments with the provider's and record the differences
@@ -595,7 +596,6 @@ def check_payment_reconciliation(order_id: int | None = None) -> dict[str, Any]:
 @celery.task(
     bind=True,
     name="process_stripe_event",
-    queue="payments",
     # No limit of Celery's own: the number of retries is counted on the
     # event (WebhookEvent.attempts, STRIPE_EVENT_MAX_RETRIES), where an
     # admin sees it and a replay resets it.
@@ -614,7 +614,6 @@ def process_stripe_event(self: Any, event_id: str) -> dict[str, Any]:
 
 @celery.task(
     name="sweep_stripe_events",
-    queue="payments",
 )
 def sweep_stripe_events() -> int:
     with task_session() as db:
@@ -622,7 +621,6 @@ def sweep_stripe_events() -> int:
 
 @celery.task(
     name="check_low_stock",
-    queue="stats",
 )
 def check_low_stock(threshold: int = 5) -> None:
     with task_session() as db:
@@ -747,14 +745,13 @@ def clear_expired_idempotency_keys(db: Session, batch_size: int = PURGE_BATCH_SI
 
 @celery.task(
     name="cleanup_expired_idempotency_keys",
-    queue="cleanup",
 )
 def cleanup_expired_idempotency_keys() -> int:
     with task_session() as db:
         return clear_expired_idempotency_keys(db)
 
 
-@celery.task(name="build_gdpr_export", queue="default")
+@celery.task(name="build_gdpr_export")
 def build_gdpr_export(user_id: int, request_id: str) -> str:
     with task_session() as db:
         user = db.get(User, user_id)
@@ -778,6 +775,6 @@ def build_gdpr_export(user_id: int, request_id: str) -> str:
         return result
 
 
-@celery.task(name="cleanup_expired_gdpr_exports", queue="cleanup")
+@celery.task(name="cleanup_expired_gdpr_exports")
 def cleanup_expired_gdpr_exports() -> int:
     return delete_expired_exports(utc_now())

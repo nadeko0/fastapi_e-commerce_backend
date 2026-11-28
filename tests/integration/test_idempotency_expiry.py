@@ -57,7 +57,7 @@ def test_beat_entry_and_queue():
     entry = tasks.celery.conf.beat_schedule["cleanup-expired-idempotency-keys"]
     assert entry["task"] == "cleanup_expired_idempotency_keys"
     assert entry["schedule"] == tasks.crontab(hour=3, minute=0)
-    assert tasks.celery.tasks["cleanup_expired_idempotency_keys"].queue == "cleanup"
+    assert tasks.celery.amqp.router.route({}, "cleanup_expired_idempotency_keys", args=(), kwargs={})["queue"].name == "cleanup"
 
 
 def test_inside_the_ttl_nothing_is_cleared_and_keys_still_replay(shop):

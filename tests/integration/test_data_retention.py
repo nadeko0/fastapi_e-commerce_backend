@@ -134,7 +134,7 @@ def test_retention_task_and_beat_entry(db_session, tasks_db):
     entry = tasks.celery.conf.beat_schedule["cleanup-expired-retention"]
     assert entry["task"] == "cleanup_expired_retention"
     assert entry["schedule"] == tasks.crontab(hour=2, minute=45)
-    assert tasks.celery.tasks["cleanup_expired_retention"].queue == "cleanup"
+    assert tasks.celery.amqp.router.route({}, "cleanup_expired_retention", args=(), kwargs={})["queue"].name == "cleanup"
 
 
 # -- stored Stripe events --------------------------------------------------------
